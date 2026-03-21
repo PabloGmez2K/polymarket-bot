@@ -1,4 +1,5 @@
 import urllib.request
+import urllib.parse
 import json
 import re
 import math
@@ -13,29 +14,22 @@ from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import OrderArgs, OrderType
 from py_clob_client.order_builder.constants import BUY, SELL
 
+# Cargar .env ANTES de leer cualquier variable de entorno
+# Esto es crítico: load_dotenv() debe ejecutarse antes de os.getenv()
+load_dotenv()
+
 # =============================================================
-# bot.py — Bot de Polymarket v4 (Scheduler Integrado)
-# Sesión 6: Despliegue en Railway + scheduler cada 6 horas
+# bot.py — Bot de Polymarket v5 (Alertas Telegram)
+# Sesión 6: Alertas instantáneas en el móvil via Telegram
 # =============================================================
 #
-# Cambios respecto a v3:
-#   - Función main() que encapsula toda la lógica
-#   - Bucle while True al final: corre, duerme 6h, repite
-#   - INTERVALO_HORAS configurable via variable de entorno
-#   - DRY_RUN y BANKROLL leídos de variables de entorno
-#
-# Flujo:
-#   1. Configuración + autenticación
-#   2. Limpiar órdenes stale (> 8 horas)
-#   3. Leer mercados de Polymarket
-#   4. Filtrar por precio (8¢ – 92¢), parsear, extraer token IDs
-#   5. Obtener previsiones (coords de aeropuerto)
-#   6. Calcular edge
-#   7. Check duplicados (no apostar si ya hay orden abierta)
-#   8. Calcular tamaño de apuesta (Kelly)
-#   9. Ejecutar órdenes con agresividad en precio
-#  10. Log + verificación
-#  11. Dormir INTERVALO_HORAS y repetir
+# Cambios respecto a v4:
+#   - load_dotenv() movido al inicio (fix: Telegram no leía .env)
+#   - Función send_telegram(): manda mensajes al móvil
+#   - Alerta al arrancar cada ciclo (el bot sigue vivo)
+#   - Alerta cuando se ejecuta una orden real
+#   - Alerta cuando hay un error grave
+#   - Sin alertas en DRY_RUN para no hacer spam
 # =============================================================
 
 
@@ -43,33 +37,31 @@ from py_clob_client.order_builder.constants import BUY, SELL
 # CONFIGURACIÓN DEL USUARIO
 # =============================================================
 
-DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"        # True = solo planifica, no ejecuta.
-                                                                # Cambia a False para órdenes reales.
+DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
+BANKROLL = float(os.getenv("BANKROLL", "15.00"))
 
-BANKROLL = float(os.getenv("BANKROLL", "15.00"))                # Bankroll de prueba — cambiar a 100 cuando
-                                                                # validemos que el sistema gana dinero.
+MIN_EDGE = 10.0
+MIN_BET = 1.00
+MAX_BET_PCT = 0.05
+MAX_EXPOSURE_PCT = 0.40
+MIN_LIQUIDITY = 100
+MAX_DAYS_AHEAD = 3
+MIN_DAYS_AHEAD = 1
 
-MIN_EDGE = 10.0          # Edge mínimo (%) para considerar operar
-MIN_BET = 1.00           # Apuesta mínima en USD (límite real de Polymarket)
-MAX_BET_PCT = 0.05       # Máximo 5% del bankroll por operación
-MAX_EXPOSURE_PCT = 0.40  # Máximo 40% del bankroll expuesto EN TOTAL
-                         # (subido desde 30%: más diversificación = menos riesgo)
-MIN_LIQUIDITY = 100      # Liquidez mínima del mercado en USD
-MAX_DAYS_AHEAD = 3       # Solo mercados que resuelven en los próximos N días
-MIN_DAYS_AHEAD = 1       # Excluir mercados que resuelven HOY (sin order book)
-
-# --- v3 ---
 MIN_PRICE = 0.08
 MAX_PRICE = 0.92
 PRICE_AGGRESSION = 0.02
 ORDER_MAX_AGE_HOURS = 8
 
-# --- v4 ---
-INTERVALO_HORAS = float(os.getenv("INTERVALO_HORAS", "6"))      # Horas entre ejecuciones
+INTERVALO_HORAS = float(os.getenv("INTERVALO_HORAS", "6"))
+
+# Telegram
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 
 # =============================================================
-# LOGGING — Guarda un registro de todo en trades.log
+# LOGGING
 # =============================================================
 
 logging.basicConfig(
@@ -119,11 +111,43 @@ RESOLUTION_STATIONS = {
 
 
 # =============================================================
+# TELEGRAM
+# =============================================================
+
+def send_telegram(mensaje):
+    """
+    Manda un mensaje al móvil via Telegram.
+
+    ¿Cómo funciona? La API de Telegram acepta peticiones HTTP simples.
+    Le mandamos una URL con el token del bot, el chat_id (tu ID),
+    y el texto del mensaje. Telegram hace el resto.
+
+    Si no hay token configurado, simplemente no hace nada.
+    Así el bot funciona igual con o sin Telegram configurado.
+
+    Usamos urllib (ya incluido en Python) — sin librerías extra.
+    """
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+
+    try:
+        params = urllib.parse.urlencode({
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": mensaje,
+            "parse_mode": "HTML",
+        })
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage?{params}"
+        urllib.request.urlopen(url, timeout=10)
+        log.info("Telegram: mensaje enviado OK")
+    except Exception as e:
+        log.warning(f"Telegram: error al enviar mensaje: {e}")
+
+
+# =============================================================
 # AUTENTICACIÓN
 # =============================================================
 
 def setup_client():
-    load_dotenv()
     pk = os.getenv("PK")
     funder = os.getenv("FUNDER")
 
@@ -154,7 +178,7 @@ def setup_client():
 def api_get(endpoint):
     url = GAMMA_URL + endpoint
     req = urllib.request.Request(url)
-    req.add_header("User-Agent", "polymarket-bot/0.4")
+    req.add_header("User-Agent", "polymarket-bot/0.5")
     resp = urllib.request.urlopen(req)
     return json.loads(resp.read())
 
@@ -391,7 +415,6 @@ def calculate_position(bankroll, estimated_prob, market_price):
         return None
 
     aggressive_price = min(market_price + PRICE_AGGRESSION, 0.99)
-
     amount = round(bankroll * fraction, 2)
     if amount < MIN_BET:
         return None
@@ -474,7 +497,7 @@ def execute_trade(client, trade, dry_run=True):
 
 
 # =============================================================
-# FUNCIÓN PRINCIPAL — encapsula una ejecución completa del bot
+# FUNCIÓN PRINCIPAL
 # =============================================================
 
 def main():
@@ -482,7 +505,7 @@ def main():
     mode_label = "DRY RUN (sin órdenes reales)" if DRY_RUN else "⚠️  MODO REAL — ÓRDENES ACTIVAS"
 
     log.info("=" * 65)
-    log.info(f"POLYMARKET WEATHER BOT v4  |  {today_str}")
+    log.info(f"POLYMARKET WEATHER BOT v5  |  {today_str}")
     log.info(f"Modo: {mode_label}")
     log.info(f"Bankroll: ${BANKROLL:.2f}  |  Edge mín: {MIN_EDGE}%")
     log.info(f"Filtro precio: {MIN_PRICE:.0%} – {MAX_PRICE:.0%}")
@@ -494,7 +517,8 @@ def main():
     client = setup_client()
     if client is None:
         log.error("No se pudo autenticar. Verifica tu .env. Saliendo.")
-        return  # Return en vez de exit() — el scheduler seguirá intentando
+        send_telegram("❌ <b>Error de autenticación</b> en Polymarket. Revisa las claves.")
+        return
 
     # ---- PASO 0: LIMPIAR ÓRDENES STALE ----
     log.info("[0/6] Limpiando órdenes stale...")
@@ -525,7 +549,7 @@ def main():
             all_markets.append(m)
     log.info(f"       {len(all_markets)} mercados encontrados")
 
-    # ---- PASO 2: Parsear + extraer token IDs + filtro de precio ----
+    # ---- PASO 2: Parsear + filtro de precio ----
     log.info("[2/6] Parseando preguntas + filtro de precio...")
     candidates = []
     filtered_price_count = 0
@@ -826,44 +850,57 @@ def main():
                 f"order_id={result['order_id']} | ok={result['ok']}"
             )
 
+            # Alerta Telegram solo en modo real
+            if not DRY_RUN:
+                icono = "✅" if result["ok"] else "❌"
+                send_telegram(
+                    f"{icono} <b>Orden ejecutada</b>\n"
+                    f"Ciudad: {trade['city']} | {trade['side']}\n"
+                    f"Cantidad: ${trade['position']['amount']:.2f} "
+                    f"({trade['position']['shares']:.1f} shares @ ${trade['position'].get('aggressive_price', 0):.2f})\n"
+                    f"Edge: {trade['edge_pct']}% | EV: ${trade['position']['expected_value']:+.2f}\n"
+                    f"Fecha mercado: {trade['date']}\n"
+                    f"Estado: {result['msg']}"
+                )
+
         ok_count = sum(1 for r in results if r["ok"])
         print()
         print(f"  Resultado: {ok_count}/{len(results)} órdenes OK")
         print()
 
+        # Resumen final por Telegram en modo real
+        if not DRY_RUN:
+            send_telegram(
+                f"📊 <b>Ciclo completado</b>\n"
+                f"Órdenes: {ok_count}/{len(results)} OK\n"
+                f"Bankroll: ${BANKROLL:.2f} | Modo: REAL"
+            )
+
     log.info("Bot finalizado.")
 
 
 # =============================================================
-# SCHEDULER — Corre main() cada INTERVALO_HORAS para siempre
+# SCHEDULER
 # =============================================================
-#
-# ¿Por qué este diseño?
-#   Railway espera un proceso que no termine nunca.
-#   Nuestro bot analiza mercados, ejecuta órdenes, y termina —
-#   eso hace que Railway lo reinicie en bucle (crash loop).
-#
-#   La solución: meter main() en un while True con time.sleep().
-#   El proceso nunca termina, Railway está contento,
-#   y el bot se ejecuta automáticamente cada 6 horas.
-#
-#   Si main() da un error inesperado, lo capturamos con try/except,
-#   lo logueamos, y seguimos con el siguiente ciclo.
-#   Esto hace el bot resiliente: un error puntual no lo mata.
-#
-# En local: verás "Próxima ejecución en 6 horas..." y puedes
-#           parar con Ctrl+C cuando quieras.
-# En Railway: el proceso vive para siempre y trabaja solo.
-#
+
 if __name__ == "__main__":
     INTERVALO_SEGUNDOS = int(INTERVALO_HORAS * 3600)
     log.info(f"Scheduler iniciado — intervalo: {INTERVALO_HORAS:.0f} horas")
+
+    # Alerta de arranque (siempre, DRY_RUN o no)
+    modo = "DRY RUN" if DRY_RUN else "REAL"
+    send_telegram(
+        f"🤖 <b>Bot arrancado</b>\n"
+        f"Modo: {modo} | Bankroll: ${BANKROLL:.2f}\n"
+        f"Intervalo: cada {INTERVALO_HORAS:.0f}h"
+    )
 
     while True:
         try:
             main()
         except Exception as e:
             log.error(f"Error inesperado en ciclo principal: {e}")
+            send_telegram(f"❌ <b>Error inesperado</b>\n<code>{str(e)[:200]}</code>")
 
         log.info(f"Próxima ejecución en {INTERVALO_HORAS:.0f} horas. Durmiendo...")
         time.sleep(INTERVALO_SEGUNDOS)
