@@ -1,6 +1,6 @@
 # CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 21 de marzo de 2026 (Sesión 6)
+**Última actualización:** 21 de marzo de 2026 (Sesión 7)
 
 ---
 
@@ -10,13 +10,13 @@ Un bot automatizado de arbitraje meteorológico en Polymarket. El bot detecta me
 
 **Cómo gana dinero:** Polymarket tiene mercados donde la gente apuesta sobre la temperatura de mañana en distintas ciudades. El bot consulta la previsión meteorológica profesional (Open-Meteo, coordenadas exactas del aeropuerto donde se mide la temperatura oficial), calcula la probabilidad real con un modelo matemático (distribución normal + redondeo a °C enteros), y cuando detecta que el precio del mercado está equivocado por más de 10%, apuesta en la dirección correcta. Es arbitraje de información: mejor dato = mejor precio = ganancia.
 
-**Bankroll:** $15 de prueba (objetivo: $100 cuando validemos que el sistema gana). Los $15 son para probar integración y validar la estrategia antes de escalar.
+**Bankroll:** $15 de prueba (objetivo: $100 cuando validemos que el sistema gana).
 
 **Modelo de Claude recomendado:** Sesiones de coding puro pueden ser Sonnet. Revisiones de arquitectura o estrategia, Opus.
 
 ---
 
-## Progreso: ~90%
+## Progreso: ~95%
 
 - [x] Datos meteorológicos (Open-Meteo, coords de aeropuerto, 19 ciudades)
 - [x] Lectura de mercados de Polymarket (Gamma API, tags, parseo regex)
@@ -24,34 +24,23 @@ Un bot automatizado de arbitraje meteorológico en Polymarket. El bot detecta me
 - [x] Gestión de riesgo (Half-Kelly + presupuesto global)
 - [x] Backtest básico (91.4% precisión, 116 mercados)
 - [x] Git/GitHub
-- [x] pip + librerías externas (py-clob-client, web3, eth-account, etc.)
 - [x] Autenticación con Polymarket (Magic wallet, firma EIP-712, credenciales L2)
 - [x] Ejecución real de órdenes (DRY_RUN flag, GTC limit orders)
-- [x] Logging a archivo trades.log con timestamps
-- [x] Fix bug clobTokenIds (json.loads)
-- [x] Fix bug SELL→BUY para tokens NO
-- [x] Filtro mercados del día actual (MIN_DAYS_AHEAD=1)
-- [x] Fix MIN_BET=$1.00 (límite real Polymarket)
-- [x] Fix mínimo 5 shares por orden (límite real Polymarket)
-- [x] Primera orden real ejecutada (2 órdenes vivas en Polymarket)
-- [x] Filtro de precio 8¢–92¢ (evitar loterías y near-certainties)
-- [x] Agresividad en precio (+2¢ para mejorar llenado)
-- [x] Check de órdenes abiertas (no duplicar posiciones)
-- [x] Limpieza de órdenes stale (cancelar si > 8 horas)
-- [x] Exposición total subida a 40% (más diversificación)
-- [x] Logging limpio (nivel INFO, sin ruido HTTP)
-- [x] DRY_RUN y BANKROLL leídos de variables de entorno
-- [x] requirements.txt creado
-- [x] Scheduler integrado (while True + time.sleep, cada 6 horas)
-- [x] Despliegue en Railway (bot corriendo 24/7 en la nube)
-- [x] Alertas Telegram (arranque, órdenes reales, errores)
-- [x] Fix load_dotenv() al inicio del archivo
-- [ ] Comandos Telegram interactivos (/estado, /ordenes, etc.)
-- [ ] Validación real: correr unos días con $15 y ver resultados
-- [ ] Revisión estratégica con Opus (Sesión 7)
-- [ ] Activar DRY_RUN=false y operar con los $15 reales
-- [ ] Escalar a $100 bankroll (solo si los datos confirman que gana)
-- [ ] Mejoras del modelo (múltiples fuentes, calibración)
+- [x] Filtro de precio 8¢–92¢, agresividad +2¢, check duplicados, limpieza stale
+- [x] Despliegue en Railway (bot corriendo 24/7)
+- [x] Alertas Telegram (arranque, órdenes, errores)
+- [x] Scheduler estratégico (horas UTC fijas: 08, 16, 23)
+- [x] Comandos Telegram con botones inline (Estado, Cartera, Órdenes, Log, Forzar, Modo)
+- [x] Cartera real desde Data API (posiciones + PnL)
+- [x] Toggle DRY_RUN desde Telegram (con doble confirmación)
+- [x] Decision log (decisions.log + /log en Telegram)
+- [x] known_tokens cache (fix órdenes sin enriquecer)
+- [x] Threading (polling Telegram + scheduler en paralelo)
+- [x] MODO REAL activado con $15
+- [ ] Validar resultados: correr varios días y analizar decisions.log
+- [ ] Optimizar estrategia basándose en datos reales
+- [ ] Escalar a $100 (solo si los datos confirman que gana)
+- [ ] Mejoras del modelo (múltiples fuentes, calibración sigma)
 
 ---
 
@@ -71,39 +60,42 @@ Un bot automatizado de arbitraje meteorológico en Polymarket. El bot detecta me
 - pip, py-clob-client, web3, eth-account, httpx
 - Conexión CLOB API, autenticación completa (EIP-712, credenciales L2)
 - Primera orden colocada y cancelada (test)
-- **Bug encontrado:** `clobTokenIds` viene como string JSON → fix con json.loads()
-- **Descubrimiento:** mercados del día actual sin order book
+- **Bug:** `clobTokenIds` como string JSON → fix json.loads()
 
 ### Sesión 4 (21 marzo 2026) — Modelo: Sonnet
-- `bot.py` v2: autenticación integrada, ejecución real, logging, todos los fixes
-- **Bugs corregidos:** clobTokenIds, SELL→BUY, MIN_DAYS_AHEAD, MIN_BET, mínimo 5 shares
-- **Límites reales de Polymarket descubiertos:** $1 mínimo, 5 shares mínimo
+- `bot.py` v2: autenticación integrada, ejecución real, todos los fixes
 - **Primera ejecución real:** 2 órdenes vivas (Shanghai YES 16°C, Wellington YES 18°C)
 
 ### Sesión 5 (21 marzo 2026) — Modelo: Opus
-- **Revisión estratégica completa** — análisis de la economía del bankroll
-- **bot.py v3** con 4 mejoras clave:
-  1. Filtro de precio 8¢–92¢
-  2. Agresividad en precio +2¢
-  3. Check de duplicados
-  4. Limpieza de órdenes stale
-- **Exposición total** subida de 30% a 40%
-- **Decisión estratégica:** NO escalar a $100 todavía
+- **Revisión estratégica completa** — bot.py v3 con 4 mejoras clave
+- Filtro precio, agresividad, duplicados, stale
+- Exposición total subida de 30% a 40%
 
 ### Sesión 6 (21 marzo 2026) — Modelo: Sonnet
-- **requirements.txt** creado (5 librerías clave)
-- **DRY_RUN y BANKROLL** movidos a variables de entorno (Railway-friendly)
-- **bot.py v4:** función main() + scheduler while True (Railway no crashea)
-- **Despliegue en Railway:** bot corriendo 24/7, estado Online
-- **Bot de Telegram creado:** @polymarket_pablo_bot
-- **bot.py v5:** alertas Telegram integradas
-  - 🤖 Alerta de arranque (siempre)
-  - ✅/❌ Alerta por orden ejecutada (solo modo real)
-  - 📊 Resumen de ciclo (solo modo real)
-  - ❌ Alerta de error grave
-- **Bug encontrado y corregido:** load_dotenv() estaba dentro de setup_client(), las variables de Telegram se leían antes — fix: mover load_dotenv() al inicio del archivo
-- **Telegram verificado:** mensaje de prueba recibido en móvil OK
-- **Push final:** Railway actualizado con v5
+- requirements.txt, DRY_RUN/BANKROLL como env vars
+- Despliegue en Railway, alertas Telegram
+
+### Sesión 7 (21 marzo 2026) — Modelo: Opus
+- **bot.py v7** — Reescritura mayor del bot
+- **Scheduler estratégico:** de "cada 6h" a horas UTC fijas (08, 16, 23)
+  - Open-Meteo actualiza modelos cada 6h (00, 06, 12, 18 UTC)
+  - Bot ejecuta después de cada actualización + cuando EEUU tiene liquidez
+- **Telegram bidireccional:** threading + polling + botones inline
+  - 📊 Estado: modo, bankroll, próxima ejecución, último ciclo
+  - 💰 Cartera: posiciones reales con PnL (Data API)
+  - 📋 Órdenes: pendientes enriquecidas con pregunta del mercado
+  - 📓 Log: resumen del último ciclo de decisiones
+  - 🚀 Forzar: ejecuta ciclo inmediato
+  - ⚡ Modo: toggle DRY_RUN↔REAL con doble confirmación
+- **Decision log:** archivo decisions.log con análisis completo de cada ciclo
+  - Qué mercados encontró y cuántos filtró (y por qué)
+  - Edge calculado para cada mercado con previsión vs precio
+  - Por qué descartó cada oportunidad (edge bajo, duplicado, Kelly insuficiente)
+  - Qué órdenes colocó y resultado
+- **known_tokens cache:** fix para que /ordenes muestre la pregunta del mercado
+- **Data API:** cartera real desde data-api.polymarket.com/positions
+- **MODO REAL activado** desde Telegram a las 22:52 UTC
+- **Conceptos nuevos aprendidos:** threading, threading.Event, inline keyboard Telegram, long polling, daemon threads
 
 ---
 
@@ -111,43 +103,41 @@ Un bot automatizado de arbitraje meteorológico en Polymarket. El bot detecta me
 
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot
 **Ubicación local:** `C:\Projects\polymarket-bot`
-**Ejecución principal:** `python bot.py` desde cmd en la carpeta del proyecto.
-**Producción:** Railway (enchanting-respect) — Online, ciclo cada 6h
+**Producción:** Railway — Online, MODO REAL, schedule 08/16/23 UTC
 
 ### Archivos:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v5 — scheduler + Telegram + todas las mejoras |
-| `requirements.txt` | Librerías para Railway (5 líneas) |
-| `edge_detector.py` | Detección de edge (versión standalone) |
+| `bot.py` | Script principal v7 — scheduler + Telegram + decision log |
+| `requirements.txt` | Librerías para Railway |
+| `decisions.log` | **NUEVO** — Log detallado de cada decisión del bot |
+| `trades.log` | Registro técnico de operaciones |
+| `edge_detector.py` | Detección de edge (standalone) |
 | `backtest.py` | Validación con mercados resueltos |
 | `bankroll.py` | Gestión de riesgo + demo Kelly |
-| `polymarket_explore.py` | Explorador de mercados por tags |
+| `polymarket_explore.py` | Explorador de mercados |
 | `weather_forecast.py` | Previsión multi-ciudad |
-| `wellington_forecast.py` | Script original Sesión 1 |
-| `.env` | Claves privadas — PK, FUNDER, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID (NO en git) |
-| `.gitignore` | Protege `.env` y otros archivos sensibles |
-| `trades.log` | Registro de todas las ejecuciones con timestamps |
+| `.env` | Claves (NO en git) |
 
-### Variables de entorno (Railway + .env local):
+### Variables de entorno (Railway + .env):
 ```
-PK=...                    # Clave privada wallet
-FUNDER=...                # Dirección funder
-DRY_RUN=true              # true = sin órdenes reales / false = modo real
-BANKROLL=15.00            # Bankroll activo
-INTERVALO_HORAS=6         # Horas entre ejecuciones (opcional, default 6)
-TELEGRAM_TOKEN=...        # Token del bot @polymarket_pablo_bot
+PK=...
+FUNDER=...
+DRY_RUN=true              # Actualmente overrideado a false desde Telegram
+BANKROLL=15.00
+SCHEDULE_HOURS_UTC=8,16,23
+TELEGRAM_TOKEN=...
 TELEGRAM_CHAT_ID=495704420
 ```
 
-### Configuración actual en bot.py v5:
+### Configuración en bot.py v7:
 ```python
-DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
+DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"  # Mutable desde Telegram
 BANKROLL = float(os.getenv("BANKROLL", "15.00"))
 MIN_EDGE = 10.0
 MIN_BET = 1.00
-MAX_BET_PCT = 0.05
-MAX_EXPOSURE_PCT = 0.40
+MAX_BET_PCT = 0.05        # 5% max por operación
+MAX_EXPOSURE_PCT = 0.40   # 40% exposición total
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 3
 MIN_DAYS_AHEAD = 1
@@ -155,73 +145,104 @@ MIN_PRICE = 0.08
 MAX_PRICE = 0.92
 PRICE_AGGRESSION = 0.02
 ORDER_MAX_AGE_HOURS = 8
-INTERVALO_HORAS = float(os.getenv("INTERVALO_HORAS", "6"))
+SCHEDULE_HOURS_UTC = [8, 16, 23]
 ```
 
-### Arquitectura v5:
+### Arquitectura v7:
 ```
-SCHEDULER (while True, cada 6h)
+HILO 1: TELEGRAM POLLING (24/7)
+  ↓ Escucha botones/comandos
+  ↓ Lee bot_state para responder
+  ↓ force_event.set() si /forzar
+
+HILO 2: SCHEDULER (horas UTC fijas)
   ↓
-0. Limpiar órdenes stale (> 8 horas)
-1. Polymarket (Gamma API, tag_id=103040) → mercados activos
-2. Filtro precio (8¢–92¢) + parseo regex + token IDs
-3. Open-Meteo (coords aeropuerto) → previsión temp_max
-4. Modelo probabilidad (normal + redondeo) → edge vs precio mercado
-5. Check duplicados + Kelly (half-kelly + 5% max + 40% total)
-6. CLOB API (BUY, precio mercado + 2¢ agresividad)
-7. Verificación + logging + alerta Telegram
+  0. Limpiar stale (>8h)
+  1. Gamma API → mercados activos
+  2. Parseo + filtros (precio, fecha, liquidez)
+  3. Open-Meteo → previsiones
+  4. Modelo probabilidad → edge vs mercado
+  5. Kelly + presupuesto → selección
+  6. CLOB API → órdenes + Telegram alert
+  7. Decision log → decisions.log + bot_state
   ↓
-Dormir INTERVALO_HORAS → repetir
+  Esperar próxima hora UTC (interruptible por /forzar)
 ```
 
-### Alertas Telegram implementadas:
-- 🤖 **Arranque:** cada vez que el proceso arranca (Railway redeploy, reinicio)
-- ✅/❌ **Orden ejecutada:** detalle completo de cada orden (solo modo real)
-- 📊 **Ciclo completado:** resumen cuando hay órdenes (solo modo real)
-- ❌ **Error grave:** si main() lanza una excepción no controlada
-
-### Estaciones de resolución mapeadas (19 ciudades):
-Seoul (RKSI), London (EGLC), Tel Aviv (LLBG), Shanghai (ZSPD), Tokyo (RJTT), NYC (KLGA), Beijing (ZBAA), Hong Kong (VHHH), Singapore (WSSS), Toronto (CYYZ), Chicago (KORD), Wellington (NZWN), Munich (EDDM), Warsaw (EPWA), Ankara (LTAC), Atlanta (KATL), Shenzhen (ZGSZ), Paris (LFPG), Buenos Aires (SAEZ).
+### APIs utilizadas:
+| API | URL | Función |
+|-----|-----|---------|
+| Gamma API | gamma-api.polymarket.com | Mercados, preguntas, precios |
+| Data API | data-api.polymarket.com | Posiciones del usuario, PnL |
+| CLOB API | clob.polymarket.com | Órdenes, autenticación |
+| Open-Meteo | api.open-meteo.com | Previsiones meteorológicas |
+| Telegram | api.telegram.org | Dashboard + alertas |
 
 ---
 
-## Plan para Sesión 7 — Revisión con Opus + Activar $15 reales
+## Estado de las primeras operaciones
 
-### Objetivo principal:
-Revisar el bot completo con Opus, identificar mejoras, y dejarlo operativo en modo real antes de dormir.
+### Posición activa:
+- **Shanghai YES 16°C** (March 22): 16.9 shares @ $0.04, valor actual ~$0.54, PnL: -$0.13 (-20%)
 
-### Agenda propuesta:
-1. **Revisar órdenes de sesión 4** — Shanghai YES 16°C y Wellington YES 18°C (March 22). ¿Se llenaron? ¿Acertaron?
-2. **Revisión estratégica con Opus** — leer bot.py v5 completo y proponer mejoras
-3. **Comandos Telegram interactivos** — `/estado`, `/ordenes`, `/siguiente` para consultar el bot desde el móvil sin entrar a Railway
-4. **Activar DRY_RUN=false** — cambiar en Railway y dejar corriendo con los $15 reales
+### Orden pendiente:
+- **Wellington YES 18°C** (March 22): Buy @ $0.05, 14 shares, ~5h esperando llenado
 
-### Comandos Telegram planificados:
-| Comando | Respuesta del bot |
-|---------|-------------------|
-| `/estado` | Bankroll, modo, próxima ejecución, órdenes abiertas |
-| `/ordenes` | Lista de órdenes abiertas con ciudad, lado, precio |
-| `/siguiente` | Cuánto tiempo falta para el próximo ciclo |
-| `/forzar` | Ejecuta un ciclo ahora sin esperar |
+### Balance Polymarket:
+- Cartera total: ~$14.91
+- Disponible: ~$14.32
+- PnL total: -$0.41
+
+**Nota:** Las primeras órdenes fueron de la sesión 4 (pre-optimización). El bot v7 es significativamente mejor — el resultado de estas órdenes iniciales no es representativo.
+
+---
+
+## Plan para Sesión 8 — Análisis de datos + Optimización
+
+### Objetivo: Aprender de los datos reales y mejorar la estrategia
+
+### Paso 1: Revisar decisions.log
+- Leer el log de la noche (ciclos 23:00 y 08:00)
+- ¿Cuántas oportunidades encontró? ¿Colocó órdenes?
+- ¿Los edges eran reales o el modelo está mal calibrado?
+
+### Paso 2: Revisar resultados en Polymarket
+- ¿Se llenaron las órdenes?
+- ¿Los mercados que apostamos se resolvieron correctamente?
+- Comparar temperatura real vs previsión del bot
+
+### Paso 3: Mejoras potenciales (priorizar según datos)
+1. **Calibración de sigma** — ¿La incertidumbre de 1.0°C para 1 día es correcta?
+2. **Múltiples fuentes** — Comparar Open-Meteo con otra fuente
+3. **Historial de edges** — ¿Los edges que detectamos son consistentes?
+4. **Fill rate** — ¿Cuántas órdenes se llenan vs cuántas expiran?
+5. **Ajuste de agresividad** — ¿+2¢ es suficiente para llenarse?
+6. **Parseo de rangos** — Capturar mercados "46-47°F" que ahora se pierden
+
+### Workflow continuo:
+```
+1. Bot corre 24/7 → genera decisions.log
+2. Pablo revisa datos → identifica patrones
+3. Sesión con Claude → implementa mejoras
+4. Push → Railway redeploy → más datos
+5. Repetir hasta que el bot sea consistentemente rentable
+```
 
 ---
 
 ## Problemas conocidos / pendientes
 
-### Prioritarios:
-1. **Validar con $15 reales** — activar DRY_RUN=false en Railway
-2. **Comandos Telegram** — el bot solo envía, no recibe comandos todavía
-3. **Revisar órdenes vivas** — Shanghai y Wellington del 22 de marzo
+### Observados:
+1. **DRY_RUN desde Telegram es temporal** — Si Railway reinicia, vuelve al valor de la variable. Para permanente: cambiar en Railway → Variables.
+2. **85 mercados no parseables** — regex no cubre rangos "46-47°F"
+3. **131 fuera de fecha** — muchos mercados son para hoy (MIN_DAYS_AHEAD=1 los excluye)
+4. **Shanghai -20%** — primera operación, pre-optimización, no representativa
 
-### Secundarios:
-4. **Escalar a $100** — solo cuando tengamos datos de que el sistema gana
-5. **Mejoras del modelo** — múltiples fuentes meteorológicas, calibración
-
-### Bugs conocidos resueltos:
-- `load_dotenv()` debe estar al inicio del archivo (antes de os.getenv)
-- `created_at` como int (Unix timestamp) — resuelto con isinstance()
-- `clobTokenIds` como string JSON — resuelto con json.loads()
-- SELL vs BUY para tokens NO — resuelto en v2
+### Resueltos en v7:
+- Órdenes sin enriquecer → known_tokens cache
+- Cartera 404 → Data API correcta
+- Scheduler fijo cada 6h → horas UTC estratégicas
+- Bot solo envía → Telegram bidireccional con botones
 
 ---
 
@@ -230,36 +251,41 @@ Revisar el bot completo con Opus, identificar mejoras, y dejarlo operativo en mo
 1. Open-Meteo vs estación real: diferencias 0.5-2°C incluso con coords de aeropuerto.
 2. Modelo simplificado: sigma fija por días, no considera microclima.
 3. Backtest optimista: usa datos reales, no previsiones históricas.
-4. 58 preguntas no parseables: regex no cubre rangos como "46-47°F".
+4. 85 preguntas no parseables: regex no cubre rangos como "46-47°F".
 5. Sin precios históricos de Polymarket: backtest solo mide dirección.
 
 ---
 
 ## Mi nivel técnico
 
-- **Programación:** Principiante avanzado. Funciones, regex, distribuciones, APIs, OOP básica, sets.
-- **Terminal:** Cómodo con cmd, Git básico (add → commit → push).
-- **Python:** urllib, json, re, math, datetime, dotenv, logging, py-clob-client, isinstance(), time.sleep, while True, variables de entorno.
+- **Programación:** Intermedio. Funciones, regex, distribuciones, APIs, OOP básica, sets, threading, eventos.
+- **Terminal:** Cómodo con cmd, Git básico.
+- **Python:** urllib, json, re, math, datetime, dotenv, logging, threading, py-clob-client, time.sleep.
+- **Conceptos nuevos (Sesión 7):** threading, threading.Event, daemon threads, long polling, inline keyboard, callback_query, múltiples loggers.
 - **Git:** Flujo básico consolidado.
-- **Crypto/Blockchain:** Básico funcional. Polygon, signature_type=1, EIP-712, token IDs.
-- **Polymarket:** Comprende shares, órdenes límite GTC, resolución binaria, order book, llenado.
-- **Railway:** Sabe desplegar desde GitHub, configurar variables de entorno, leer logs.
-- **Telegram Bot API:** Sabe crear bots con BotFather, obtener chat_id, enviar mensajes via HTTP.
-- **Estrategia:** Entiende Kelly, edge, agresividad en precio, por qué no escalar antes de validar.
-- **Pendiente:** Comandos Telegram bidireccionales (polling), estrategias avanzadas de llenado.
-- **Workflow de sesiones:** No edita código manualmente — Claude siempre entrega archivos completos.
+- **Polymarket:** Comprende shares, órdenes GTC, resolución, order book, Data API, Gamma API, CLOB API.
+- **Railway:** Despliegue, variables de entorno, logs.
+- **Telegram:** Bot bidireccional con botones inline y polling.
+- **Estrategia:** Kelly, edge, agresividad, por qué validar antes de escalar.
+- **Workflow:** Claude entrega archivos completos, Pablo hace push.
 
 ---
 
 ## Recordatorios importantes
 
-**Activar órdenes reales en Railway:**
-railway.app → proyecto polymarket-bot → Variables → cambiar `DRY_RUN` de `true` a `false`. Sin push, sin tocar código.
+**Activar órdenes reales (permanente):**
+Railway → Variables → `DRY_RUN` = `false`
 
-**Push a GitHub (después de cambios en local):**
+**Activar órdenes reales (temporal):**
+Telegram → ⚡ Modo → Activar REAL
+
+**Push a GitHub:**
 ```
 cd C:\Projects\polymarket-bot
 git add .
-git commit -m "descripción del cambio"
+git commit -m "descripción"
 git push
 ```
+
+**Ver qué hizo el bot:**
+Telegram → 📓 Log (resumen) o Railway → Logs (completo)
