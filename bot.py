@@ -4,7 +4,7 @@ import re
 import math
 import os
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 # Dependencias externas (pip install python-dotenv py-clob-client)
 from dotenv import load_dotenv
@@ -13,28 +13,29 @@ from py_clob_client.clob_types import OrderArgs, OrderType
 from py_clob_client.order_builder.constants import BUY, SELL
 
 # =============================================================
-# bot.py — Bot de Polymarket v2 (Con Ejecución Real)
-# Sesión 4: Primera orden real + integración completa
+# bot.py — Bot de Polymarket v3 (Estrategia Validada)
+# Sesión 5: Revisión estratégica + hardening para bankroll real
 # =============================================================
 #
-# Novedades respecto a v1:
-#   - Autenticación con Polymarket (Magic wallet)
-#   - Ejecución real de órdenes (con flag DRY_RUN)
-#   - Logging a archivo trades.log
-#   - Fix bug clobTokenIds (json.loads si viene como string)
-#   - Filtro: se excluyen mercados que resuelven HOY (sin order book)
-#   - Fix bug SELL: comprar NO usa BUY + token_id_no, no SELL
+# Cambios respecto a v2:
+#   - Filtro de precio: ignora mercados < 8¢ y > 92¢
+#   - Agresividad en precio: paga +2¢ para mejorar llenado
+#   - Check de órdenes abiertas: no duplica posiciones
+#   - Limpieza de órdenes stale: cancela si > 8 horas
+#   - Exposición total sube a 40% (más diversificación)
+#   - Bankroll se mantiene en $15 hasta validar el sistema
 #
 # Flujo:
-#   1. Configuración (bankroll, límites, DRY_RUN)
-#   2. Autenticación con Polymarket
+#   1. Configuración + autenticación
+#   2. Limpiar órdenes stale (> 8 horas)
 #   3. Leer mercados de Polymarket
-#   4. Parsear preguntas + extraer token IDs
+#   4. Filtrar por precio (8¢ – 92¢), parsear, extraer token IDs
 #   5. Obtener previsiones (coords de aeropuerto)
 #   6. Calcular edge
-#   7. Calcular tamaño de apuesta (Kelly)
-#   8. Mostrar plan de operaciones
-#   9. Ejecutar órdenes (si DRY_RUN = False)
+#   7. Check duplicados (no apostar si ya hay orden abierta)
+#   8. Calcular tamaño de apuesta (Kelly)
+#   9. Ejecutar órdenes con agresividad en precio
+#  10. Log + verificación
 # =============================================================
 
 
@@ -42,17 +43,33 @@ from py_clob_client.order_builder.constants import BUY, SELL
 # CONFIGURACIÓN DEL USUARIO
 # =============================================================
 
-DRY_RUN = False          # True = solo planifica, no ejecuta.
+DRY_RUN = True           # True = solo planifica, no ejecuta.
                          # Cambia a False para órdenes reales.
 
-BANKROLL = 15.00         # Bankroll real actual en USDC
+BANKROLL = 15.00         # Bankroll de prueba — cambiar a 100 cuando
+                         # validemos que el sistema gana dinero.
+
 MIN_EDGE = 10.0          # Edge mínimo (%) para considerar operar
 MIN_BET = 1.00           # Apuesta mínima en USD (límite real de Polymarket)
 MAX_BET_PCT = 0.05       # Máximo 5% del bankroll por operación
-MAX_EXPOSURE_PCT = 0.30  # Máximo 30% del bankroll expuesto EN TOTAL
+MAX_EXPOSURE_PCT = 0.40  # Máximo 40% del bankroll expuesto EN TOTAL
+                         # (subido desde 30%: más diversificación = menos riesgo)
 MIN_LIQUIDITY = 100      # Liquidez mínima del mercado en USD
 MAX_DAYS_AHEAD = 3       # Solo mercados que resuelven en los próximos N días
 MIN_DAYS_AHEAD = 1       # Excluir mercados que resuelven HOY (sin order book)
+
+# --- NUEVOS en v3 ---
+MIN_PRICE = 0.08         # Ignorar mercados por debajo de 8¢
+                         # (en las colas de la distribución, el modelo
+                         #  no tiene precisión suficiente)
+MAX_PRICE = 0.92         # Ignorar mercados por encima de 92¢
+                         # (profit mínimo, no vale la pena)
+PRICE_AGGRESSION = 0.02  # Pagar hasta 2¢ más que el precio de mercado
+                         # para mejorar probabilidad de llenado.
+                         # Ej: si mercado pide 30¢, colocamos BUY a 32¢
+ORDER_MAX_AGE_HOURS = 8  # Cancelar órdenes abiertas más viejas que esto.
+                         # La previsión cambia, el precio cambia —
+                         # mejor re-evaluar en la siguiente corrida.
 
 
 # =============================================================
@@ -60,7 +77,9 @@ MIN_DAYS_AHEAD = 1       # Excluir mercados que resuelven HOY (sin order book)
 # =============================================================
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,     # Cambiado de DEBUG a INFO en v3
+                            # DEBUG mostraba cabeceras HTTP ilegibles.
+                            # Si necesitas depurar, cámbialo de vuelta a DEBUG.
     format="%(asctime)s | %(levelname)-8s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
@@ -110,6 +129,13 @@ RESOLUTION_STATIONS = {
 # =============================================================
 
 def setup_client():
+    """
+    Conecta con Polymarket usando las claves del archivo .env.
+
+    Usa 'Magic wallet' (signature_type=1): firma EIP-712 que
+    Polymarket genera a partir de tu clave privada. Es como
+    un DNI digital que demuestra que eres tú sin revelar tu clave.
+    """
     load_dotenv()
     pk = os.getenv("PK")
     funder = os.getenv("FUNDER")
@@ -139,14 +165,16 @@ def setup_client():
 # =============================================================
 
 def api_get(endpoint):
+    """Llama a la API de Gamma (datos públicos de Polymarket)."""
     url = GAMMA_URL + endpoint
     req = urllib.request.Request(url)
-    req.add_header("User-Agent", "polymarket-bot/0.2")
+    req.add_header("User-Agent", "polymarket-bot/0.3")
     resp = urllib.request.urlopen(req)
     return json.loads(resp.read())
 
 
 def get_coordinates_fallback(city_name):
+    """Busca coords si la ciudad no está en RESOLUTION_STATIONS."""
     city_clean = city_name.strip().replace(" ", "+")
     url = (
         f"https://geocoding-api.open-meteo.com/v1/search"
@@ -161,6 +189,7 @@ def get_coordinates_fallback(city_name):
 
 
 def get_forecast(lat, lon):
+    """Obtiene previsión de Open-Meteo para los próximos días."""
     url = (
         f"https://api.open-meteo.com/v1/forecast"
         f"?latitude={lat}&longitude={lon}"
@@ -185,10 +214,126 @@ def get_forecast(lat, lon):
 
 
 # =============================================================
+# FUNCIONES: GESTIÓN DE ÓRDENES ABIERTAS (NUEVO en v3)
+# =============================================================
+
+def get_open_orders(client):
+    """
+    Obtiene todas las órdenes abiertas en Polymarket.
+
+    Devuelve una lista de diccionarios con info de cada orden.
+    Usamos esto para dos cosas:
+      1. No duplicar: si ya hay orden en un mercado, no poner otra.
+      2. Limpiar stale: si una orden lleva > 8h sin llenarse, cancelarla.
+    """
+    try:
+        # La API de CLOB devuelve las órdenes del usuario autenticado
+        orders = client.get_orders()
+
+        # Filtrar solo las que están activas (LIVE)
+        open_orders = []
+        for order in orders:
+            status = order.get("status", "").upper()
+            if status in ("LIVE", "ACTIVE", "OPEN"):
+                open_orders.append(order)
+
+        log.info(f"Órdenes abiertas encontradas: {len(open_orders)}")
+        return open_orders
+
+    except Exception as e:
+        log.warning(f"Error al obtener órdenes abiertas: {e}")
+        # Si falla, devolvemos lista vacía para no bloquear el bot.
+        # Es mejor arriesgar una duplicación que no operar nada.
+        return []
+
+
+def get_order_token_ids(open_orders):
+    """
+    Extrae los token_ids de las órdenes abiertas.
+
+    Devuelve un SET (conjunto) de token_ids.
+    Un set es como una lista pero sin duplicados y con búsqueda
+    instantánea — perfecto para preguntar "¿ya aposté en esto?"
+
+    Lo usamos para el check de duplicados: si el token_id de un
+    mercado que queremos operar ya está en este set, lo saltamos.
+    """
+    token_ids = set()
+    for order in open_orders:
+        asset_id = order.get("asset_id", "")
+        if asset_id:
+            token_ids.add(asset_id)
+    return token_ids
+
+
+def clean_stale_orders(client, open_orders, max_age_hours):
+    """
+    Cancela órdenes que llevan demasiado tiempo sin llenarse.
+
+    ¿Por qué? Una orden colocada hace 12 horas para un mercado
+    que resuelve mañana puede ya no tener edge:
+      - La previsión meteorológica se actualiza cada pocas horas
+      - El precio del mercado también cambia
+      - Si nadie quiso venderte a tu precio en 8 horas, algo pasa
+
+    Mejor cancelar y dejar que el bot re-evalúe en la siguiente corrida.
+    Si el edge sigue ahí, volverá a colocar la orden con precio actualizado.
+    """
+    cancelled = 0
+    now = datetime.now(timezone.utc)
+
+    for order in open_orders:
+        order_id = order.get("id", "")
+        created_at_raw = order.get("created_at", "")
+
+        if not created_at_raw or not order_id:
+            continue
+
+        # Parsear la fecha de creación de la orden.
+        # Polymarket puede devolver el timestamp en dos formatos:
+        #   - Entero (Unix timestamp en segundos): 1774113343
+        #   - String ISO 8601: "2026-03-21T14:30:00Z"
+        # Manejamos ambos por si la API cambia o varía entre endpoints.
+        try:
+            if isinstance(created_at_raw, (int, float)):
+                # Unix timestamp → convertir a datetime UTC
+                created_at = datetime.fromtimestamp(created_at_raw, tz=timezone.utc)
+            else:
+                # String ISO → parsear
+                created_at_clean = str(created_at_raw).replace("Z", "+00:00")
+                created_at = datetime.fromisoformat(created_at_clean)
+        except (ValueError, TypeError, OSError):
+            log.warning(f"No se pudo parsear fecha de orden {order_id}: {created_at_raw}")
+            continue
+
+        age_hours = (now - created_at).total_seconds() / 3600
+
+        if age_hours > max_age_hours:
+            log.info(
+                f"Cancelando orden stale: {order_id[:16]}... "
+                f"(edad: {age_hours:.1f}h, límite: {max_age_hours}h)"
+            )
+            try:
+                client.cancel(order_id)
+                cancelled += 1
+                log.info(f"  → Cancelada OK")
+            except Exception as e:
+                log.warning(f"  → Error al cancelar: {e}")
+
+    return cancelled
+
+
+# =============================================================
 # FUNCIONES: PARSEO
 # =============================================================
 
 def parse_temperature_question(question):
+    """
+    Extrae ciudad, temperatura, condición y fecha de una pregunta
+    de Polymarket tipo "Will the temperature in Seoul be 16°C on March 22?"
+
+    Usa regex (expresión regular) = un patrón de búsqueda en texto.
+    """
     match = re.search(
         r"temperature in (.+?) (?:be |on )"
         r"(\d+)°([CF])"
@@ -224,6 +369,7 @@ def parse_temperature_question(question):
 
 
 def date_text_to_iso(date_text, year=2026):
+    """Convierte "March 22" a "2026-03-22"."""
     if not date_text:
         return None
     months = {
@@ -247,12 +393,22 @@ def date_text_to_iso(date_text, year=2026):
 # =============================================================
 
 def normal_cdf(x, mu, sigma):
+    """
+    Función de distribución acumulada de la normal.
+    Devuelve la probabilidad de que un valor sea <= x,
+    dada una media (mu) y desviación estándar (sigma).
+    """
     if sigma <= 0:
         return 1.0 if x >= mu else 0.0
     return 0.5 * (1.0 + math.erf((x - mu) / (sigma * math.sqrt(2))))
 
 
 def get_uncertainty(days_ahead):
+    """
+    Sigma (incertidumbre) según cuántos días faltan.
+    Más días = más incertidumbre = sigma más grande.
+    Estos valores están calibrados con el backtest (91.4% precisión).
+    """
     if days_ahead <= 0:
         return 0.8
     elif days_ahead == 1:
@@ -268,6 +424,15 @@ def get_uncertainty(days_ahead):
 
 
 def estimate_prob(forecast_max, threshold_c, condition, days_ahead):
+    """
+    Calcula la probabilidad estimada de que la temperatura
+    cumpla la condición del mercado.
+
+    Usa distribución normal centrada en la previsión (mu),
+    con sigma que crece según los días que faltan.
+    El truco del +/- 0.5 es porque las temperaturas se redondean
+    a grados enteros: "16°C" en realidad significa "15.5 a 16.5°C".
+    """
     sigma = get_uncertainty(days_ahead)
     mu = forecast_max
 
@@ -288,6 +453,20 @@ def estimate_prob(forecast_max, threshold_c, condition, days_ahead):
 # =============================================================
 
 def kelly_fraction(estimated_prob, market_price):
+    """
+    Criterio de Kelly: cuánto apostar dado tu edge.
+
+    Kelly = (p*b - q) / b, donde:
+      p = tu probabilidad estimada de ganar
+      q = 1 - p (probabilidad de perder)
+      b = payout ratio = (1 - precio) / precio
+
+    Usamos MEDIO Kelly (divido entre 2) porque:
+      - Kelly completo asume que tu modelo es perfecto
+      - Con medio Kelly, reduces la volatilidad a cambio de
+        reducir ligeramente el crecimiento
+      - Es el estándar en trading cuantitativo
+    """
     if market_price <= 0.01 or market_price >= 0.99:
         return 0.0
     if estimated_prob <= 0.01 or estimated_prob >= 0.99:
@@ -306,24 +485,31 @@ def kelly_fraction(estimated_prob, market_price):
 
 
 def calculate_position(bankroll, estimated_prob, market_price):
+    """
+    Calcula cuánto apostar y cuántas shares comprar.
+
+    Incluye la lógica de mínimo 5 shares (requisito de Polymarket)
+    y la agresividad en precio (pagar un poco más para llenado).
+    """
     fraction = kelly_fraction(estimated_prob, market_price)
 
     if fraction <= 0:
         return None
 
+    # El precio agresivo es lo que realmente pagaremos.
+    # market_price es lo que cotiza, aggressive_price es lo que ofrecemos.
+    aggressive_price = min(market_price + PRICE_AGGRESSION, 0.99)
+
     amount = round(bankroll * fraction, 2)
     if amount < MIN_BET:
         return None
 
-    shares = amount / market_price
+    # Calculamos shares con el precio AGRESIVO (el real que pagaremos)
+    shares = amount / aggressive_price
 
     # Polymarket exige mínimo 5 shares por orden.
-    # Con precios altos (ej: NO a $0.60) o apuestas pequeñas,
-    # el cálculo puede dar menos de 5 shares y la orden es rechazada.
-    # En ese caso escalamos el importe para llegar a 5 shares exactas,
-    # respetando siempre el tope MAX_BET_PCT.
     if shares < 5.0:
-        amount_for_5_shares = round(5.0 * market_price, 2)
+        amount_for_5_shares = round(5.0 * aggressive_price, 2)
         if amount_for_5_shares > bankroll * MAX_BET_PCT:
             return None   # No se puede llegar a 5 shares sin superar el tope
         if amount_for_5_shares < MIN_BET:
@@ -331,7 +517,8 @@ def calculate_position(bankroll, estimated_prob, market_price):
         amount = amount_for_5_shares
         shares = 5.0
 
-    profit = round(shares * (1.0 - market_price), 2)
+    # Profit se calcula con precio agresivo (es lo que pagamos realmente)
+    profit = round(shares * (1.0 - aggressive_price), 2)
     loss = round(amount, 2)
     ev = round(estimated_prob * profit - (1 - estimated_prob) * loss, 2)
 
@@ -342,6 +529,8 @@ def calculate_position(bankroll, estimated_prob, market_price):
         "profit_if_win": profit,
         "loss_if_lose": loss,
         "expected_value": ev,
+        "aggressive_price": aggressive_price,  # NUEVO: precio real de la orden
+        "market_price": market_price,           # Precio original del mercado
     }
 
 
@@ -353,20 +542,30 @@ def execute_trade(client, trade, dry_run=True):
     """
     Ejecuta una orden en Polymarket.
 
+    CAMBIO v3: Usa el precio agresivo (mercado + 2¢) en lugar del
+    precio exacto de mercado. Esto sacrifica ~2¢ de edge por orden
+    pero aumenta dramáticamente la probabilidad de llenado.
+
     Por qué siempre BUY:
-        En Polymarket, para apostar a que algo NO ocurre, no se
-        hace SELL. Se compra el token "NO" directamente con BUY.
-        El token_id ya apunta al outcome correcto (YES o NO).
-        SELL significaría vender tokens que ya tienes, no comprar.
+        Para apostar NO, se compra el token "NO" con BUY.
+        SELL = vender tokens que ya tienes, no es lo que queremos.
 
     Por qué órdenes límite (GTC):
-        Tú fijas el precio máximo. Si el mercado sube, no te llena.
-        GTC = Good Till Cancelled → activa hasta llenar o cancelar.
+        GTC = Good Till Cancelled. La orden espera al precio que pides.
+        Con agresividad de 2¢, es más probable que se llene rápido.
     """
     token_id = trade["token_id"]
-    price = trade["mkt_price"] / 100.0
-    size = trade["position"]["shares"]
 
+    # CAMBIO v3: usar precio agresivo si está disponible
+    position = trade["position"]
+    if "aggressive_price" in position:
+        price = position["aggressive_price"]
+    else:
+        price = trade["mkt_price"] / 100.0
+
+    size = position["shares"]
+
+    # Polymarket exige precios redondeados a 2 decimales
     price = round(price, 2)
     size = round(size, 2)
 
@@ -375,6 +574,7 @@ def execute_trade(client, trade, dry_run=True):
     log.info(
         f"{'[DRY RUN] ' if dry_run else ''}Orden: "
         f"{trade['side']} {size} shares × ${price:.2f} "
+        f"(mercado: ${trade['mkt_price']/100:.2f}, agresividad: +${PRICE_AGGRESSION:.2f}) "
         f"| {trade['city']} {trade['date']} "
         f"| token {token_id[:12]}..."
     )
@@ -413,9 +613,12 @@ if __name__ == "__main__":
     mode_label = "DRY RUN (sin órdenes reales)" if DRY_RUN else "⚠️  MODO REAL — ÓRDENES ACTIVAS"
 
     log.info("=" * 65)
-    log.info(f"POLYMARKET WEATHER BOT v2  |  {today_str}")
+    log.info(f"POLYMARKET WEATHER BOT v3  |  {today_str}")
     log.info(f"Modo: {mode_label}")
     log.info(f"Bankroll: ${BANKROLL:.2f}  |  Edge mín: {MIN_EDGE}%")
+    log.info(f"Filtro precio: {MIN_PRICE:.0%} – {MAX_PRICE:.0%}")
+    log.info(f"Agresividad: +${PRICE_AGGRESSION:.2f}")
+    log.info(f"Limpieza stale: >{ORDER_MAX_AGE_HOURS}h")
     log.info("=" * 65)
 
     # ---- AUTENTICACIÓN ----
@@ -424,8 +627,29 @@ if __name__ == "__main__":
         log.error("No se pudo autenticar. Verifica tu .env. Saliendo.")
         exit(1)
 
+    # ---- PASO 0: LIMPIAR ÓRDENES STALE (NUEVO en v3) ----
+    #
+    # Antes de hacer nada, revisamos si hay órdenes viejas que cancelar.
+    # ¿Por qué primero? Porque si cancelamos una orden stale, ese
+    # presupuesto vuelve a estar disponible para nuevas operaciones.
+    # Además, limpiar antes de buscar mercados evita que el check de
+    # duplicados nos bloquee en un mercado donde teníamos una orden
+    # vieja que ya no tiene sentido.
+    #
+    log.info("[0/6] Limpiando órdenes stale...")
+    open_orders = get_open_orders(client)
+    cancelled_count = clean_stale_orders(client, open_orders, ORDER_MAX_AGE_HOURS)
+    log.info(f"       {cancelled_count} órdenes stale canceladas")
+
+    # Refrescar la lista de órdenes abiertas DESPUÉS de cancelar
+    # (para que el check de duplicados sea preciso)
+    if cancelled_count > 0:
+        open_orders = get_open_orders(client)
+    open_token_ids = get_order_token_ids(open_orders)
+    log.info(f"       {len(open_token_ids)} órdenes activas restantes")
+
     # ---- PASO 1: Mercados ----
-    log.info("[1/5] Obteniendo mercados...")
+    log.info("[1/6] Obteniendo mercados...")
     try:
         events = api_get(
             f"/events?tag_id={DAILY_TEMP_TAG_ID}"
@@ -442,9 +666,10 @@ if __name__ == "__main__":
             all_markets.append(m)
     log.info(f"       {len(all_markets)} mercados encontrados")
 
-    # ---- PASO 2: Parsear + extraer token IDs ----
-    log.info("[2/5] Parseando preguntas...")
+    # ---- PASO 2: Parsear + extraer token IDs + filtro de precio ----
+    log.info("[2/6] Parseando preguntas + filtro de precio...")
     candidates = []
+    filtered_price_count = 0   # Contador para saber cuántos filtramos
 
     for market in all_markets:
         question = market.get("question", "")
@@ -486,8 +711,15 @@ if __name__ == "__main__":
             continue
 
         mkt_prob_yes = float(prices[0])
-        if mkt_prob_yes >= 0.98 or mkt_prob_yes <= 0.02:
-            continue
+
+        # FILTRO DE PRECIO (NUEVO en v3)
+        # ¿Por qué ambos lados? Porque si YES está a 3¢, NO está a 97¢.
+        # En ambos extremos, el modelo no tiene la precisión necesaria.
+        if mkt_prob_yes < MIN_PRICE or mkt_prob_yes > MAX_PRICE:
+            mkt_prob_no = 1.0 - mkt_prob_yes
+            if mkt_prob_no < MIN_PRICE or mkt_prob_no > MAX_PRICE:
+                filtered_price_count += 1
+                continue
 
         liquidity = float(market.get("liquidity", 0))
         if liquidity < MIN_LIQUIDITY:
@@ -504,10 +736,12 @@ if __name__ == "__main__":
         parsed["token_id_no"] = clob_ids[1]
         candidates.append(parsed)
 
-    log.info(f"       {len(candidates)} candidatos (con filtros de calidad)")
+    log.info(f"       {len(candidates)} candidatos")
+    if filtered_price_count > 0:
+        log.info(f"       {filtered_price_count} filtrados por precio (<{MIN_PRICE:.0%} o >{MAX_PRICE:.0%})")
 
     # ---- PASO 3: Previsiones ----
-    log.info("[3/5] Obteniendo previsiones...")
+    log.info("[3/6] Obteniendo previsiones...")
     cities_needed = set(c["city"] for c in candidates)
     forecast_cache = {}
 
@@ -528,8 +762,9 @@ if __name__ == "__main__":
         log.info(f"       {city} ({label}): OK")
 
     # ---- PASO 4: Calcular edge ----
-    log.info("[4/5] Calculando edge...")
+    log.info("[4/6] Calculando edge...")
     trades = []
+    skipped_duplicates = 0   # Contador de duplicados evitados
 
     for c in candidates:
         city = c["city"]
@@ -574,6 +809,14 @@ if __name__ == "__main__":
         if edge_pct < MIN_EDGE:
             continue
 
+        # CHECK DE DUPLICADOS (NUEVO en v3)
+        # Si ya tenemos una orden abierta en este token_id, saltamos.
+        # Esto evita duplicar posiciones si el bot corre dos veces.
+        if token_id in open_token_ids:
+            skipped_duplicates += 1
+            log.debug(f"  Duplicado evitado: {city} {side} {c['date_iso']} (ya hay orden)")
+            continue
+
         position = calculate_position(BANKROLL, our_prob, mkt_price)
         if not position:
             continue
@@ -600,6 +843,9 @@ if __name__ == "__main__":
 
     trades.sort(key=lambda x: x["position"]["expected_value"], reverse=True)
 
+    if skipped_duplicates > 0:
+        log.info(f"       {skipped_duplicates} mercados saltados (ya hay orden abierta)")
+
     # ---- PASO 5: Presupuesto global + plan ----
     max_budget = BANKROLL * MAX_EXPOSURE_PCT
     budget_remaining = max_budget
@@ -614,9 +860,9 @@ if __name__ == "__main__":
         else:
             if budget_remaining >= MIN_BET:
                 reduced_amount = round(budget_remaining, 2)
-                mkt_price_decimal = t["mkt_price"] / 100
-                shares = reduced_amount / mkt_price_decimal
-                profit = round(shares * (1.0 - mkt_price_decimal), 2)
+                aggressive_price = pos.get("aggressive_price", t["mkt_price"] / 100)
+                shares = reduced_amount / aggressive_price
+                profit = round(shares * (1.0 - aggressive_price), 2)
                 loss = round(reduced_amount, 2)
                 our_prob_decimal = t["our_prob"] / 100
                 ev = round(our_prob_decimal * profit - (1 - our_prob_decimal) * loss, 2)
@@ -628,11 +874,13 @@ if __name__ == "__main__":
                     "profit_if_win": profit,
                     "loss_if_lose": loss,
                     "expected_value": ev,
+                    "aggressive_price": aggressive_price,
+                    "market_price": t["mkt_price"] / 100,
                 }
                 budget_remaining = 0
                 selected_trades.append(t)
 
-    log.info("[5/5] Generando plan de operaciones...")
+    log.info("[5/6] Generando plan de operaciones...")
     log.info(f"       {len(trades)} oportunidades detectadas")
     log.info(f"       {len(selected_trades)} seleccionadas (presupuesto: ${max_budget:.2f})")
     log.info(f"       {len(trades) - len(selected_trades)} descartadas (sin presupuesto)")
@@ -659,10 +907,14 @@ if __name__ == "__main__":
             confidence = "ALTA" if t["days_ahead"] <= 1 else "MEDIA"
             unit = "°" + t["unit"]
 
+            # Mostrar el precio agresivo vs precio de mercado
+            agg_price = pos.get("aggressive_price", t["mkt_price"] / 100)
+            mkt_price_display = t["mkt_price"] / 100
+
             print(f"  ┌─ Operación #{i + 1} ──────────────────────────────")
             print(f"  │ {t['question']}")
             print(f"  │")
-            print(f"  │ Acción:    COMPRAR {t['side']} a ${t['mkt_price']/100:.2f}")
+            print(f"  │ Acción:    COMPRAR {t['side']} a ${agg_price:.2f} (mercado: ${mkt_price_display:.2f})")
             print(f"  │ Cantidad:  ${pos['amount']:.2f} ({pos['fraction_pct']}% del bankroll)")
             print(f"  │ Shares:    {pos['shares']:.1f}")
             print(f"  │")
@@ -689,6 +941,7 @@ if __name__ == "__main__":
         print(f"  Exposición total: ${total_exposure:.2f} ({total_exposure/BANKROLL*100:.1f}%)")
         print(f"  Capital libre:    ${BANKROLL - total_exposure:.2f}")
         print(f"  EV total:         ${total_ev:+.2f}")
+        print(f"  Agresividad:      +${PRICE_AGGRESSION:.2f} por orden")
         print()
         print(f"  Modo: {mode_label}")
         print("=" * 65)
@@ -718,6 +971,7 @@ if __name__ == "__main__":
             log.info(
                 f"Trade #{i+1}: {trade['city']} | {trade['side']} | "
                 f"${trade['position']['amount']:.2f} | edge={trade['edge_pct']}% | "
+                f"price={trade['position'].get('aggressive_price', '?')} | "
                 f"order_id={result['order_id']} | ok={result['ok']}"
             )
 
