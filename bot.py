@@ -2,31 +2,39 @@ import urllib.request
 import json
 import re
 import math
-from datetime import date
+import os
+import logging
+from datetime import date, datetime
+
+# Dependencias externas (pip install python-dotenv py-clob-client)
+from dotenv import load_dotenv
+from py_clob_client.client import ClobClient
+from py_clob_client.clob_types import OrderArgs, OrderType
+from py_clob_client.order_builder.constants import BUY, SELL
 
 # =============================================================
-# bot.py — Bot de Polymarket v1 (Sistema Completo)
-# Sesión 2 del bot de Polymarket
+# bot.py — Bot de Polymarket v2 (Con Ejecución Real)
+# Sesión 4: Primera orden real + integración completa
 # =============================================================
 #
-# Este es el script principal del bot. Combina:
-# - Edge detection (de edge_detector.py)
-# - Bankroll management (de bankroll.py)
-# - Coordenadas de aeropuerto verificadas
-# - Modelo de probabilidad con distribución normal
+# Novedades respecto a v1:
+#   - Autenticación con Polymarket (Magic wallet)
+#   - Ejecución real de órdenes (con flag DRY_RUN)
+#   - Logging a archivo trades.log
+#   - Fix bug clobTokenIds (json.loads si viene como string)
+#   - Filtro: se excluyen mercados que resuelven HOY (sin order book)
+#   - Fix bug SELL: comprar NO usa BUY + token_id_no, no SELL
 #
 # Flujo:
-#   1. Configuración (bankroll, límites de riesgo)
-#   2. Leer mercados de Polymarket
-#   3. Parsear preguntas
-#   4. Obtener previsiones (coords de aeropuerto)
-#   5. Calcular edge
-#   6. Calcular tamaño de apuesta (Kelly)
-#   7. Mostrar plan de operaciones concreto
-#
-# IMPORTANTE: Este bot NO ejecuta órdenes todavía.
-# Solo muestra recomendaciones. La ejecución automática
-# requiere autenticación con Polymarket (futuras sesiones).
+#   1. Configuración (bankroll, límites, DRY_RUN)
+#   2. Autenticación con Polymarket
+#   3. Leer mercados de Polymarket
+#   4. Parsear preguntas + extraer token IDs
+#   5. Obtener previsiones (coords de aeropuerto)
+#   6. Calcular edge
+#   7. Calcular tamaño de apuesta (Kelly)
+#   8. Mostrar plan de operaciones
+#   9. Ejecutar órdenes (si DRY_RUN = False)
 # =============================================================
 
 
@@ -34,13 +42,37 @@ from datetime import date
 # CONFIGURACIÓN DEL USUARIO
 # =============================================================
 
-BANKROLL = 100.00        # Capital total en USD
+DRY_RUN = False          # True = solo planifica, no ejecuta.
+                         # Cambia a False para órdenes reales.
+
+BANKROLL = 15.00         # Bankroll real actual en USDC
 MIN_EDGE = 10.0          # Edge mínimo (%) para considerar operar
-MIN_BET = 0.50           # Apuesta mínima en USD
+MIN_BET = 1.00           # Apuesta mínima en USD (límite real de Polymarket)
 MAX_BET_PCT = 0.05       # Máximo 5% del bankroll por operación
 MAX_EXPOSURE_PCT = 0.30  # Máximo 30% del bankroll expuesto EN TOTAL
 MIN_LIQUIDITY = 100      # Liquidez mínima del mercado en USD
-MAX_DAYS_AHEAD = 3       # Solo mercados que resuelven en 3 días o menos
+MAX_DAYS_AHEAD = 3       # Solo mercados que resuelven en los próximos N días
+MIN_DAYS_AHEAD = 1       # Excluir mercados que resuelven HOY (sin order book)
+
+
+# =============================================================
+# LOGGING — Guarda un registro de todo en trades.log
+# =============================================================
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s | %(levelname)-8s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.FileHandler("trades.log", encoding="utf-8"),
+        logging.StreamHandler(),
+    ]
+)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+log = logging.getLogger(__name__)
 
 
 # =============================================================
@@ -74,13 +106,42 @@ RESOLUTION_STATIONS = {
 
 
 # =============================================================
+# AUTENTICACIÓN
+# =============================================================
+
+def setup_client():
+    load_dotenv()
+    pk = os.getenv("PK")
+    funder = os.getenv("FUNDER")
+
+    if not pk or not funder:
+        log.error("No se encontraron PK o FUNDER en .env")
+        return None
+
+    try:
+        client = ClobClient(
+            "https://clob.polymarket.com",
+            key=pk,
+            chain_id=137,
+            signature_type=1,
+            funder=funder,
+        )
+        client.set_api_creds(client.create_or_derive_api_creds())
+        log.info("Autenticación con Polymarket: OK")
+        return client
+    except Exception as e:
+        log.error(f"Error en autenticación: {e}")
+        return None
+
+
+# =============================================================
 # FUNCIONES: API
 # =============================================================
 
 def api_get(endpoint):
     url = GAMMA_URL + endpoint
     req = urllib.request.Request(url)
-    req.add_header("User-Agent", "polymarket-bot/0.1")
+    req.add_header("User-Agent", "polymarket-bot/0.2")
     resp = urllib.request.urlopen(req)
     return json.loads(resp.read())
 
@@ -255,6 +316,21 @@ def calculate_position(bankroll, estimated_prob, market_price):
         return None
 
     shares = amount / market_price
+
+    # Polymarket exige mínimo 5 shares por orden.
+    # Con precios altos (ej: NO a $0.60) o apuestas pequeñas,
+    # el cálculo puede dar menos de 5 shares y la orden es rechazada.
+    # En ese caso escalamos el importe para llegar a 5 shares exactas,
+    # respetando siempre el tope MAX_BET_PCT.
+    if shares < 5.0:
+        amount_for_5_shares = round(5.0 * market_price, 2)
+        if amount_for_5_shares > bankroll * MAX_BET_PCT:
+            return None   # No se puede llegar a 5 shares sin superar el tope
+        if amount_for_5_shares < MIN_BET:
+            return None
+        amount = amount_for_5_shares
+        shares = 5.0
+
     profit = round(shares * (1.0 - market_price), 2)
     loss = round(amount, 2)
     ev = round(estimated_prob * profit - (1 - estimated_prob) * loss, 2)
@@ -270,22 +346,86 @@ def calculate_position(bankroll, estimated_prob, market_price):
 
 
 # =============================================================
+# FUNCIONES: EJECUCIÓN DE ÓRDENES
+# =============================================================
+
+def execute_trade(client, trade, dry_run=True):
+    """
+    Ejecuta una orden en Polymarket.
+
+    Por qué siempre BUY:
+        En Polymarket, para apostar a que algo NO ocurre, no se
+        hace SELL. Se compra el token "NO" directamente con BUY.
+        El token_id ya apunta al outcome correcto (YES o NO).
+        SELL significaría vender tokens que ya tienes, no comprar.
+
+    Por qué órdenes límite (GTC):
+        Tú fijas el precio máximo. Si el mercado sube, no te llena.
+        GTC = Good Till Cancelled → activa hasta llenar o cancelar.
+    """
+    token_id = trade["token_id"]
+    price = trade["mkt_price"] / 100.0
+    size = trade["position"]["shares"]
+
+    price = round(price, 2)
+    size = round(size, 2)
+
+    side = BUY   # Siempre BUY — el token_id ya determina si es YES o NO
+
+    log.info(
+        f"{'[DRY RUN] ' if dry_run else ''}Orden: "
+        f"{trade['side']} {size} shares × ${price:.2f} "
+        f"| {trade['city']} {trade['date']} "
+        f"| token {token_id[:12]}..."
+    )
+
+    if dry_run:
+        return {"ok": True, "order_id": "DRY_RUN", "msg": "Simulado (DRY_RUN=True)"}
+
+    try:
+        order_args = OrderArgs(
+            token_id=token_id,
+            price=price,
+            size=size,
+            side=side,
+        )
+        signed_order = client.create_order(order_args)
+        resp = client.post_order(signed_order, OrderType.GTC)
+
+        order_id = resp.get("orderID", resp.get("id", "desconocido"))
+        status = resp.get("status", "?")
+
+        log.info(f"Orden enviada: ID={order_id} | Status={status}")
+        return {"ok": True, "order_id": order_id, "msg": f"Status: {status}"}
+
+    except Exception as e:
+        log.error(f"Error al ejecutar orden: {e}")
+        return {"ok": False, "order_id": None, "msg": str(e)}
+
+
+# =============================================================
 # PROGRAMA PRINCIPAL
 # =============================================================
 
 if __name__ == "__main__":
 
     today_str = date.today().isoformat()
+    mode_label = "DRY RUN (sin órdenes reales)" if DRY_RUN else "⚠️  MODO REAL — ÓRDENES ACTIVAS"
 
-    print()
-    print("=" * 65)
-    print("  POLYMARKET WEATHER BOT v1")
-    print(f"  Fecha: {today_str}  |  Bankroll: ${BANKROLL:.2f}")
-    print("=" * 65)
-    print()
+    log.info("=" * 65)
+    log.info(f"POLYMARKET WEATHER BOT v2  |  {today_str}")
+    log.info(f"Modo: {mode_label}")
+    log.info(f"Bankroll: ${BANKROLL:.2f}  |  Edge mín: {MIN_EDGE}%")
+    log.info("=" * 65)
+
+    # ---- AUTENTICACIÓN ----
+    client = setup_client()
+    if client is None:
+        log.error("No se pudo autenticar. Verifica tu .env. Saliendo.")
+        exit(1)
 
     # ---- PASO 1: Mercados ----
-    print("  [1/5] Obteniendo mercados...")
+    log.info("[1/5] Obteniendo mercados...")
     try:
         events = api_get(
             f"/events?tag_id={DAILY_TEMP_TAG_ID}"
@@ -293,17 +433,17 @@ if __name__ == "__main__":
             f"&limit=30&order=volume24hr&ascending=false"
         )
     except Exception as e:
-        print(f"  Error: {e}")
+        log.error(f"Error al obtener mercados: {e}")
         events = []
 
     all_markets = []
     for event in events:
         for m in event.get("markets", []):
             all_markets.append(m)
-    print(f"        {len(all_markets)} mercados encontrados")
+    log.info(f"       {len(all_markets)} mercados encontrados")
 
-    # ---- PASO 2: Parsear ----
-    print("  [2/5] Parseando preguntas...")
+    # ---- PASO 2: Parsear + extraer token IDs ----
+    log.info("[2/5] Parseando preguntas...")
     candidates = []
 
     for market in all_markets:
@@ -322,7 +462,7 @@ if __name__ == "__main__":
         except ValueError:
             continue
 
-        if days_ahead < 0 or days_ahead > MAX_DAYS_AHEAD:
+        if days_ahead < MIN_DAYS_AHEAD or days_ahead > MAX_DAYS_AHEAD:
             continue
 
         prices_raw = market.get("outcomePrices", "[]")
@@ -334,6 +474,15 @@ if __name__ == "__main__":
             continue
 
         if not prices:
+            continue
+
+        clob_ids_raw = market.get("clobTokenIds", "[]")
+        try:
+            clob_ids = json.loads(clob_ids_raw) if isinstance(clob_ids_raw, str) else clob_ids_raw
+        except (json.JSONDecodeError, TypeError):
+            clob_ids = []
+
+        if not clob_ids or len(clob_ids) < 2:
             continue
 
         mkt_prob_yes = float(prices[0])
@@ -351,12 +500,14 @@ if __name__ == "__main__":
         parsed["mkt_prob_no"] = 1.0 - mkt_prob_yes
         parsed["volume_24h"] = float(market.get("volume24hr", 0))
         parsed["liquidity"] = liquidity
+        parsed["token_id_yes"] = clob_ids[0]
+        parsed["token_id_no"] = clob_ids[1]
         candidates.append(parsed)
 
-    print(f"        {len(candidates)} candidatos (con filtros de calidad)")
+    log.info(f"       {len(candidates)} candidatos (con filtros de calidad)")
 
     # ---- PASO 3: Previsiones ----
-    print("  [3/5] Obteniendo previsiones...")
+    log.info("[3/5] Obteniendo previsiones...")
     cities_needed = set(c["city"] for c in candidates)
     forecast_cache = {}
 
@@ -369,14 +520,15 @@ if __name__ == "__main__":
             if coords:
                 lat, lon = coords
             else:
+                log.warning(f"No se encontraron coordenadas para {city}")
                 continue
 
         forecast_cache[city] = get_forecast(lat, lon)
         label = station["name"] if station else "fallback"
-        print(f"        {city} ({label}): OK")
+        log.info(f"       {city} ({label}): OK")
 
     # ---- PASO 4: Calcular edge ----
-    print("  [4/5] Calculando edge...")
+    log.info("[4/5] Calculando edge...")
     trades = []
 
     for c in candidates:
@@ -400,8 +552,6 @@ if __name__ == "__main__":
         )
         our_prob_no = 1.0 - our_prob_yes
 
-        # Determinar dirección de la operación
-        # ¿Compramos YES o NO?
         edge_yes = our_prob_yes - c["mkt_prob_yes"]
         edge_no = our_prob_no - c["mkt_prob_no"]
 
@@ -410,11 +560,13 @@ if __name__ == "__main__":
             our_prob = our_prob_yes
             mkt_price = c["mkt_prob_yes"]
             edge = edge_yes
+            token_id = c["token_id_yes"]
         elif edge_no > 0:
             side = "NO"
             our_prob = our_prob_no
             mkt_price = c["mkt_prob_no"]
             edge = edge_no
+            token_id = c["token_id_no"]
         else:
             continue
 
@@ -422,7 +574,6 @@ if __name__ == "__main__":
         if edge_pct < MIN_EDGE:
             continue
 
-        # Calcular posición
         position = calculate_position(BANKROLL, our_prob, mkt_price)
         if not position:
             continue
@@ -444,23 +595,12 @@ if __name__ == "__main__":
             "volume_24h": c["volume_24h"],
             "liquidity": c["liquidity"],
             "station": RESOLUTION_STATIONS.get(city, {}).get("name", "?"),
+            "token_id": token_id,
         })
 
     trades.sort(key=lambda x: x["position"]["expected_value"], reverse=True)
 
-    # ---- PASO 5: Aplicar presupuesto global y mostrar plan ----
-    #
-    # Problema: Kelly calcula cada trade de forma independiente.
-    # Con 23 trades a 5% cada uno = 115% del bankroll. Imposible.
-    #
-    # Solución: presupuesto global. Recorremos los trades ordenados
-    # por EV (mejores primero) y asignamos capital hasta llegar al
-    # tope de MAX_EXPOSURE_PCT. Los que no caben, se descartan.
-    #
-    # Esto es como un carrito de la compra con presupuesto: metes
-    # los productos más valiosos primero y cuando se acaba el dinero,
-    # dejas el resto en la estantería.
-
+    # ---- PASO 5: Presupuesto global + plan ----
     max_budget = BANKROLL * MAX_EXPOSURE_PCT
     budget_remaining = max_budget
     selected_trades = []
@@ -468,15 +608,11 @@ if __name__ == "__main__":
     for t in trades:
         pos = t["position"]
         if pos["amount"] <= budget_remaining:
-            # Cabe en el presupuesto → la incluimos
             budget_remaining -= pos["amount"]
             t["selected"] = True
             selected_trades.append(t)
         else:
-            # No cabe el tamaño completo.
-            # ¿Cabe algo? Solo si lo que queda supera el mínimo.
             if budget_remaining >= MIN_BET:
-                # Recalcular con lo que queda
                 reduced_amount = round(budget_remaining, 2)
                 mkt_price_decimal = t["mkt_price"] / 100
                 shares = reduced_amount / mkt_price_decimal
@@ -495,14 +631,14 @@ if __name__ == "__main__":
                 }
                 budget_remaining = 0
                 selected_trades.append(t)
-            # Si no cabe ni el mínimo, saltamos este trade
 
-    print(f"  [5/5] Generando plan de operaciones...\n")
-    print(f"        {len(trades)} oportunidades detectadas")
-    print(f"        {len(selected_trades)} seleccionadas (presupuesto: ${max_budget:.2f})")
-    print(f"        {len(trades) - len(selected_trades)} descartadas (sin presupuesto)")
+    log.info("[5/5] Generando plan de operaciones...")
+    log.info(f"       {len(trades)} oportunidades detectadas")
+    log.info(f"       {len(selected_trades)} seleccionadas (presupuesto: ${max_budget:.2f})")
+    log.info(f"       {len(trades) - len(selected_trades)} descartadas (sin presupuesto)")
+
+    # ---- IMPRIMIR PLAN ----
     print()
-
     print("=" * 65)
     print("  PLAN DE OPERACIONES")
     print("=" * 65)
@@ -540,10 +676,10 @@ if __name__ == "__main__":
             print(f"  │")
             print(f"  │ Liquidez: ${t['liquidity']:,.0f} | Vol 24h: ${t['volume_24h']:,.0f}")
             print(f"  │ Estación: {t['station']} | Fecha: {t['date']}")
+            print(f"  │ Token ID:  {t['token_id'][:16]}...")
             print(f"  └────────────────────────────────────────────")
             print()
 
-        # Resumen
         print("=" * 65)
         print("  RESUMEN DEL PLAN")
         print("=" * 65)
@@ -554,7 +690,40 @@ if __name__ == "__main__":
         print(f"  Capital libre:    ${BANKROLL - total_exposure:.2f}")
         print(f"  EV total:         ${total_ev:+.2f}")
         print()
-        print("  RECORDATORIO: Este plan es una RECOMENDACIÓN.")
-        print("  Verifica las previsiones en Wunderground antes de operar.")
-        print("  El bot NO ejecuta órdenes — eso requiere autenticación.")
-    print("=" * 65)
+        print(f"  Modo: {mode_label}")
+        print("=" * 65)
+
+    # ---- PASO 6: EJECUCIÓN ----
+    if not selected_trades:
+        log.info("Sin operaciones que ejecutar.")
+    else:
+        print()
+        if DRY_RUN:
+            print("  [DRY RUN] Las siguientes órdenes se SIMULARÍAN:")
+        else:
+            print("  ⚠️  EJECUTANDO ÓRDENES REALES...")
+        print()
+
+        results = []
+        for i, trade in enumerate(selected_trades):
+            result = execute_trade(client, trade, dry_run=DRY_RUN)
+            results.append(result)
+
+            status_icon = "✓" if result["ok"] else "✗"
+            print(
+                f"  {status_icon} #{i+1} {trade['city']} {trade['side']} "
+                f"${trade['position']['amount']:.2f} → {result['msg']}"
+            )
+
+            log.info(
+                f"Trade #{i+1}: {trade['city']} | {trade['side']} | "
+                f"${trade['position']['amount']:.2f} | edge={trade['edge_pct']}% | "
+                f"order_id={result['order_id']} | ok={result['ok']}"
+            )
+
+        ok_count = sum(1 for r in results if r["ok"])
+        print()
+        print(f"  Resultado: {ok_count}/{len(results)} órdenes OK")
+        print()
+
+    log.info("Bot finalizado.")
