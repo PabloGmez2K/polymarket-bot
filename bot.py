@@ -19,16 +19,15 @@ from py_clob_client.order_builder.constants import BUY, SELL
 load_dotenv()
 
 # =============================================================
-# bot.py — Bot de Polymarket v6.1 (Dashboard Telegram completo)
-# Sesión 7: Todo controlable desde el móvil
+# bot.py — Bot de Polymarket v6.2
+# Sesión 7: Cartera real + órdenes enriquecidas + dashboard
 # =============================================================
 #
-# Cambios respecto a v6:
-#   - /cartera: balance real + posiciones abiertas desde Telegram
-#   - /modo: activa/desactiva DRY_RUN desde Telegram (con confirmación)
-#   - Órdenes mejoradas: ciudad, pregunta, shares, no solo precio
-#   - Menú reorganizado: más intuitivo
-#   - bot_state guarda datos del último ciclo para consultas
+# Cambios respecto a v6.1:
+#   - Cartera usa Data API (data-api.polymarket.com) — la correcta
+#   - Campos reales: cashPnl, percentPnl, title, outcome, curPrice
+#   - Órdenes: busca en mercados activos Y cerrados (para enriquecer)
+#   - Aumentado límite de búsqueda de mercados para enriquecimiento
 # =============================================================
 
 
@@ -36,8 +35,6 @@ load_dotenv()
 # CONFIGURACIÓN
 # =============================================================
 
-# DRY_RUN ahora es mutable — se puede cambiar desde Telegram.
-# Si Railway reinicia, vuelve al valor de la variable de entorno.
 DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
 BANKROLL = float(os.getenv("BANKROLL", "15.00"))
 
@@ -54,21 +51,9 @@ MAX_PRICE = 0.92
 PRICE_AGGRESSION = 0.02
 ORDER_MAX_AGE_HOURS = 8
 
-# ---- TIMING ESTRATÉGICO ----
-# Horas UTC en las que el bot ejecuta un ciclo.
-#
-# Open-Meteo actualiza modelos a las 00, 06, 12, 18 UTC.
-# Traders de Polymarket más activos en horario EEUU (14-22 UTC).
-#
-#   08:00 UTC (09:00 España) → Datos del modelo 06 UTC
-#   16:00 UTC (17:00 España) → Datos del modelo 12 UTC, EEUU activo
-#   23:00 UTC (00:00 España) → Datos del modelo 18 UTC, última pasada
-#
-# Configurable con SCHEDULE_HOURS_UTC="8,16,23" en Railway.
 SCHEDULE_HOURS_UTC_STR = os.getenv("SCHEDULE_HOURS_UTC", "8,16,23")
 SCHEDULE_HOURS_UTC = [int(h.strip()) for h in SCHEDULE_HOURS_UTC_STR.split(",")]
 
-# Telegram
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
@@ -116,6 +101,7 @@ clob_client = None
 # =============================================================
 
 GAMMA_URL = "https://gamma-api.polymarket.com"
+DATA_API_URL = "https://data-api.polymarket.com"
 DAILY_TEMP_TAG_ID = "103040"
 
 RESOLUTION_STATIONS = {
@@ -142,7 +128,7 @@ RESOLUTION_STATIONS = {
 
 
 # =============================================================
-# TELEGRAM — ENVÍO DE MENSAJES
+# TELEGRAM — ENVÍO
 # =============================================================
 
 MENU_KEYBOARD = {
@@ -164,15 +150,8 @@ MENU_KEYBOARD = {
 
 
 def send_telegram(mensaje, with_menu=False, custom_keyboard=None):
-    """
-    Manda un mensaje al móvil via Telegram.
-
-    with_menu=True → botones del menú principal
-    custom_keyboard → botones personalizados (ej: confirmación Sí/No)
-    """
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         return
-
     try:
         payload = {
             "chat_id": TELEGRAM_CHAT_ID,
@@ -196,7 +175,6 @@ def send_telegram(mensaje, with_menu=False, custom_keyboard=None):
 
 
 def answer_callback_query(callback_id, text=""):
-    """Responde a un botón pulsado (quita el spinner)."""
     if not TELEGRAM_TOKEN:
         return
     try:
@@ -219,7 +197,6 @@ def answer_callback_query(callback_id, text=""):
 # =============================================================
 
 def cmd_estado():
-    """📊 Estado general del bot."""
     global DRY_RUN
     modo = "🔴 REAL" if not DRY_RUN else "🟡 DRY RUN"
     running = "🔄 Ejecutando..." if bot_state["running"] else "💤 Esperando"
@@ -264,25 +241,30 @@ def cmd_estado():
 
 def cmd_cartera():
     """
-    💰 Muestra cartera: posiciones abiertas con PnL.
+    💰 Cartera: posiciones reales + PnL.
 
-    Consulta la Gamma API con tu dirección FUNDER para ver
-    en qué mercados tienes shares y cómo van.
+    Usa la Data API de Polymarket (data-api.polymarket.com/positions).
+    Esta es la API oficial para consultar posiciones de un usuario.
+    Devuelve: título del mercado, outcome (YES/NO), shares, precio medio,
+    precio actual, PnL en cash, PnL en porcentaje, etc.
+
+    El parámetro 'user' es tu dirección FUNDER (la que identifica tu cuenta).
+    sizeThreshold=0 incluye posiciones pequeñas (las nuestras son de $1).
     """
     funder = os.getenv("FUNDER", "")
     if not funder:
         send_telegram("❌ No hay FUNDER configurado.", with_menu=True)
         return
 
-    # ---- Obtener posiciones desde Gamma API ----
     try:
-        url = (
-            f"{GAMMA_URL}/positions"
-            f"?user={funder.lower()}"
-            f"&limit=20"
-            f"&sortBy=value"
-            f"&sortOrder=desc"
-        )
+        params = urllib.parse.urlencode({
+            "user": funder.lower(),
+            "sizeThreshold": "0",
+            "limit": "20",
+            "sortBy": "CURRENT",
+            "sortDirection": "DESC",
+        })
+        url = f"{DATA_API_URL}/positions?{params}"
         req = urllib.request.Request(url)
         req.add_header("User-Agent", "polymarket-bot/0.6")
         resp = urllib.request.urlopen(req, timeout=15)
@@ -298,45 +280,40 @@ def cmd_cartera():
         )
         return
 
-    # ---- Calcular totales ----
+    # ---- Construir resumen ----
     total_invested = 0
-    total_current_value = 0
+    total_current = 0
+    total_pnl = 0
     lines = []
 
     for i, pos in enumerate(positions):
-        # Gamma API fields — parseamos con fallbacks robustos
-        market_question = pos.get("title", pos.get("question", ""))
-        if not market_question:
-            # Intentar sacar del mercado anidado
-            market_obj = pos.get("market", {})
-            market_question = market_obj.get("question", "Mercado desconocido")
+        title = pos.get("title", "Mercado desconocido")
+        outcome = pos.get("outcome", "?")
+        size = float(pos.get("size", 0))
+        avg_price = float(pos.get("avgPrice", 0))
+        cur_price = float(pos.get("curPrice", 0))
+        initial_value = float(pos.get("initialValue", 0))
+        current_value = float(pos.get("currentValue", 0))
+        cash_pnl = float(pos.get("cashPnl", 0))
+        pct_pnl = float(pos.get("percentPnl", 0))
 
-        outcome = pos.get("outcome", pos.get("side", "?"))
-        size = float(pos.get("size", pos.get("shares", 0)))
-        avg_price = float(pos.get("avgPrice", pos.get("avg_price", 0)))
-        cur_price = float(pos.get("curPrice", pos.get("cur_price", pos.get("price", 0))))
+        total_invested += initial_value
+        total_current += current_value
+        total_pnl += cash_pnl
 
-        invested = size * avg_price
-        current = size * cur_price
+        pnl_icon = "🟢" if cash_pnl >= 0 else "🔴"
 
-        total_invested += invested
-        total_current_value += current
-
-        pnl = current - invested
-        pnl_pct = (pnl / invested * 100) if invested > 0 else 0
-        pnl_icon = "🟢" if pnl >= 0 else "🔴"
-
-        q_short = market_question[:50] + "..." if len(market_question) > 50 else market_question
+        # Acortar título
+        t_short = title[:50] + "..." if len(title) > 50 else title
 
         lines.append(
             f"{i+1}. {pnl_icon} <b>{outcome}</b>\n"
-            f"   {q_short}\n"
+            f"   {t_short}\n"
             f"   {size:.1f} shares @ ${avg_price:.2f} → ${cur_price:.2f}\n"
-            f"   Invertido: ${invested:.2f} | Valor: ${current:.2f}\n"
-            f"   PnL: ${pnl:+.2f} ({pnl_pct:+.1f}%)"
+            f"   Invertido: ${initial_value:.2f} | Valor: ${current_value:.2f}\n"
+            f"   PnL: ${cash_pnl:+.2f} ({pct_pnl:+.1f}%)"
         )
 
-    total_pnl = total_current_value - total_invested
     total_pnl_pct = (total_pnl / total_invested * 100) if total_invested > 0 else 0
     total_icon = "🟢" if total_pnl >= 0 else "🔴"
 
@@ -345,14 +322,13 @@ def cmd_cartera():
         f"\n"
         f"Posiciones: {len(positions)}\n"
         f"Invertido: ${total_invested:.2f}\n"
-        f"Valor actual: ${total_current_value:.2f}\n"
-        f"PnL total: {total_icon} ${total_pnl:+.2f} ({total_pnl_pct:+.1f}%)\n"
+        f"Valor actual: ${total_current:.2f}\n"
+        f"PnL total: {total_icon} <b>${total_pnl:+.2f} ({total_pnl_pct:+.1f}%)</b>\n"
         f"\n"
         f"{'─' * 30}\n"
     )
 
     msg = header + "\n".join(lines)
-
     if len(msg) > 4000:
         msg = msg[:3990] + "\n..."
 
@@ -360,11 +336,19 @@ def cmd_cartera():
 
 
 def cmd_ordenes():
-    """📋 Órdenes abiertas (pendientes de llenarse)."""
+    """
+    📋 Órdenes abiertas enriquecidas.
+
+    Cruza los token_ids de tus órdenes con los mercados de la Gamma API
+    para mostrar la pregunta del mercado en vez del token críptico.
+
+    Busca SIN filtro active/closed para encontrar también mercados
+    que estén a punto de resolverse o ya cerrados.
+    """
     global clob_client
 
     if bot_state["running"]:
-        send_telegram("🔄 Ciclo en ejecución, prueba en unos segundos...", with_menu=True)
+        send_telegram("🔄 Ciclo en ejecución...", with_menu=True)
         return
 
     if clob_client is None:
@@ -381,12 +365,12 @@ def cmd_ordenes():
         send_telegram("📋 <b>Órdenes pendientes:</b> ninguna", with_menu=True)
         return
 
-    # ---- Enriquecer con datos del mercado ----
+    # ---- Enriquecer: buscar SIN filtro closed para encontrar todos ----
     token_to_market = {}
     try:
+        # Buscamos más amplio: sin closed=false, con más límite
         events = api_get(
-            f"/events?tag_id={DAILY_TEMP_TAG_ID}"
-            f"&active=true&closed=false&limit=30"
+            f"/events?tag_id={DAILY_TEMP_TAG_ID}&limit=50"
         )
         for event in events:
             for m in event.get("markets", []):
@@ -399,8 +383,8 @@ def cmd_ordenes():
                 for idx, tid in enumerate(clob_ids):
                     side_label = "YES" if idx == 0 else "NO"
                     token_to_market[tid] = {"question": question, "side": side_label}
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning(f"Error enriqueciendo órdenes: {e}")
 
     lines = [f"📋 <b>Órdenes pendientes: {len(orders)}</b>\n"]
 
@@ -424,6 +408,7 @@ def cmd_ordenes():
             except (ValueError, TypeError, OSError):
                 pass
 
+        # Info del mercado
         market_info = token_to_market.get(asset_id, {})
         question = market_info.get("question", "")
         token_side = market_info.get("side", "")
@@ -438,29 +423,27 @@ def cmd_ordenes():
         else:
             lines.append(
                 f"\n{i+1}. {side} @ ${price}{age_str}\n"
-                f"   Token: {asset_id[:20]}..."
+                f"   Token: {asset_id[:24]}..."
             )
 
     send_telegram("\n".join(lines), with_menu=True)
 
 
 def cmd_siguiente():
-    """⏰ Cuánto falta para el próximo ciclo."""
     next_run = bot_state["next_run"]
     if not next_run:
-        send_telegram("⏰ No hay próxima ejecución programada.", with_menu=True)
+        send_telegram("⏰ No hay próxima ejecución.", with_menu=True)
         return
 
     now = datetime.now(timezone.utc)
     diff = next_run - now
 
     if diff.total_seconds() <= 0:
-        send_telegram("⏰ Ejecutando ahora mismo...", with_menu=True)
+        send_telegram("⏰ Ejecutando ahora...", with_menu=True)
         return
 
     hours = int(diff.total_seconds() // 3600)
     minutes = int((diff.total_seconds() % 3600) // 60)
-
     schedule_display = ", ".join(f"{h:02d}:00" for h in sorted(SCHEDULE_HOURS_UTC))
 
     msg = (
@@ -477,98 +460,67 @@ def cmd_siguiente():
 
 
 def cmd_forzar():
-    """🚀 Ejecuta un ciclo inmediatamente."""
     if bot_state["running"]:
         send_telegram("🔄 Ya hay un ciclo en ejecución.", with_menu=True)
         return
-
     send_telegram("🚀 <b>Ciclo forzado</b>\nDespertando al scheduler...")
     force_event.set()
 
 
 def cmd_modo():
-    """
-    ⚡ Cambiar entre DRY RUN y REAL.
-
-    Primer toque: muestra estado actual + confirmación.
-    Segundo toque: cambia el modo.
-
-    ¿Por qué dos toques? Porque activar MODO REAL
-    gasta dinero de verdad. No queremos toques accidentales.
-    """
     global DRY_RUN
-
     if DRY_RUN:
         msg = (
             f"⚡ <b>Modo actual: 🟡 DRY RUN</b>\n"
-            f"(Las órdenes se simulan)\n"
-            f"\n"
+            f"(Las órdenes se simulan)\n\n"
             f"¿Activar <b>MODO REAL</b>?\n"
-            f"Se usarán los ${BANKROLL:.2f} del bankroll.\n"
-            f"\n"
+            f"Se usarán los ${BANKROLL:.2f} del bankroll.\n\n"
             f"⚠️ Esto es dinero real."
         )
-        kb = {
-            "inline_keyboard": [[
-                {"text": "✅ Sí, activar REAL", "callback_data": "confirmar_real"},
-                {"text": "❌ Cancelar", "callback_data": "cancelar_modo"},
-            ]]
-        }
+        kb = {"inline_keyboard": [[
+            {"text": "✅ Sí, activar REAL", "callback_data": "confirmar_real"},
+            {"text": "❌ Cancelar", "callback_data": "cancelar_modo"},
+        ]]}
     else:
         msg = (
             f"⚡ <b>Modo actual: 🔴 REAL</b>\n"
-            f"(Las órdenes son reales)\n"
-            f"\n"
+            f"(Las órdenes son reales)\n\n"
             f"¿Volver a <b>DRY RUN</b>?"
         )
-        kb = {
-            "inline_keyboard": [[
-                {"text": "🟡 Sí, volver a DRY RUN", "callback_data": "confirmar_dry"},
-                {"text": "❌ Cancelar", "callback_data": "cancelar_modo"},
-            ]]
-        }
-
+        kb = {"inline_keyboard": [[
+            {"text": "🟡 Sí, volver a DRY RUN", "callback_data": "confirmar_dry"},
+            {"text": "❌ Cancelar", "callback_data": "cancelar_modo"},
+        ]]}
     send_telegram(msg, custom_keyboard=kb)
 
 
 def cmd_confirmar_real():
-    """Confirmación: activar modo real."""
     global DRY_RUN
     DRY_RUN = False
     log.info("MODO REAL activado desde Telegram")
     send_telegram(
-        f"🔴 <b>MODO REAL ACTIVADO</b>\n"
-        f"\n"
+        f"🔴 <b>MODO REAL ACTIVADO</b>\n\n"
         f"Las órdenes son reales a partir de ahora.\n"
-        f"Bankroll: ${BANKROLL:.2f}\n"
-        f"\n"
+        f"Bankroll: ${BANKROLL:.2f}\n\n"
         f"⚠️ Si Railway reinicia, volverá al valor\n"
         f"de DRY_RUN en Variables de Railway.\n"
-        f"Para hacerlo permanente: Railway → Variables → DRY_RUN=false",
+        f"Para permanente: Railway → Variables → DRY_RUN=false",
         with_menu=True,
     )
 
 
 def cmd_confirmar_dry():
-    """Confirmación: volver a dry run."""
     global DRY_RUN
     DRY_RUN = True
     log.info("DRY RUN activado desde Telegram")
-    send_telegram(
-        f"🟡 <b>DRY RUN ACTIVADO</b>\n"
-        f"\n"
-        f"Las órdenes se simularán.",
-        with_menu=True,
-    )
+    send_telegram("🟡 <b>DRY RUN ACTIVADO</b>\n\nLas órdenes se simularán.", with_menu=True)
 
 
 def cmd_cancelar_modo():
-    """No cambiar nada."""
     modo = "🟡 DRY RUN" if DRY_RUN else "🔴 REAL"
     send_telegram(f"Sin cambios. Modo: {modo}", with_menu=True)
 
 
-# Mapa de comandos
 COMMANDS = {
     "estado": cmd_estado,
     "cartera": cmd_cartera,
@@ -587,13 +539,10 @@ COMMANDS = {
 # =============================================================
 
 def is_authorized(chat_id):
-    """Solo responde a tu chat_id."""
     return str(chat_id) == str(TELEGRAM_CHAT_ID)
 
 
 def handle_telegram_update(update):
-    """Procesa un update de Telegram (botón o texto)."""
-
     if "callback_query" in update:
         cb = update["callback_query"]
         cb_id = cb["id"]
@@ -610,7 +559,7 @@ def handle_telegram_update(update):
             try:
                 COMMANDS[command]()
             except Exception as e:
-                log.warning(f"Error en comando '{command}': {e}")
+                log.warning(f"Error en '{command}': {e}")
                 send_telegram(f"❌ Error: {e}", with_menu=True)
         return
 
@@ -631,21 +580,13 @@ def handle_telegram_update(update):
             try:
                 COMMANDS[text]()
             except Exception as e:
-                log.warning(f"Error en comando '{text}': {e}")
+                log.warning(f"Error en '{text}': {e}")
                 send_telegram(f"❌ Error: {e}", with_menu=True)
         else:
-            send_telegram(
-                "🤖 <b>Bot Polymarket</b>\n\n"
-                "Toca un botón:",
-                with_menu=True,
-            )
+            send_telegram("🤖 <b>Bot Polymarket</b>\n\nToca un botón:", with_menu=True)
 
 
 def telegram_polling_loop():
-    """
-    Hilo que escucha Telegram (long polling).
-    Pregunta cada 30s si hay mensajes nuevos.
-    """
     log.info("Telegram polling: iniciado")
     offset = 0
 
@@ -667,7 +608,7 @@ def telegram_polling_loop():
                 try:
                     handle_telegram_update(update)
                 except Exception as e:
-                    log.warning(f"Error procesando update: {e}")
+                    log.warning(f"Error update: {e}")
 
         except Exception as e:
             log.warning(f"Telegram polling error: {e}")
@@ -798,15 +739,12 @@ def clean_stale_orders(client, open_orders, max_age_hours):
                 created_at_clean = str(created_at_raw).replace("Z", "+00:00")
                 created_at = datetime.fromisoformat(created_at_clean)
         except (ValueError, TypeError, OSError):
-            log.warning(f"No se pudo parsear fecha de orden {order_id}: {created_at_raw}")
             continue
 
         age_hours = (now - created_at).total_seconds() / 3600
 
         if age_hours > max_age_hours:
-            log.info(
-                f"Cancelando stale: {order_id[:16]}... ({age_hours:.1f}h)"
-            )
+            log.info(f"Cancelando stale: {order_id[:16]}... ({age_hours:.1f}h)")
             try:
                 client.cancel(order_id)
                 cancelled += 1
@@ -933,13 +871,11 @@ def kelly_fraction(estimated_prob, market_price):
     if kelly <= 0:
         return 0.0
 
-    half_kelly = kelly / 2.0
-    return min(half_kelly, MAX_BET_PCT)
+    return min(kelly / 2.0, MAX_BET_PCT)
 
 
 def calculate_position(bankroll, estimated_prob, market_price):
     fraction = kelly_fraction(estimated_prob, market_price)
-
     if fraction <= 0:
         return None
 
@@ -951,12 +887,12 @@ def calculate_position(bankroll, estimated_prob, market_price):
     shares = amount / aggressive_price
 
     if shares < 5.0:
-        amount_for_5_shares = round(5.0 * aggressive_price, 2)
-        if amount_for_5_shares > bankroll * MAX_BET_PCT:
+        amount_for_5 = round(5.0 * aggressive_price, 2)
+        if amount_for_5 > bankroll * MAX_BET_PCT:
             return None
-        if amount_for_5_shares < MIN_BET:
+        if amount_for_5 < MIN_BET:
             return None
-        amount = amount_for_5_shares
+        amount = amount_for_5
         shares = 5.0
 
     profit = round(shares * (1.0 - aggressive_price), 2)
@@ -981,46 +917,31 @@ def calculate_position(bankroll, estimated_prob, market_price):
 
 def execute_trade(client, trade, dry_run=True):
     token_id = trade["token_id"]
-
     position = trade["position"]
-    if "aggressive_price" in position:
-        price = position["aggressive_price"]
-    else:
-        price = trade["mkt_price"] / 100.0
-
+    price = position.get("aggressive_price", trade["mkt_price"] / 100.0)
     size = position["shares"]
     price = round(price, 2)
     size = round(size, 2)
-    side = BUY
 
     log.info(
         f"{'[DRY RUN] ' if dry_run else ''}Orden: "
         f"{trade['side']} {size}sh × ${price:.2f} "
-        f"| {trade['city']} {trade['date']} "
-        f"| token {token_id[:12]}..."
+        f"| {trade['city']} {trade['date']}"
     )
 
     if dry_run:
         return {"ok": True, "order_id": "DRY_RUN", "msg": "Simulado"}
 
     try:
-        order_args = OrderArgs(
-            token_id=token_id,
-            price=price,
-            size=size,
-            side=side,
-        )
+        order_args = OrderArgs(token_id=token_id, price=price, size=size, side=BUY)
         signed_order = client.create_order(order_args)
         resp = client.post_order(signed_order, OrderType.GTC)
-
-        order_id = resp.get("orderID", resp.get("id", "desconocido"))
+        order_id = resp.get("orderID", resp.get("id", "?"))
         status = resp.get("status", "?")
-
         log.info(f"Orden enviada: ID={order_id} | Status={status}")
         return {"ok": True, "order_id": order_id, "msg": f"Status: {status}"}
-
     except Exception as e:
-        log.error(f"Error al ejecutar orden: {e}")
+        log.error(f"Error al ejecutar: {e}")
         return {"ok": False, "order_id": None, "msg": str(e)}
 
 
@@ -1029,7 +950,6 @@ def execute_trade(client, trade, dry_run=True):
 # =============================================================
 
 def main(client):
-    """Ejecuta un ciclo completo del bot."""
     today_str = date.today().isoformat()
     mode_label = "DRY RUN" if DRY_RUN else "MODO REAL"
 
@@ -1037,13 +957,13 @@ def main(client):
     bot_state["last_run"] = datetime.now(timezone.utc)
 
     log.info("=" * 65)
-    log.info(f"POLYMARKET WEATHER BOT v6.1  |  {today_str}")
-    log.info(f"Modo: {mode_label} | Bankroll: ${BANKROLL:.2f}")
+    log.info(f"POLYMARKET BOT v6.2  |  {today_str} | {mode_label}")
+    log.info(f"Bankroll: ${BANKROLL:.2f}")
     log.info("=" * 65)
 
     if client is None:
-        log.error("Cliente no autenticado. Saltando ciclo.")
-        send_telegram("❌ Cliente no autenticado. Saltando ciclo.")
+        log.error("Cliente no autenticado.")
+        send_telegram("❌ Cliente no autenticado.")
         bot_state["running"] = False
         return
 
@@ -1102,7 +1022,6 @@ def main(client):
             prices = json.loads(prices_raw) if isinstance(prices_raw, str) else prices_raw
         except (json.JSONDecodeError, TypeError):
             continue
-
         if not prices:
             continue
 
@@ -1111,12 +1030,10 @@ def main(client):
             clob_ids = json.loads(clob_ids_raw) if isinstance(clob_ids_raw, str) else clob_ids_raw
         except (json.JSONDecodeError, TypeError):
             clob_ids = []
-
         if not clob_ids or len(clob_ids) < 2:
             continue
 
         mkt_prob_yes = float(prices[0])
-
         if mkt_prob_yes < MIN_PRICE or mkt_prob_yes > MAX_PRICE:
             mkt_prob_no = 1.0 - mkt_prob_yes
             if mkt_prob_no < MIN_PRICE or mkt_prob_no > MAX_PRICE:
@@ -1154,32 +1071,24 @@ def main(client):
                 lat, lon = coords
             else:
                 continue
-
         forecast_cache[city] = get_forecast(lat, lon)
-        label = station["name"] if station else "fallback"
-        log.info(f"       {city} ({label}): OK")
 
     # ---- PASO 4: Edge ----
-    log.info("[4/6] Calculando edge...")
+    log.info("[4/6] Edge...")
     trades = []
     skipped_dup = 0
 
     for c in candidates:
         city = c["city"]
-        if city not in forecast_cache:
-            continue
-        if c["date_iso"] not in forecast_cache[city]:
+        if city not in forecast_cache or c["date_iso"] not in forecast_cache[city]:
             continue
 
-        forecast_day = forecast_cache[city][c["date_iso"]]
-        forecast_max = forecast_day["temp_max"]
-
+        forecast_max = forecast_cache[city][c["date_iso"]]["temp_max"]
         threshold = c["temp_threshold"]
         threshold_c = (threshold - 32) * 5 / 9 if c["unit"] == "F" else float(threshold)
 
         our_prob_yes = estimate_prob(forecast_max, threshold_c, c["condition"], c["days_ahead"])
         our_prob_no = 1.0 - our_prob_yes
-
         edge_yes = our_prob_yes - c["mkt_prob_yes"]
         edge_no = our_prob_no - c["mkt_prob_no"]
 
@@ -1190,10 +1099,8 @@ def main(client):
         else:
             continue
 
-        edge_pct = edge * 100
-        if edge_pct < MIN_EDGE:
+        if edge * 100 < MIN_EDGE:
             continue
-
         if token_id in open_token_ids:
             skipped_dup += 1
             continue
@@ -1203,30 +1110,18 @@ def main(client):
             continue
 
         trades.append({
-            "question": c["question"],
-            "city": city,
-            "date": c["date_iso"],
-            "days_ahead": c["days_ahead"],
-            "forecast_max": forecast_max,
-            "threshold": threshold,
-            "unit": c["unit"],
-            "condition": c["condition"],
-            "side": side,
-            "our_prob": round(our_prob * 100, 1),
-            "mkt_price": round(mkt_price * 100, 1),
-            "edge_pct": round(edge_pct, 1),
-            "position": position,
-            "volume_24h": c["volume_24h"],
+            "question": c["question"], "city": city, "date": c["date_iso"],
+            "days_ahead": c["days_ahead"], "forecast_max": forecast_max,
+            "threshold": threshold, "unit": c["unit"], "condition": c["condition"],
+            "side": side, "our_prob": round(our_prob * 100, 1),
+            "mkt_price": round(mkt_price * 100, 1), "edge_pct": round(edge * 100, 1),
+            "position": position, "volume_24h": c["volume_24h"],
             "liquidity": c["liquidity"],
             "station": RESOLUTION_STATIONS.get(city, {}).get("name", "?"),
             "token_id": token_id,
         })
 
     trades.sort(key=lambda x: x["position"]["expected_value"], reverse=True)
-
-    if skipped_dup > 0:
-        log.info(f"       {skipped_dup} duplicados saltados")
-
     bot_state["last_opportunities"] = len(trades)
 
     # ---- PASO 5: Presupuesto ----
@@ -1239,39 +1134,24 @@ def main(client):
         if pos["amount"] <= budget_remaining:
             budget_remaining -= pos["amount"]
             selected_trades.append(t)
-        else:
-            if budget_remaining >= MIN_BET:
-                reduced = round(budget_remaining, 2)
-                agg_p = pos.get("aggressive_price", t["mkt_price"] / 100)
-                shares = reduced / agg_p
-                profit = round(shares * (1.0 - agg_p), 2)
-                prob_d = t["our_prob"] / 100
-                ev = round(prob_d * profit - (1 - prob_d) * reduced, 2)
-
-                t["position"] = {
-                    "fraction_pct": round(reduced / BANKROLL * 100, 2),
-                    "amount": reduced,
-                    "shares": round(shares, 2),
-                    "profit_if_win": profit,
-                    "loss_if_lose": reduced,
-                    "expected_value": ev,
-                    "aggressive_price": agg_p,
-                    "market_price": t["mkt_price"] / 100,
-                }
-                budget_remaining = 0
-                selected_trades.append(t)
+        elif budget_remaining >= MIN_BET:
+            reduced = round(budget_remaining, 2)
+            agg_p = pos.get("aggressive_price", t["mkt_price"] / 100)
+            shares = reduced / agg_p
+            profit = round(shares * (1.0 - agg_p), 2)
+            prob_d = t["our_prob"] / 100
+            ev = round(prob_d * profit - (1 - prob_d) * reduced, 2)
+            t["position"] = {
+                "fraction_pct": round(reduced / BANKROLL * 100, 2),
+                "amount": reduced, "shares": round(shares, 2),
+                "profit_if_win": profit, "loss_if_lose": reduced,
+                "expected_value": ev, "aggressive_price": agg_p,
+                "market_price": t["mkt_price"] / 100,
+            }
+            budget_remaining = 0
+            selected_trades.append(t)
 
     log.info(f"[5/6] {len(trades)} oportunidades | {len(selected_trades)} seleccionadas")
-
-    # ---- Log plan ----
-    if selected_trades:
-        for i, t in enumerate(selected_trades):
-            pos = t["position"]
-            log.info(
-                f"  #{i+1} {t['city']} {t['side']} | "
-                f"${pos['amount']:.2f} × {pos['shares']:.1f}sh | "
-                f"edge={t['edge_pct']}% | EV=${pos['expected_value']:+.2f}"
-            )
 
     # ---- PASO 6: EJECUCIÓN ----
     if not selected_trades:
@@ -1284,23 +1164,16 @@ def main(client):
             result = execute_trade(client, trade, dry_run=DRY_RUN)
             results.append(result)
 
-            log.info(
-                f"Trade #{i+1}: {trade['city']} {trade['side']} | "
-                f"${trade['position']['amount']:.2f} | "
-                f"ok={result['ok']} | id={result['order_id']}"
-            )
-
             if not DRY_RUN:
                 icono = "✅" if result["ok"] else "❌"
                 send_telegram(
-                    f"{icono} <b>Orden ejecutada</b>\n"
-                    f"{trade['city']} | {trade['side']}\n"
+                    f"{icono} <b>Orden</b>\n"
+                    f"{trade['city']} {trade['side']}\n"
                     f"${trade['position']['amount']:.2f} "
                     f"({trade['position']['shares']:.1f}sh "
                     f"@ ${trade['position'].get('aggressive_price', 0):.2f})\n"
                     f"Edge: {trade['edge_pct']}% | "
-                    f"EV: ${trade['position']['expected_value']:+.2f}\n"
-                    f"Fecha: {trade['date']}"
+                    f"EV: ${trade['position']['expected_value']:+.2f}"
                 )
 
         ok_count = sum(1 for r in results if r["ok"])
@@ -1310,8 +1183,7 @@ def main(client):
         if not DRY_RUN and ok_count > 0:
             send_telegram(
                 f"📊 <b>Ciclo completado</b>\n"
-                f"Órdenes: {ok_count}/{len(results)} OK\n"
-                f"Bankroll: ${BANKROLL:.2f}",
+                f"Órdenes: {ok_count}/{len(results)} OK",
                 with_menu=True,
             )
 
@@ -1321,86 +1193,67 @@ def main(client):
 
 
 # =============================================================
-# SCHEDULER ESTRATÉGICO
+# SCHEDULER
 # =============================================================
 
 def get_next_run_time():
-    """Próxima hora UTC programada."""
     now = datetime.now(timezone.utc)
-    hours_sorted = sorted(SCHEDULE_HOURS_UTC)
-
-    for hour in hours_sorted:
+    for hour in sorted(SCHEDULE_HOURS_UTC):
         candidate = now.replace(hour=hour, minute=0, second=0, microsecond=0)
         if candidate > now:
             return candidate
-
     tomorrow = now + timedelta(days=1)
-    return tomorrow.replace(hour=hours_sorted[0], minute=0, second=0, microsecond=0)
+    return tomorrow.replace(hour=sorted(SCHEDULE_HOURS_UTC)[0], minute=0, second=0, microsecond=0)
 
 
 if __name__ == "__main__":
     log.info("=" * 65)
-    log.info("POLYMARKET BOT v6.1 — Dashboard Telegram")
+    log.info("POLYMARKET BOT v6.2")
     log.info(f"Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
     log.info(f"Modo: {'DRY RUN' if DRY_RUN else 'REAL'}")
     log.info("=" * 65)
 
-    # ---- Autenticación ----
     clob_client = setup_client()
     if clob_client is None:
         log.error("No se pudo autenticar.")
-        send_telegram("❌ <b>Error de autenticación</b> al arrancar.")
+        send_telegram("❌ <b>Error de autenticación</b>")
 
-    # ---- Hilo Telegram ----
     if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
         telegram_thread = threading.Thread(
-            target=telegram_polling_loop,
-            daemon=True,
-            name="TelegramPoller",
+            target=telegram_polling_loop, daemon=True, name="TelegramPoller",
         )
         telegram_thread.start()
         log.info("Telegram polling: arrancado")
-    else:
-        log.warning("Telegram no configurado")
 
-    # ---- Alerta arranque ----
     modo = "DRY RUN" if DRY_RUN else "REAL"
     schedule_display = ", ".join(f"{h:02d}:00" for h in sorted(SCHEDULE_HOURS_UTC))
     send_telegram(
-        f"🤖 <b>Bot arrancado (v6.1)</b>\n"
+        f"🤖 <b>Bot arrancado (v6.2)</b>\n"
         f"Modo: {modo} | Bankroll: ${BANKROLL:.2f}\n"
         f"Schedule: {schedule_display} UTC",
         with_menu=True,
     )
 
-    # ---- Primer ciclo ----
-    log.info("Primer ciclo al arrancar...")
+    log.info("Primer ciclo...")
     try:
         main(clob_client)
     except Exception as e:
         log.error(f"Error primer ciclo: {e}")
         send_telegram(f"❌ <b>Error</b>\n<code>{str(e)[:200]}</code>")
 
-    # ---- Bucle scheduler ----
     while True:
         next_run = get_next_run_time()
         bot_state["next_run"] = next_run
-
-        time_until = next_run - datetime.now(timezone.utc)
-        log.info(
-            f"Próximo: {next_run.strftime('%H:%M UTC')} "
-            f"(en {time_until.total_seconds()/3600:.1f}h)"
-        )
+        log.info(f"Próximo: {next_run.strftime('%H:%M UTC')}")
 
         while datetime.now(timezone.utc) < next_run:
-            was_forced = force_event.wait(timeout=30)
-            if was_forced:
+            if force_event.wait(timeout=30):
                 force_event.clear()
-                log.info("⚡ Ciclo forzado")
+                log.info("⚡ Forzado")
                 break
 
         try:
             main(clob_client)
         except Exception as e:
-            log.error(f"Error en ciclo: {e}")
+            log.error(f"Error: {e}")
             send_telegram(f"❌ <b>Error</b>\n<code>{str(e)[:200]}</code>")
