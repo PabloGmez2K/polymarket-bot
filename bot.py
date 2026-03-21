@@ -43,11 +43,11 @@ from py_clob_client.order_builder.constants import BUY, SELL
 # CONFIGURACIÓN DEL USUARIO
 # =============================================================
 
-DRY_RUN = True           # True = solo planifica, no ejecuta.
-                         # Cambia a False para órdenes reales.
+DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"        # True = solo planifica, no ejecuta.
+                                                                # Cambia a False para órdenes reales.
 
-BANKROLL = 15.00         # Bankroll de prueba — cambiar a 100 cuando
-                         # validemos que el sistema gana dinero.
+BANKROLL = float(os.getenv("BANKROLL", "15.00"))                # Bankroll de prueba — cambiar a 100 cuando
+                                                                # validemos que el sistema gana dinero.
 
 MIN_EDGE = 10.0          # Edge mínimo (%) para considerar operar
 MIN_BET = 1.00           # Apuesta mínima en USD (límite real de Polymarket)
