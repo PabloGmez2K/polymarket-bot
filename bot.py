@@ -6,7 +6,8 @@ import math
 import os
 import time
 import logging
-from datetime import date, datetime, timezone
+import threading
+from datetime import date, datetime, timezone, timedelta
 
 # Dependencias externas (pip install python-dotenv py-clob-client)
 from dotenv import load_dotenv
@@ -15,26 +16,25 @@ from py_clob_client.clob_types import OrderArgs, OrderType
 from py_clob_client.order_builder.constants import BUY, SELL
 
 # Cargar .env ANTES de leer cualquier variable de entorno
-# Esto es crítico: load_dotenv() debe ejecutarse antes de os.getenv()
 load_dotenv()
 
 # =============================================================
-# bot.py — Bot de Polymarket v5 (Alertas Telegram)
-# Sesión 6: Alertas instantáneas en el móvil via Telegram
+# bot.py — Bot de Polymarket v6 (Timing estratégico + Telegram)
+# Sesión 7: Scheduler inteligente + comandos Telegram con botones
 # =============================================================
 #
-# Cambios respecto a v4:
-#   - load_dotenv() movido al inicio (fix: Telegram no leía .env)
-#   - Función send_telegram(): manda mensajes al móvil
-#   - Alerta al arrancar cada ciclo (el bot sigue vivo)
-#   - Alerta cuando se ejecuta una orden real
-#   - Alerta cuando hay un error grave
-#   - Sin alertas en DRY_RUN para no hacer spam
+# Cambios respecto a v5:
+#   - Scheduler estratégico: ejecuta a horas UTC fijas (no cada 6h)
+#   - Telegram bidireccional: recibe comandos, no solo envía
+#   - Botones inline: tocas un botón en el móvil, obtienes info
+#   - Threading: un hilo escucha Telegram, otro gestiona ciclos
+#   - /forzar: ejecuta un ciclo inmediato desde el móvil
+#   - Cliente CLOB global: se autentica una vez, se reutiliza
 # =============================================================
 
 
 # =============================================================
-# CONFIGURACIÓN DEL USUARIO
+# CONFIGURACIÓN
 # =============================================================
 
 DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
@@ -53,7 +53,23 @@ MAX_PRICE = 0.92
 PRICE_AGGRESSION = 0.02
 ORDER_MAX_AGE_HOURS = 8
 
-INTERVALO_HORAS = float(os.getenv("INTERVALO_HORAS", "6"))
+# ---- TIMING ESTRATÉGICO ----
+# Horas UTC en las que el bot ejecuta un ciclo.
+#
+# ¿Por qué estas horas y no "cada 6h"?
+#
+# Open-Meteo actualiza sus modelos meteorológicos a las 00, 06, 12, 18 UTC.
+# Los traders de Polymarket están más activos en horario EEUU (14-22 UTC).
+# Queremos correr DESPUÉS de cada actualización de datos, Y cuando hay liquidez.
+#
+#   08:00 UTC (09:00 España) → Datos de la actualización 06 UTC, mercados asiáticos
+#   16:00 UTC (17:00 España) → Datos de la actualización 12 UTC, EEUU activo
+#   23:00 UTC (00:00 España) → Datos de la actualización 18 UTC, última pasada del día
+#
+# Puedes cambiar esto con la variable de entorno SCHEDULE_HOURS_UTC.
+# Ejemplo: "8,14,20" para tres horas distintas.
+SCHEDULE_HOURS_UTC_STR = os.getenv("SCHEDULE_HOURS_UTC", "8,16,23")
+SCHEDULE_HOURS_UTC = [int(h.strip()) for h in SCHEDULE_HOURS_UTC_STR.split(",")]
 
 # Telegram
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
@@ -78,6 +94,32 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 log = logging.getLogger(__name__)
+
+
+# =============================================================
+# ESTADO COMPARTIDO ENTRE HILOS
+# =============================================================
+#
+# Este diccionario es el "tablón de anuncios" del bot.
+# El hilo del scheduler escribe aquí (cuándo corrió, qué encontró).
+# El hilo de Telegram lo lee (para responder a tus comandos).
+#
+# threading.Event es el "walkie-talkie":
+# - El scheduler duerme esperando la señal.
+# - Cuando mandas /forzar, el hilo Telegram llama force_event.set()
+# - El scheduler se despierta inmediatamente.
+
+bot_state = {
+    "next_run": None,
+    "last_run": None,
+    "last_orders_placed": 0,
+    "last_opportunities": 0,
+    "running": False,
+    "cycle_count": 0,
+}
+
+force_event = threading.Event()
+clob_client = None  # Se autentica una vez al arrancar
 
 
 # =============================================================
@@ -111,36 +153,338 @@ RESOLUTION_STATIONS = {
 
 
 # =============================================================
-# TELEGRAM
+# TELEGRAM — ENVÍO DE MENSAJES
 # =============================================================
 
-def send_telegram(mensaje):
+# Los botones que aparecen en Telegram.
+# Cada botón tiene un texto visible y un callback_data (lo que el bot recibe
+# cuando lo tocas). Es una lista de filas — cada fila es una lista de botones.
+MENU_KEYBOARD = {
+    "inline_keyboard": [
+        [
+            {"text": "📊 Estado", "callback_data": "estado"},
+            {"text": "📋 Órdenes", "callback_data": "ordenes"},
+        ],
+        [
+            {"text": "⏰ Siguiente", "callback_data": "siguiente"},
+            {"text": "🚀 Forzar ciclo", "callback_data": "forzar"},
+        ],
+    ]
+}
+
+
+def send_telegram(mensaje, with_menu=False):
     """
-    Manda un mensaje al móvil via Telegram.
+    Manda un mensaje al móvil via Telegram (POST).
 
-    ¿Cómo funciona? La API de Telegram acepta peticiones HTTP simples.
-    Le mandamos una URL con el token del bot, el chat_id (tu ID),
-    y el texto del mensaje. Telegram hace el resto.
-
-    Si no hay token configurado, simplemente no hace nada.
-    Así el bot funciona igual con o sin Telegram configurado.
-
-    Usamos urllib (ya incluido en Python) — sin librerías extra.
+    with_menu=True añade los botones interactivos debajo del mensaje.
+    Así después de cada respuesta puedes tocar otro botón sin escribir nada.
     """
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         return
 
     try:
-        params = urllib.parse.urlencode({
+        payload = {
             "chat_id": TELEGRAM_CHAT_ID,
             "text": mensaje,
             "parse_mode": "HTML",
-        })
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage?{params}"
-        urllib.request.urlopen(url, timeout=10)
-        log.info("Telegram: mensaje enviado OK")
+        }
+        if with_menu:
+            payload["reply_markup"] = MENU_KEYBOARD
+
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+            data=data,
+            headers={"Content-Type": "application/json"},
+        )
+        urllib.request.urlopen(req, timeout=10)
     except Exception as e:
-        log.warning(f"Telegram: error al enviar mensaje: {e}")
+        log.warning(f"Telegram: error al enviar: {e}")
+
+
+def answer_callback_query(callback_id, text=""):
+    """
+    Responde a un callback (botón pulsado) en Telegram.
+
+    Esto es obligatorio: si no respondes, el botón muestra un spinner
+    infinito. El 'text' aparece como una notificación pequeña arriba.
+    """
+    if not TELEGRAM_TOKEN:
+        return
+    try:
+        payload = {"callback_query_id": callback_id}
+        if text:
+            payload["text"] = text
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
+            data=data,
+            headers={"Content-Type": "application/json"},
+        )
+        urllib.request.urlopen(req, timeout=10)
+    except Exception:
+        pass
+
+
+# =============================================================
+# TELEGRAM — COMANDOS
+# =============================================================
+
+def cmd_estado():
+    """📊 Muestra el estado general del bot."""
+    modo = "🔴 REAL" if not DRY_RUN else "🟡 DRY RUN"
+    running = "🔄 Sí, ahora mismo" if bot_state["running"] else "💤 No"
+
+    next_run = bot_state["next_run"]
+    if next_run:
+        now = datetime.now(timezone.utc)
+        diff = next_run - now
+        if diff.total_seconds() > 0:
+            hours = int(diff.total_seconds() // 3600)
+            minutes = int((diff.total_seconds() % 3600) // 60)
+            next_str = f"{next_run.strftime('%H:%M UTC')} (en {hours}h {minutes}m)"
+        else:
+            next_str = "Ahora"
+    else:
+        next_str = "No programado"
+
+    last_run = bot_state["last_run"]
+    last_str = last_run.strftime('%H:%M UTC') if last_run else "Nunca"
+
+    msg = (
+        f"📊 <b>Estado del Bot</b>\n"
+        f"\n"
+        f"Modo: {modo}\n"
+        f"Bankroll: <b>${BANKROLL:.2f}</b>\n"
+        f"Ejecutando: {running}\n"
+        f"\n"
+        f"Última ejecución: {last_str}\n"
+        f"Próxima: {next_str}\n"
+        f"Ciclos completados: {bot_state['cycle_count']}\n"
+        f"\n"
+        f"Último ciclo:\n"
+        f"  Oportunidades: {bot_state['last_opportunities']}\n"
+        f"  Órdenes: {bot_state['last_orders_placed']}\n"
+        f"\n"
+        f"Schedule: {SCHEDULE_HOURS_UTC} UTC"
+    )
+    send_telegram(msg, with_menu=True)
+
+
+def cmd_ordenes():
+    """📋 Muestra las órdenes abiertas en Polymarket."""
+    global clob_client
+
+    if bot_state["running"]:
+        send_telegram("🔄 Ciclo en ejecución, prueba en unos segundos...", with_menu=True)
+        return
+
+    if clob_client is None:
+        send_telegram("❌ Cliente no autenticado. No puedo consultar órdenes.", with_menu=True)
+        return
+
+    try:
+        orders = get_open_orders(clob_client)
+    except Exception as e:
+        send_telegram(f"❌ Error al consultar órdenes: {e}", with_menu=True)
+        return
+
+    if not orders:
+        send_telegram("📋 <b>Órdenes abiertas:</b> ninguna", with_menu=True)
+        return
+
+    lines = [f"📋 <b>Órdenes abiertas: {len(orders)}</b>\n"]
+    for i, order in enumerate(orders):
+        price = order.get("price", "?")
+        size = order.get("original_size", order.get("size", "?"))
+        side = order.get("side", "?")
+        asset_id = order.get("asset_id", "")
+
+        # Intentar calcular la edad de la orden
+        created_raw = order.get("created_at", "")
+        age_str = ""
+        if created_raw:
+            try:
+                if isinstance(created_raw, (int, float)):
+                    created = datetime.fromtimestamp(created_raw, tz=timezone.utc)
+                else:
+                    created = datetime.fromisoformat(str(created_raw).replace("Z", "+00:00"))
+                age_h = (datetime.now(timezone.utc) - created).total_seconds() / 3600
+                age_str = f" | {age_h:.1f}h"
+            except (ValueError, TypeError, OSError):
+                pass
+
+        lines.append(
+            f"{i+1}. {side} @ ${price}{age_str}\n"
+            f"   Token: {asset_id[:16]}..."
+        )
+
+    send_telegram("\n".join(lines), with_menu=True)
+
+
+def cmd_siguiente():
+    """⏰ Muestra cuánto falta para el próximo ciclo."""
+    next_run = bot_state["next_run"]
+    if not next_run:
+        send_telegram("⏰ No hay próxima ejecución programada.", with_menu=True)
+        return
+
+    now = datetime.now(timezone.utc)
+    diff = next_run - now
+
+    if diff.total_seconds() <= 0:
+        send_telegram("⏰ Ejecutando ahora mismo...", with_menu=True)
+        return
+
+    hours = int(diff.total_seconds() // 3600)
+    minutes = int((diff.total_seconds() % 3600) // 60)
+
+    schedule_display = ", ".join(f"{h:02d}:00" for h in sorted(SCHEDULE_HOURS_UTC))
+
+    msg = (
+        f"⏰ <b>Próximo ciclo</b>\n"
+        f"\n"
+        f"Hora: {next_run.strftime('%H:%M UTC')} ({next_run.strftime('%d %b')})\n"
+        f"Faltan: <b>{hours}h {minutes}m</b>\n"
+        f"\n"
+        f"Schedule diario: {schedule_display} UTC"
+    )
+    send_telegram(msg, with_menu=True)
+
+
+def cmd_forzar():
+    """🚀 Ejecuta un ciclo inmediatamente."""
+    if bot_state["running"]:
+        send_telegram("🔄 Ya hay un ciclo en ejecución. Espera a que termine.", with_menu=True)
+        return
+
+    send_telegram("🚀 <b>Ciclo forzado</b>\nDespertando al scheduler...")
+    force_event.set()  # ← Esto despierta al scheduler inmediatamente
+
+
+# Mapa de comandos: texto → función
+COMMANDS = {
+    "estado": cmd_estado,
+    "ordenes": cmd_ordenes,
+    "siguiente": cmd_siguiente,
+    "forzar": cmd_forzar,
+}
+
+
+# =============================================================
+# TELEGRAM — RECEPCIÓN (POLLING)
+# =============================================================
+
+def is_authorized(chat_id):
+    """Solo responde a tu chat_id. Seguridad básica."""
+    return str(chat_id) == str(TELEGRAM_CHAT_ID)
+
+
+def handle_telegram_update(update):
+    """
+    Procesa un update de Telegram. Hay dos tipos:
+    - callback_query: alguien tocó un botón
+    - message: alguien escribió un texto (como /estado)
+    """
+
+    # ---- Botón pulsado ----
+    if "callback_query" in update:
+        cb = update["callback_query"]
+        cb_id = cb["id"]
+        chat_id = cb.get("message", {}).get("chat", {}).get("id", 0)
+        command = cb.get("data", "")
+
+        if not is_authorized(chat_id):
+            answer_callback_query(cb_id, "⛔ No autorizado")
+            return
+
+        # Responder al callback (quita el spinner del botón)
+        answer_callback_query(cb_id)
+
+        # Ejecutar el comando
+        if command in COMMANDS:
+            try:
+                COMMANDS[command]()
+            except Exception as e:
+                log.warning(f"Error en comando Telegram '{command}': {e}")
+                send_telegram(f"❌ Error: {e}", with_menu=True)
+        return
+
+    # ---- Mensaje de texto ----
+    if "message" in update:
+        msg = update["message"]
+        chat_id = msg.get("chat", {}).get("id", 0)
+        text = msg.get("text", "").strip().lower()
+
+        if not is_authorized(chat_id):
+            return
+
+        # Quitar la barra / si la escriben
+        if text.startswith("/"):
+            text = text[1:]
+
+        # Quitar @nombre_del_bot si lo incluyen
+        if "@" in text:
+            text = text.split("@")[0]
+
+        if text in COMMANDS:
+            try:
+                COMMANDS[text]()
+            except Exception as e:
+                log.warning(f"Error en comando Telegram '{text}': {e}")
+                send_telegram(f"❌ Error: {e}", with_menu=True)
+        else:
+            # Cualquier texto desconocido → mostrar menú
+            send_telegram(
+                "🤖 <b>Bot Polymarket</b>\n"
+                "Toca un botón para interactuar:",
+                with_menu=True
+            )
+
+
+def telegram_polling_loop():
+    """
+    Hilo que escucha Telegram constantemente.
+
+    ¿Cómo funciona el polling?
+    - Le preguntamos a Telegram: "¿hay mensajes nuevos?"
+    - Telegram espera hasta 30 segundos antes de responder (long polling)
+    - Si llega un mensaje durante esa espera, responde inmediatamente
+    - Procesamos el mensaje y volvemos a preguntar
+    - El 'offset' le dice a Telegram: "ya procesé todo hasta este ID,
+      dame solo los nuevos"
+
+    Este bucle NUNCA termina — corre mientras el bot esté vivo.
+    Si hay un error de red, espera 10 segundos y reintenta.
+    """
+    log.info("Telegram polling: iniciado")
+    offset = 0
+
+    while True:
+        try:
+            url = (
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
+                f"?offset={offset}&timeout=30"
+            )
+            resp = urllib.request.urlopen(url, timeout=35)
+            data = json.loads(resp.read())
+
+            if not data.get("ok"):
+                time.sleep(5)
+                continue
+
+            for update in data.get("result", []):
+                offset = update["update_id"] + 1
+                try:
+                    handle_telegram_update(update)
+                except Exception as e:
+                    log.warning(f"Error procesando update Telegram: {e}")
+
+        except Exception as e:
+            # Error de red, Telegram caído, etc. — esperar y reintentar
+            log.warning(f"Telegram polling error: {e}")
+            time.sleep(10)
 
 
 # =============================================================
@@ -178,7 +522,7 @@ def setup_client():
 def api_get(endpoint):
     url = GAMMA_URL + endpoint
     req = urllib.request.Request(url)
-    req.add_header("User-Agent", "polymarket-bot/0.5")
+    req.add_header("User-Agent", "polymarket-bot/0.6")
     resp = urllib.request.urlopen(req)
     return json.loads(resp.read())
 
@@ -497,15 +841,22 @@ def execute_trade(client, trade, dry_run=True):
 
 
 # =============================================================
-# FUNCIÓN PRINCIPAL
+# FUNCIÓN PRINCIPAL (UN CICLO)
 # =============================================================
 
-def main():
+def main(client):
+    """
+    Ejecuta un ciclo completo del bot.
+    Recibe el cliente ya autenticado (no lo crea cada vez).
+    """
     today_str = date.today().isoformat()
     mode_label = "DRY RUN (sin órdenes reales)" if DRY_RUN else "⚠️  MODO REAL — ÓRDENES ACTIVAS"
 
+    bot_state["running"] = True
+    bot_state["last_run"] = datetime.now(timezone.utc)
+
     log.info("=" * 65)
-    log.info(f"POLYMARKET WEATHER BOT v5  |  {today_str}")
+    log.info(f"POLYMARKET WEATHER BOT v6  |  {today_str}")
     log.info(f"Modo: {mode_label}")
     log.info(f"Bankroll: ${BANKROLL:.2f}  |  Edge mín: {MIN_EDGE}%")
     log.info(f"Filtro precio: {MIN_PRICE:.0%} – {MAX_PRICE:.0%}")
@@ -513,11 +864,10 @@ def main():
     log.info(f"Limpieza stale: >{ORDER_MAX_AGE_HOURS}h")
     log.info("=" * 65)
 
-    # ---- AUTENTICACIÓN ----
-    client = setup_client()
     if client is None:
-        log.error("No se pudo autenticar. Verifica tu .env. Saliendo.")
-        send_telegram("❌ <b>Error de autenticación</b> en Polymarket. Revisa las claves.")
+        log.error("Cliente no autenticado. Saltando ciclo.")
+        send_telegram("❌ <b>Error:</b> cliente no autenticado. Saltando ciclo.")
+        bot_state["running"] = False
         return
 
     # ---- PASO 0: LIMPIAR ÓRDENES STALE ----
@@ -722,6 +1072,9 @@ def main():
     if skipped_duplicates > 0:
         log.info(f"       {skipped_duplicates} mercados saltados (ya hay orden abierta)")
 
+    # Actualizar estado compartido
+    bot_state["last_opportunities"] = len(trades)
+
     # ---- PASO 5: Presupuesto global + plan ----
     max_budget = BANKROLL * MAX_EXPOSURE_PCT
     budget_remaining = max_budget
@@ -824,6 +1177,7 @@ def main():
     # ---- PASO 6: EJECUCIÓN ----
     if not selected_trades:
         log.info("Sin operaciones que ejecutar.")
+        bot_state["last_orders_placed"] = 0
     else:
         print()
         if DRY_RUN:
@@ -864,6 +1218,8 @@ def main():
                 )
 
         ok_count = sum(1 for r in results if r["ok"])
+        bot_state["last_orders_placed"] = ok_count
+
         print()
         print(f"  Resultado: {ok_count}/{len(results)} órdenes OK")
         print()
@@ -876,31 +1232,117 @@ def main():
                 f"Bankroll: ${BANKROLL:.2f} | Modo: REAL"
             )
 
-    log.info("Bot finalizado.")
+    bot_state["cycle_count"] += 1
+    bot_state["running"] = False
+    log.info("Ciclo finalizado.")
 
 
 # =============================================================
-# SCHEDULER
+# SCHEDULER ESTRATÉGICO
 # =============================================================
+
+def get_next_run_time():
+    """
+    Calcula cuándo toca la próxima ejecución.
+
+    Mira las horas programadas (SCHEDULE_HOURS_UTC), busca la próxima
+    que aún no ha pasado hoy. Si todas las de hoy ya pasaron,
+    devuelve la primera de mañana.
+
+    Ejemplo con schedule [8, 16, 23]:
+      - Son las 10:00 UTC → próxima: 16:00 UTC hoy
+      - Son las 23:30 UTC → próxima: 08:00 UTC mañana
+    """
+    now = datetime.now(timezone.utc)
+    hours_sorted = sorted(SCHEDULE_HOURS_UTC)
+
+    for hour in hours_sorted:
+        candidate = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+        if candidate > now:
+            return candidate
+
+    # Todas las horas de hoy ya pasaron → primera de mañana
+    tomorrow = now + timedelta(days=1)
+    first_hour = hours_sorted[0]
+    return tomorrow.replace(hour=first_hour, minute=0, second=0, microsecond=0)
+
 
 if __name__ == "__main__":
-    INTERVALO_SEGUNDOS = int(INTERVALO_HORAS * 3600)
-    log.info(f"Scheduler iniciado — intervalo: {INTERVALO_HORAS:.0f} horas")
+    log.info("=" * 65)
+    log.info("POLYMARKET BOT v6 — Scheduler estratégico + Telegram")
+    log.info(f"Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
+    log.info(f"Modo: {'DRY RUN' if DRY_RUN else 'REAL'}")
+    log.info("=" * 65)
 
-    # Alerta de arranque (siempre, DRY_RUN o no)
+    # ---- Autenticación (una sola vez) ----
+    clob_client = setup_client()
+    if clob_client is None:
+        log.error("No se pudo autenticar. El bot arranca pero no podrá operar.")
+        send_telegram("❌ <b>Error de autenticación</b> al arrancar. Revisa las claves.")
+
+    # ---- Arrancar hilo de Telegram ----
+    # daemon=True significa que el hilo muere automáticamente cuando
+    # el programa principal termina. Sin esto, el programa no cerraría nunca.
+    if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
+        telegram_thread = threading.Thread(
+            target=telegram_polling_loop,
+            daemon=True,
+            name="TelegramPoller",
+        )
+        telegram_thread.start()
+        log.info("Hilo de Telegram polling: arrancado")
+    else:
+        log.warning("Telegram no configurado — comandos desactivados")
+
+    # ---- Alerta de arranque ----
     modo = "DRY RUN" if DRY_RUN else "REAL"
+    schedule_display = ", ".join(f"{h:02d}:00" for h in sorted(SCHEDULE_HOURS_UTC))
     send_telegram(
-        f"🤖 <b>Bot arrancado</b>\n"
+        f"🤖 <b>Bot arrancado (v6)</b>\n"
         f"Modo: {modo} | Bankroll: ${BANKROLL:.2f}\n"
-        f"Intervalo: cada {INTERVALO_HORAS:.0f}h"
+        f"Schedule: {schedule_display} UTC\n"
+        f"\n"
+        f"Usa los botones para controlar el bot:",
+        with_menu=True,
     )
 
-    while True:
-        try:
-            main()
-        except Exception as e:
-            log.error(f"Error inesperado en ciclo principal: {e}")
-            send_telegram(f"❌ <b>Error inesperado</b>\n<code>{str(e)[:200]}</code>")
+    # ---- Primer ciclo inmediato ----
+    log.info("Ejecutando primer ciclo al arrancar...")
+    try:
+        main(clob_client)
+    except Exception as e:
+        log.error(f"Error en primer ciclo: {e}")
+        send_telegram(f"❌ <b>Error en primer ciclo</b>\n<code>{str(e)[:200]}</code>")
 
-        log.info(f"Próxima ejecución en {INTERVALO_HORAS:.0f} horas. Durmiendo...")
-        time.sleep(INTERVALO_SEGUNDOS)
+    # ---- Bucle del scheduler ----
+    while True:
+        next_run = get_next_run_time()
+        bot_state["next_run"] = next_run
+
+        time_until = next_run - datetime.now(timezone.utc)
+        hours_until = time_until.total_seconds() / 3600
+        log.info(
+            f"Próximo ciclo: {next_run.strftime('%H:%M UTC')} "
+            f"(en {hours_until:.1f}h). Esperando..."
+        )
+
+        # ---- Espera inteligente ----
+        # En vez de un time.sleep() largo, esperamos en bloques de 30s.
+        # Cada 30 segundos comprobamos:
+        #   1. ¿Ya es la hora? → ejecutar ciclo
+        #   2. ¿Alguien mandó /forzar? → ejecutar ciclo inmediato
+        # force_event.wait(30) duerme 30 segundos, PERO se despierta
+        # inmediatamente si alguien llama force_event.set().
+        while datetime.now(timezone.utc) < next_run:
+            was_forced = force_event.wait(timeout=30)
+            if was_forced:
+                force_event.clear()
+                log.info("⚡ Ciclo forzado desde Telegram")
+                break
+
+        # ---- Ejecutar ciclo ----
+        try:
+            main(clob_client)
+        except Exception as e:
+            log.error(f"Error inesperado en ciclo: {e}")
+            send_telegram(f"❌ <b>Error inesperado</b>\n<code>{str(e)[:200]}</code>")
