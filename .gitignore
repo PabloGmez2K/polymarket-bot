@@ -28,3 +28,7 @@ debug_tags.py
 
 # Notas personales
 *.log
+
+.env
+*.env
+keys.env
