@@ -1,6 +1,6 @@
 # CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 21 de marzo de 2026 (Sesión 7)
+**Última actualización:** 22 de marzo de 2026 (Sesión 8)
 
 ---
 
@@ -12,13 +12,13 @@ Un bot automatizado de arbitraje meteorológico en Polymarket. El bot detecta me
 
 **Bankroll:** $15 de prueba (objetivo: $100 cuando validemos que el sistema gana).
 
-**Modelo de Claude recomendado:** Sesiones de coding puro pueden ser Sonnet. Revisiones de arquitectura o estrategia, Opus.
+**Modelo de Claude recomendado:** Sesiones de coding puro → Sonnet. Revisiones de arquitectura, estrategia o diseño de sistemas → Opus.
 
 ---
 
-## Progreso: ~95%
+## Progreso: ~97%
 
-- [x] Datos meteorológicos (Open-Meteo, coords de aeropuerto, 19 ciudades)
+- [x] Datos meteorológicos (Open-Meteo, coords de aeropuerto, 30 ciudades)
 - [x] Lectura de mercados de Polymarket (Gamma API, tags, parseo regex)
 - [x] Detección de edge (modelo normal + redondeo)
 - [x] Gestión de riesgo (Half-Kelly + presupuesto global)
@@ -39,10 +39,16 @@ Un bot automatizado de arbitraje meteorológico en Polymarket. El bot detecta me
 - [x] MODO REAL activado con $15
 - [x] Procfile para Railway
 - [x] DRY_RUN=false permanente en Railway Variables
+- [x] bot.py v8: MIN_DAYS=0, MAX_DAYS=5, reintentos de red, +11 ciudades nuevas
+- [x] Pipeline de inteligencia de mercado (find_traders + trader_analyzer + traders_db)
+- [x] Análisis de 3 traders de referencia (ColdMath, Trader2, Trader3)
+- [x] Sistema de histórico acumulativo (trader_history.json)
+- [ ] Optimizar find_traders.py para descubrir traders más relevantes
+- [ ] Automatizar pipeline de análisis en Railway (ejecución periódica)
 - [ ] Validar resultados: correr varios días y analizar decisions.log
-- [ ] Optimizar estrategia basándose en datos reales
+- [ ] Parsear mercados de rangos "46-47°F" (+30% mercados)
+- [ ] Calibrar sigma con datos reales
 - [ ] Escalar a $100 (solo si los datos confirman que gana)
-- [ ] Mejoras del modelo (múltiples fuentes, calibración sigma)
 
 ---
 
@@ -79,28 +85,31 @@ Un bot automatizado de arbitraje meteorológico en Polymarket. El bot detecta me
 
 ### Sesión 7 (21 marzo 2026) — Modelo: Opus
 - **bot.py v7** — Reescritura mayor del bot
-- **Scheduler estratégico:** de "cada 6h" a horas UTC fijas (08, 16, 23)
-  - Open-Meteo actualiza modelos cada 6h (00, 06, 12, 18 UTC)
-  - Bot ejecuta después de cada actualización + cuando EEUU tiene liquidez
-- **Telegram bidireccional:** threading + polling + botones inline
-  - 📊 Estado: modo, bankroll, próxima ejecución, último ciclo
-  - 💰 Cartera: posiciones reales con PnL (Data API)
-  - 📋 Órdenes: pendientes enriquecidas con pregunta del mercado
-  - 📓 Log: resumen del último ciclo de decisiones
-  - 🚀 Forzar: ejecuta ciclo inmediato
-  - ⚡ Modo: toggle DRY_RUN↔REAL con doble confirmación
-- **Decision log:** archivo decisions.log con análisis completo de cada ciclo
-  - Qué mercados encontró y cuántos filtró (y por qué)
-  - Edge calculado para cada mercado con previsión vs precio
-  - Por qué descartó cada oportunidad (edge bajo, duplicado, Kelly insuficiente)
-  - Qué órdenes colocó y resultado
-- **known_tokens cache:** fix para que /ordenes muestre la pregunta del mercado
-- **Data API:** cartera real desde data-api.polymarket.com/positions
-- **MODO REAL activado** desde Telegram a las 22:52 UTC
-- **DRY_RUN=false** configurado permanente en Railway Variables
-- **Procfile** añadido (`web: python bot.py`) para fix de build en Railway
-- **Bot desplegado y corriendo** en MODO REAL a las 23:09 UTC
-- **Conceptos nuevos aprendidos:** threading, threading.Event, daemon threads, long polling, inline keyboard, callback_query, múltiples loggers, Procfile
+- Scheduler estratégico, Telegram bidireccional, decision log, known_tokens cache
+- **MODO REAL activado** a las 23:09 UTC
+
+### Sesión 8 (22 marzo 2026) — Modelo: Sonnet
+- **Análisis de primeros ciclos reales** — bot funcionó pero encontró 0 oportunidades
+  - Diagnóstico: MIN_DAYS=1 descartaba 225 mercados de hoy, solo 6 pasaban filtro
+  - Error de red en ciclo 23:00 (`Connection reset by peer`) — sin reintentos
+- **bot.py v8** con 3 mejoras clave:
+  - `MIN_DAYS_AHEAD = 0` — incluye mercados de hoy (sigma=0.8°C, máxima confianza)
+  - `MAX_DAYS_AHEAD = 5` — amplía ventana de 3 a 5 días
+  - Reintentos automáticos en `api_get` y `get_forecast` (3 intentos, 5s delay)
+- **+11 ciudades nuevas** (de 19 a 30): Miami, Madrid, Seattle, Dallas, Lucknow, Sao Paulo, Taipei, Milan, Chongqing, Chengdu, Wuhan
+  - Ciudades identificadas analizando traders de referencia
+- **Pipeline de inteligencia de mercado** construido desde cero:
+  - `coldmath_tracker.py` → análisis de trader individual
+  - `trader_analyzer.py` → análisis multi-trader con consenso, edge validation, histórico
+  - `find_traders.py` → descubrimiento automático de traders similares vía API
+  - `traders_db.json` → registro central persistente de traders
+  - `trader_history.json` → histórico acumulativo de análisis
+- **Análisis de 3 traders de referencia:**
+  - **ColdMath** (0x594e...): $70K bankroll, 87% WR, opera No a $0.95-0.99 → no relevante para nuestra escala
+  - **Trader2** (0xd393...): bankroll pequeño, opera Yes a $0.003-0.05, 45% WR → estrategia de lotería masiva, no imitar
+  - **Found1** (0x4174...): 75.8% WR, opera en rango medio ($0.10-0.90), London/Ankara → más relevante
+- **Descubrimiento clave de API:** `/trades?market=conditionId` funciona; `/positions?market=` da 400 error
+- **Conceptos aprendidos:** pipeline de datos, JSON como base de datos simple, endpoint discovery por debug, estrategias de trading comparadas
 
 ---
 
@@ -113,40 +122,31 @@ Un bot automatizado de arbitraje meteorológico en Polymarket. El bot detecta me
 ### Archivos:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v7 — scheduler + Telegram + decision log |
-| `Procfile` | **NUEVO** — Indica a Railway cómo arrancar (`web: python bot.py`) |
+| `bot.py` | Script principal v8 — scheduler + Telegram + decision log |
+| `Procfile` | Indica a Railway cómo arrancar (`web: python bot.py`) |
 | `requirements.txt` | Librerías para Railway |
-| `decisions.log` | Log detallado de cada decisión del bot (en Railway, no en git) |
-| `trades.log` | Registro técnico de operaciones (en Railway, no en git) |
+| `trader_analyzer.py` | Análisis multi-trader: consenso, edge, histórico |
+| `find_traders.py` | Descubrimiento automático de traders similares |
+| `traders_db.json` | Registro central de traders (NO en git si contiene datos sensibles) |
+| `trader_history.json` | Histórico de análisis acumulativo |
+| `decisions.log` | Log detallado de cada decisión del bot (en Railway) |
+| `trades.log` | Registro técnico de operaciones (en Railway) |
 | `edge_detector.py` | Detección de edge (standalone) |
 | `backtest.py` | Validación con mercados resueltos |
 | `bankroll.py` | Gestión de riesgo + demo Kelly |
-| `polymarket_explore.py` | Explorador de mercados |
-| `weather_forecast.py` | Previsión multi-ciudad |
 | `.env` | Claves (NO en git) |
 
-### Variables de entorno (Railway):
-```
-PK=...
-FUNDER=...
-DRY_RUN=false              # PERMANENTE — modo real
-BANKROLL=15.00
-SCHEDULE_HOURS_UTC=8,16,23
-TELEGRAM_TOKEN=...
-TELEGRAM_CHAT_ID=495704420
-```
-
-### Configuración en bot.py v7:
+### Configuración en bot.py v8:
 ```python
-DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"  # Mutable desde Telegram
+DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
 BANKROLL = float(os.getenv("BANKROLL", "15.00"))
 MIN_EDGE = 10.0
 MIN_BET = 1.00
-MAX_BET_PCT = 0.05        # 5% max por operación
-MAX_EXPOSURE_PCT = 0.40   # 40% exposición total
+MAX_BET_PCT = 0.05
+MAX_EXPOSURE_PCT = 0.40
 MIN_LIQUIDITY = 100
-MAX_DAYS_AHEAD = 3
-MIN_DAYS_AHEAD = 1
+MAX_DAYS_AHEAD = 5        # v8: ampliado de 3
+MIN_DAYS_AHEAD = 0        # v8: incluye hoy
 MIN_PRICE = 0.08
 MAX_PRICE = 0.92
 PRICE_AGGRESSION = 0.02
@@ -154,181 +154,106 @@ ORDER_MAX_AGE_HOURS = 8
 SCHEDULE_HOURS_UTC = [8, 16, 23]
 ```
 
-### Arquitectura v7:
-```
-HILO 1: TELEGRAM POLLING (24/7)
-  ↓ Escucha botones/comandos
-  ↓ Lee bot_state para responder
-  ↓ force_event.set() si /forzar
+### 30 ciudades cubiertas (RESOLUTION_STATIONS):
+Seoul, London, Tel Aviv, Shanghai, Tokyo, New York City, Beijing, Hong Kong, Singapore, Toronto, Chicago, Wellington, Munich, Warsaw, Ankara, Atlanta, Shenzhen, Paris, Buenos Aires, Miami, Madrid, Seattle, Dallas, Lucknow, Sao Paulo, Taipei, Milan, Chongqing, Chengdu, Wuhan
 
-HILO 2: SCHEDULER (horas UTC fijas)
-  ↓
-  0. Limpiar stale (>8h)
-  1. Gamma API → mercados activos
-  2. Parseo + filtros (precio, fecha, liquidez)
-  3. Open-Meteo → previsiones
-  4. Modelo probabilidad → edge vs mercado
-  5. Kelly + presupuesto → selección
-  6. CLOB API → órdenes + Telegram alert
-  7. Decision log → decisions.log + bot_state
-  ↓
-  Esperar próxima hora UTC (interruptible por /forzar)
+### Pipeline de análisis de traders:
 ```
+find_traders.py          →    traders_db.json    →    trader_analyzer.py
+(descubre via /trades)        (registro central)       (analiza todos)
+                                                              ↓
+                                                    trader_history.json
+                                                    (acumulación histórica)
+```
+
+**Endpoint que funciona para traders de un mercado:**
+```
+GET https://data-api.polymarket.com/trades?market={conditionId}&limit=100
+```
+Campos útiles: `proxyWallet`, `side`, `price`, `size`, `timestamp`, `outcome`, `pseudonym`
+
+**Endpoints que NO funcionan:**
+- `/positions?market=conditionId` → 400 Bad Request
+- `/positions?asset_id=tokenId` → 400 Bad Request
+- `/markets/{tokenId}/top-holders` → 404
 
 ### APIs utilizadas:
 | API | URL | Función |
 |-----|-----|---------|
 | Gamma API | gamma-api.polymarket.com | Mercados, preguntas, precios |
-| Data API | data-api.polymarket.com | Posiciones del usuario, PnL |
+| Data API | data-api.polymarket.com | Posiciones del usuario, trades, PnL |
 | CLOB API | clob.polymarket.com | Órdenes, autenticación |
 | Open-Meteo | api.open-meteo.com | Previsiones meteorológicas |
 | Telegram | api.telegram.org | Dashboard + alertas |
 
 ---
 
-## Estado de las primeras operaciones
+## Traders de referencia analizados
 
-### Posición activa:
-- **Shanghai YES 16°C** (March 22): 16.9 shares @ $0.04, valor actual ~$0.54, PnL: -$0.13 (-20%)
+| Nombre | Address | Bankroll | WR | Estrategia | Relevancia |
+|--------|---------|---------|----|-----------|-|
+| ColdMath | 0x594e... | ~$70K | 87% | No a $0.95-0.99 | Baja — escala diferente |
+| Trader2 | 0xd393... | Pequeño | 45% | Yes a $0.003 masivo | Baja — lotería pura |
+| Trader3 | 0x09f4... | Pequeño | 97%* | Yes a $0.002 masivo | Muy baja — WR engañoso |
+| Found1 | 0x4174... | ~$221 | 75.8% | Mix mid-range | Media — seguir observando |
 
-### Orden pendiente:
-- **Wellington YES 18°C** (March 22): Buy @ $0.05, 14 shares, ~5h esperando llenado
+*97% WR engañoso: compra cientos de mercados imposibles a $0.002, alguno acierta.
 
-### Balance Polymarket:
-- Cartera total: ~$14.91
-- Disponible: ~$14.32
-- PnL total: -$0.41
-
-**Nota:** Las primeras órdenes fueron de la sesión 4 (pre-optimización). El bot v7 es significativamente mejor — el resultado de estas órdenes iniciales no es representativo.
+**Patrones aprendidos de los traders:**
+- ColdMath opera 08:00-09:07 UTC (justo después de actualización Open-Meteo)
+- Los tres operan en la ventana 08:00-10:00 UTC — nuestro schedule es correcto
+- Condición "exact" es la más apostada (más edge cuando el mercado está equivocado)
+- London, Warsaw, Chicago, Lucknow, Paris son las ciudades con más actividad agregada
 
 ---
 
-## Plan para Sesión 8 — Análisis de datos + Optimización
+## Lo que hay que hacer en la próxima sesión de Opus
 
-### Al inicio de la sesión, Claude debe pedir:
-1. Capturas de Telegram: 📓 Log, 💰 Cartera, 📋 Órdenes
-2. Capturas de Polymarket: cartera, posiciones, pedidos abiertos
-3. Log de Railway (si Pablo puede copiarlo)
-4. Cualquier observación o duda que Pablo tenga
+### Objetivo principal: Rediseñar find_traders.py y automatizar el pipeline
 
-### Objetivo: Aprender de los datos reales y mejorar la estrategia
+### Problema actual de find_traders.py:
+1. **Criterio de selección débil** — aparecer en 2 de 40 mercados escaneados es muy ruidoso. Traders relevantes pueden no estar en esos mercados concretos.
+2. **Bankroll calculado imprecisamente** — `initialValue` de posiciones activas ≠ balance real de wallet.
+3. **Win rate poco fiable** — endpoint `closed=true` no está documentado, puede cambiar.
+4. **Sin usar `pseudonym`** — el campo está disponible en `/trades` y permite identificar traders con nombre público.
+5. **Descubrimiento reactivo** — escanea mercados aleatorios en vez de partir de fuentes de alta calidad (leaderboard, mercados de mayor volumen por ciudad).
 
-### Paso 1: Revisar decisions.log
-- Leer el log de la noche (ciclos 23:00 y 08:00)
-- ¿Cuántas oportunidades encontró? ¿Colocó órdenes?
-- ¿Los edges eran reales o el modelo está mal calibrado?
+### Lo que Opus debe diseñar:
+1. **Estrategia de descubrimiento más inteligente:** partir del leaderboard de temperatura si existe, o escanear todos los mercados de temperatura (no solo 40) agrupando por ciudad, y rankear traders por frecuencia real en el universo completo.
+2. **Clasificador de traders:** categorizar automáticamente por estrategia (lotería, mid-range, high-confidence) basándose en distribución de precios histórica, no solo snapshot actual.
+3. **Automatización en Railway:** cron semanal para `find_traders`, diario para `trader_analyzer`, con resultados accesibles vía Telegram (`/traders` comando nuevo).
+4. **Integración con bot.py:** cuando `trader_analyzer` detecte consenso entre traders mid-range en un mercado que el bot no tiene, registrarlo en el decision log como señal adicional.
 
-### Paso 2: Revisar resultados en Polymarket
-- ¿Se llenaron las órdenes?
-- ¿Los mercados que apostamos se resolvieron correctamente?
-- Comparar temperatura real vs previsión del bot
-
-### Paso 3: Mejoras potenciales (priorizar según datos)
-1. **Calibración de sigma** — ¿La incertidumbre de 1.0°C para 1 día es correcta?
-2. **Múltiples fuentes** — Comparar Open-Meteo con otra fuente
-3. **Historial de edges** — ¿Los edges que detectamos son consistentes?
-4. **Fill rate** — ¿Cuántas órdenes se llenan vs cuántas expiran?
-5. **Ajuste de agresividad** — ¿+2¢ es suficiente para llenarse?
-6. **Parseo de rangos** — Capturar mercados "46-47°F" que ahora se pierden
-
-### Workflow continuo:
-```
-1. Bot corre 24/7 → genera decisions.log
-2. Pablo revisa datos → identifica patrones
-3. Sesión con Claude → implementa mejoras
-4. Push → Railway redeploy → más datos
-5. Repetir hasta que el bot sea consistentemente rentable
-```
+### Archivos que Pablo adjuntará:
+- `bot.py` (v8)
+- `find_traders.py`
+- `trader_analyzer.py`
+- `traders_db.json`
+- `trader_history.json` (con las entradas acumuladas hasta entonces)
 
 ---
 
 ## Hoja de ruta de mejoras
 
-### Fase 1 — Validar y reparar (Sesiones 8-9)
-_Objetivo: confirmar que el bot base funciona y capturar más mercados._
-
-- [ ] Analizar decisions.log de las primeras noches
-- [ ] Comparar previsión del bot vs temperatura real (¿acertamos?)
-- [ ] Medir fill rate (¿cuántas órdenes se llenan?)
+### Fase 1 — Validar y reparar (en curso)
+- [ ] Confirmar que v8 encuentra oportunidades (ciclo 16:00 UTC del 22 marzo)
 - [ ] Parsear mercados de rangos "46-47°F" (+30% mercados)
-- [ ] Calibrar sigma con datos reales (previsión vs resultado)
-- [ ] Ajustar agresividad si las órdenes no se llenan
+- [ ] Medir fill rate (¿cuántas órdenes se llenan vs expiran?)
+- [ ] Calibrar sigma con datos reales
 
-### Fase 2 — Más inteligencia (Sesiones 10-12)
-_Objetivo: mejorar la precisión del modelo y detectar más edge._
+### Fase 2 — Pipeline de inteligencia (próxima sesión Opus)
+- [ ] Rediseñar find_traders.py con criterios más sólidos
+- [ ] Automatizar pipeline en Railway
+- [ ] Integrar señales de consenso en decision log del bot
+- [ ] Comando /traders en Telegram
 
-- [ ] Múltiples fuentes meteorológicas (GFS, ECMWF además de Open-Meteo)
-- [ ] Sigma dinámica por ciudad (Tokyo ≠ Wellington)
-- [ ] Sigma dinámica por patrón meteorológico (frentes, tormentas = más incertidumbre)
-- [ ] Análisis de a qué hora del día los precios están más "equivocados"
-- [ ] Backtest con previsiones históricas (no solo datos reales)
+### Fase 3 — Más inteligencia meteorológica
+- [ ] Múltiples fuentes meteorológicas (GFS, ECMWF)
+- [ ] Sigma dinámica por ciudad y patrón meteorológico
+- [ ] Backtest con previsiones históricas
 
-### Fase 3 — Ventaja competitiva (Sesiones 13+)
-_Objetivo: diferenciarse de otros bots de Polymarket._
-
-- [ ] Fuentes de datos premium (estaciones específicas, APIs de pago)
-- [ ] Ejecución más frecuente (detectar cambios en forecast y operar en minutos)
-- [ ] Expandir a otros mercados (precipitación, viento, índices económicos)
-- [ ] Machine learning para calibrar sigma automáticamente con históricos
-- [ ] Análisis del order book para optimizar precio de entrada
-
-### Fase 4 — Escalar (cuando los datos confirmen rentabilidad)
-- [ ] Subir bankroll a $100
-- [ ] Subir a $500-1000 si sigue ganando
-- [ ] Diversificar en múltiples tipos de mercados
-
----
-
-## Migración a Claude Code
-
-### Qué es Claude Code
-Una herramienta de terminal que permite a Claude editar archivos, ejecutar código, hacer git push — todo directamente en tu ordenador. En vez de que Claude te dé un archivo y tú lo copies, Claude trabaja directamente en tu proyecto. Es como tener un programador sentado a tu lado que usa tu teclado.
-
-### Cuándo migrar
-**Sesión 8 o 9** — cuando empecemos la fase de optimización. El workflow actual (Claude da archivo completo → Pablo copia → push) funciona para construir desde cero, pero para cambiar un parámetro, testear una idea, y ver el resultado rápido, Claude Code es mucho más eficiente.
-
-### Cómo prepararlo
-1. Instalar Claude Code (se hace desde la terminal, Pablo lo hará guiado)
-2. Conectar con el repo polymarket-bot
-3. A partir de ahí, las sesiones de optimización serán: Pablo describe qué quiere → Claude Code edita, testea, y hace push directamente
-
-### Por qué tiene sentido ahora y no antes
-Antes necesitábamos entender qué hace cada pieza (APIs, regex, Kelly, threading). Copiar archivos completos y leer el código ayudaba a eso. Ahora que el bot funciona y entramos en fase de iterar rápido, Claude Code acelera el ciclo de mejora.
-
----
-
-## Mi nivel técnico
-
-- **Programación:** Vibecoding — sabe dirigir a Claude para construir software real, entiende la lógica y la arquitectura aunque no escriba cada línea. Funciones, regex, distribuciones, APIs, threading, eventos.
-- **Enfoque:** Programar en el contexto actual — usando IA como copiloto, no memorizando sintaxis. Aprender los conceptos (qué es un hilo, qué es una API, qué es Kelly) para poder dirigir bien, no para escribir código desde cero.
-- **Terminal:** Cómodo con cmd, Git básico.
-- **Python:** Entiende urllib, json, re, math, datetime, dotenv, logging, threading, py-clob-client.
-- **Conceptos aprendidos (Sesión 7):** threading, threading.Event, daemon threads, long polling, inline keyboard, callback_query, múltiples loggers, Procfile.
-- **Git:** Flujo básico consolidado.
-- **Polymarket:** Comprende shares, órdenes GTC, resolución, order book, Data API, Gamma API, CLOB API.
-- **Railway:** Despliegue, variables de entorno, logs, Procfile.
-- **Telegram:** Bot bidireccional con botones inline y polling.
-- **Estrategia:** Kelly, edge, agresividad, por qué validar antes de escalar.
-- **Workflow actual:** Claude entrega archivos completos, Pablo hace push.
-- **Workflow futuro:** Claude Code edita directamente en el repo.
-
----
-
-## Problemas conocidos / pendientes
-
-### Observados:
-1. **85 mercados no parseables** — regex no cubre rangos "46-47°F"
-2. **131 fuera de fecha** — muchos mercados son para hoy (MIN_DAYS_AHEAD=1 los excluye)
-3. **Shanghai -20%** — primera operación, pre-optimización, no representativa
-4. **409 Conflict en Telegram** — ocurre al reiniciar (dos instancias hacen polling a la vez). Se resuelve solo en ~30 segundos.
-
-### Resueltos en v7:
-- Órdenes sin enriquecer → known_tokens cache
-- Cartera 404 → Data API correcta (data-api.polymarket.com)
-- Scheduler fijo cada 6h → horas UTC estratégicas
-- Bot solo envía → Telegram bidireccional con botones
-- Build fail Railway → Procfile añadido
-- DRY_RUN temporal → permanente en Railway Variables
+### Fase 4 — Escalar
+- [ ] Subir bankroll a $100 cuando datos confirmen rentabilidad
 
 ---
 
@@ -337,18 +262,16 @@ Antes necesitábamos entender qué hace cada pieza (APIs, regex, Kelly, threadin
 1. Open-Meteo vs estación real: diferencias 0.5-2°C incluso con coords de aeropuerto.
 2. Modelo simplificado: sigma fija por días, no considera microclima.
 3. Backtest optimista: usa datos reales, no previsiones históricas.
-4. 85 preguntas no parseables: regex no cubre rangos como "46-47°F".
+4. Regex no cubre rangos como "46-47°F" — esos mercados se pierden.
 5. Sin precios históricos de Polymarket: backtest solo mide dirección.
 
 ---
 
 ## Recordatorios importantes
 
-**Activar órdenes reales (permanente):**
-Railway → Variables → `DRY_RUN` = `false`
+**Ver qué hizo el bot:** Telegram → 📓 Log (resumen) o Railway → Logs (completo)
 
-**Activar órdenes reales (temporal):**
-Telegram → ⚡ Modo → Activar REAL
+**Activar modo real permanente:** railway.app → proyecto → Variables → `DRY_RUN=false`
 
 **Push a GitHub:**
 ```
@@ -357,6 +280,3 @@ git add .
 git commit -m "descripción"
 git push
 ```
-
-**Ver qué hizo el bot:**
-Telegram → 📓 Log (resumen) o Railway → Logs (completo)

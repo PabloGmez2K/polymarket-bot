@@ -1,17 +1,23 @@
 """
-trader_analyzer.py — Análisis estratégico multi-trader
-=======================================================
+trader_analyzer.py v2 — Análisis profundo + señales accionables
+================================================================
 
-Parte del pipeline de inteligencia de mercado:
+Pipeline:   find_traders.py → traders_db.json → trader_analyzer.py → signals.json
 
-  find_traders.py → traders_db.json → trader_analyzer.py → trader_history.json
-
-Analiza todos los traders en traders_db.json más los hardcodeados,
-detecta consenso, valida edge real, y acumula histórico para
-optimizar la estrategia del bot.
+Cambios vs v1:
+  - Solo analiza traders de traders_db.json (no hardcoded duplicados)
+  - Produce signals.json que bot.py consume directamente
+  - Señal = "trader X compró YES en mercado Y a precio Z"
+  - Cuando bot.py encuentra edge Y un trader tracked coincide → señal confirmada
+  - Más ligero: menos prints, más datos estructurados
 
 Uso:
-    python trader_analyzer.py
+    python trader_analyzer.py              # análisis completo
+    python trader_analyzer.py --signals    # solo generar signals.json (rápido)
+
+Llamable desde bot.py:
+    from trader_analyzer import get_trader_signals
+    signals = get_trader_signals()
 """
 
 import urllib.request
@@ -19,136 +25,31 @@ import urllib.parse
 import json
 import re
 import os
+import sys
+import time
 from datetime import datetime, timezone
 
 # ============================================================
-# TRADERS CONOCIDOS (hardcoded — siempre se analizan)
+# CONFIG
 # ============================================================
-TRADERS_CORE = {
-    "ColdMath": "0x594edb9112f526fa6a80b8f858a6379c8a2c1c11",
-    "Trader2":  "0xd3938e1d885f7849215c49d87465709d63400744",
-    "Trader3":  "0x09f4265f01d6f73d6cf3ccdb8a37e1f7bb42e9c2",
-}
-
-# Tu dirección para comparar (opcional)
-MY_ADDRESS = ""
-
-# Nuestro rango de precio operativo
-MIN_PRICE = 0.08
-MAX_PRICE = 0.92
-
-# Archivos del pipeline
-DB_FILE      = "traders_db.json"      # registro de traders descubiertos
-HISTORY_FILE = "trader_history.json"  # histórico de análisis
 
 DATA_API  = "https://data-api.polymarket.com"
 GAMMA_API = "https://gamma-api.polymarket.com"
 
+DB_FILE      = "traders_db.json"
+SIGNALS_FILE = "signals.json"      # señales para bot.py
+HISTORY_FILE = "trader_history.json"
 
-# ============================================================
-# TRADERS_DB — registro persistente
-# ============================================================
-
-def load_traders_db():
-    """
-    Carga traders_db.json y devuelve el dict completo de traders.
-    Si no existe, lo crea con los traders core.
-    El archivo tiene esta estructura:
-    {
-      "traders": {
-        "ColdMath": {
-          "address": "0x...",
-          "source": "manual",
-          "added": "2026-03-22T...",
-          "tags": ["high_bankroll", "no_strategy"],
-          "notes": "Opera No a 0.99, no relevante para estrategia"
-        },
-        "Nuevo1": {
-          "address": "0x...",
-          "source": "find_traders",
-          "added": "2026-03-22T...",
-          "win_rate_discovery": 62.5,
-          "bankroll_discovery": 45.0,
-          "tags": ["our_range", "small_bankroll"]
-        }
-      }
-    }
-    """
-    if not os.path.exists(DB_FILE):
-        # Crear con los traders core
-        db = {"traders": {}}
-        for name, address in TRADERS_CORE.items():
-            db["traders"][name] = {
-                "address": address,
-                "source": "manual",
-                "added": datetime.now(timezone.utc).isoformat(),
-                "tags": [],
-                "notes": "",
-            }
-        save_traders_db(db)
-        print(f"  Creado {DB_FILE} con {len(TRADERS_CORE)} traders core")
-        return db
-
-    with open(DB_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def save_traders_db(db):
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(db, f, indent=2, ensure_ascii=False)
-
-
-def get_all_traders(db):
-    """
-    Devuelve dict {nombre: address} de todos los traders en la DB,
-    fusionado con los core por si acaso no estaban en el archivo.
-    """
-    traders = dict(TRADERS_CORE)  # empieza con los core
-    for name, info in db["traders"].items():
-        addr = info.get("address", "")
-        if addr and name not in traders:
-            traders[name] = addr
-    return traders
-
-
-def add_trader_to_db(db, name, address, source="manual", **kwargs):
-    """Añade un trader nuevo a la DB si no existe ya."""
-    # Comprobar si la address ya está (aunque con otro nombre)
-    existing = {
-        info["address"].lower(): n
-        for n, info in db["traders"].items()
-    }
-    if address.lower() in existing:
-        print(f"  {address[:14]}... ya existe como '{existing[address.lower()]}'")
-        return False
-
-    db["traders"][name] = {
-        "address": address,
-        "source": source,
-        "added": datetime.now(timezone.utc).isoformat(),
-        "tags": kwargs.get("tags", []),
-        "notes": kwargs.get("notes", ""),
-        **{k: v for k, v in kwargs.items() if k not in ("tags", "notes")},
-    }
-    return True
-
-
-def update_trader_stats(db, name, stats):
-    """Actualiza las estadísticas de un trader tras el análisis."""
-    if name in db["traders"]:
-        db["traders"][name].update({
-            "last_analyzed": datetime.now(timezone.utc).isoformat(),
-            "last_win_rate": stats.get("win_rate"),
-            "last_n_positions": stats.get("n_positions"),
-            "last_our_range": stats.get("n_our_range"),
-            "last_pnl_closed": stats.get("pnl_closed"),
-        })
+# Rango de precio que nos interesa
+MIN_PRICE = 0.08
+MAX_PRICE = 0.92
 
 
 # ============================================================
 # API
 # ============================================================
-def api_get(url, retries=3):
+
+def api_get(url, retries=3, delay=3):
     for attempt in range(retries):
         try:
             req = urllib.request.Request(url)
@@ -157,71 +58,45 @@ def api_get(url, retries=3):
             return json.loads(resp.read())
         except Exception as e:
             if attempt == retries - 1:
-                raise e
-            import time; time.sleep(3)
+                return None
+            time.sleep(delay)
+    return None
 
 
 def get_positions(address, limit=50):
     """Posiciones activas de un trader."""
-    try:
-        params = urllib.parse.urlencode({
-            "user": address.lower(),
-            "sizeThreshold": "0.1",
-            "limit": limit,
-            "sortBy": "CURRENT",
-            "sortDirection": "DESC",
-        })
-        return api_get(f"{DATA_API}/positions?{params}")
-    except Exception as e:
-        print(f"  Error posiciones: {e}")
-        return []
-
-
-def get_activity(address, limit=50):
-    """Actividad reciente de un trader."""
-    try:
-        params = urllib.parse.urlencode({
-            "user": address.lower(),
-            "limit": limit,
-        })
-        return api_get(f"{DATA_API}/activity?{params}")
-    except Exception as e:
-        print(f"  Error actividad: {e}")
-        return []
+    params = urllib.parse.urlencode({
+        "user": address.lower(),
+        "sizeThreshold": "0.1",
+        "limit": limit,
+        "sortBy": "CURRENT",
+        "sortDirection": "DESC",
+    })
+    return api_get(f"{DATA_API}/positions?{params}") or []
 
 
 def get_closed_positions(address, limit=100):
-    """Posiciones cerradas para calcular win rate."""
-    try:
-        params = urllib.parse.urlencode({
-            "user": address.lower(),
-            "sizeThreshold": "0.1",
-            "limit": limit,
-            "sortBy": "CURRENT",
-            "sortDirection": "DESC",
-        })
-        return api_get(f"{DATA_API}/positions?{params}&closed=true")
-    except Exception:
-        return []
+    """Posiciones cerradas para win rate."""
+    params = urllib.parse.urlencode({
+        "user": address.lower(),
+        "sizeThreshold": "0.1",
+        "limit": limit,
+        "sortBy": "CURRENT",
+        "sortDirection": "DESC",
+    })
+    return api_get(f"{DATA_API}/positions?{params}&closed=true") or []
 
 
 # ============================================================
 # PARSEO
 # ============================================================
+
 def parse_city(title):
-    """Extrae la ciudad de una pregunta de temperatura."""
     match = re.search(r"temperature in (.+?) (?:be |between |\d)", title, re.IGNORECASE)
     return match.group(1).strip() if match else None
 
 
 def parse_condition(title):
-    """
-    Clasifica el tipo de condición:
-      exact       → "be 13°C on"
-      at_or_above → "13°C or higher/above"
-      at_or_below → "13°C or below"
-      range       → "between 60-65°F"
-    """
     t = title.lower()
     if "or higher" in t or "or above" in t:
         return "at_or_above"
@@ -233,6 +108,27 @@ def parse_condition(title):
         return "exact"
 
 
+def parse_date(title):
+    """Extrae fecha del título del mercado."""
+    match = re.search(
+        r"((?:January|February|March|April|May|June"
+        r"|July|August|September|October|November|December)"
+        r"\s+\d+)",
+        title, re.IGNORECASE
+    )
+    if not match:
+        return None
+    months = {
+        "january":"01","february":"02","march":"03","april":"04",
+        "may":"05","june":"06","july":"07","august":"08",
+        "september":"09","october":"10","november":"11","december":"12"
+    }
+    parts = match.group(1).strip().split()
+    if len(parts) != 2 or parts[0].lower() not in months:
+        return None
+    return f"2026-{months[parts[0].lower()]}-{parts[1].zfill(2)}"
+
+
 def parse_temp(title):
     """Extrae temperatura y unidad."""
     match = re.search(r"(\d+)°([CF])", title)
@@ -241,300 +137,259 @@ def parse_temp(title):
     return None, None
 
 
-def market_key(position):
+def is_temperature_market(title):
+    """Detecta si una posición es de un mercado de temperatura."""
+    return bool(re.search(r"temperature", title, re.IGNORECASE))
+
+
+# ============================================================
+# DB
+# ============================================================
+
+def load_db():
+    if not os.path.exists(DB_FILE):
+        return {"traders": {}, "meta": {}}
+    with open(DB_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_db(db):
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(db, f, indent=2, ensure_ascii=False)
+
+
+def get_trackable_traders(db):
     """
-    Clave única para identificar un mercado entre traders.
-    Usamos el título truncado (55 chars) como proxy —
-    suficiente para detectar coincidencias.
+    Devuelve los traders que vale la pena analizar en profundidad.
+    Excluye los marcados como 'reference' (ColdMath, Trader2) —
+    los analizamos pero no generamos señales de ellos.
     """
-    title = position.get("title", "")
-    return title[:60].strip().lower()
+    result = {}
+    for name, info in db.get("traders", {}).items():
+        addr = info.get("address", "")
+        if not addr:
+            continue
+        result[name] = {
+            "address": addr,
+            "strategy": info.get("strategy", "unknown"),
+            "is_reference": "reference" in info.get("tags", []),
+        }
+    return result
 
 
 # ============================================================
 # ANÁLISIS POR TRADER
 # ============================================================
-def analyze_trader(name, address):
-    """Analiza un trader y devuelve un dict con todos sus datos."""
-    print(f"\n  Analizando {name} ({address[:14]}...)...")
 
+def analyze_trader(name, address, is_reference=False):
+    """
+    Analiza un trader. Devuelve dict con estadísticas + posiciones
+    de temperatura en nuestro rango de precio (las señales).
+    """
     positions = get_positions(address)
-    activity = get_activity(address)
     closed = get_closed_positions(address, limit=100)
 
-    # --- Estadísticas básicas ---
+    # Win rate
     wins = sum(1 for p in closed if float(p.get("cashPnl", 0)) > 0)
     losses = sum(1 for p in closed if float(p.get("cashPnl", 0)) < 0)
-    total_pnl_closed = sum(float(p.get("cashPnl", 0)) for p in closed)
+    total_pnl = sum(float(p.get("cashPnl", 0)) for p in closed)
     win_rate = wins / (wins + losses) * 100 if (wins + losses) > 0 else 0
 
-    # --- Distribución de precios ---
-    price_dist = {"0.00-0.10": 0, "0.10-0.50": 0, "0.50-0.90": 0, "0.90-1.00": 0}
-    for p in positions:
-        price = float(p.get("avgPrice", 0))
-        if price < 0.10:
-            price_dist["0.00-0.10"] += 1
-        elif price < 0.50:
-            price_dist["0.10-0.50"] += 1
-        elif price < 0.90:
-            price_dist["0.50-0.90"] += 1
-        else:
-            price_dist["0.90-1.00"] += 1
-
-    # --- Posiciones en nuestro rango ---
-    our_range = [
+    # Posiciones de temperatura activas
+    temp_positions = [
         p for p in positions
-        if MIN_PRICE <= float(p.get("avgPrice", 0)) <= MAX_PRICE
+        if is_temperature_market(p.get("title", ""))
     ]
 
-    # --- Condiciones apostadas ---
-    conditions = {}
-    for p in positions:
-        c = parse_condition(p.get("title", ""))
-        conditions[c] = conditions.get(c, 0) + 1
+    # Posiciones en nuestro rango de precio → señales potenciales
+    signals = []
+    for p in temp_positions:
+        avg_price = float(p.get("avgPrice", 0))
+        cur_price = float(p.get("curPrice", 0))
 
-    # --- Ciudades ---
-    cities = {}
+        if not (MIN_PRICE <= avg_price <= MAX_PRICE):
+            continue
+
+        title = p.get("title", "")
+        city = parse_city(title)
+        condition = parse_condition(title)
+        market_date = parse_date(title)
+        temp, unit = parse_temp(title)
+        outcome = p.get("outcome", "")
+        cash_pnl = float(p.get("cashPnl", 0))
+        pct_pnl = float(p.get("percentPnl", 0))
+
+        signals.append({
+            "trader": name,
+            "is_reference": is_reference,
+            "title": title[:80],
+            "city": city,
+            "condition": condition,
+            "date": market_date,
+            "temp": temp,
+            "unit": unit,
+            "outcome": outcome,
+            "avg_price": round(avg_price, 4),
+            "cur_price": round(cur_price, 4),
+            "cash_pnl": round(cash_pnl, 2),
+            "pct_pnl": round(pct_pnl, 1),
+            # Para que bot.py pueda matchear
+            "match_key": f"{city}|{market_date}|{condition}|{temp}|{unit}",
+        })
+
+    # Distribución de precios (todas las posiciones activas)
+    price_dist = {"low": 0, "mid": 0, "high": 0}
     for p in positions:
+        pr = float(p.get("avgPrice", 0))
+        if pr < 0.06:
+            price_dist["low"] += 1
+        elif pr <= 0.90:
+            price_dist["mid"] += 1
+        else:
+            price_dist["high"] += 1
+
+    # Ciudades
+    cities = {}
+    for p in temp_positions:
         city = parse_city(p.get("title", ""))
         if city:
             cities[city] = cities.get(city, 0) + 1
 
-    # --- Timing ---
-    hours = {}
-    for t in activity:
-        ts = t.get("timestamp", t.get("createdAt", ""))
-        if ts:
-            try:
-                dt = datetime.fromtimestamp(int(ts), tz=timezone.utc)
-                h = dt.hour
-                hours[h] = hours.get(h, 0) + 1
-            except Exception:
-                pass
-
-    # --- Movimiento de precio (validación de edge) ---
-    # Para posiciones con ganancia >20%, el precio se movió significativamente
-    # después de la entrada → confirma edge real
-    big_movers = []
-    for p in positions:
-        pct = float(p.get("percentPnl", 0))
-        if abs(pct) >= 20:
-            city = parse_city(p.get("title", ""))
-            title_short = p.get("title", "?")[:55]
-            outcome = p.get("outcome", "?")
-            avg = float(p.get("avgPrice", 0))
-            cur = float(p.get("curPrice", 0))
-            pnl = float(p.get("cashPnl", 0))
-            big_movers.append({
-                "city": city,
-                "title": title_short,
-                "outcome": outcome,
-                "avg_price": avg,
-                "cur_price": cur,
-                "pct_pnl": pct,
-                "cash_pnl": pnl,
-            })
-
     return {
         "name": name,
         "address": address,
+        "is_reference": is_reference,
         "n_positions": len(positions),
-        "n_closed": len(closed),
+        "n_temp": len(temp_positions),
+        "n_signals": len(signals),
         "win_rate": round(win_rate, 1),
         "wins": wins,
         "losses": losses,
-        "pnl_closed": round(total_pnl_closed, 2),
-        "price_distribution": price_dist,
-        "n_our_range": len(our_range),
-        "our_range_positions": [
-            {
-                "title": p.get("title", "?")[:60],
-                "outcome": p.get("outcome", "?"),
-                "avg_price": float(p.get("avgPrice", 0)),
-                "cur_price": float(p.get("curPrice", 0)),
-                "pct_pnl": float(p.get("percentPnl", 0)),
-                "cash_pnl": float(p.get("cashPnl", 0)),
-                "condition": parse_condition(p.get("title", "")),
-                "city": parse_city(p.get("title", "")),
-            }
-            for p in our_range
-        ],
-        "conditions": conditions,
+        "pnl_closed": round(total_pnl, 2),
+        "price_dist": price_dist,
         "cities": cities,
-        "timing_hours": hours,
-        "big_movers": big_movers,
-        "positions_raw_keys": [market_key(p) for p in positions],
+        "signals": signals,
     }
 
 
 # ============================================================
-# CONSENSO ENTRE TRADERS
+# CONSENSO
 # ============================================================
-def find_consensus(trader_data_list):
-    """
-    Detecta mercados donde coinciden 2 o más traders DISTINTOS.
-    Filtra casos donde el mismo trader aparece varias veces
-    en el mismo mercado (posiciones YES y NO a la vez).
-    """
-    market_to_traders = {}
-    for td in trader_data_list:
-        for key in td["positions_raw_keys"]:
-            if key not in market_to_traders:
-                market_to_traders[key] = []
-            # Solo añadir si este trader no está ya para este mercado
-            if td["name"] not in market_to_traders[key]:
-                market_to_traders[key].append(td["name"])
 
-    # Solo mercados con 2+ traders DISTINTOS
+def find_consensus(all_results):
+    """
+    Detecta mercados donde 2+ traders coinciden.
+    Usa match_key para identificar el mismo mercado.
+    """
+    market_to_signals = {}  # match_key → lista de señales
+
+    for result in all_results:
+        for signal in result["signals"]:
+            key = signal["match_key"]
+            if key not in market_to_signals:
+                market_to_signals[key] = []
+            # No duplicar el mismo trader
+            if not any(s["trader"] == signal["trader"] for s in market_to_signals[key]):
+                market_to_signals[key].append(signal)
+
+    # Solo mercados con 2+ traders
     consensus = {
-        k: v for k, v in market_to_traders.items()
+        k: v for k, v in market_to_signals.items()
         if len(v) >= 2
     }
     return consensus
 
 
 # ============================================================
-# MOSTRAR RESULTADOS
+# SEÑALES PARA BOT.PY
 # ============================================================
-def print_results(trader_data_list, consensus):
-    print(f"\n{'='*60}")
-    print("RESUMEN POR TRADER")
-    print(f"{'='*60}")
 
-    for td in trader_data_list:
-        print(f"\n📊 {td['name']} ({td['address'][:14]}...)")
-        print(f"  Posiciones activas: {td['n_positions']}")
-        print(f"  Win rate (cerradas): {td['win_rate']:.1f}% "
-              f"({td['wins']}W/{td['losses']}L, PnL: ${td['pnl_closed']:+.2f})")
+def generate_signals_file(all_results, consensus):
+    """
+    Genera signals.json que bot.py lee en cada ciclo.
+    Estructura simple: lista de señales con toda la info necesaria
+    para que bot.py pueda cruzar con sus propios candidatos.
+    """
+    # Todas las señales de traders no-reference
+    actionable = []
+    for result in all_results:
+        if result["is_reference"]:
+            continue
+        for signal in result["signals"]:
+            # Marcar si hay consenso
+            signal["has_consensus"] = signal["match_key"] in consensus
+            if signal["has_consensus"]:
+                others = [
+                    s["trader"] for s in consensus[signal["match_key"]]
+                    if s["trader"] != signal["trader"]
+                ]
+                signal["consensus_with"] = others
+            else:
+                signal["consensus_with"] = []
+            actionable.append(signal)
 
-        # Distribución de precios
-        dist = td["price_distribution"]
-        print(f"  Precios — bajo(<0.10):{dist['0.00-0.10']} "
-              f"mid(0.10-0.90):{dist['0.10-0.50']+dist['0.50-0.90']} "
-              f"alto(>0.90):{dist['0.90-1.00']}")
-
-        # Horario de actividad
-        if td["timing_hours"]:
-            peak_hour = max(td["timing_hours"], key=td["timing_hours"].get)
-            print(f"  Hora pico de actividad: {peak_hour:02d}:00 UTC "
-                  f"({td['timing_hours'][peak_hour]} trades)")
-
-        # Condiciones favoritas
-        if td["conditions"]:
-            top_cond = max(td["conditions"], key=td["conditions"].get)
-            print(f"  Condición más usada: {top_cond} "
-                  f"({td['conditions'][top_cond]} posiciones)")
-
-    # ---- CONSENSO ----
-    print(f"\n{'='*60}")
-    print("🎯 CONSENSO ENTRE TRADERS (mercados compartidos)")
-    print(f"{'='*60}")
-    if consensus:
-        for market_title, traders_in in consensus.items():
-            print(f"\n  ✅ {' + '.join(traders_in)}:")
-            print(f"     {market_title[:70]}")
-    else:
-        print("  No hay mercados compartidos en este momento.")
-
-    # ---- POSICIONES EN NUESTRO RANGO ----
-    print(f"\n{'='*60}")
-    print(f"💡 POSICIONES EN NUESTRO RANGO ({MIN_PRICE}-{MAX_PRICE})")
-    print(f"   → Estas son las más relevantes para nuestra estrategia")
-    print(f"{'='*60}")
-
-    found_any = False
-    for td in trader_data_list:
-        if td["our_range_positions"]:
-            found_any = True
-            print(f"\n  {td['name']} ({len(td['our_range_positions'])} posiciones):")
-            for p in td["our_range_positions"]:
-                icon = "🟢" if p["pct_pnl"] >= 0 else "🔴"
-                move = p["cur_price"] - p["avg_price"]
-                print(f"    {icon} {p['outcome']} | entrada: ${p['avg_price']:.2f} → "
-                      f"ahora: ${p['cur_price']:.2f} ({move:+.2f}) | "
-                      f"PnL: {p['pct_pnl']:+.1f}%")
-                print(f"       {p['title'][:60]}")
-                print(f"       Ciudad: {p['city']} | Condición: {p['condition']}")
-    if not found_any:
-        print("  Ningún trader tiene posiciones en nuestro rango ahora mismo.")
-
-    # ---- MOVIMIENTOS DE PRECIO GRANDES ----
-    print(f"\n{'='*60}")
-    print("📈 VALIDACIÓN DE EDGE (movimientos >20% desde entrada)")
-    print(f"   → Si subió mucho después de que entraron, el edge era real")
-    print(f"{'='*60}")
-
-    found_movers = False
-    for td in trader_data_list:
-        if td["big_movers"]:
-            found_movers = True
-            print(f"\n  {td['name']}:")
-            for m in td["big_movers"][:5]:  # Top 5
-                icon = "🟢" if m["pct_pnl"] >= 0 else "🔴"
-                print(f"    {icon} {m['outcome']} @ ${m['avg_price']:.3f} → "
-                      f"${m['cur_price']:.3f} ({m['pct_pnl']:+.0f}%) | "
-                      f"${m['cash_pnl']:+.2f}")
-                print(f"       {m['title'][:60]}")
-    if not found_movers:
-        print("  Sin movimientos grandes en este momento.")
-
-    # ---- CIUDADES CON MAYOR ACTIVIDAD AGREGADA ----
-    print(f"\n{'='*60}")
-    print("🌍 CIUDADES CON MAYOR ACTIVIDAD (todos los traders)")
-    print(f"{'='*60}")
-    city_total = {}
-    for td in trader_data_list:
-        for city, count in td["cities"].items():
-            city_total[city] = city_total.get(city, 0) + count
-
-    our_cities = {
-        "Seoul", "London", "Tel Aviv", "Shanghai", "Tokyo", "New York City",
-        "Beijing", "Hong Kong", "Singapore", "Toronto", "Chicago", "Wellington",
-        "Munich", "Warsaw", "Ankara", "Atlanta", "Shenzhen", "Paris",
-        "Buenos Aires", "Miami", "Madrid", "Seattle", "Dallas", "Lucknow",
-        "Sao Paulo", "Taipei", "Milan", "Chongqing", "Chengdu", "Wuhan",
+    output = {
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "n_traders_analyzed": len(all_results),
+        "n_actionable_signals": len(actionable),
+        "n_consensus_markets": len(consensus),
+        "signals": actionable,
     }
 
-    for city, count in sorted(city_total.items(), key=lambda x: -x[1])[:15]:
-        status = "✅" if city in our_cities else "❌ FALTA"
-        print(f"  {city}: {count} posiciones totales  {status}")
+    with open(SIGNALS_FILE, "w", encoding="utf-8") as f:
+        json.dump(output, f, indent=2, ensure_ascii=False)
+
+    return output
+
+
+def get_trader_signals():
+    """
+    Función pública para bot.py.
+    Lee signals.json y devuelve las señales.
+    Si el archivo tiene más de 12 horas, devuelve vacío (stale).
+    """
+    if not os.path.exists(SIGNALS_FILE):
+        return []
+
+    try:
+        with open(SIGNALS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        # Check freshness
+        generated = datetime.fromisoformat(data["generated"])
+        age_hours = (datetime.now(timezone.utc) - generated).total_seconds() / 3600
+        if age_hours > 12:
+            return []
+
+        return data.get("signals", [])
+    except Exception:
+        return []
 
 
 # ============================================================
 # GUARDAR HISTÓRICO
 # ============================================================
-def save_history(trader_data_list, consensus):
-    """
-    Guarda el análisis en trader_history.json.
-    Cada ejecución añade una entrada nueva — nunca sobreescribe.
-    Así puedes ver cómo evolucionan las posiciones con el tiempo.
-    """
+
+def save_history(all_results, consensus):
+    """Añade entrada al histórico acumulativo."""
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "traders": [
             {
-                "name": td["name"],
-                "address": td["address"],
-                "n_positions": td["n_positions"],
-                "win_rate": td["win_rate"],
-                "pnl_closed": td["pnl_closed"],
-                "our_range_count": td["n_our_range"],
-                "price_distribution": td["price_distribution"],
-                "conditions": td["conditions"],
-                "top_cities": dict(
-                    sorted(td["cities"].items(), key=lambda x: -x[1])[:10]
-                ),
-                "timing_hours": td["timing_hours"],
-                "our_range_positions": td["our_range_positions"],
-                "big_movers": td["big_movers"],
+                "name": r["name"],
+                "n_positions": r["n_positions"],
+                "n_temp": r["n_temp"],
+                "n_signals": r["n_signals"],
+                "win_rate": r["win_rate"],
+                "pnl_closed": r["pnl_closed"],
+                "price_dist": r["price_dist"],
+                "top_cities": dict(sorted(r["cities"].items(), key=lambda x: -x[1])[:5]),
             }
-            for td in trader_data_list
+            for r in all_results
         ],
-        "consensus_markets": list(consensus.keys()),
         "n_consensus": len(consensus),
     }
 
-    # Cargar histórico existente
     history = []
     if os.path.exists(HISTORY_FILE):
         try:
@@ -545,85 +400,165 @@ def save_history(trader_data_list, consensus):
 
     history.append(entry)
 
-    # Guardar
+    # Mantener solo últimas 50 entradas (evitar que crezca infinito)
+    if len(history) > 50:
+        history = history[-50:]
+
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(history, f, indent=2, ensure_ascii=False)
 
-    print(f"\n💾 Análisis guardado en {HISTORY_FILE} "
-          f"(total entradas: {len(history)})")
 
+# ============================================================
+# PRINTS
+# ============================================================
 
-def print_history_summary():
-    """Muestra tendencias del histórico si hay más de una entrada."""
-    if not os.path.exists(HISTORY_FILE):
-        return
-
-    try:
-        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-            history = json.load(f)
-    except Exception:
-        return
-
-    if len(history) < 2:
-        return
-
+def print_summary(all_results, consensus, signals_output):
+    """Resumen legible para consola."""
     print(f"\n{'='*60}")
-    print(f"📅 TENDENCIAS HISTÓRICAS ({len(history)} análisis guardados)")
+    print(f"📊 RESUMEN DE ANÁLISIS")
     print(f"{'='*60}")
 
-    first = history[0]
-    last = history[-1]
-    print(f"  Primer análisis: {first['timestamp'][:16]} UTC")
-    print(f"  Último análisis: {last['timestamp'][:16]} UTC")
-    print(f"  Mercados en consenso — antes: {first['n_consensus']} | "
-          f"ahora: {last['n_consensus']}")
+    for r in all_results:
+        ref = " (REF)" if r["is_reference"] else ""
+        print(f"\n  {r['name']}{ref} — {r['address'][:14]}...")
+        print(f"    Posiciones: {r['n_positions']} total, {r['n_temp']} temp, "
+              f"{r['n_signals']} en nuestro rango")
+        print(f"    Win rate: {r['win_rate']:.1f}% ({r['wins']}W/{r['losses']}L) | "
+              f"PnL: ${r['pnl_closed']:+.2f}")
+        print(f"    Precios: low={r['price_dist']['low']} mid={r['price_dist']['mid']} "
+              f"high={r['price_dist']['high']}")
+        if r["cities"]:
+            top_3 = sorted(r["cities"].items(), key=lambda x: -x[1])[:3]
+            print(f"    Ciudades: {', '.join(f'{c}({n})' for c,n in top_3)}")
 
-    # Evolución del win rate por trader
-    for t_now in last["traders"]:
-        name = t_now["name"]
-        t_first = next((t for t in first["traders"] if t["name"] == name), None)
-        if t_first:
-            wr_delta = t_now["win_rate"] - t_first["win_rate"]
-            print(f"  {name} — win rate: {t_first['win_rate']:.1f}% → "
-                  f"{t_now['win_rate']:.1f}% ({wr_delta:+.1f}pp)")
+    # Señales accionables
+    actionable = [s for s in signals_output.get("signals", []) if not s.get("is_reference")]
+    if actionable:
+        print(f"\n{'='*60}")
+        print(f"🎯 SEÑALES ACCIONABLES ({len(actionable)})")
+        print(f"{'='*60}")
+        for s in actionable[:10]:
+            consensus_mark = " 🤝" if s["has_consensus"] else ""
+            print(f"\n  {s['trader']}: {s['outcome']} @ ${s['avg_price']:.3f} "
+                  f"→ ${s['cur_price']:.3f}{consensus_mark}")
+            print(f"    {s['city']} | {s['condition']} | {s['date']} | {s['temp']}°{s['unit']}")
+            if s["consensus_with"]:
+                print(f"    Consenso con: {', '.join(s['consensus_with'])}")
+    else:
+        print(f"\n  Sin señales accionables en este momento.")
+
+    # Consenso
+    if consensus:
+        print(f"\n{'='*60}")
+        print(f"🤝 MERCADOS CON CONSENSO ({len(consensus)})")
+        print(f"{'='*60}")
+        for key, sigs in consensus.items():
+            traders = [s["trader"] for s in sigs]
+            city = sigs[0].get("city", "?")
+            date = sigs[0].get("date", "?")
+            print(f"  {' + '.join(traders)}: {city} {date}")
+
+
+# ============================================================
+# FUNCIÓN PARA BOT.PY — Resumen Telegram
+# ============================================================
+
+def get_telegram_summary():
+    """
+    Genera un resumen corto para el comando /traders de Telegram.
+    """
+    if not os.path.exists(SIGNALS_FILE):
+        return "📊 Sin datos de traders.\nEjecuta trader_analyzer.py primero."
+
+    try:
+        with open(SIGNALS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return "❌ Error leyendo signals.json"
+
+    generated = data.get("generated", "?")[:16]
+    n_signals = data.get("n_actionable_signals", 0)
+    n_consensus = data.get("n_consensus_markets", 0)
+
+    text = f"📊 <b>Traders Intel</b>\n"
+    text += f"Última actualización: {generated} UTC\n\n"
+
+    if n_signals == 0:
+        text += "Sin señales accionables ahora.\n"
+    else:
+        text += f"Señales: {n_signals} | Consenso: {n_consensus}\n\n"
+
+        # Mostrar hasta 5 señales
+        for s in data.get("signals", [])[:5]:
+            if s.get("is_reference"):
+                continue
+            icon = "🤝" if s.get("has_consensus") else "📍"
+            text += (f"{icon} {s['trader']}: {s['outcome']} {s['city']} "
+                     f"{s['date']} ${s['avg_price']:.2f}\n")
+
+    return text
 
 
 # ============================================================
 # MAIN
 # ============================================================
-if __name__ == "__main__":
-    print("🔍 ANALIZADOR MULTI-TRADER — Polymarket")
 
-    # Cargar DB de traders
-    print(f"\nCargando {DB_FILE}...")
-    db = load_traders_db()
-    all_traders = get_all_traders(db)
-    print(f"  {len(all_traders)} traders a analizar: {', '.join(all_traders.keys())}")
-    print(f"Buscando posiciones en rango ${MIN_PRICE}-${MAX_PRICE}...\n")
+def main(signals_only=False):
+    print("=" * 60)
+    print("📊 TRADER ANALYZER v2")
+    print("=" * 60)
 
-    # Analizar cada trader
-    trader_data_list = []
-    for name, address in all_traders.items():
-        data = analyze_trader(name, address)
-        trader_data_list.append(data)
-        # Actualizar estadísticas en la DB
-        update_trader_stats(db, name, data)
+    db = load_db()
+    traders = get_trackable_traders(db)
 
-    # Guardar DB actualizada
-    save_traders_db(db)
+    if not traders:
+        print("❌ No hay traders en traders_db.json")
+        print("   Ejecuta find_traders.py primero.")
+        return
 
-    # Detectar consenso
-    consensus = find_consensus(trader_data_list)
+    print(f"\nAnalizando {len(traders)} traders...")
 
-    # Mostrar resultados en consola
-    print_results(trader_data_list, consensus)
+    all_results = []
+    for name, info in traders.items():
+        print(f"\n  → {name}...")
+        result = analyze_trader(name, info["address"], info["is_reference"])
+        all_results.append(result)
 
-    # Mostrar tendencias históricas
-    print_history_summary()
+        # Actualizar DB con stats frescas
+        if name in db["traders"]:
+            db["traders"][name].update({
+                "last_analyzed": datetime.now(timezone.utc).isoformat(),
+                "last_win_rate": result["win_rate"],
+                "last_n_positions": result["n_positions"],
+                "last_n_signals": result["n_signals"],
+                "last_pnl_closed": result["pnl_closed"],
+            })
 
-    # Guardar en histórico
-    save_history(trader_data_list, consensus)
+        time.sleep(0.5)  # rate limit entre traders
+
+    save_db(db)
+
+    # Consenso
+    consensus = find_consensus(all_results)
+
+    # Generar signals.json
+    signals_output = generate_signals_file(all_results, consensus)
+    print(f"\n💾 {SIGNALS_FILE}: {signals_output['n_actionable_signals']} señales")
+
+    if not signals_only:
+        # Prints detallados
+        print_summary(all_results, consensus, signals_output)
+
+        # Histórico
+        save_history(all_results, consensus)
+        print(f"\n💾 Histórico actualizado en {HISTORY_FILE}")
 
     print(f"\n✅ Análisis completado.")
-    print(f"   {DB_FILE}: {len(db['traders'])} traders registrados")
-    print(f"   Para añadir traders nuevos: edita {DB_FILE} o ejecuta find_traders.py")
+    print(f"   Bot.py puede leer señales con: from trader_analyzer import get_trader_signals")
+
+    return signals_output
+
+
+if __name__ == "__main__":
+    signals_only = "--signals" in sys.argv
+    main(signals_only=signals_only)

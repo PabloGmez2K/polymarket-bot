@@ -4,9 +4,11 @@ import json
 import re
 import math
 import os
+import sys
 import time
 import logging
 import threading
+import subprocess
 from datetime import date, datetime, timezone, timedelta
 
 from dotenv import load_dotenv
@@ -17,17 +19,20 @@ from py_clob_client.order_builder.constants import BUY, SELL
 load_dotenv()
 
 # =============================================================
-# bot.py v8 — Más mercados + Reintentos de red
-# Sesión 8: Ampliar ventana de fechas, robustez de red
+# bot.py v9 — Pipeline de inteligencia de traders integrado
+# Sesión 9: Señales de traders + descubrimiento automático
 # =============================================================
 #
-# Nuevo en v8:
-#   - MIN_DAYS_AHEAD = 0 (incluye mercados de hoy)
-#     → A las 08:00 UTC, Tokyo/Shanghai ya casi han alcanzado el max
-#     → El modelo usa sigma=0.8°C para hoy (máxima confianza)
-#   - MAX_DAYS_AHEAD = 5 (más mercados candidatos)
-#   - Reintentos automáticos en llamadas a APIs (3 intentos)
-#     → Fix del error "Connection reset by peer" del ciclo 23:00
+# Nuevo en v9:
+#   - Cruza edge con señales de traders tracked (signals.json)
+#   - Comando /traders en Telegram
+#   - Descubrimiento semanal automático (lunes 08:00 UTC)
+#   - Análisis diario de traders (primer ciclo del día)
+#   - Decision log anota cuando trader confirma edge
+#
+# Heredado de v8:
+#   - MIN_DAYS_AHEAD = 0, MAX_DAYS_AHEAD = 5
+#   - Reintentos automáticos en APIs
 # =============================================================
 
 
@@ -100,6 +105,8 @@ bot_state = {
     "cycle_count": 0,
     "last_trades": [],
     "last_decision_summary": "",  # Resumen del último ciclo para /log
+    "last_trader_scan": None,     # v9: última ejecución de find_traders
+    "last_trader_analysis": None, # v9: última ejecución de trader_analyzer
 }
 
 force_event = threading.Event()
@@ -109,6 +116,94 @@ clob_client = None
 # Se llena cada vez que el bot escanea mercados o coloca órdenes.
 # Así cuando consultas /ordenes, sabe a qué mercado pertenece cada token.
 known_tokens = {}
+
+
+# =============================================================
+# PIPELINE DE TRADERS (v9)
+# =============================================================
+
+def load_trader_signals():
+    """
+    Lee signals.json generado por trader_analyzer.py.
+    Devuelve dict de match_key → lista de señales para cruce rápido.
+    Si el archivo no existe o es viejo (>12h), devuelve vacío.
+    """
+    signals_file = "signals.json"
+    if not os.path.exists(signals_file):
+        return {}
+    try:
+        with open(signals_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        # Check freshness
+        generated = datetime.fromisoformat(data.get("generated", "2000-01-01T00:00:00+00:00"))
+        age_hours = (datetime.now(timezone.utc) - generated).total_seconds() / 3600
+        if age_hours > 12:
+            return {}
+        # Indexar por match_key para cruce O(1)
+        index = {}
+        for s in data.get("signals", []):
+            key = s.get("match_key", "")
+            if key:
+                if key not in index:
+                    index[key] = []
+                index[key].append(s)
+        return index
+    except Exception as e:
+        log.warning(f"Error cargando signals.json: {e}")
+        return {}
+
+
+def run_trader_analysis():
+    """
+    Ejecuta trader_analyzer.py como subproceso.
+    Se llama una vez al día (primer ciclo) para actualizar signals.json.
+    """
+    import subprocess
+    try:
+        log.info("Ejecutando trader_analyzer.py...")
+        result = subprocess.run(
+            [sys.executable, "trader_analyzer.py", "--signals"],
+            capture_output=True, text=True, timeout=120
+        )
+        if result.returncode == 0:
+            log.info("trader_analyzer.py completado OK")
+            bot_state["last_trader_analysis"] = datetime.now(timezone.utc)
+            return True
+        else:
+            log.warning(f"trader_analyzer.py error: {result.stderr[:200]}")
+            return False
+    except Exception as e:
+        log.warning(f"Error ejecutando trader_analyzer.py: {e}")
+        return False
+
+
+def run_trader_discovery():
+    """
+    Ejecuta find_traders.py como subproceso.
+    Se llama semanalmente (lunes 08:00 UTC) para descubrir nuevos traders.
+    """
+    import subprocess
+    try:
+        log.info("Ejecutando find_traders.py (descubrimiento semanal)...")
+        send_telegram("🔍 Descubrimiento semanal de traders iniciado...")
+        result = subprocess.run(
+            [sys.executable, "find_traders.py", "--quick"],
+            capture_output=True, text=True, timeout=300
+        )
+        if result.returncode == 0:
+            log.info("find_traders.py completado OK")
+            bot_state["last_trader_scan"] = datetime.now(timezone.utc)
+            # Después del descubrimiento, actualizar análisis
+            run_trader_analysis()
+            send_telegram("✅ Descubrimiento de traders completado")
+            return True
+        else:
+            log.warning(f"find_traders.py error: {result.stderr[:200]}")
+            send_telegram(f"⚠️ Error en descubrimiento: {result.stderr[:100]}")
+            return False
+    except Exception as e:
+        log.warning(f"Error ejecutando find_traders.py: {e}")
+        return False
 
 
 # =============================================================
@@ -170,7 +265,10 @@ MENU_KEYBOARD = {
             {"text": "📓 Log", "callback_data": "log"},
         ],
         [
+            {"text": "🔍 Traders", "callback_data": "traders"},
             {"text": "🚀 Forzar ciclo", "callback_data": "forzar"},
+        ],
+        [
             {"text": "⚡ Modo", "callback_data": "modo"},
         ],
     ]
@@ -480,9 +578,73 @@ def cmd_cancelar_modo():
     send_telegram(f"Sin cambios: {modo}", with_menu=True)
 
 
+def cmd_traders():
+    """
+    🔍 Muestra resumen de inteligencia de traders.
+    Lee signals.json y muestra señales accionables.
+    """
+    signals_file = "signals.json"
+    if not os.path.exists(signals_file):
+        send_telegram(
+            "🔍 <b>Traders Intel</b>\n\n"
+            "Sin datos todavía.\n"
+            "Se generarán automáticamente en el próximo ciclo.",
+            with_menu=True,
+        )
+        return
+
+    try:
+        with open(signals_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        send_telegram(f"❌ Error: {e}", with_menu=True)
+        return
+
+    generated = data.get("generated", "?")[:16]
+    n_signals = data.get("n_actionable_signals", 0)
+    n_consensus = data.get("n_consensus_markets", 0)
+    n_traders = data.get("n_traders_analyzed", 0)
+
+    text = f"🔍 <b>Traders Intel</b>\n"
+    text += f"Última actualización: {generated} UTC\n"
+    text += f"Traders: {n_traders} | Señales: {n_signals} | Consenso: {n_consensus}\n"
+
+    # Último scan y análisis
+    scan = bot_state.get("last_trader_scan")
+    analysis = bot_state.get("last_trader_analysis")
+    if scan:
+        text += f"\nÚltimo scan: {scan.strftime('%d/%m %H:%M')} UTC"
+    if analysis:
+        text += f"\nÚltimo análisis: {analysis.strftime('%d/%m %H:%M')} UTC"
+
+    if n_signals == 0:
+        text += "\n\nSin señales accionables ahora."
+    else:
+        text += f"\n\n<b>Señales activas:</b>\n"
+        shown = 0
+        for s in data.get("signals", []):
+            if s.get("is_reference"):
+                continue
+            if shown >= 8:
+                text += f"\n... y {n_signals - shown} más"
+                break
+            icon = "🤝" if s.get("has_consensus") else "📍"
+            city = s.get("city", "?")
+            date_str = s.get("date", "?")
+            outcome = s.get("outcome", "?")
+            price = s.get("avg_price", 0)
+            text += f"{icon} {s['trader']}: {outcome} {city} {date_str} ${price:.2f}\n"
+            shown += 1
+
+    if len(text) > 4000:
+        text = text[:3990] + "\n..."
+    send_telegram(text, with_menu=True)
+
+
 COMMANDS = {
     "estado": cmd_estado, "cartera": cmd_cartera, "ordenes": cmd_ordenes,
     "log": cmd_log, "forzar": cmd_forzar, "modo": cmd_modo,
+    "traders": cmd_traders,
     "confirmar_real": cmd_confirmar_real, "confirmar_dry": cmd_confirmar_dry,
     "cancelar_modo": cmd_cancelar_modo,
 }
@@ -838,7 +1000,7 @@ def main(client):
     bot_state["last_run"] = datetime.now(timezone.utc)
 
     log.info("=" * 65)
-    log.info(f"BOT v8 | {today_str} | {mode_label} | ${BANKROLL:.2f}")
+    log.info(f"BOT v9 | {today_str} | {mode_label} | ${BANKROLL:.2f}")
     log.info("=" * 65)
 
     # Decision log: registrar inicio
@@ -854,6 +1016,14 @@ def main(client):
         _save_decision_log(dl)
         bot_state["running"] = False
         return
+
+    # ---- v9: Cargar señales de traders ----
+    trader_signals = load_trader_signals()
+    n_signals = sum(len(v) for v in trader_signals.values())
+    if n_signals > 0:
+        dl.append(f"TRADERS: {n_signals} señales cargadas de signals.json")
+    else:
+        dl.append(f"TRADERS: sin señales (signals.json vacío o ausente)")
 
     # ---- PASO 0: STALE ----
     open_orders = get_open_orders(client)
@@ -1017,7 +1187,16 @@ def main(client):
             edge_analysis.append(f"  ✗ {city} {side} | edge={edge_pct:.1f}% → KELLY MUY BAJO (no alcanza $1 mín)")
             continue
 
-        edge_analysis.append(f"  ✓ {city} {side} {threshold}°{c['unit']} {c['date_iso']} | forecast={forecast_max:.1f}°C | nuestro={our_prob*100:.1f}% mercado={mkt_price*100:.1f}% | edge={edge_pct:.1f}% | ${position['amount']:.2f} EV=${position['expected_value']:+.2f}")
+        # v9: Cruzar con señales de traders
+        # match_key format: "city|date|condition|temp|unit"
+        match_key = f"{city}|{c['date_iso']}|{c['condition']}|{threshold}|{c['unit']}"
+        matching_traders = trader_signals.get(match_key, [])
+        trader_confirm = ""
+        if matching_traders:
+            names = [s["trader"] for s in matching_traders]
+            trader_confirm = f" 🤝 CONFIRMADO por: {', '.join(names)}"
+
+        edge_analysis.append(f"  ✓ {city} {side} {threshold}°{c['unit']} {c['date_iso']} | forecast={forecast_max:.1f}°C | nuestro={our_prob*100:.1f}% mercado={mkt_price*100:.1f}% | edge={edge_pct:.1f}% | ${position['amount']:.2f} EV=${position['expected_value']:+.2f}{trader_confirm}")
 
         trades.append({
             "question": c["question"], "city": city, "date": c["date_iso"],
@@ -1029,6 +1208,7 @@ def main(client):
             "liquidity": c["liquidity"],
             "station": RESOLUTION_STATIONS.get(city, {}).get("name", "?"),
             "token_id": token_id,
+            "trader_confirmed": [s["trader"] for s in matching_traders],  # v9
         })
 
     trades.sort(key=lambda x: x["position"]["expected_value"], reverse=True)
@@ -1091,6 +1271,10 @@ def main(client):
 
             if not DRY_RUN:
                 icon = "✅" if result["ok"] else "❌"
+                # v9: añadir confirmación de traders si existe
+                trader_line = ""
+                if trade.get("trader_confirmed"):
+                    trader_line = f"\n🤝 Confirmado: {', '.join(trade['trader_confirmed'])}"
                 send_telegram(
                     f"{icon} <b>Orden</b>\n"
                     f"{trade['city']} {trade['side']}\n"
@@ -1098,6 +1282,7 @@ def main(client):
                     f"({trade['position']['shares']:.1f}sh "
                     f"@ ${trade['position'].get('aggressive_price', 0):.2f})\n"
                     f"Edge: {trade['edge_pct']}% | EV: ${trade['position']['expected_value']:+.2f}"
+                    f"{trader_line}"
                 )
 
         ok = sum(1 for r in results if r["ok"])
@@ -1132,6 +1317,8 @@ def _save_decision_log(lines):
     for line in lines:
         if line.startswith("CICLO"):
             summary += f"<b>{line}</b>\n"
+        elif line.startswith("TRADERS:"):
+            summary += f"{line}\n"
         elif line.startswith("MERCADOS:"):
             summary += f"{line}\n"
         elif line.startswith("FILTROS:"):
@@ -1145,7 +1332,12 @@ def _save_decision_log(lines):
         elif line.startswith("SELECCIONADAS:"):
             summary += f"<b>{line}</b>\n"
         elif line.strip().startswith("✓"):
-            summary += f"🟢 {line.strip()[2:]}\n"
+            # v9: incluir líneas con confirmación de traders
+            text = line.strip()[2:]
+            if "🤝" in text:
+                summary += f"🟢🤝 {text}\n"
+            else:
+                summary += f"🟢 {text}\n"
         elif line.strip().startswith("✗") and "BAJO" not in line and "SIN EDGE" not in line:
             pass  # Omitir los descartados sin edge en el resumen
         elif line.strip().startswith("⏭"):
@@ -1172,9 +1364,49 @@ def get_next_run_time():
     return tomorrow.replace(hour=sorted(SCHEDULE_HOURS_UTC)[0], minute=0, second=0, microsecond=0)
 
 
+def should_run_daily_analysis():
+    """¿Toca actualizar señales de traders? Una vez al día."""
+    last = bot_state.get("last_trader_analysis")
+    if last is None:
+        return True
+    age_hours = (datetime.now(timezone.utc) - last).total_seconds() / 3600
+    return age_hours >= 20  # cada ~20h para que no se salte por timing
+
+
+def should_run_weekly_discovery():
+    """¿Toca descubrir traders nuevos? Lunes 08:00 UTC."""
+    now = datetime.now(timezone.utc)
+    if now.weekday() != 0:  # 0 = lunes
+        return False
+    if now.hour != sorted(SCHEDULE_HOURS_UTC)[0]:  # primer ciclo del día
+        return False
+    last = bot_state.get("last_trader_scan")
+    if last is None:
+        return True
+    age_hours = (datetime.now(timezone.utc) - last).total_seconds() / 3600
+    return age_hours >= 100  # mínimo ~4 días entre scans
+
+
+def run_trader_tasks():
+    """Ejecuta tareas del pipeline de traders según corresponda."""
+    # Descubrimiento semanal (lunes)
+    if should_run_weekly_discovery():
+        try:
+            run_trader_discovery()
+        except Exception as e:
+            log.warning(f"Error en descubrimiento de traders: {e}")
+
+    # Análisis diario
+    elif should_run_daily_analysis():
+        try:
+            run_trader_analysis()
+        except Exception as e:
+            log.warning(f"Error en análisis de traders: {e}")
+
+
 if __name__ == "__main__":
     log.info("=" * 65)
-    log.info(f"POLYMARKET BOT v8 | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
+    log.info(f"POLYMARKET BOT v9 | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
     log.info(f"Modo: {'DRY RUN' if DRY_RUN else 'REAL'}")
     log.info("=" * 65)
 
@@ -1189,12 +1421,15 @@ if __name__ == "__main__":
     modo = "DRY RUN" if DRY_RUN else "REAL"
     schedule = ", ".join(f"{h:02d}:00" for h in sorted(SCHEDULE_HOURS_UTC))
     send_telegram(
-        f"🤖 <b>Bot v8 arrancado</b>\n"
+        f"🤖 <b>Bot v9 arrancado</b>\n"
         f"Modo: {modo} | ${BANKROLL:.2f}\n"
-        f"Schedule: {schedule} UTC\n\n"
-        f"📓 Nuevo: toca Log para ver decisiones",
+        f"Schedule: {schedule} UTC\n"
+        f"🔍 Traders: auto-análisis diario, descubrimiento lunes",
         with_menu=True,
     )
+
+    # v9: Ejecutar análisis de traders antes del primer ciclo
+    run_trader_tasks()
 
     log.info("Primer ciclo...")
     try:
@@ -1213,6 +1448,9 @@ if __name__ == "__main__":
                 force_event.clear()
                 log.info("⚡ Forzado")
                 break
+
+        # v9: Tareas de traders antes de cada ciclo
+        run_trader_tasks()
 
         try:
             main(clob_client)
