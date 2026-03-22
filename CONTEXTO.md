@@ -386,6 +386,7 @@ $75 → 7 días rentables → +$25 = $100
 3. **Sin gestión activa v9:** 100% buy-and-hold. 5 posiciones a $0. Traders exitosos gestionan 50-58% activamente.
 4. **Open-Meteo vs Weather Underground:** No estamos usando la fuente de resolución. Error de 1-3°C posible.
 5. **BANKROLL hardcoded v10:** Bot calculaba presupuesto sobre $15 cuando solo quedaban $10.70. Fix: bankroll dinámico.
+6. **Cash balance API v10.1:** `client.get_balance()` devuelve $0 con Magic wallet. Bot creía tener $2.58 cuando tenía $30. Fix: si cash=0, usar BANKROLL como fallback.
 
 ### Lecciones de la investigación de traders
 1. **Entire-Hood (el mejor, +$4,153):** 0 pérdidas por resolución. Corta a -10%, toma a +17%. Solo aguanta lo que va a ganar seguro.

@@ -1218,11 +1218,11 @@ def get_effective_bankroll(client=None):
     Calcula el bankroll REAL: cash libre + valor de posiciones.
 
     El BANKROLL de Railway es un tope máximo. Pero si hemos perdido dinero,
-    el bankroll real es menor. Sin esto, el bot calcula presupuestos
-    sobre dinero que ya no existe.
+    el bankroll real es menor.
 
-    Usa client.get_balance() para cash libre (USDC disponible).
-    Usa Data API para valor de posiciones activas.
+    IMPORTANTE: client.get_balance() no funciona con Magic wallet
+    (devuelve 0). Si cash=0, usamos BANKROLL como fallback — es el
+    dato más fiable que tenemos de cuánto depositamos.
     """
     cash_balance = 0.0
     positions_value = 0.0
@@ -1256,12 +1256,19 @@ def get_effective_bankroll(client=None):
             log.warning(f"Error consultando posiciones: {e}")
 
     effective = cash_balance + positions_value
-    # Tope: nunca asumir más del BANKROLL depositado
-    effective = min(effective, BANKROLL)
-    # Mínimo: $1 para que el bot no se pare totalmente
-    effective = max(effective, 1.0)
 
-    log.info(f"Bankroll: ${effective:.2f} (cash=${cash_balance:.2f} + posiciones=${positions_value:.2f}, tope=${BANKROLL:.2f})")
+    # Si cash=0, probablemente get_balance() no funciona (Magic wallet bug)
+    # En ese caso, usar BANKROLL como fallback — es lo que depositamos
+    if cash_balance < 0.01 and BANKROLL > 0:
+        effective = BANKROLL
+        log.info(f"Bankroll: ${effective:.2f} (cash API no disponible, usando BANKROLL tope=${BANKROLL:.2f}, posiciones=${positions_value:.2f})")
+    else:
+        # Tope: nunca asumir más del BANKROLL depositado
+        effective = min(effective, BANKROLL)
+        # Mínimo: $1 para que el bot no se pare totalmente
+        effective = max(effective, 1.0)
+        log.info(f"Bankroll: ${effective:.2f} (cash=${cash_balance:.2f} + posiciones=${positions_value:.2f}, tope=${BANKROLL:.2f})")
+
     return effective
 
 
