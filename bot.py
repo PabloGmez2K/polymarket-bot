@@ -43,13 +43,13 @@ load_dotenv()
 DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
 BANKROLL = float(os.getenv("BANKROLL", "15.00"))
 
-MIN_EDGE = 10.0
+MIN_EDGE = float(os.getenv("MIN_EDGE", "7.0"))   # v9: env var, bajado de 10 a 7
 MIN_BET = 1.00
 MAX_BET_PCT = 0.05
 MAX_EXPOSURE_PCT = 0.40
 MIN_LIQUIDITY = 100
-MAX_DAYS_AHEAD = 5   # v8: ampliar de 3 a 5 (más candidatos)
-MIN_DAYS_AHEAD = 0   # v8: incluir mercados de hoy (sigma=0.8°C)
+MAX_DAYS_AHEAD = 5
+MIN_DAYS_AHEAD = 0
 
 MIN_PRICE = 0.08
 MAX_PRICE = 0.92
@@ -104,9 +104,11 @@ bot_state = {
     "running": False,
     "cycle_count": 0,
     "last_trades": [],
-    "last_decision_summary": "",  # Resumen del último ciclo para /log
-    "last_trader_scan": None,     # v9: última ejecución de find_traders
-    "last_trader_analysis": None, # v9: última ejecución de trader_analyzer
+    "last_decision_summary": "",
+    "last_trader_scan": None,
+    "last_trader_analysis": None,
+    "last_edge_analysis": [],       # v9: para /logfull
+    "last_trader_signals": {},      # v9: para cruce en /logfull
 }
 
 force_event = threading.Event()
@@ -279,14 +281,15 @@ MENU_KEYBOARD = {
             {"text": "💰 Cartera", "callback_data": "cartera"},
         ],
         [
-            {"text": "📋 Órdenes", "callback_data": "ordenes"},
             {"text": "📓 Log", "callback_data": "log"},
+            {"text": "📋 Detalle", "callback_data": "logfull"},
         ],
         [
             {"text": "🔍 Traders", "callback_data": "traders"},
-            {"text": "🚀 Forzar ciclo", "callback_data": "forzar"},
+            {"text": "📋 Órdenes", "callback_data": "ordenes"},
         ],
         [
+            {"text": "🚀 Forzar ciclo", "callback_data": "forzar"},
             {"text": "⚡ Modo", "callback_data": "modo"},
         ],
     ]
@@ -363,6 +366,7 @@ def cmd_estado():
         f"📊 <b>Estado del Bot</b>\n\n"
         f"Modo: {modo}\n"
         f"Bankroll: <b>${BANKROLL:.2f}</b>\n"
+        f"Min edge: {MIN_EDGE}%\n"
         f"Estado: {running}\n\n"
         f"Última ejecución: {last_str}\n"
         f"Próxima: {next_str}\n"
@@ -522,16 +526,36 @@ def cmd_ordenes():
 def cmd_log():
     """
     📓 Muestra qué hizo el bot en el último ciclo.
-
-    Esto es el "cerebro" del bot explicado: qué mercados vio,
-    qué edge calculó, por qué descartó unos y eligió otros.
+    Si no hay resumen en memoria (post-redeploy), lee del archivo.
     """
     summary = bot_state.get("last_decision_summary", "")
+
+    # Si no hay en memoria, intentar leer del archivo decisions.log
+    if not summary:
+        try:
+            if os.path.exists("decisions.log"):
+                with open("decisions.log", "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                # Buscar el último ciclo (empieza con "====")
+                last_cycle_start = -1
+                for i in range(len(lines) - 1, -1, -1):
+                    if "CICLO" in lines[i] and "=====" in lines[max(0, i-1)]:
+                        last_cycle_start = max(0, i - 1)
+                        break
+                if last_cycle_start >= 0:
+                    cycle_lines = lines[last_cycle_start:]
+                    summary = "📓 <b>Último ciclo (de archivo)</b>\n\n"
+                    for line in cycle_lines[:30]:  # máx 30 líneas
+                        clean = line.strip()
+                        if clean:
+                            summary += f"{clean}\n"
+        except Exception:
+            pass
+
     if not summary:
         send_telegram("📓 <b>Log</b>\n\nAún no hay ciclos registrados.", with_menu=True)
         return
 
-    # Telegram tiene límite de 4096 chars
     if len(summary) > 3900:
         summary = summary[:3900] + "\n..."
 
@@ -544,6 +568,91 @@ def cmd_forzar():
         return
     send_telegram("🚀 <b>Ciclo forzado</b>\nDespertando...")
     force_event.set()
+
+
+def cmd_logfull():
+    """
+    📋 Log detallado: muestra TODOS los mercados evaluados,
+    incluyendo por qué se descartó cada uno.
+    Cruza con señales de traders.
+    """
+    edge_analysis = bot_state.get("last_edge_analysis", [])
+    trader_signals = bot_state.get("last_trader_signals", {})
+
+    if not edge_analysis:
+        send_telegram(
+            "📋 <b>Log detallado</b>\n\nSin datos. Espera a que complete un ciclo.",
+            with_menu=True,
+        )
+        return
+
+    # Clasificar las líneas
+    accepted = []      # ✓
+    near_misses = []   # ✗ BAJO con edge ≥3%
+    no_edge = []       # ✗ SIN EDGE
+    duplicates = []    # ⏭
+    kelly_low = []     # ✗ KELLY
+
+    for line in edge_analysis:
+        stripped = line.strip()
+        if stripped.startswith("✓"):
+            accepted.append(stripped)
+        elif "BAJO" in stripped:
+            # Extraer edge %
+            edge_match = re.search(r"edge=(\d+\.?\d*)%", stripped)
+            edge_val = float(edge_match.group(1)) if edge_match else 0
+            near_misses.append((edge_val, stripped[2:]))
+        elif "SIN EDGE" in stripped:
+            no_edge.append(stripped[2:])
+        elif stripped.startswith("⏭"):
+            duplicates.append(stripped[2:])
+        elif "KELLY" in stripped:
+            kelly_low.append(stripped[2:])
+
+    near_misses.sort(key=lambda x: -x[0])
+
+    text = f"📋 <b>Log detallado del último ciclo</b>\n\n"
+    text += f"Total: {len(edge_analysis)} mercados evaluados\n"
+    text += f"✅ Aceptados: {len(accepted)}\n"
+    text += f"🔶 Near miss (edge ≥3%): {len([n for n in near_misses if n[0] >= 3])}\n"
+    text += f"⏭ Duplicados: {len(duplicates)}\n"
+    text += f"❌ Sin edge: {len(no_edge)}\n"
+    text += f"❌ Kelly bajo: {len(kelly_low)}\n"
+
+    # Aceptados
+    if accepted:
+        text += f"\n<b>✅ ACEPTADOS:</b>\n"
+        for line in accepted[:5]:
+            text += f"🟢 {line[2:70]}\n"
+
+    # Near misses con cruce de traders (lo más útil)
+    interesting = [(e, t) for e, t in near_misses if e >= 3.0]
+    if interesting:
+        text += f"\n<b>🔶 NEAR MISSES (edge ≥3%, < {MIN_EDGE}%):</b>\n"
+        for edge_val, line_text in interesting[:8]:
+            # Cruzar con traders
+            trader_info = ""
+            if trader_signals:
+                for key, sigs in trader_signals.items():
+                    # Buscar coincidencia por ciudad en la línea
+                    parts = key.split("|")
+                    if len(parts) >= 1:
+                        city = parts[0]
+                        if city.lower() in line_text.lower():
+                            traders = [s["trader"] for s in sigs]
+                            trader_info = f"\n    👀 Traders aquí: {', '.join(traders[:4])}"
+                            break
+
+            text += f"  🔶 edge={edge_val:.1f}% | {line_text[:65]}{trader_info}\n"
+
+        if len(interesting) > 8:
+            text += f"  ... y {len(interesting) - 8} más\n"
+    else:
+        text += f"\n<i>Sin near misses ≥3% — el mercado está muy eficiente ahora.</i>\n"
+
+    if len(text) > 3900:
+        text = text[:3890] + "\n..."
+    send_telegram(text, with_menu=True)
 
 
 def cmd_modo():
@@ -668,8 +777,8 @@ def cmd_traders():
 
 COMMANDS = {
     "estado": cmd_estado, "cartera": cmd_cartera, "ordenes": cmd_ordenes,
-    "log": cmd_log, "forzar": cmd_forzar, "modo": cmd_modo,
-    "traders": cmd_traders,
+    "log": cmd_log, "logfull": cmd_logfull, "forzar": cmd_forzar,
+    "modo": cmd_modo, "traders": cmd_traders,
     "confirmar_real": cmd_confirmar_real, "confirmar_dry": cmd_confirmar_dry,
     "cancelar_modo": cmd_cancelar_modo,
 }
@@ -1090,7 +1199,7 @@ def main(client):
     dl = []  # Lista de líneas para el log de decisiones
     dl.append(f"{'='*50}")
     dl.append(f"CICLO {bot_state['cycle_count']+1} | {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} | {mode_label}")
-    dl.append(f"MIN_DAYS={MIN_DAYS_AHEAD} MAX_DAYS={MAX_DAYS_AHEAD}")
+    dl.append(f"MIN_DAYS={MIN_DAYS_AHEAD} MAX_DAYS={MAX_DAYS_AHEAD} MIN_EDGE={MIN_EDGE}%")
     dl.append(f"{'='*50}")
 
     if client is None:
@@ -1310,6 +1419,10 @@ def main(client):
     trades.sort(key=lambda x: x["position"]["expected_value"], reverse=True)
     bot_state["last_opportunities"] = len(trades)
 
+    # v9: Guardar análisis completo para /logfull
+    bot_state["last_edge_analysis"] = edge_analysis
+    bot_state["last_trader_signals"] = trader_signals
+
     dl.append(f"\nANÁLISIS DE EDGE ({len(candidates)} mercados evaluados):")
     dl.extend(edge_analysis)
     if skipped_dup:
@@ -1351,6 +1464,15 @@ def main(client):
         dl.append(f"\nSin operaciones este ciclo.")
         bot_state["last_orders_placed"] = 0
         bot_state["last_trades"] = []
+        # v9: Siempre notificar que el ciclo terminó
+        if not DRY_RUN:
+            send_telegram(
+                f"💤 <b>Ciclo completado</b>\n"
+                f"Evaluados: {len(candidates)} | Edge: {len(trades)} | Seleccionados: 0\n"
+                f"Min edge: {MIN_EDGE}%\n"
+                f"Toca 📓 Log para detalle",
+                with_menu=True,
+            )
     else:
         results = []
         for i, trade in enumerate(selected):
@@ -1385,7 +1507,7 @@ def main(client):
         bot_state["last_orders_placed"] = ok
         bot_state["last_trades"] = selected
 
-        if not DRY_RUN and ok > 0:
+        if not DRY_RUN:
             send_telegram(f"📊 <b>Ciclo completado</b>\nÓrdenes: {ok}/{len(results)} OK", with_menu=True)
 
     dl.append(f"\n{'='*50}")
@@ -1409,6 +1531,9 @@ def _save_decision_log(lines):
     # Preparar versión Telegram (más corta, con HTML)
     summary = f"📓 <b>Último ciclo</b>\n\n"
 
+    # Near misses: mercados con edge pero por debajo de MIN_EDGE
+    near_misses = []
+
     # Extraer las partes más importantes
     for line in lines:
         if line.startswith("CICLO"):
@@ -1428,20 +1553,58 @@ def _save_decision_log(lines):
         elif line.startswith("SELECCIONADAS:"):
             summary += f"<b>{line}</b>\n"
         elif line.strip().startswith("✓"):
-            # v9: incluir líneas con confirmación de traders
             text = line.strip()[2:]
             if "🤝" in text:
                 summary += f"🟢🤝 {text}\n"
             else:
                 summary += f"🟢 {text}\n"
-        elif line.strip().startswith("✗") and "BAJO" not in line and "SIN EDGE" not in line:
-            pass  # Omitir los descartados sin edge en el resumen
+        elif line.strip().startswith("✗") and "BAJO" in line:
+            # Near miss: tenía edge pero no suficiente
+            # Extraer el % de edge para ordenar
+            import re as _re
+            edge_match = _re.search(r"edge=(\d+\.?\d*)%", line)
+            if edge_match:
+                edge_val = float(edge_match.group(1))
+                if edge_val >= 3.0:  # solo mostrar los interesantes (≥3%)
+                    near_misses.append((edge_val, line.strip()[2:]))
         elif line.strip().startswith("⏭"):
             summary += f"⏭ {line.strip()[2:]}\n"
         elif line.strip().startswith("OK") or line.strip().startswith("FAIL"):
             summary += f"{line.strip()}\n"
         elif "Sin operaciones" in line:
             summary += f"\n💤 {line.strip()}\n"
+
+    # Añadir near misses al resumen (top 5 por edge)
+    if near_misses:
+        near_misses.sort(key=lambda x: -x[0])
+        summary += f"\n<b>🔶 Casi entraron ({len(near_misses)} con edge ≥3%):</b>\n"
+        for edge_val, text in near_misses[:5]:
+            # Cruzar con traders si hay señales
+            trader_info = ""
+            signals = bot_state.get("last_trader_signals", {})
+            if signals:
+                # Intentar extraer ciudad y fecha del texto para buscar señales
+                import re as _re
+                city_m = _re.match(r"(\S+(?:\s\S+)?)\s+(YES|NO)\s+", text)
+                if city_m:
+                    city_name = city_m.group(1)
+                    # Buscar en señales cualquier match parcial por ciudad
+                    matching = [
+                        k for k in signals.keys()
+                        if city_name.lower() in k.lower()
+                    ]
+                    if matching:
+                        all_traders = set()
+                        for k in matching:
+                            for s in signals[k]:
+                                all_traders.add(s["trader"])
+                        if all_traders:
+                            trader_info = f" 👀 {', '.join(list(all_traders)[:3])}"
+
+            summary += f"  🔶 {text[:70]}{trader_info}\n"
+
+        if len(near_misses) > 5:
+            summary += f"  ... y {len(near_misses) - 5} más\n"
 
     bot_state["last_decision_summary"] = summary
 
@@ -1519,7 +1682,7 @@ if __name__ == "__main__":
     send_telegram(
         f"🤖 <b>Bot v9 arrancado</b>\n"
         f"Modo: {modo} | ${BANKROLL:.2f}\n"
-        f"Schedule: {schedule} UTC\n"
+        f"Min edge: {MIN_EDGE}% | Schedule: {schedule} UTC\n"
         f"🔍 Traders: auto-análisis diario, descubrimiento lunes",
         with_menu=True,
     )
