@@ -139,6 +139,13 @@ RESOLUTION_STATIONS = {
     "Shenzhen":       {"lat": 22.6393, "lon": 113.8107, "name": "Bao'an"},
     "Paris":          {"lat": 49.0097, "lon": 2.5479,   "name": "CDG"},
     "Buenos Aires":   {"lat": -34.8222, "lon": -58.5358, "name": "Ezeiza"},
+    # Ciudades añadidas en v8 (detectadas en análisis de ColdMath)
+    "Miami":          {"lat": 25.7954,  "lon": -80.2901,  "name": "Miami Intl"},
+    "Madrid":         {"lat": 40.4936,  "lon": -3.5668,   "name": "Barajas"},
+    "Seattle":        {"lat": 47.4499,  "lon": -122.3118, "name": "Sea-Tac"},
+    "Dallas":         {"lat": 32.8972,  "lon": -97.0377,  "name": "Dallas Fort Worth"},
+    "Lucknow":        {"lat": 26.7606,  "lon": 80.8893,   "name": "Chaudhary Charan Singh"},
+    "Sao Paulo":      {"lat": -23.4355, "lon": -46.4730,  "name": "Guarulhos"},
 }
 
 
