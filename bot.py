@@ -17,16 +17,17 @@ from py_clob_client.order_builder.constants import BUY, SELL
 load_dotenv()
 
 # =============================================================
-# bot.py v7 — Decision Log + Dashboard completo
-# Sesión 7: Aprender de cada ciclo + bot operativo
+# bot.py v8 — Más mercados + Reintentos de red
+# Sesión 8: Ampliar ventana de fechas, robustez de red
 # =============================================================
 #
-# Nuevo en v7:
-#   - decisions.log: registro detallado de cada decisión del bot
-#   - /log en Telegram: ver qué hizo el bot en el último ciclo
-#   - known_tokens: cache de token_id → mercado (fix órdenes)
-#   - Balance real en /cartera (disponible + invertido)
-#   - Listo para dejar corriendo en modo REAL
+# Nuevo en v8:
+#   - MIN_DAYS_AHEAD = 0 (incluye mercados de hoy)
+#     → A las 08:00 UTC, Tokyo/Shanghai ya casi han alcanzado el max
+#     → El modelo usa sigma=0.8°C para hoy (máxima confianza)
+#   - MAX_DAYS_AHEAD = 5 (más mercados candidatos)
+#   - Reintentos automáticos en llamadas a APIs (3 intentos)
+#     → Fix del error "Connection reset by peer" del ciclo 23:00
 # =============================================================
 
 
@@ -42,8 +43,8 @@ MIN_BET = 1.00
 MAX_BET_PCT = 0.05
 MAX_EXPOSURE_PCT = 0.40
 MIN_LIQUIDITY = 100
-MAX_DAYS_AHEAD = 3
-MIN_DAYS_AHEAD = 1
+MAX_DAYS_AHEAD = 5   # v8: ampliar de 3 a 5 (más candidatos)
+MIN_DAYS_AHEAD = 0   # v8: incluir mercados de hoy (sigma=0.8°C)
 
 MIN_PRICE = 0.08
 MAX_PRICE = 0.92
@@ -570,25 +571,40 @@ def setup_client():
 # FUNCIONES: API
 # =============================================================
 
-def api_get(endpoint):
+def api_get(endpoint, retries=3, delay=5):
+    """GET a la Gamma API con reintentos automáticos.
+    
+    Si la conexión falla (error de red), espera `delay` segundos y reintenta.
+    Esto soluciona el 'Connection reset by peer' del ciclo 23:00.
+    """
     url = GAMMA_URL + endpoint
-    req = urllib.request.Request(url)
-    req.add_header("User-Agent", "polymarket-bot/0.7")
-    resp = urllib.request.urlopen(req)
-    return json.loads(resp.read())
+    last_error = None
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(url)
+            req.add_header("User-Agent", "polymarket-bot/0.8")
+            resp = urllib.request.urlopen(req, timeout=30)
+            return json.loads(resp.read())
+        except Exception as e:
+            last_error = e
+            if attempt < retries - 1:
+                log.warning(f"API error (intento {attempt+1}/{retries}): {e} — reintentando en {delay}s")
+                time.sleep(delay)
+    raise last_error
 
 
 def get_coordinates_fallback(city_name):
     city_clean = city_name.strip().replace(" ", "+")
     url = f"https://geocoding-api.open-meteo.com/v1/search?name={city_clean}&count=1&language=en"
-    resp = urllib.request.urlopen(url)
+    resp = urllib.request.urlopen(url, timeout=15)
     data = json.loads(resp.read())
     if "results" not in data or not data["results"]:
         return None
     return data["results"][0]["latitude"], data["results"][0]["longitude"]
 
 
-def get_forecast(lat, lon):
+def get_forecast(lat, lon, retries=3, delay=5):
+    """GET a Open-Meteo con reintentos automáticos."""
     url = (
         f"https://api.open-meteo.com/v1/forecast"
         f"?latitude={lat}&longitude={lon}"
@@ -596,18 +612,27 @@ def get_forecast(lat, lon):
         f",precipitation_probability_max,precipitation_sum"
         f"&timezone=auto"
     )
-    resp = urllib.request.urlopen(url)
-    data = json.loads(resp.read())
-    daily = data["daily"]
-    result = {}
-    for i in range(len(daily["time"])):
-        result[daily["time"][i]] = {
-            "temp_max": daily["temperature_2m_max"][i],
-            "temp_min": daily["temperature_2m_min"][i],
-            "rain_prob": daily["precipitation_probability_max"][i],
-            "rain_mm": daily["precipitation_sum"][i],
-        }
-    return result
+    last_error = None
+    for attempt in range(retries):
+        try:
+            resp = urllib.request.urlopen(url, timeout=30)
+            data = json.loads(resp.read())
+            daily = data["daily"]
+            result = {}
+            for i in range(len(daily["time"])):
+                result[daily["time"][i]] = {
+                    "temp_max": daily["temperature_2m_max"][i],
+                    "temp_min": daily["temperature_2m_min"][i],
+                    "rain_prob": daily["precipitation_probability_max"][i],
+                    "rain_mm": daily["precipitation_sum"][i],
+                }
+            return result
+        except Exception as e:
+            last_error = e
+            if attempt < retries - 1:
+                log.warning(f"Forecast error (intento {attempt+1}/{retries}): {e} — reintentando en {delay}s")
+                time.sleep(delay)
+    raise last_error
 
 
 # =============================================================
@@ -800,13 +825,14 @@ def main(client):
     bot_state["last_run"] = datetime.now(timezone.utc)
 
     log.info("=" * 65)
-    log.info(f"BOT v7 | {today_str} | {mode_label} | ${BANKROLL:.2f}")
+    log.info(f"BOT v8 | {today_str} | {mode_label} | ${BANKROLL:.2f}")
     log.info("=" * 65)
 
     # Decision log: registrar inicio
     dl = []  # Lista de líneas para el log de decisiones
     dl.append(f"{'='*50}")
     dl.append(f"CICLO {bot_state['cycle_count']+1} | {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} | {mode_label}")
+    dl.append(f"MIN_DAYS={MIN_DAYS_AHEAD} MAX_DAYS={MAX_DAYS_AHEAD}")
     dl.append(f"{'='*50}")
 
     if client is None:
@@ -1135,7 +1161,7 @@ def get_next_run_time():
 
 if __name__ == "__main__":
     log.info("=" * 65)
-    log.info(f"POLYMARKET BOT v7 | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
+    log.info(f"POLYMARKET BOT v8 | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
     log.info(f"Modo: {'DRY RUN' if DRY_RUN else 'REAL'}")
     log.info("=" * 65)
 
@@ -1150,7 +1176,7 @@ if __name__ == "__main__":
     modo = "DRY RUN" if DRY_RUN else "REAL"
     schedule = ", ".join(f"{h:02d}:00" for h in sorted(SCHEDULE_HOURS_UTC))
     send_telegram(
-        f"🤖 <b>Bot v7 arrancado</b>\n"
+        f"🤖 <b>Bot v8 arrancado</b>\n"
         f"Modo: {modo} | ${BANKROLL:.2f}\n"
         f"Schedule: {schedule} UTC\n\n"
         f"📓 Nuevo: toca Log para ver decisiones",

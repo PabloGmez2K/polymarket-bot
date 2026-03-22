@@ -37,6 +37,8 @@ Un bot automatizado de arbitraje meteorológico en Polymarket. El bot detecta me
 - [x] known_tokens cache (fix órdenes sin enriquecer)
 - [x] Threading (polling Telegram + scheduler en paralelo)
 - [x] MODO REAL activado con $15
+- [x] Procfile para Railway
+- [x] DRY_RUN=false permanente en Railway Variables
 - [ ] Validar resultados: correr varios días y analizar decisions.log
 - [ ] Optimizar estrategia basándose en datos reales
 - [ ] Escalar a $100 (solo si los datos confirman que gana)
@@ -95,7 +97,10 @@ Un bot automatizado de arbitraje meteorológico en Polymarket. El bot detecta me
 - **known_tokens cache:** fix para que /ordenes muestre la pregunta del mercado
 - **Data API:** cartera real desde data-api.polymarket.com/positions
 - **MODO REAL activado** desde Telegram a las 22:52 UTC
-- **Conceptos nuevos aprendidos:** threading, threading.Event, inline keyboard Telegram, long polling, daemon threads
+- **DRY_RUN=false** configurado permanente en Railway Variables
+- **Procfile** añadido (`web: python bot.py`) para fix de build en Railway
+- **Bot desplegado y corriendo** en MODO REAL a las 23:09 UTC
+- **Conceptos nuevos aprendidos:** threading, threading.Event, daemon threads, long polling, inline keyboard, callback_query, múltiples loggers, Procfile
 
 ---
 
@@ -103,15 +108,16 @@ Un bot automatizado de arbitraje meteorológico en Polymarket. El bot detecta me
 
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot
 **Ubicación local:** `C:\Projects\polymarket-bot`
-**Producción:** Railway — Online, MODO REAL, schedule 08/16/23 UTC
+**Producción:** Railway — Online, MODO REAL, DRY_RUN=false permanente, schedule 08/16/23 UTC
 
 ### Archivos:
 | Archivo | Función |
 |---------|---------|
 | `bot.py` | Script principal v7 — scheduler + Telegram + decision log |
+| `Procfile` | **NUEVO** — Indica a Railway cómo arrancar (`web: python bot.py`) |
 | `requirements.txt` | Librerías para Railway |
-| `decisions.log` | **NUEVO** — Log detallado de cada decisión del bot |
-| `trades.log` | Registro técnico de operaciones |
+| `decisions.log` | Log detallado de cada decisión del bot (en Railway, no en git) |
+| `trades.log` | Registro técnico de operaciones (en Railway, no en git) |
 | `edge_detector.py` | Detección de edge (standalone) |
 | `backtest.py` | Validación con mercados resueltos |
 | `bankroll.py` | Gestión de riesgo + demo Kelly |
@@ -119,11 +125,11 @@ Un bot automatizado de arbitraje meteorológico en Polymarket. El bot detecta me
 | `weather_forecast.py` | Previsión multi-ciudad |
 | `.env` | Claves (NO en git) |
 
-### Variables de entorno (Railway + .env):
+### Variables de entorno (Railway):
 ```
 PK=...
 FUNDER=...
-DRY_RUN=true              # Actualmente overrideado a false desde Telegram
+DRY_RUN=false              # PERMANENTE — modo real
 BANKROLL=15.00
 SCHEDULE_HOURS_UTC=8,16,23
 TELEGRAM_TOKEN=...
@@ -199,6 +205,12 @@ HILO 2: SCHEDULER (horas UTC fijas)
 
 ## Plan para Sesión 8 — Análisis de datos + Optimización
 
+### Al inicio de la sesión, Claude debe pedir:
+1. Capturas de Telegram: 📓 Log, 💰 Cartera, 📋 Órdenes
+2. Capturas de Polymarket: cartera, posiciones, pedidos abiertos
+3. Log de Railway (si Pablo puede copiarlo)
+4. Cualquier observación o duda que Pablo tenga
+
 ### Objetivo: Aprender de los datos reales y mejorar la estrategia
 
 ### Paso 1: Revisar decisions.log
@@ -230,19 +242,93 @@ HILO 2: SCHEDULER (horas UTC fijas)
 
 ---
 
+## Hoja de ruta de mejoras
+
+### Fase 1 — Validar y reparar (Sesiones 8-9)
+_Objetivo: confirmar que el bot base funciona y capturar más mercados._
+
+- [ ] Analizar decisions.log de las primeras noches
+- [ ] Comparar previsión del bot vs temperatura real (¿acertamos?)
+- [ ] Medir fill rate (¿cuántas órdenes se llenan?)
+- [ ] Parsear mercados de rangos "46-47°F" (+30% mercados)
+- [ ] Calibrar sigma con datos reales (previsión vs resultado)
+- [ ] Ajustar agresividad si las órdenes no se llenan
+
+### Fase 2 — Más inteligencia (Sesiones 10-12)
+_Objetivo: mejorar la precisión del modelo y detectar más edge._
+
+- [ ] Múltiples fuentes meteorológicas (GFS, ECMWF además de Open-Meteo)
+- [ ] Sigma dinámica por ciudad (Tokyo ≠ Wellington)
+- [ ] Sigma dinámica por patrón meteorológico (frentes, tormentas = más incertidumbre)
+- [ ] Análisis de a qué hora del día los precios están más "equivocados"
+- [ ] Backtest con previsiones históricas (no solo datos reales)
+
+### Fase 3 — Ventaja competitiva (Sesiones 13+)
+_Objetivo: diferenciarse de otros bots de Polymarket._
+
+- [ ] Fuentes de datos premium (estaciones específicas, APIs de pago)
+- [ ] Ejecución más frecuente (detectar cambios en forecast y operar en minutos)
+- [ ] Expandir a otros mercados (precipitación, viento, índices económicos)
+- [ ] Machine learning para calibrar sigma automáticamente con históricos
+- [ ] Análisis del order book para optimizar precio de entrada
+
+### Fase 4 — Escalar (cuando los datos confirmen rentabilidad)
+- [ ] Subir bankroll a $100
+- [ ] Subir a $500-1000 si sigue ganando
+- [ ] Diversificar en múltiples tipos de mercados
+
+---
+
+## Migración a Claude Code
+
+### Qué es Claude Code
+Una herramienta de terminal que permite a Claude editar archivos, ejecutar código, hacer git push — todo directamente en tu ordenador. En vez de que Claude te dé un archivo y tú lo copies, Claude trabaja directamente en tu proyecto. Es como tener un programador sentado a tu lado que usa tu teclado.
+
+### Cuándo migrar
+**Sesión 8 o 9** — cuando empecemos la fase de optimización. El workflow actual (Claude da archivo completo → Pablo copia → push) funciona para construir desde cero, pero para cambiar un parámetro, testear una idea, y ver el resultado rápido, Claude Code es mucho más eficiente.
+
+### Cómo prepararlo
+1. Instalar Claude Code (se hace desde la terminal, Pablo lo hará guiado)
+2. Conectar con el repo polymarket-bot
+3. A partir de ahí, las sesiones de optimización serán: Pablo describe qué quiere → Claude Code edita, testea, y hace push directamente
+
+### Por qué tiene sentido ahora y no antes
+Antes necesitábamos entender qué hace cada pieza (APIs, regex, Kelly, threading). Copiar archivos completos y leer el código ayudaba a eso. Ahora que el bot funciona y entramos en fase de iterar rápido, Claude Code acelera el ciclo de mejora.
+
+---
+
+## Mi nivel técnico
+
+- **Programación:** Vibecoding — sabe dirigir a Claude para construir software real, entiende la lógica y la arquitectura aunque no escriba cada línea. Funciones, regex, distribuciones, APIs, threading, eventos.
+- **Enfoque:** Programar en el contexto actual — usando IA como copiloto, no memorizando sintaxis. Aprender los conceptos (qué es un hilo, qué es una API, qué es Kelly) para poder dirigir bien, no para escribir código desde cero.
+- **Terminal:** Cómodo con cmd, Git básico.
+- **Python:** Entiende urllib, json, re, math, datetime, dotenv, logging, threading, py-clob-client.
+- **Conceptos aprendidos (Sesión 7):** threading, threading.Event, daemon threads, long polling, inline keyboard, callback_query, múltiples loggers, Procfile.
+- **Git:** Flujo básico consolidado.
+- **Polymarket:** Comprende shares, órdenes GTC, resolución, order book, Data API, Gamma API, CLOB API.
+- **Railway:** Despliegue, variables de entorno, logs, Procfile.
+- **Telegram:** Bot bidireccional con botones inline y polling.
+- **Estrategia:** Kelly, edge, agresividad, por qué validar antes de escalar.
+- **Workflow actual:** Claude entrega archivos completos, Pablo hace push.
+- **Workflow futuro:** Claude Code edita directamente en el repo.
+
+---
+
 ## Problemas conocidos / pendientes
 
 ### Observados:
-1. **DRY_RUN desde Telegram es temporal** — Si Railway reinicia, vuelve al valor de la variable. Para permanente: cambiar en Railway → Variables.
-2. **85 mercados no parseables** — regex no cubre rangos "46-47°F"
-3. **131 fuera de fecha** — muchos mercados son para hoy (MIN_DAYS_AHEAD=1 los excluye)
-4. **Shanghai -20%** — primera operación, pre-optimización, no representativa
+1. **85 mercados no parseables** — regex no cubre rangos "46-47°F"
+2. **131 fuera de fecha** — muchos mercados son para hoy (MIN_DAYS_AHEAD=1 los excluye)
+3. **Shanghai -20%** — primera operación, pre-optimización, no representativa
+4. **409 Conflict en Telegram** — ocurre al reiniciar (dos instancias hacen polling a la vez). Se resuelve solo en ~30 segundos.
 
 ### Resueltos en v7:
 - Órdenes sin enriquecer → known_tokens cache
-- Cartera 404 → Data API correcta
+- Cartera 404 → Data API correcta (data-api.polymarket.com)
 - Scheduler fijo cada 6h → horas UTC estratégicas
 - Bot solo envía → Telegram bidireccional con botones
+- Build fail Railway → Procfile añadido
+- DRY_RUN temporal → permanente en Railway Variables
 
 ---
 
@@ -253,21 +339,6 @@ HILO 2: SCHEDULER (horas UTC fijas)
 3. Backtest optimista: usa datos reales, no previsiones históricas.
 4. 85 preguntas no parseables: regex no cubre rangos como "46-47°F".
 5. Sin precios históricos de Polymarket: backtest solo mide dirección.
-
----
-
-## Mi nivel técnico
-
-- **Programación:** Intermedio. Funciones, regex, distribuciones, APIs, OOP básica, sets, threading, eventos.
-- **Terminal:** Cómodo con cmd, Git básico.
-- **Python:** urllib, json, re, math, datetime, dotenv, logging, threading, py-clob-client, time.sleep.
-- **Conceptos nuevos (Sesión 7):** threading, threading.Event, daemon threads, long polling, inline keyboard, callback_query, múltiples loggers.
-- **Git:** Flujo básico consolidado.
-- **Polymarket:** Comprende shares, órdenes GTC, resolución, order book, Data API, Gamma API, CLOB API.
-- **Railway:** Despliegue, variables de entorno, logs.
-- **Telegram:** Bot bidireccional con botones inline y polling.
-- **Estrategia:** Kelly, edge, agresividad, por qué validar antes de escalar.
-- **Workflow:** Claude entrega archivos completos, Pablo hace push.
 
 ---
 
