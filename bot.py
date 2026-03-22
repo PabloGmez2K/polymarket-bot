@@ -19,22 +19,21 @@ from py_clob_client.order_builder.constants import BUY, SELL
 load_dotenv()
 
 # =============================================================
-# bot.py v10 — Fix exposición + calibración sigma
-# Sesión 10: Análisis de pérdidas → correcciones
+# bot.py v10.1 — Gestión activa de posiciones
+# Sesión 10: Stop-loss + take-profit + re-evaluación
 # =============================================================
 #
-# Nuevo en v10:
-#   - FIX CRÍTICO: Exposición acumulativa entre ciclos
-#     (consulta Data API para posiciones reales antes de apostar)
-#   - FIX: Detecta posiciones existentes → no duplica apuestas
-#   - Sigma recalibrada (v9 sobreconfiaba → 0/5 en resueltos)
-#     Día 0: 0.8→1.2 | Día 1: 1.0→1.5 | Día 2: 1.4→2.0
-#   - FIX: /detalle con fallback a archivo + manejo errores
-#   - Mensaje "Ejecutando primer ciclo..." al arrancar
+# Nuevo en v10.1:
+#   - manage_positions(): gestión activa cada ciclo
+#     Stop-loss: vende si posición pierde > STOP_LOSS_PCT
+#     Take-profit: vende si posición gana > TAKE_PROFIT_PCT
+#     Basado en investigación de traders reales:
+#       Entire-Hood: 58% gestión activa, 0 pérdidas por resolución
+#       Stop-loss avg -10%, take-profit avg +17%
 #
-# Heredado de v9:
-#   - Pipeline de traders (signals.json, descubrimiento semanal)
-#   - Scheduler estratégico + Telegram bidireccional
+# Heredado de v10:
+#   - Exposición acumulativa, sigma calibrada
+#   - Pipeline de traders, scheduler, Telegram
 # =============================================================
 
 
@@ -52,6 +51,13 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = 0
+
+# v10.1: Gestión activa de posiciones
+# Basado en investigación: Entire-Hood corta a -10%, toma a +17%
+# Usamos umbrales un poco más amplios para nuestro bankroll pequeño
+STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", "-25.0"))     # vender si PnL% < -25%
+TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", "40.0"))  # vender si PnL% > +40%
+SELL_AGGRESSION = 0.02  # cuánto bajar el precio para asegurar venta rápida
 
 MIN_PRICE = 0.08
 MAX_PRICE = 0.92
@@ -1065,6 +1071,261 @@ def get_current_exposure():
 
 
 # =============================================================
+# GESTIÓN ACTIVA DE POSICIONES (v10.1)
+# =============================================================
+
+def manage_positions(client, dl):
+    """
+    Gestión activa: stop-loss, take-profit, Y re-evaluación con datos frescos.
+
+    Basado en investigación de traders exitosos:
+      - Entire-Hood: 58% gestión activa, 0 pérdidas por resolución
+      - Clave: detecta cuándo la previsión cambia y sale antes
+
+    Lógica por posición (en orden de prioridad):
+      1. Si PnL% < STOP_LOSS_PCT (-25%) → VENDER (cortar pérdida)
+      2. Si PnL% > TAKE_PROFIT_PCT (+40%) → VENDER (asegurar ganancia)
+      3. RE-EVALUACIÓN: consultar previsión fresca. Si edge ahora
+         es negativo (< -3%) → VENDER (el mercado tiene razón)
+
+    Devuelve: (n_sold, capital_freed)
+    """
+    if DRY_RUN:
+        dl.append(f"GESTIÓN: modo DRY RUN — solo análisis, sin ventas")
+
+    funder = os.getenv("FUNDER", "")
+    if not funder:
+        dl.append(f"GESTIÓN: sin FUNDER, saltando")
+        return 0, 0.0
+
+    # ---- Obtener posiciones actuales ----
+    try:
+        params = urllib.parse.urlencode({
+            "user": funder.lower(),
+            "sizeThreshold": "0",
+            "limit": "50",
+            "sortBy": "CURRENT",
+            "sortDirection": "DESC",
+        })
+        url = f"{DATA_API_URL}/positions?{params}"
+        req = urllib.request.Request(url)
+        req.add_header("User-Agent", "polymarket-bot/0.10")
+        resp = urllib.request.urlopen(req, timeout=15)
+        positions = json.loads(resp.read())
+    except Exception as e:
+        dl.append(f"GESTIÓN: error obteniendo posiciones: {e}")
+        return 0, 0.0
+
+    # ---- Filtrar posiciones de temperatura con valor ----
+    temp_positions = []
+    for p in positions:
+        title = p.get("title", "")
+        if not re.search(r"temperature", title, re.IGNORECASE):
+            continue
+        current_value = float(p.get("currentValue", 0))
+        if current_value < 0.01:
+            continue  # Ya resuelta a $0, nada que hacer
+        temp_positions.append(p)
+
+    if not temp_positions:
+        dl.append(f"GESTIÓN: sin posiciones de temperatura activas")
+        return 0, 0.0
+
+    dl.append(f"\nGESTIÓN DE POSICIONES: {len(temp_positions)} posiciones activas")
+    dl.append(f"  Stop-loss: {STOP_LOSS_PCT}% | Take-profit: +{TAKE_PROFIT_PCT}% | Re-eval: edge<-3%")
+
+    # ---- Cache de previsiones para re-evaluación ----
+    forecast_cache = {}
+
+    # ---- Evaluar cada posición ----
+    to_sell = []        # lista de (posición, tipo, razón)
+    keeping = []        # info de las que mantenemos
+
+    for p in temp_positions:
+        title_full = p.get("title", "?")
+        title = title_full[:55]
+        outcome = p.get("outcome", "?")
+        size = float(p.get("size", 0))
+        avg_price = float(p.get("avgPrice", 0))
+        cur_price = float(p.get("curPrice", 0))
+        pct_pnl = float(p.get("percentPnl", 0))
+        cash_pnl = float(p.get("cashPnl", 0))
+        initial_value = float(p.get("initialValue", 0))
+        asset_id = p.get("asset", "")
+
+        # Sin asset_id no podemos vender
+        if not asset_id:
+            dl.append(f"  ⚠ {outcome} {title} | sin asset_id")
+            continue
+
+        label = f"{outcome:3s} {title}"
+
+        # ---- CHECK 1: Stop-loss (prioridad máxima) ----
+        if pct_pnl <= STOP_LOSS_PCT:
+            reason = f"🔻 STOP-LOSS ({pct_pnl:+.1f}% < {STOP_LOSS_PCT}%)"
+            to_sell.append((p, "stop_loss", reason))
+            dl.append(f"  {reason} | {label} | ${cash_pnl:+.2f}")
+            continue
+
+        # ---- CHECK 2: Take-profit ----
+        if pct_pnl >= TAKE_PROFIT_PCT:
+            reason = f"💰 TAKE-PROFIT ({pct_pnl:+.1f}% > +{TAKE_PROFIT_PCT}%)"
+            to_sell.append((p, "take_profit", reason))
+            dl.append(f"  {reason} | {label} | ${cash_pnl:+.2f}")
+            continue
+
+        # ---- CHECK 3: Re-evaluación con previsión fresca ----
+        parsed = parse_temperature_question(title_full)
+        if not parsed or not parsed.get("date_str"):
+            dl.append(f"  ✓ MANTENER ({pct_pnl:+.1f}%) | {label} | no parseable")
+            keeping.append(p)
+            continue
+
+        city = parsed["city"]
+        date_iso = date_text_to_iso(parsed["date_str"])
+        if not date_iso:
+            dl.append(f"  ✓ MANTENER ({pct_pnl:+.1f}%) | {label} | fecha inválida")
+            keeping.append(p)
+            continue
+
+        try:
+            days_ahead = (date.fromisoformat(date_iso) - date.today()).days
+        except ValueError:
+            keeping.append(p)
+            continue
+
+        # Si ya pasó la fecha, no re-evaluar (se resolverá sola)
+        if days_ahead < 0:
+            dl.append(f"  ⏳ RESOLUCIÓN pendiente | {label}")
+            keeping.append(p)
+            continue
+
+        # Obtener previsión fresca (con cache)
+        if city not in forecast_cache:
+            station = RESOLUTION_STATIONS.get(city)
+            if station:
+                try:
+                    forecast_cache[city] = get_forecast(station["lat"], station["lon"])
+                except Exception:
+                    forecast_cache[city] = None
+            else:
+                forecast_cache[city] = None
+
+        fc = forecast_cache.get(city)
+        if not fc or date_iso not in fc:
+            dl.append(f"  ✓ MANTENER ({pct_pnl:+.1f}%) | {label} | sin previsión")
+            keeping.append(p)
+            continue
+
+        # Recalcular probabilidad con datos frescos
+        forecast_max = fc[date_iso]["temp_max"]
+        threshold = parsed["temp_threshold"]
+        threshold_c = (threshold - 32) * 5 / 9 if parsed["unit"] == "F" else float(threshold)
+
+        threshold_high = parsed.get("temp_threshold_high")
+        threshold_high_c = None
+        if threshold_high is not None:
+            threshold_high_c = (threshold_high - 32) * 5 / 9 if parsed["unit"] == "F" else float(threshold_high)
+
+        our_prob_yes = estimate_prob(forecast_max, threshold_c, parsed["condition"], days_ahead, threshold_high_c)
+
+        # ¿Qué lado tenemos? Calcular edge actual
+        if outcome.upper() == "YES":
+            our_prob = our_prob_yes
+            mkt_price = cur_price
+        else:
+            our_prob = 1.0 - our_prob_yes
+            mkt_price = 1.0 - cur_price
+
+        edge_pct = (our_prob - mkt_price) * 100
+
+        # Si edge es negativo: la previsión dice que estamos equivocados
+        if edge_pct < -3.0:
+            reason = (f"🔄 RE-EVAL edge={edge_pct:+.1f}% "
+                      f"forecast={forecast_max:.1f}°C "
+                      f"nuestro={our_prob*100:.0f}% vs mercado={mkt_price*100:.0f}%")
+            to_sell.append((p, "reeval", reason))
+            dl.append(f"  {reason}")
+            dl.append(f"    → {label} | PnL={pct_pnl:+.1f}% (${cash_pnl:+.2f})")
+        else:
+            dl.append(f"  ✓ MANTENER ({pct_pnl:+.1f}%) edge={edge_pct:+.1f}% | {label}")
+            keeping.append(p)
+
+    if not to_sell:
+        dl.append(f"\n  Sin posiciones que cerrar este ciclo")
+        return 0, 0.0
+
+    # ---- Ejecutar ventas ----
+    dl.append(f"\n  VENDIENDO {len(to_sell)} posiciones:")
+    n_sold = 0
+    capital_freed = 0.0
+
+    for p, sell_type, reason in to_sell:
+        asset_id = p.get("asset", "")
+        outcome = p.get("outcome", "?")
+        size = float(p.get("size", 0))
+        cur_price = float(p.get("curPrice", 0))
+        title = p.get("title", "?")[:50]
+
+        # Precio agresivo: ligeramente por debajo del mercado para asegurar fill
+        sell_price = round(max(0.01, cur_price - SELL_AGGRESSION), 2)
+
+        # Shares: vender todo
+        shares_to_sell = round(size, 2)
+        if shares_to_sell < 0.1:
+            dl.append(f"    ⚠ {outcome} {title} | muy pocas shares ({shares_to_sell})")
+            continue
+
+        estimated_return = round(shares_to_sell * sell_price, 2)
+
+        log.info(f"{'[DRY] ' if DRY_RUN else ''}VENTA: {outcome} {shares_to_sell}sh × ${sell_price:.2f} | {title}")
+
+        if DRY_RUN:
+            dl.append(f"    [DRY] SELL {outcome} {shares_to_sell}sh × ${sell_price:.2f} = ~${estimated_return:.2f} | {title}")
+            n_sold += 1
+            capital_freed += estimated_return
+            continue
+
+        try:
+            order_args = OrderArgs(
+                token_id=asset_id,
+                price=sell_price,
+                size=shares_to_sell,
+                side=SELL,
+            )
+            signed = client.create_order(order_args)
+            resp = client.post_order(signed, OrderType.GTC)
+            oid = resp.get("orderID", resp.get("id", "?"))
+            status = resp.get("status", "?")
+
+            dl.append(f"    ✅ SELL {outcome} {shares_to_sell}sh × ${sell_price:.2f} → {status} | {title}")
+            n_sold += 1
+            capital_freed += estimated_return
+
+            # Notificar por Telegram
+            if sell_type == "stop_loss":
+                icon, type_label = "🔻", "Stop-loss"
+            elif sell_type == "take_profit":
+                icon, type_label = "💰", "Take-profit"
+            else:
+                icon, type_label = "🔄", "Re-evaluación"
+            pct = float(p.get("percentPnl", 0))
+            send_telegram(
+                f"{icon} <b>{type_label}</b>\n"
+                f"{outcome} {title}\n"
+                f"Venta: {shares_to_sell}sh × ${sell_price:.2f}\n"
+                f"PnL: {pct:+.1f}% (${float(p.get('cashPnl', 0)):+.2f})"
+            )
+
+        except Exception as e:
+            dl.append(f"    ❌ ERROR vendiendo {outcome} {title}: {e}")
+            log.error(f"Error vendiendo posición: {e}")
+
+    dl.append(f"\n  Resultado: {n_sold} vendidas | ~${capital_freed:.2f} liberados")
+    return n_sold, capital_freed
+
+
+# =============================================================
 # FUNCIONES: PARSEO
 # =============================================================
 
@@ -1274,7 +1535,7 @@ def main(client):
     bot_state["last_run"] = datetime.now(timezone.utc)
 
     log.info("=" * 65)
-    log.info(f"BOT v10 | {today_str} | {mode_label} | ${BANKROLL:.2f}")
+    log.info(f"BOT v10.1 | {today_str} | {mode_label} | ${BANKROLL:.2f}")
     log.info("=" * 65)
 
     # Decision log: registrar inicio
@@ -1307,6 +1568,17 @@ def main(client):
         open_orders = get_open_orders(client)
     open_token_ids = get_order_token_ids(open_orders)
     dl.append(f"Órdenes activas: {len(open_token_ids)}")
+
+    # ---- PASO 0.5: GESTIÓN ACTIVA (v10.1) ----
+    # Antes de buscar nuevas oportunidades, gestionar posiciones existentes
+    # Esto libera capital y corta pérdidas (como hacen Entire-Hood y Thrifty)
+    try:
+        n_sold, capital_freed = manage_positions(client, dl)
+        if n_sold > 0:
+            dl.append(f"GESTIÓN: {n_sold} posiciones cerradas, ~${capital_freed:.2f} liberados")
+    except Exception as e:
+        dl.append(f"GESTIÓN: error: {e}")
+        log.warning(f"Error en gestión de posiciones: {e}")
 
     # ---- PASO 1: Mercados ----
     try:
@@ -1754,7 +2026,7 @@ def run_trader_tasks():
 
 if __name__ == "__main__":
     log.info("=" * 65)
-    log.info(f"POLYMARKET BOT v10 | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
+    log.info(f"POLYMARKET BOT v10.1 | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
     log.info(f"Modo: {'DRY RUN' if DRY_RUN else 'REAL'}")
     log.info("=" * 65)
 
@@ -1769,10 +2041,10 @@ if __name__ == "__main__":
     modo = "DRY RUN" if DRY_RUN else "REAL"
     schedule = ", ".join(f"{h:02d}:00" for h in sorted(SCHEDULE_HOURS_UTC))
     send_telegram(
-        f"🤖 <b>Bot v10 arrancado</b>\n"
+        f"🤖 <b>Bot v10.1 arrancado</b>\n"
         f"Modo: {modo} | ${BANKROLL:.2f}\n"
         f"Min edge: {MIN_EDGE}% | Schedule: {schedule} UTC\n"
-        f"🔧 Fix: exposición acumulativa + sigma calibrada\n"
+        f"🔧 Gestión activa: SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n"
         f"🔍 Traders: auto-análisis diario, descubrimiento lunes",
         with_menu=True,
     )
