@@ -249,6 +249,24 @@ RESOLUTION_STATIONS = {
     "Wuhan":          {"lat": 30.7748,  "lon": 114.2137, "name": "Tianhe"},
 }
 
+# Alias → nombre canónico (mercados de rango usan abreviaturas)
+CITY_ALIASES = {
+    "NYC": "New York City",
+    "New York": "New York City",
+    "LA": "Los Angeles",
+    "SF": "San Francisco",
+    "HK": "Hong Kong",
+    "SP": "Sao Paulo",
+    "São Paulo": "Sao Paulo",
+    "BA": "Buenos Aires",
+}
+
+
+def normalize_city(city_raw):
+    """Normaliza nombre de ciudad: aplica alias y limpia."""
+    city = city_raw.strip()
+    return CITY_ALIASES.get(city, city)
+
 
 # =============================================================
 # TELEGRAM — ENVÍO
@@ -864,6 +882,46 @@ def clean_stale_orders(client, open_orders, max_age_hours):
 # =============================================================
 
 def parse_temperature_question(question):
+    """
+    Parsea preguntas de temperatura de Polymarket.
+    
+    Formato exact/above/below:
+      "Will the highest temperature in London be 18°C on March 22?"
+      "Will the highest temperature in Seoul be 14°C or higher on March 22?"
+    
+    Formato range (NUEVO en v9):
+      "Will the highest temperature in NYC be between 62-63°F on March 22?"
+    
+    Devuelve dict con:
+      city, temp_threshold, condition, date_str, unit
+      + temp_threshold_high (solo para ranges)
+    """
+    # ---- Intentar formato RANGO primero ----
+    range_match = re.search(
+        r"temperature in (.+?) be between "
+        r"(\d+)\s*[-–]\s*(\d+)°([CF])"
+        r".*?(?:on |)"
+        r"((?:January|February|March|April|May|June"
+        r"|July|August|September|October|November|December)"
+        r"\s+\d+)",
+        question, re.IGNORECASE,
+    )
+    if range_match:
+        city = normalize_city(range_match.group(1).strip())
+        temp_low = int(range_match.group(2))
+        temp_high = int(range_match.group(3))
+        unit = range_match.group(4).upper()
+        date_str = range_match.group(5)
+        return {
+            "city": city,
+            "temp_threshold": temp_low,
+            "temp_threshold_high": temp_high,
+            "condition": "range",
+            "date_str": date_str,
+            "unit": unit,
+        }
+
+    # ---- Formato exact / above / below ----
     match = re.search(
         r"temperature in (.+?) (?:be |on )"
         r"(\d+)°([CF])"
@@ -876,7 +934,7 @@ def parse_temperature_question(question):
     )
     if not match:
         return None
-    city = match.group(1).strip()
+    city = normalize_city(match.group(1).strip())
     temp = int(match.group(2))
     unit = match.group(3).upper() if match.group(3) else "C"
     condition = "exact"
@@ -887,7 +945,14 @@ def parse_temperature_question(question):
         elif mod in ("higher", "above"):
             condition = "at_or_above"
     date_str = match.group(5) if match.lastindex >= 5 else None
-    return {"city": city, "temp_threshold": temp, "condition": condition, "date_str": date_str, "unit": unit}
+    return {
+        "city": city,
+        "temp_threshold": temp,
+        "temp_threshold_high": None,
+        "condition": condition,
+        "date_str": date_str,
+        "unit": unit,
+    }
 
 
 def date_text_to_iso(date_text, year=2026):
@@ -915,7 +980,14 @@ def get_uncertainty(days_ahead):
     return {0: 0.8, 1: 1.0, 2: 1.4, 3: 1.8}.get(days_ahead, 2.5 if days_ahead <= 5 else 3.0)
 
 
-def estimate_prob(forecast_max, threshold_c, condition, days_ahead):
+def estimate_prob(forecast_max, threshold_c, condition, days_ahead, threshold_high_c=None):
+    """
+    Calcula probabilidad de que se cumpla la condición.
+    
+    Para rangos: P(low ≤ T ≤ high).
+    La corrección ±0.5 se aplica porque la temperatura se redondea a enteros.
+    Ejemplo: "between 62-63°F" → P(61.5 ≤ T ≤ 63.5)
+    """
     sigma = get_uncertainty(days_ahead)
     mu = forecast_max
     if condition == "exact":
@@ -924,6 +996,10 @@ def estimate_prob(forecast_max, threshold_c, condition, days_ahead):
         prob = normal_cdf(threshold_c + 0.5, mu, sigma)
     elif condition == "at_or_above":
         prob = 1.0 - normal_cdf(threshold_c - 0.5, mu, sigma)
+    elif condition == "range" and threshold_high_c is not None:
+        # Rango: P(low ≤ T ≤ high)
+        # Corrección: low-0.5 a high+0.5 porque se redondea a enteros
+        prob = normal_cdf(threshold_high_c + 0.5, mu, sigma) - normal_cdf(threshold_c - 0.5, mu, sigma)
     else:
         prob = 0.5
     return max(0.01, min(0.99, prob))
@@ -1164,7 +1240,16 @@ def main(client):
         threshold = c["temp_threshold"]
         threshold_c = (threshold - 32) * 5 / 9 if c["unit"] == "F" else float(threshold)
 
-        our_prob_yes = estimate_prob(forecast_max, threshold_c, c["condition"], c["days_ahead"])
+        # v9: Soporte para rangos ("between 62-63°F")
+        threshold_high = c.get("temp_threshold_high")
+        threshold_high_c = None
+        if threshold_high is not None:
+            threshold_high_c = (threshold_high - 32) * 5 / 9 if c["unit"] == "F" else float(threshold_high)
+
+        # Label para logs (muestra rango si aplica)
+        temp_label = f"{threshold}-{threshold_high}°{c['unit']}" if threshold_high else f"{threshold}°{c['unit']}"
+
+        our_prob_yes = estimate_prob(forecast_max, threshold_c, c["condition"], c["days_ahead"], threshold_high_c)
         our_prob_no = 1.0 - our_prob_yes
         edge_yes = our_prob_yes - c["mkt_prob_yes"]
         edge_no = our_prob_no - c["mkt_prob_no"]
@@ -1175,13 +1260,13 @@ def main(client):
         elif edge_no > 0:
             side, our_prob, mkt_price, edge, token_id = "NO", our_prob_no, c["mkt_prob_no"], edge_no, c["token_id_no"]
         else:
-            edge_analysis.append(f"  ✗ {city} {threshold}°{c['unit']} {c['date_iso']} | forecast={forecast_max:.1f}°C | edge_yes={edge_yes*100:.1f}% edge_no={edge_no*100:.1f}% → SIN EDGE")
+            edge_analysis.append(f"  ✗ {city} {temp_label} {c['date_iso']} | forecast={forecast_max:.1f}°C | edge_yes={edge_yes*100:.1f}% edge_no={edge_no*100:.1f}% → SIN EDGE")
             continue
 
         edge_pct = edge * 100
 
         if edge_pct < MIN_EDGE:
-            edge_analysis.append(f"  ✗ {city} {side} {threshold}°{c['unit']} {c['date_iso']} | forecast={forecast_max:.1f}°C | nuestro={our_prob*100:.1f}% mercado={mkt_price*100:.1f}% | edge={edge_pct:.1f}% → BAJO (min {MIN_EDGE}%)")
+            edge_analysis.append(f"  ✗ {city} {side} {temp_label} {c['date_iso']} | forecast={forecast_max:.1f}°C | nuestro={our_prob*100:.1f}% mercado={mkt_price*100:.1f}% | edge={edge_pct:.1f}% → BAJO (min {MIN_EDGE}%)")
             continue
 
         if token_id in open_token_ids:
@@ -1195,20 +1280,24 @@ def main(client):
             continue
 
         # v9: Cruzar con señales de traders
-        # match_key format: "city|date|condition|temp|unit"
-        match_key = f"{city}|{c['date_iso']}|{c['condition']}|{threshold}|{c['unit']}"
+        # match_key: para rangos usa "low-high" como temp
+        if threshold_high:
+            match_key = f"{city}|{c['date_iso']}|{c['condition']}|{threshold}-{threshold_high}|{c['unit']}"
+        else:
+            match_key = f"{city}|{c['date_iso']}|{c['condition']}|{threshold}|{c['unit']}"
         matching_traders = trader_signals.get(match_key, [])
         trader_confirm = ""
         if matching_traders:
             names = [s["trader"] for s in matching_traders]
             trader_confirm = f" 🤝 CONFIRMADO por: {', '.join(names)}"
 
-        edge_analysis.append(f"  ✓ {city} {side} {threshold}°{c['unit']} {c['date_iso']} | forecast={forecast_max:.1f}°C | nuestro={our_prob*100:.1f}% mercado={mkt_price*100:.1f}% | edge={edge_pct:.1f}% | ${position['amount']:.2f} EV=${position['expected_value']:+.2f}{trader_confirm}")
+        edge_analysis.append(f"  ✓ {city} {side} {temp_label} {c['date_iso']} | forecast={forecast_max:.1f}°C | nuestro={our_prob*100:.1f}% mercado={mkt_price*100:.1f}% | edge={edge_pct:.1f}% | ${position['amount']:.2f} EV=${position['expected_value']:+.2f}{trader_confirm}")
 
         trades.append({
             "question": c["question"], "city": city, "date": c["date_iso"],
             "days_ahead": c["days_ahead"], "forecast_max": forecast_max,
-            "threshold": threshold, "unit": c["unit"], "condition": c["condition"],
+            "threshold": threshold, "threshold_high": threshold_high,
+            "unit": c["unit"], "condition": c["condition"],
             "side": side, "our_prob": round(our_prob * 100, 1),
             "mkt_price": round(mkt_price * 100, 1), "edge_pct": round(edge_pct, 1),
             "position": position, "volume_24h": c["volume_24h"],
