@@ -1,0 +1,864 @@
+{
+  "traders": {
+    "ColdMath": {
+      "address": "0x594edb9112f526fa6a80b8f858a6379c8a2c1c11",
+      "source": "manual",
+      "added": "2026-03-22T11:02:01.737463+00:00",
+      "tags": [
+        "high_confidence",
+        "whale",
+        "reference"
+      ],
+      "notes": "Ballena $70K, opera No a $0.95-0.99. Referencia, no imitar.",
+      "strategy": "reference",
+      "last_analyzed": "2026-03-22T11:07:33.598002+00:00",
+      "last_win_rate": 79.0,
+      "last_n_positions": 50,
+      "last_n_signals": 3,
+      "last_pnl_closed": 628.83
+    },
+    "Trader2": {
+      "address": "0xd3938e1d885f7849215c49d87465709d63400744",
+      "source": "manual",
+      "added": "2026-03-22T11:02:01.737483+00:00",
+      "tags": [
+        "lottery",
+        "reference"
+      ],
+      "notes": "Lotería masiva, Yes a $0.003. WR bajo. No imitar.",
+      "strategy": "reference",
+      "last_analyzed": "2026-03-22T11:07:34.324645+00:00",
+      "last_win_rate": 39.4,
+      "last_n_positions": 50,
+      "last_n_signals": 0,
+      "last_pnl_closed": 15.06
+    },
+    "Entire-Hood": {
+      "address": "0xb40e89677d59665d5188541ad860450a6e2a7cc9",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737509+00:00",
+      "pseudonym": "Entire-Hood",
+      "tags": [
+        "mid_range",
+        "auto_discovered"
+      ],
+      "notes": "Score=34, 7 mercados, $201 invertido, ciudades: Paris(17), Tokyo(5), London(4)",
+      "strategy": "mid_range",
+      "discovery_n_markets": 7,
+      "discovery_total_size": 200.69,
+      "discovery_avg_price": 0.562,
+      "discovery_score": 34,
+      "top_cities": {
+        "Paris": 17,
+        "Tokyo": 5,
+        "London": 4
+      },
+      "last_analyzed": "2026-03-22T11:07:35.097254+00:00",
+      "last_win_rate": 84.0,
+      "last_n_positions": 50,
+      "last_n_signals": 32,
+      "last_pnl_closed": 4153.09
+    },
+    "Watery-Database": {
+      "address": "0x6a2ca036957c0c6aa31f8a58d78561feb8a864f0",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737545+00:00",
+      "pseudonym": "Watery-Database",
+      "tags": [
+        "mid_range",
+        "auto_discovered"
+      ],
+      "notes": "Score=32, 6 mercados, $201 invertido, ciudades: London(1), Denver(1), Los Angeles(1)",
+      "strategy": "mid_range",
+      "discovery_n_markets": 6,
+      "discovery_total_size": 201.4,
+      "discovery_avg_price": 0.173,
+      "discovery_score": 32,
+      "top_cities": {
+        "London": 1,
+        "Denver": 1,
+        "Los Angeles": 1
+      },
+      "last_analyzed": "2026-03-22T11:07:35.801507+00:00",
+      "last_win_rate": 27.0,
+      "last_n_positions": 50,
+      "last_n_signals": 14,
+      "last_pnl_closed": -275.97
+    },
+    "Auto_003": {
+      "address": "0x4addc66860b349959cb5070a83dbd9eeb6836fe5",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737574+00:00",
+      "pseudonym": "",
+      "tags": [
+        "mid_range",
+        "auto_discovered"
+      ],
+      "notes": "Score=30.9, 10 mercados, $109 invertido, ciudades: Paris(9), Lucknow(8), Chongqing(7)",
+      "strategy": "mid_range",
+      "discovery_n_markets": 10,
+      "discovery_total_size": 109.48,
+      "discovery_avg_price": 0.572,
+      "discovery_score": 30.9,
+      "top_cities": {
+        "Paris": 9,
+        "Lucknow": 8,
+        "Chongqing": 7
+      },
+      "last_analyzed": "2026-03-22T11:07:36.509372+00:00",
+      "last_win_rate": 59.4,
+      "last_n_positions": 50,
+      "last_n_signals": 47,
+      "last_pnl_closed": 115.11
+    },
+    "Concrete-Caramel": {
+      "address": "0x1f66796b45581868376365aef54b51eb84184c8d",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737590+00:00",
+      "pseudonym": "Concrete-Caramel",
+      "tags": [
+        "mixed",
+        "auto_discovered"
+      ],
+      "notes": "Score=28, 4 mercados, $2435 invertido, ciudades: Tokyo(13), Chicago(3)",
+      "strategy": "mixed",
+      "discovery_n_markets": 4,
+      "discovery_total_size": 2434.62,
+      "discovery_avg_price": 0.237,
+      "discovery_score": 28,
+      "top_cities": {
+        "Tokyo": 13,
+        "Chicago": 3
+      },
+      "last_analyzed": "2026-03-22T11:07:37.263692+00:00",
+      "last_win_rate": 10.1,
+      "last_n_positions": 50,
+      "last_n_signals": 17,
+      "last_pnl_closed": -5694.33
+    },
+    "Thrifty-Original": {
+      "address": "0xc34f6b088bb9172625ee1ea2ee8da9ac4f037d2e",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737606+00:00",
+      "pseudonym": "Thrifty-Original",
+      "tags": [
+        "mid_range",
+        "auto_discovered"
+      ],
+      "notes": "Score=26.2, 8 mercados, $102 invertido, ciudades: Paris(10), London(3), Seattle(1)",
+      "strategy": "mid_range",
+      "discovery_n_markets": 8,
+      "discovery_total_size": 101.69,
+      "discovery_avg_price": 0.626,
+      "discovery_score": 26.2,
+      "top_cities": {
+        "Paris": 10,
+        "London": 3,
+        "Seattle": 1
+      },
+      "last_analyzed": "2026-03-22T11:07:38.079001+00:00",
+      "last_win_rate": 74.7,
+      "last_n_positions": 50,
+      "last_n_signals": 21,
+      "last_pnl_closed": 48.1
+    },
+    "Dimpled-Boy": {
+      "address": "0x98d973b69565d3564b39f364cc1bf73a62db2c8c",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737621+00:00",
+      "pseudonym": "Dimpled-Boy",
+      "tags": [
+        "mixed",
+        "auto_discovered"
+      ],
+      "notes": "Score=23.0, 5 mercados, $130 invertido, ciudades: London(3), Paris(1), Lucknow(1)",
+      "strategy": "mixed",
+      "discovery_n_markets": 5,
+      "discovery_total_size": 130.0,
+      "discovery_avg_price": 0.827,
+      "discovery_score": 23.0,
+      "top_cities": {
+        "London": 3,
+        "Paris": 1,
+        "Lucknow": 1
+      },
+      "last_analyzed": "2026-03-22T11:07:38.805051+00:00",
+      "last_win_rate": 77.8,
+      "last_n_positions": 50,
+      "last_n_signals": 8,
+      "last_pnl_closed": 274.94
+    },
+    "Auto_007": {
+      "address": "0x3efd499a9c35155c17e1611ec6ecdf882fb5b982",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737639+00:00",
+      "pseudonym": "",
+      "tags": [
+        "mid_range",
+        "auto_discovered"
+      ],
+      "notes": "Score=21.2, 9 mercados, $32 invertido, ciudades: Chongqing(12), Paris(6), London(6)",
+      "strategy": "mid_range",
+      "discovery_n_markets": 9,
+      "discovery_total_size": 31.85,
+      "discovery_avg_price": 0.54,
+      "discovery_score": 21.2,
+      "top_cities": {
+        "Chongqing": 12,
+        "Paris": 6,
+        "London": 6
+      },
+      "last_analyzed": "2026-03-22T11:07:39.536106+00:00",
+      "last_win_rate": 61.0,
+      "last_n_positions": 50,
+      "last_n_signals": 21,
+      "last_pnl_closed": 163.37
+    },
+    "Lumpy-Emergence": {
+      "address": "0xc1becee1d2255717e8943a1eb83dd3ed75346471",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737653+00:00",
+      "pseudonym": "Lumpy-Emergence",
+      "tags": [
+        "mixed",
+        "auto_discovered"
+      ],
+      "notes": "Score=19.0, 3 mercados, $130 invertido, ciudades: New York City(3), Tokyo(1)",
+      "strategy": "mixed",
+      "discovery_n_markets": 3,
+      "discovery_total_size": 130.0,
+      "discovery_avg_price": 0.918,
+      "discovery_score": 19.0,
+      "top_cities": {
+        "New York City": 3,
+        "Tokyo": 1
+      },
+      "last_analyzed": "2026-03-22T11:07:40.224982+00:00",
+      "last_win_rate": 42.1,
+      "last_n_positions": 19,
+      "last_n_signals": 2,
+      "last_pnl_closed": -6.4
+    },
+    "Rewarding-Boatyard": {
+      "address": "0x91d992bc6236237084956303a6842279250f141d",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737666+00:00",
+      "pseudonym": "Rewarding-Boatyard",
+      "tags": [
+        "mid_range",
+        "auto_discovered"
+      ],
+      "notes": "Score=18.8, 5 mercados, $88 invertido, ciudades: London(6), Paris(5), Chicago(1)",
+      "strategy": "mid_range",
+      "discovery_n_markets": 5,
+      "discovery_total_size": 87.64,
+      "discovery_avg_price": 0.348,
+      "discovery_score": 18.8,
+      "top_cities": {
+        "London": 6,
+        "Paris": 5,
+        "Chicago": 1
+      },
+      "last_analyzed": "2026-03-22T11:07:40.929923+00:00",
+      "last_win_rate": 28.9,
+      "last_n_positions": 38,
+      "last_n_signals": 30,
+      "last_pnl_closed": -528.65
+    },
+    "Unwieldy-Amusement": {
+      "address": "0x888ff776068312ebabef1682fa11b5a90fc823f5",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737679+00:00",
+      "pseudonym": "Unwieldy-Amusement",
+      "tags": [
+        "mid_range",
+        "auto_discovered"
+      ],
+      "notes": "Score=16.2, 3 mercados, $102 invertido, ciudades: Paris(5), London(5)",
+      "strategy": "mid_range",
+      "discovery_n_markets": 3,
+      "discovery_total_size": 102.28,
+      "discovery_avg_price": 0.495,
+      "discovery_score": 16.2,
+      "top_cities": {
+        "Paris": 5,
+        "London": 5
+      },
+      "last_analyzed": "2026-03-22T11:07:41.640024+00:00",
+      "last_win_rate": 4.5,
+      "last_n_positions": 50,
+      "last_n_signals": 39,
+      "last_pnl_closed": -1251.33
+    },
+    "Immediate-Ideal": {
+      "address": "0x2cece5e16f3acb694cf6a8ed84cc56dfd15ca79b",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737698+00:00",
+      "pseudonym": "Immediate-Ideal",
+      "tags": [
+        "mid_range",
+        "auto_discovered"
+      ],
+      "notes": "Score=14.6, 4 mercados, $66 invertido, ciudades: Shenzhen(1), London(1), Beijing(1)",
+      "strategy": "mid_range",
+      "discovery_n_markets": 4,
+      "discovery_total_size": 66.34,
+      "discovery_avg_price": 0.13,
+      "discovery_score": 14.6,
+      "top_cities": {
+        "Shenzhen": 1,
+        "London": 1,
+        "Beijing": 1
+      },
+      "last_analyzed": "2026-03-22T11:07:42.349229+00:00",
+      "last_win_rate": 9.0,
+      "last_n_positions": 50,
+      "last_n_signals": 49,
+      "last_pnl_closed": -1916.0
+    },
+    "Small-Retirement": {
+      "address": "0x1361f345f4bf87d1a39b46577e8e448abab9f12b",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737721+00:00",
+      "pseudonym": "Small-Retirement",
+      "tags": [
+        "mid_range",
+        "auto_discovered"
+      ],
+      "notes": "Score=14.4, 3 mercados, $84 invertido, ciudades: London(3), Paris(2), Buenos Aires(1)",
+      "strategy": "mid_range",
+      "discovery_n_markets": 3,
+      "discovery_total_size": 83.61,
+      "discovery_avg_price": 0.499,
+      "discovery_score": 14.4,
+      "top_cities": {
+        "London": 3,
+        "Paris": 2,
+        "Buenos Aires": 1
+      },
+      "last_analyzed": "2026-03-22T11:07:43.066482+00:00",
+      "last_win_rate": 59.4,
+      "last_n_positions": 50,
+      "last_n_signals": 48,
+      "last_pnl_closed": 394.78
+    },
+    "Auto_013": {
+      "address": "0x62046319410526ac30863035c453c035d521b1fc",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737740+00:00",
+      "pseudonym": "",
+      "tags": [
+        "mid_range",
+        "auto_discovered"
+      ],
+      "notes": "Score=13.0, 5 mercados, $30 invertido, ciudades: Lucknow(1), Madrid(1), Beijing(1)",
+      "strategy": "mid_range",
+      "discovery_n_markets": 5,
+      "discovery_total_size": 29.67,
+      "discovery_avg_price": 0.109,
+      "discovery_score": 13.0,
+      "top_cities": {
+        "Lucknow": 1,
+        "Madrid": 1,
+        "Beijing": 1
+      },
+      "last_analyzed": "2026-03-22T11:07:43.756913+00:00",
+      "last_win_rate": 16.1,
+      "last_n_positions": 31,
+      "last_n_signals": 16,
+      "last_pnl_closed": -97.97
+    },
+    "Healthy-Worry": {
+      "address": "0xc4983c4046714e725cd47e279b6b0d0f67c18ba5",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737752+00:00",
+      "pseudonym": "Healthy-Worry",
+      "tags": [
+        "mid_range",
+        "auto_discovered"
+      ],
+      "notes": "Score=12.3, 3 mercados, $63 invertido, ciudades: Paris(4), London(1)",
+      "strategy": "mid_range",
+      "discovery_n_markets": 3,
+      "discovery_total_size": 63.0,
+      "discovery_avg_price": 0.456,
+      "discovery_score": 12.3,
+      "top_cities": {
+        "Paris": 4,
+        "London": 1
+      },
+      "last_analyzed": "2026-03-22T11:07:44.484033+00:00",
+      "last_win_rate": 21.0,
+      "last_n_positions": 50,
+      "last_n_signals": 50,
+      "last_pnl_closed": -1451.72
+    },
+    "Unwieldy-Counsel": {
+      "address": "0x3abffa6d0b8a22423a66064ca458499225feb143",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737764+00:00",
+      "pseudonym": "Unwieldy-Counsel",
+      "tags": [
+        "mid_range",
+        "auto_discovered"
+      ],
+      "notes": "Score=12.0, 4 mercados, $40 invertido, ciudades: Shenzhen(4), Chongqing(2), Ankara(1)",
+      "strategy": "mid_range",
+      "discovery_n_markets": 4,
+      "discovery_total_size": 40.47,
+      "discovery_avg_price": 0.367,
+      "discovery_score": 12.0,
+      "top_cities": {
+        "Shenzhen": 4,
+        "Chongqing": 2,
+        "Ankara": 1
+      },
+      "last_analyzed": "2026-03-22T11:07:45.301037+00:00",
+      "last_win_rate": 55.6,
+      "last_n_positions": 50,
+      "last_n_signals": 1,
+      "last_pnl_closed": 120.58
+    },
+    "Tame-Zombie": {
+      "address": "0x44d366f47b5e383d4786a82badee3ce5078694e3",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737777+00:00",
+      "pseudonym": "Tame-Zombie",
+      "tags": [
+        "mid_range",
+        "auto_discovered"
+      ],
+      "notes": "Score=11.0, 5 mercados, $10 invertido, ciudades: Paris(2), London(2), Chicago(1)",
+      "strategy": "mid_range",
+      "discovery_n_markets": 5,
+      "discovery_total_size": 9.74,
+      "discovery_avg_price": 0.677,
+      "discovery_score": 11.0,
+      "top_cities": {
+        "Paris": 2,
+        "London": 2,
+        "Chicago": 1
+      },
+      "last_analyzed": "2026-03-22T11:07:46.001234+00:00",
+      "last_win_rate": 50.0,
+      "last_n_positions": 14,
+      "last_n_signals": 11,
+      "last_pnl_closed": -2.61
+    },
+    "Outrageous-Litigatio": {
+      "address": "0x4ffba5035905ddfd5e80db2fcbf83a7b4c62119d",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737789+00:00",
+      "pseudonym": "Outrageous-Litigation",
+      "tags": [
+        "mixed",
+        "auto_discovered"
+      ],
+      "notes": "Score=10.8, 3 mercados, $48 invertido, ciudades: Tokyo(5), Chicago(1)",
+      "strategy": "mixed",
+      "discovery_n_markets": 3,
+      "discovery_total_size": 48.22,
+      "discovery_avg_price": 0.061,
+      "discovery_score": 10.8,
+      "top_cities": {
+        "Tokyo": 5,
+        "Chicago": 1
+      },
+      "last_analyzed": "2026-03-22T11:07:46.725587+00:00",
+      "last_win_rate": 30.8,
+      "last_n_positions": 26,
+      "last_n_signals": 6,
+      "last_pnl_closed": -108.66
+    },
+    "Nutty-Facility": {
+      "address": "0xe23b83282bc762105f553aee47fd8ba9cb758d60",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737800+00:00",
+      "pseudonym": "Nutty-Facility",
+      "tags": [
+        "mixed",
+        "auto_discovered"
+      ],
+      "notes": "Score=9.6, 4 mercados, $16 invertido, ciudades: Paris(4)",
+      "strategy": "mixed",
+      "discovery_n_markets": 4,
+      "discovery_total_size": 16.37,
+      "discovery_avg_price": 0.312,
+      "discovery_score": 9.6,
+      "top_cities": {
+        "Paris": 4
+      },
+      "last_analyzed": "2026-03-22T11:07:47.422775+00:00",
+      "last_win_rate": 23.5,
+      "last_n_positions": 17,
+      "last_n_signals": 6,
+      "last_pnl_closed": -7.79
+    },
+    "Kind-Flour": {
+      "address": "0x1fbc165ba105bcf5dab6ff96819c036daa9e4105",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737813+00:00",
+      "pseudonym": "Kind-Flour",
+      "tags": [
+        "mid_range",
+        "auto_discovered"
+      ],
+      "notes": "Score=9.5, 4 mercados, $15 invertido, ciudades: Paris(2), Chicago(1), London(1)",
+      "strategy": "mid_range",
+      "discovery_n_markets": 4,
+      "discovery_total_size": 14.66,
+      "discovery_avg_price": 0.297,
+      "discovery_score": 9.5,
+      "top_cities": {
+        "Paris": 2,
+        "Chicago": 1,
+        "London": 1
+      },
+      "last_analyzed": "2026-03-22T11:07:48.133189+00:00",
+      "last_win_rate": 23.1,
+      "last_n_positions": 50,
+      "last_n_signals": 48,
+      "last_pnl_closed": -368.01
+    },
+    "Lighthearted-Mammoth": {
+      "address": "0xb3a32554e389c6792426f750a688c331e747fa3c",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737825+00:00",
+      "pseudonym": "Lighthearted-Mammoth",
+      "tags": [
+        "mixed",
+        "auto_discovered"
+      ],
+      "notes": "Score=9.3, 4 mercados, $13 invertido, ciudades: Seattle(3), Chicago(1)",
+      "strategy": "mixed",
+      "discovery_n_markets": 4,
+      "discovery_total_size": 12.84,
+      "discovery_avg_price": 0.048,
+      "discovery_score": 9.3,
+      "top_cities": {
+        "Seattle": 3,
+        "Chicago": 1
+      },
+      "last_analyzed": "2026-03-22T11:07:48.825477+00:00",
+      "last_win_rate": 18.5,
+      "last_n_positions": 27,
+      "last_n_signals": 7,
+      "last_pnl_closed": -425.35
+    },
+    "Plain-Medicine": {
+      "address": "0x07d4c967481bd8d40842f4fe783897b7238d6679",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737840+00:00",
+      "pseudonym": "Plain-Medicine",
+      "tags": [
+        "mixed",
+        "auto_discovered"
+      ],
+      "notes": "Score=9.2, 4 mercados, $12 invertido, ciudades: Taipei(1), Warsaw(1), Shenzhen(1)",
+      "strategy": "mixed",
+      "discovery_n_markets": 4,
+      "discovery_total_size": 12.0,
+      "discovery_avg_price": 0.701,
+      "discovery_score": 9.2,
+      "top_cities": {
+        "Taipei": 1,
+        "Warsaw": 1,
+        "Shenzhen": 1
+      },
+      "last_analyzed": "2026-03-22T11:07:49.520179+00:00",
+      "last_win_rate": 14.3,
+      "last_n_positions": 14,
+      "last_n_signals": 9,
+      "last_pnl_closed": -44.89
+    },
+    "Cheery-Pizza": {
+      "address": "0x6cb5d1d059e133cb905a2e987511cf0d32bdb230",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737852+00:00",
+      "pseudonym": "Cheery-Pizza",
+      "tags": [
+        "mixed",
+        "auto_discovered"
+      ],
+      "notes": "Score=9.2, 4 mercados, $12 invertido, ciudades: Lucknow(2), Shenzhen(1), Beijing(1)",
+      "strategy": "mixed",
+      "discovery_n_markets": 4,
+      "discovery_total_size": 11.99,
+      "discovery_avg_price": 0.795,
+      "discovery_score": 9.2,
+      "top_cities": {
+        "Lucknow": 2,
+        "Shenzhen": 1,
+        "Beijing": 1
+      },
+      "last_analyzed": "2026-03-22T11:07:50.244664+00:00",
+      "last_win_rate": 39.0,
+      "last_n_positions": 50,
+      "last_n_signals": 20,
+      "last_pnl_closed": -171.83
+    },
+    "Jubilant-Spending": {
+      "address": "0x65c4153de06e2a99889f0dade70741ae62677ea4",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737865+00:00",
+      "pseudonym": "Jubilant-Spending",
+      "tags": [
+        "mid_range",
+        "auto_discovered"
+      ],
+      "notes": "Score=9.0, 3 mercados, $30 invertido, ciudades: Chongqing(3), Paris(2), Lucknow(1)",
+      "strategy": "mid_range",
+      "discovery_n_markets": 3,
+      "discovery_total_size": 30.0,
+      "discovery_avg_price": 0.528,
+      "discovery_score": 9.0,
+      "top_cities": {
+        "Chongqing": 3,
+        "Paris": 2,
+        "Lucknow": 1
+      },
+      "last_analyzed": "2026-03-22T11:07:51.045216+00:00",
+      "last_win_rate": 44.0,
+      "last_n_positions": 50,
+      "last_n_signals": 49,
+      "last_pnl_closed": 138.92
+    },
+    "Charming-Underwear-C": {
+      "address": "0xefc84a51f07abce7076105b380f2eae05c684676",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737877+00:00",
+      "pseudonym": "Charming-Underwear-Chaplain",
+      "tags": [
+        "mixed",
+        "auto_discovered"
+      ],
+      "notes": "Score=8.8, 4 mercados, $8 invertido, ciudades: Paris(1), London(1), Chicago(1)",
+      "strategy": "mixed",
+      "discovery_n_markets": 4,
+      "discovery_total_size": 8.0,
+      "discovery_avg_price": 0.35,
+      "discovery_score": 8.8,
+      "top_cities": {
+        "Paris": 1,
+        "London": 1,
+        "Chicago": 1
+      },
+      "last_analyzed": "2026-03-22T11:07:51.740393+00:00",
+      "last_win_rate": 14.3,
+      "last_n_positions": 7,
+      "last_n_signals": 3,
+      "last_pnl_closed": -6.01
+    },
+    "Eminent-Shack": {
+      "address": "0x87e91083a3f29212fa289afd7c34e746cba66df4",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737890+00:00",
+      "pseudonym": "Eminent-Shack",
+      "tags": [
+        "mixed",
+        "auto_discovered"
+      ],
+      "notes": "Score=8.7, 4 mercados, $7 invertido, ciudades: Paris(4), Toronto(1), London(1)",
+      "strategy": "mixed",
+      "discovery_n_markets": 4,
+      "discovery_total_size": 7.27,
+      "discovery_avg_price": 0.842,
+      "discovery_score": 8.7,
+      "top_cities": {
+        "Paris": 4,
+        "Toronto": 1,
+        "London": 1
+      },
+      "last_analyzed": "2026-03-22T11:07:52.437932+00:00",
+      "last_win_rate": 32.0,
+      "last_n_positions": 26,
+      "last_n_signals": 5,
+      "last_pnl_closed": 0.23
+    },
+    "Actual-Examination": {
+      "address": "0x242c89f59541ea360b572da7fb0282a1f97044d7",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737902+00:00",
+      "pseudonym": "Actual-Examination",
+      "tags": [
+        "mid_range",
+        "auto_discovered"
+      ],
+      "notes": "Score=8.2, 3 mercados, $22 invertido, ciudades: London(3), Paris(1)",
+      "strategy": "mid_range",
+      "discovery_n_markets": 3,
+      "discovery_total_size": 22.09,
+      "discovery_avg_price": 0.492,
+      "discovery_score": 8.2,
+      "top_cities": {
+        "London": 3,
+        "Paris": 1
+      },
+      "last_analyzed": "2026-03-22T11:07:53.147294+00:00",
+      "last_win_rate": 19.6,
+      "last_n_positions": 46,
+      "last_n_signals": 19,
+      "last_pnl_closed": -15.96
+    },
+    "Unaware-Engine": {
+      "address": "0x6297b93ea37ff92a57fd636410f3b71ebf74517e",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737914+00:00",
+      "pseudonym": "Unaware-Engine",
+      "tags": [
+        "mid_range",
+        "auto_discovered"
+      ],
+      "notes": "Score=8.2, 3 mercados, $22 invertido, ciudades: Wuhan(4), Taipei(1), Beijing(1)",
+      "strategy": "mid_range",
+      "discovery_n_markets": 3,
+      "discovery_total_size": 22.33,
+      "discovery_avg_price": 0.185,
+      "discovery_score": 8.2,
+      "top_cities": {
+        "Wuhan": 4,
+        "Taipei": 1,
+        "Beijing": 1
+      },
+      "last_analyzed": "2026-03-22T11:07:53.843045+00:00",
+      "last_win_rate": 100.0,
+      "last_n_positions": 1,
+      "last_n_signals": 1,
+      "last_pnl_closed": 0.45
+    },
+    "Shy-Advertising": {
+      "address": "0x7ecc100e4b4e8402eb2639840b729971a626d023",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737926+00:00",
+      "pseudonym": "Shy-Advertising",
+      "tags": [
+        "mid_range",
+        "auto_discovered"
+      ],
+      "notes": "Score=7.6, 3 mercados, $16 invertido, ciudades: Paris(5), London(4)",
+      "strategy": "mid_range",
+      "discovery_n_markets": 3,
+      "discovery_total_size": 16.0,
+      "discovery_avg_price": 0.632,
+      "discovery_score": 7.6,
+      "top_cities": {
+        "Paris": 5,
+        "London": 4
+      },
+      "last_analyzed": "2026-03-22T11:07:54.568437+00:00",
+      "last_win_rate": 3.2,
+      "last_n_positions": 50,
+      "last_n_signals": 49,
+      "last_pnl_closed": -188.48
+    },
+    "Flawed-Salute": {
+      "address": "0xbb1fbde023b03976cc81b00e179cdfde24155154",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737939+00:00",
+      "pseudonym": "Flawed-Salute",
+      "tags": [
+        "mid_range",
+        "auto_discovered"
+      ],
+      "notes": "Score=6.9, 3 mercados, $9 invertido, ciudades: Paris(1), London(1), Buenos Aires(1)",
+      "strategy": "mid_range",
+      "discovery_n_markets": 3,
+      "discovery_total_size": 9.45,
+      "discovery_avg_price": 0.232,
+      "discovery_score": 6.9,
+      "top_cities": {
+        "Paris": 1,
+        "London": 1,
+        "Buenos Aires": 1
+      },
+      "last_analyzed": "2026-03-22T11:07:55.273665+00:00",
+      "last_win_rate": 15.4,
+      "last_n_positions": 13,
+      "last_n_signals": 10,
+      "last_pnl_closed": -10.08
+    },
+    "Intent-Plantation": {
+      "address": "0x50936370f48b7c7f87016ae8ec1462d0200a272c",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737950+00:00",
+      "pseudonym": "Intent-Plantation",
+      "tags": [
+        "mixed",
+        "auto_discovered"
+      ],
+      "notes": "Score=6.8, 3 mercados, $8 invertido, ciudades: Paris(4)",
+      "strategy": "mixed",
+      "discovery_n_markets": 3,
+      "discovery_total_size": 8.44,
+      "discovery_avg_price": 0.239,
+      "discovery_score": 6.8,
+      "top_cities": {
+        "Paris": 4
+      },
+      "last_analyzed": "2026-03-22T11:07:56.037950+00:00",
+      "last_win_rate": 15.2,
+      "last_n_positions": 50,
+      "last_n_signals": 9,
+      "last_pnl_closed": -560.52
+    },
+    "Rubbery-Worshiper": {
+      "address": "0x82b3183bd4809256dc11eae31ead10cbad6a73ae",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737961+00:00",
+      "pseudonym": "Rubbery-Worshiper",
+      "tags": [
+        "mid_range",
+        "auto_discovered"
+      ],
+      "notes": "Score=6.8, 3 mercados, $8 invertido, ciudades: Paris(2), Chicago(1)",
+      "strategy": "mid_range",
+      "discovery_n_markets": 3,
+      "discovery_total_size": 8.11,
+      "discovery_avg_price": 0.323,
+      "discovery_score": 6.8,
+      "top_cities": {
+        "Paris": 2,
+        "Chicago": 1
+      },
+      "last_analyzed": "2026-03-22T11:07:56.744401+00:00",
+      "last_win_rate": 62.2,
+      "last_n_positions": 45,
+      "last_n_signals": 45,
+      "last_pnl_closed": 34.59
+    },
+    "Pricey-Score": {
+      "address": "0x665959eb02b5da0361f47fd79f5c1a36877bb7ca",
+      "source": "auto_discovery",
+      "added": "2026-03-22T11:02:01.737973+00:00",
+      "pseudonym": "Pricey-Score",
+      "tags": [
+        "mid_range",
+        "auto_discovered"
+      ],
+      "notes": "Score=6.6, 3 mercados, $6 invertido, ciudades: Paris(2), Tel Aviv(1)",
+      "strategy": "mid_range",
+      "discovery_n_markets": 3,
+      "discovery_total_size": 6.37,
+      "discovery_avg_price": 0.113,
+      "discovery_score": 6.6,
+      "top_cities": {
+        "Paris": 2,
+        "Tel Aviv": 1
+      },
+      "last_analyzed": "2026-03-22T11:07:57.460766+00:00",
+      "last_win_rate": 30.3,
+      "last_n_positions": 50,
+      "last_n_signals": 46,
+      "last_pnl_closed": 56.14
+    }
+  },
+  "meta": {
+    "last_scan": "2026-03-22T11:02:01.737981+00:00",
+    "markets_scanned": 120,
+    "total_trades_seen": 11664,
+    "unique_traders_seen": 2376,
+    "traders_passed_filter": 32,
+    "new_added": 32,
+    "existing_updated": 0
+  }
+}

@@ -1,0 +1,1340 @@
+[
+  {
+    "timestamp": "2026-03-22T11:02:36.832010+00:00",
+    "traders": [
+      {
+        "name": "ColdMath",
+        "n_positions": 50,
+        "n_temp": 50,
+        "n_signals": 3,
+        "win_rate": 80.8,
+        "pnl_closed": 658.68,
+        "price_dist": {
+          "low": 0,
+          "mid": 2,
+          "high": 48
+        },
+        "top_cities": {
+          "Warsaw": 7,
+          "Miami": 6,
+          "Lucknow": 4,
+          "Sao Paulo": 4,
+          "Atlanta": 3
+        }
+      },
+      {
+        "name": "Trader2",
+        "n_positions": 50,
+        "n_temp": 50,
+        "n_signals": 0,
+        "win_rate": 41.2,
+        "pnl_closed": 4.83,
+        "price_dist": {
+          "low": 50,
+          "mid": 0,
+          "high": 0
+        },
+        "top_cities": {
+          "Seoul": 6,
+          "Taipei": 4,
+          "Tokyo": 4,
+          "Warsaw": 4,
+          "Singapore": 3
+        }
+      },
+      {
+        "name": "Entire-Hood",
+        "n_positions": 50,
+        "n_temp": 34,
+        "n_signals": 32,
+        "win_rate": 87.0,
+        "pnl_closed": 4319.15,
+        "price_dist": {
+          "low": 0,
+          "mid": 46,
+          "high": 4
+        },
+        "top_cities": {
+          "Tokyo": 5,
+          "Chicago": 4,
+          "Shenzhen": 3,
+          "Shanghai": 3,
+          "Ankara": 3
+        }
+      },
+      {
+        "name": "Watery-Database",
+        "n_positions": 50,
+        "n_temp": 25,
+        "n_signals": 14,
+        "win_rate": 26.7,
+        "pnl_closed": -271.13,
+        "price_dist": {
+          "low": 10,
+          "mid": 38,
+          "high": 2
+        },
+        "top_cities": {
+          "London": 4,
+          "Singapore": 3,
+          "Hong Kong": 3,
+          "Shanghai": 3,
+          "Paris": 2
+        }
+      },
+      {
+        "name": "Auto_003",
+        "n_positions": 50,
+        "n_temp": 50,
+        "n_signals": 47,
+        "win_rate": 57.8,
+        "pnl_closed": 107.08,
+        "price_dist": {
+          "low": 0,
+          "mid": 49,
+          "high": 1
+        },
+        "top_cities": {
+          "Milan": 4,
+          "Wuhan": 3,
+          "Tel Aviv": 3,
+          "Tokyo": 3,
+          "Ankara": 3
+        }
+      },
+      {
+        "name": "Concrete-Caramel",
+        "n_positions": 50,
+        "n_temp": 40,
+        "n_signals": 16,
+        "win_rate": 10.1,
+        "pnl_closed": -5730.25,
+        "price_dist": {
+          "low": 25,
+          "mid": 23,
+          "high": 2
+        },
+        "top_cities": {
+          "Wellington": 8,
+          "Seoul": 7,
+          "Shanghai": 4,
+          "New York City": 4,
+          "Wuhan": 3
+        }
+      },
+      {
+        "name": "Thrifty-Original",
+        "n_positions": 50,
+        "n_temp": 50,
+        "n_signals": 21,
+        "win_rate": 76.8,
+        "pnl_closed": 54.72,
+        "price_dist": {
+          "low": 0,
+          "mid": 21,
+          "high": 29
+        },
+        "top_cities": {
+          "New York City": 7,
+          "Tokyo": 4,
+          "Sao Paulo": 4,
+          "Madrid": 4,
+          "Shanghai": 3
+        }
+      },
+      {
+        "name": "Dimpled-Boy",
+        "n_positions": 50,
+        "n_temp": 16,
+        "n_signals": 9,
+        "win_rate": 74.7,
+        "pnl_closed": 270.17,
+        "price_dist": {
+          "low": 0,
+          "mid": 41,
+          "high": 9
+        },
+        "top_cities": {
+          "Warsaw": 3,
+          "Tel Aviv": 2,
+          "London": 2,
+          "Tokyo": 2,
+          "Singapore": 2
+        }
+      },
+      {
+        "name": "Auto_007",
+        "n_positions": 50,
+        "n_temp": 23,
+        "n_signals": 22,
+        "win_rate": 62.0,
+        "pnl_closed": 161.08,
+        "price_dist": {
+          "low": 1,
+          "mid": 47,
+          "high": 2
+        },
+        "top_cities": {
+          "New York City": 4,
+          "Ankara": 2,
+          "London": 2,
+          "Taipei": 2,
+          "Milan": 2
+        }
+      },
+      {
+        "name": "Lumpy-Emergence",
+        "n_positions": 19,
+        "n_temp": 3,
+        "n_signals": 2,
+        "win_rate": 42.1,
+        "pnl_closed": -6.83,
+        "price_dist": {
+          "low": 1,
+          "mid": 16,
+          "high": 2
+        },
+        "top_cities": {
+          "New York City": 2,
+          "Hong Kong": 1
+        }
+      },
+      {
+        "name": "Rewarding-Boatyard",
+        "n_positions": 38,
+        "n_temp": 38,
+        "n_signals": 30,
+        "win_rate": 32.4,
+        "pnl_closed": -522.84,
+        "price_dist": {
+          "low": 5,
+          "mid": 32,
+          "high": 1
+        },
+        "top_cities": {
+          "New York City": 3,
+          "London": 3,
+          "Atlanta": 3,
+          "Paris": 3,
+          "Buenos Aires": 3
+        }
+      },
+      {
+        "name": "Unwieldy-Amusement",
+        "n_positions": 50,
+        "n_temp": 50,
+        "n_signals": 39,
+        "win_rate": 4.5,
+        "pnl_closed": -1254.74,
+        "price_dist": {
+          "low": 8,
+          "mid": 42,
+          "high": 0
+        },
+        "top_cities": {
+          "London": 13,
+          "Munich": 12,
+          "Paris": 9,
+          "Ankara": 4,
+          "Seoul": 3
+        }
+      },
+      {
+        "name": "Immediate-Ideal",
+        "n_positions": 50,
+        "n_temp": 50,
+        "n_signals": 49,
+        "win_rate": 7.0,
+        "pnl_closed": -1952.15,
+        "price_dist": {
+          "low": 0,
+          "mid": 50,
+          "high": 0
+        },
+        "top_cities": {
+          "Hong Kong": 5,
+          "Tokyo": 4,
+          "Atlanta": 3,
+          "Beijing": 3,
+          "Dallas": 3
+        }
+      },
+      {
+        "name": "Small-Retirement",
+        "n_positions": 50,
+        "n_temp": 48,
+        "n_signals": 48,
+        "win_rate": 58.3,
+        "pnl_closed": 373.99,
+        "price_dist": {
+          "low": 0,
+          "mid": 50,
+          "high": 0
+        },
+        "top_cities": {
+          "Shanghai": 3,
+          "Singapore": 3,
+          "Hong Kong": 3,
+          "Warsaw": 3,
+          "Paris": 3
+        }
+      },
+      {
+        "name": "Auto_013",
+        "n_positions": 31,
+        "n_temp": 30,
+        "n_signals": 16,
+        "win_rate": 16.1,
+        "pnl_closed": -100.76,
+        "price_dist": {
+          "low": 13,
+          "mid": 18,
+          "high": 0
+        },
+        "top_cities": {
+          "Hong Kong": 4,
+          "Ankara": 3,
+          "New York City": 2,
+          "London": 2,
+          "Singapore": 2
+        }
+      },
+      {
+        "name": "Healthy-Worry",
+        "n_positions": 50,
+        "n_temp": 50,
+        "n_signals": 50,
+        "win_rate": 21.0,
+        "pnl_closed": -1427.0,
+        "price_dist": {
+          "low": 0,
+          "mid": 50,
+          "high": 0
+        },
+        "top_cities": {
+          "London": 5,
+          "Paris": 5,
+          "Ankara": 4,
+          "Singapore": 3,
+          "Warsaw": 3
+        }
+      },
+      {
+        "name": "Unwieldy-Counsel",
+        "n_positions": 50,
+        "n_temp": 1,
+        "n_signals": 1,
+        "win_rate": 58.6,
+        "pnl_closed": 412.61,
+        "price_dist": {
+          "low": 1,
+          "mid": 44,
+          "high": 5
+        },
+        "top_cities": {
+          "Seattle": 1
+        }
+      },
+      {
+        "name": "Tame-Zombie",
+        "n_positions": 14,
+        "n_temp": 14,
+        "n_signals": 11,
+        "win_rate": 50.0,
+        "pnl_closed": -2.32,
+        "price_dist": {
+          "low": 0,
+          "mid": 11,
+          "high": 3
+        },
+        "top_cities": {
+          "London": 4,
+          "Buenos Aires": 3,
+          "Ankara": 2,
+          "Paris": 2,
+          "Tel Aviv": 2
+        }
+      },
+      {
+        "name": "Outrageous-Litigatio",
+        "n_positions": 26,
+        "n_temp": 24,
+        "n_signals": 6,
+        "win_rate": 26.9,
+        "pnl_closed": -93.86,
+        "price_dist": {
+          "low": 16,
+          "mid": 10,
+          "high": 0
+        },
+        "top_cities": {
+          "Ankara": 6,
+          "Tokyo": 5,
+          "Chicago": 3,
+          "Shenzhen": 3,
+          "Wellington": 2
+        }
+      },
+      {
+        "name": "Nutty-Facility",
+        "n_positions": 17,
+        "n_temp": 17,
+        "n_signals": 6,
+        "win_rate": 23.5,
+        "pnl_closed": -8.3,
+        "price_dist": {
+          "low": 11,
+          "mid": 6,
+          "high": 0
+        },
+        "top_cities": {
+          "Paris": 10,
+          "London": 7
+        }
+      },
+      {
+        "name": "Kind-Flour",
+        "n_positions": 50,
+        "n_temp": 50,
+        "n_signals": 48,
+        "win_rate": 21.6,
+        "pnl_closed": -369.99,
+        "price_dist": {
+          "low": 1,
+          "mid": 49,
+          "high": 0
+        },
+        "top_cities": {
+          "New York City": 6,
+          "Seattle": 6,
+          "London": 6,
+          "Dallas": 6,
+          "Buenos Aires": 6
+        }
+      },
+      {
+        "name": "Lighthearted-Mammoth",
+        "n_positions": 27,
+        "n_temp": 9,
+        "n_signals": 7,
+        "win_rate": 18.5,
+        "pnl_closed": -425.81,
+        "price_dist": {
+          "low": 15,
+          "mid": 12,
+          "high": 0
+        },
+        "top_cities": {
+          "Seattle": 3,
+          "New York City": 3,
+          "Dallas": 3
+        }
+      },
+      {
+        "name": "Plain-Medicine",
+        "n_positions": 14,
+        "n_temp": 11,
+        "n_signals": 9,
+        "win_rate": 14.3,
+        "pnl_closed": -44.86,
+        "price_dist": {
+          "low": 1,
+          "mid": 13,
+          "high": 0
+        },
+        "top_cities": {
+          "Shanghai": 5,
+          "Shenzhen": 2,
+          "Chongqing": 2,
+          "Beijing": 2
+        }
+      },
+      {
+        "name": "Cheery-Pizza",
+        "n_positions": 50,
+        "n_temp": 42,
+        "n_signals": 20,
+        "win_rate": 39.0,
+        "pnl_closed": -171.98,
+        "price_dist": {
+          "low": 0,
+          "mid": 19,
+          "high": 31
+        },
+        "top_cities": {
+          "Hong Kong": 8,
+          "New York City": 6,
+          "Tokyo": 6,
+          "Shenzhen": 5,
+          "Shanghai": 4
+        }
+      },
+      {
+        "name": "Jubilant-Spending",
+        "n_positions": 50,
+        "n_temp": 50,
+        "n_signals": 49,
+        "win_rate": 44.0,
+        "pnl_closed": 106.63,
+        "price_dist": {
+          "low": 0,
+          "mid": 50,
+          "high": 0
+        },
+        "top_cities": {
+          "Dallas": 4,
+          "Seattle": 3,
+          "London": 3,
+          "Sao Paulo": 3,
+          "Madrid": 3
+        }
+      },
+      {
+        "name": "Charming-Underwear-C",
+        "n_positions": 7,
+        "n_temp": 5,
+        "n_signals": 3,
+        "win_rate": 14.3,
+        "pnl_closed": -5.2,
+        "price_dist": {
+          "low": 2,
+          "mid": 5,
+          "high": 0
+        },
+        "top_cities": {
+          "London": 1,
+          "Paris": 1,
+          "Warsaw": 1,
+          "Madrid": 1,
+          "Ankara": 1
+        }
+      },
+      {
+        "name": "Eminent-Shack",
+        "n_positions": 26,
+        "n_temp": 26,
+        "n_signals": 5,
+        "win_rate": 26.9,
+        "pnl_closed": 0.07,
+        "price_dist": {
+          "low": 0,
+          "mid": 5,
+          "high": 21
+        },
+        "top_cities": {
+          "Buenos Aires": 5,
+          "Ankara": 4,
+          "New York City": 4,
+          "Atlanta": 3,
+          "Paris": 2
+        }
+      },
+      {
+        "name": "Actual-Examination",
+        "n_positions": 46,
+        "n_temp": 21,
+        "n_signals": 19,
+        "win_rate": 17.4,
+        "pnl_closed": -16.0,
+        "price_dist": {
+          "low": 6,
+          "mid": 40,
+          "high": 0
+        },
+        "top_cities": {
+          "London": 5,
+          "Paris": 2,
+          "Madrid": 2,
+          "Seoul": 2,
+          "Dallas": 2
+        }
+      },
+      {
+        "name": "Unaware-Engine",
+        "n_positions": 1,
+        "n_temp": 1,
+        "n_signals": 1,
+        "win_rate": 100.0,
+        "pnl_closed": 0.45,
+        "price_dist": {
+          "low": 0,
+          "mid": 1,
+          "high": 0
+        },
+        "top_cities": {
+          "Beijing": 1
+        }
+      },
+      {
+        "name": "Shy-Advertising",
+        "n_positions": 50,
+        "n_temp": 50,
+        "n_signals": 49,
+        "win_rate": 3.2,
+        "pnl_closed": -188.37,
+        "price_dist": {
+          "low": 1,
+          "mid": 49,
+          "high": 0
+        },
+        "top_cities": {
+          "London": 36,
+          "Paris": 7,
+          "Seoul": 3,
+          "Singapore": 2,
+          "Tokyo": 2
+        }
+      },
+      {
+        "name": "Flawed-Salute",
+        "n_positions": 13,
+        "n_temp": 13,
+        "n_signals": 10,
+        "win_rate": 15.4,
+        "pnl_closed": -10.61,
+        "price_dist": {
+          "low": 3,
+          "mid": 10,
+          "high": 0
+        },
+        "top_cities": {
+          "Buenos Aires": 3,
+          "London": 3,
+          "Seoul": 3,
+          "Sao Paulo": 2,
+          "Paris": 2
+        }
+      },
+      {
+        "name": "Intent-Plantation",
+        "n_positions": 50,
+        "n_temp": 28,
+        "n_signals": 8,
+        "win_rate": 17.0,
+        "pnl_closed": -315.33,
+        "price_dist": {
+          "low": 40,
+          "mid": 10,
+          "high": 0
+        },
+        "top_cities": {
+          "New York City": 11,
+          "London": 8,
+          "Paris": 4,
+          "Atlanta": 4,
+          "Tokyo": 1
+        }
+      },
+      {
+        "name": "Rubbery-Worshiper",
+        "n_positions": 43,
+        "n_temp": 43,
+        "n_signals": 43,
+        "win_rate": 64.3,
+        "pnl_closed": 35.05,
+        "price_dist": {
+          "low": 0,
+          "mid": 43,
+          "high": 0
+        },
+        "top_cities": {
+          "New York City": 4,
+          "Munich": 4,
+          "Atlanta": 4,
+          "Paris": 3,
+          "Seattle": 3
+        }
+      },
+      {
+        "name": "Pricey-Score",
+        "n_positions": 50,
+        "n_temp": 50,
+        "n_signals": 46,
+        "win_rate": 31.8,
+        "pnl_closed": 57.15,
+        "price_dist": {
+          "low": 3,
+          "mid": 47,
+          "high": 0
+        },
+        "top_cities": {
+          "Dallas": 8,
+          "London": 8,
+          "Tel Aviv": 6,
+          "Munich": 6,
+          "Paris": 5
+        }
+      }
+    ],
+    "n_consensus": 127
+  },
+  {
+    "timestamp": "2026-03-22T11:07:58.288669+00:00",
+    "traders": [
+      {
+        "name": "ColdMath",
+        "n_positions": 50,
+        "n_temp": 50,
+        "n_signals": 3,
+        "win_rate": 79.0,
+        "pnl_closed": 628.83,
+        "price_dist": {
+          "low": 0,
+          "mid": 2,
+          "high": 48
+        },
+        "top_cities": {
+          "Warsaw": 7,
+          "Miami": 6,
+          "Lucknow": 4,
+          "Sao Paulo": 4,
+          "Atlanta": 3
+        }
+      },
+      {
+        "name": "Trader2",
+        "n_positions": 50,
+        "n_temp": 50,
+        "n_signals": 0,
+        "win_rate": 39.4,
+        "pnl_closed": 15.06,
+        "price_dist": {
+          "low": 50,
+          "mid": 0,
+          "high": 0
+        },
+        "top_cities": {
+          "Seoul": 5,
+          "Tokyo": 4,
+          "Warsaw": 4,
+          "Taipei": 3,
+          "London": 3
+        }
+      },
+      {
+        "name": "Entire-Hood",
+        "n_positions": 50,
+        "n_temp": 34,
+        "n_signals": 32,
+        "win_rate": 84.0,
+        "pnl_closed": 4153.09,
+        "price_dist": {
+          "low": 0,
+          "mid": 46,
+          "high": 4
+        },
+        "top_cities": {
+          "Tokyo": 5,
+          "Chicago": 4,
+          "Shenzhen": 3,
+          "Shanghai": 3,
+          "Ankara": 3
+        }
+      },
+      {
+        "name": "Watery-Database",
+        "n_positions": 50,
+        "n_temp": 25,
+        "n_signals": 14,
+        "win_rate": 27.0,
+        "pnl_closed": -275.97,
+        "price_dist": {
+          "low": 10,
+          "mid": 38,
+          "high": 2
+        },
+        "top_cities": {
+          "London": 4,
+          "Singapore": 3,
+          "Hong Kong": 3,
+          "Shanghai": 3,
+          "Paris": 2
+        }
+      },
+      {
+        "name": "Auto_003",
+        "n_positions": 50,
+        "n_temp": 50,
+        "n_signals": 47,
+        "win_rate": 59.4,
+        "pnl_closed": 115.11,
+        "price_dist": {
+          "low": 0,
+          "mid": 49,
+          "high": 1
+        },
+        "top_cities": {
+          "Milan": 4,
+          "Wuhan": 3,
+          "Tel Aviv": 3,
+          "Tokyo": 3,
+          "Ankara": 3
+        }
+      },
+      {
+        "name": "Concrete-Caramel",
+        "n_positions": 50,
+        "n_temp": 41,
+        "n_signals": 17,
+        "win_rate": 10.1,
+        "pnl_closed": -5694.33,
+        "price_dist": {
+          "low": 25,
+          "mid": 23,
+          "high": 2
+        },
+        "top_cities": {
+          "Wellington": 8,
+          "Seoul": 6,
+          "New York City": 5,
+          "Shanghai": 4,
+          "Wuhan": 3
+        }
+      },
+      {
+        "name": "Thrifty-Original",
+        "n_positions": 50,
+        "n_temp": 50,
+        "n_signals": 21,
+        "win_rate": 74.7,
+        "pnl_closed": 48.1,
+        "price_dist": {
+          "low": 0,
+          "mid": 21,
+          "high": 29
+        },
+        "top_cities": {
+          "New York City": 7,
+          "Tokyo": 4,
+          "London": 4,
+          "Madrid": 4,
+          "Dallas": 4
+        }
+      },
+      {
+        "name": "Dimpled-Boy",
+        "n_positions": 50,
+        "n_temp": 16,
+        "n_signals": 8,
+        "win_rate": 77.8,
+        "pnl_closed": 274.94,
+        "price_dist": {
+          "low": 0,
+          "mid": 41,
+          "high": 9
+        },
+        "top_cities": {
+          "Tel Aviv": 2,
+          "London": 2,
+          "Tokyo": 2,
+          "Singapore": 2,
+          "Warsaw": 2
+        }
+      },
+      {
+        "name": "Auto_007",
+        "n_positions": 50,
+        "n_temp": 23,
+        "n_signals": 21,
+        "win_rate": 61.0,
+        "pnl_closed": 163.37,
+        "price_dist": {
+          "low": 1,
+          "mid": 47,
+          "high": 2
+        },
+        "top_cities": {
+          "New York City": 4,
+          "London": 2,
+          "Taipei": 2,
+          "Milan": 2,
+          "Hong Kong": 2
+        }
+      },
+      {
+        "name": "Lumpy-Emergence",
+        "n_positions": 19,
+        "n_temp": 3,
+        "n_signals": 2,
+        "win_rate": 42.1,
+        "pnl_closed": -6.4,
+        "price_dist": {
+          "low": 1,
+          "mid": 16,
+          "high": 2
+        },
+        "top_cities": {
+          "New York City": 2,
+          "Hong Kong": 1
+        }
+      },
+      {
+        "name": "Rewarding-Boatyard",
+        "n_positions": 38,
+        "n_temp": 38,
+        "n_signals": 30,
+        "win_rate": 28.9,
+        "pnl_closed": -528.65,
+        "price_dist": {
+          "low": 5,
+          "mid": 32,
+          "high": 1
+        },
+        "top_cities": {
+          "New York City": 3,
+          "London": 3,
+          "Atlanta": 3,
+          "Buenos Aires": 3,
+          "Paris": 3
+        }
+      },
+      {
+        "name": "Unwieldy-Amusement",
+        "n_positions": 50,
+        "n_temp": 50,
+        "n_signals": 39,
+        "win_rate": 4.5,
+        "pnl_closed": -1251.33,
+        "price_dist": {
+          "low": 8,
+          "mid": 42,
+          "high": 0
+        },
+        "top_cities": {
+          "London": 13,
+          "Munich": 12,
+          "Paris": 9,
+          "Ankara": 4,
+          "Seoul": 3
+        }
+      },
+      {
+        "name": "Immediate-Ideal",
+        "n_positions": 50,
+        "n_temp": 50,
+        "n_signals": 49,
+        "win_rate": 9.0,
+        "pnl_closed": -1916.0,
+        "price_dist": {
+          "low": 0,
+          "mid": 50,
+          "high": 0
+        },
+        "top_cities": {
+          "Hong Kong": 5,
+          "Tokyo": 4,
+          "Atlanta": 3,
+          "Beijing": 3,
+          "Dallas": 3
+        }
+      },
+      {
+        "name": "Small-Retirement",
+        "n_positions": 50,
+        "n_temp": 48,
+        "n_signals": 48,
+        "win_rate": 59.4,
+        "pnl_closed": 394.78,
+        "price_dist": {
+          "low": 0,
+          "mid": 50,
+          "high": 0
+        },
+        "top_cities": {
+          "Shanghai": 3,
+          "Singapore": 3,
+          "Hong Kong": 3,
+          "Warsaw": 3,
+          "Paris": 3
+        }
+      },
+      {
+        "name": "Auto_013",
+        "n_positions": 31,
+        "n_temp": 30,
+        "n_signals": 16,
+        "win_rate": 16.1,
+        "pnl_closed": -97.97,
+        "price_dist": {
+          "low": 13,
+          "mid": 18,
+          "high": 0
+        },
+        "top_cities": {
+          "Hong Kong": 4,
+          "Ankara": 3,
+          "New York City": 2,
+          "London": 2,
+          "Wellington": 2
+        }
+      },
+      {
+        "name": "Healthy-Worry",
+        "n_positions": 50,
+        "n_temp": 50,
+        "n_signals": 50,
+        "win_rate": 21.0,
+        "pnl_closed": -1451.72,
+        "price_dist": {
+          "low": 0,
+          "mid": 50,
+          "high": 0
+        },
+        "top_cities": {
+          "London": 5,
+          "Paris": 5,
+          "Ankara": 4,
+          "Singapore": 3,
+          "Warsaw": 3
+        }
+      },
+      {
+        "name": "Unwieldy-Counsel",
+        "n_positions": 50,
+        "n_temp": 1,
+        "n_signals": 1,
+        "win_rate": 55.6,
+        "pnl_closed": 120.58,
+        "price_dist": {
+          "low": 1,
+          "mid": 44,
+          "high": 5
+        },
+        "top_cities": {
+          "Seattle": 1
+        }
+      },
+      {
+        "name": "Tame-Zombie",
+        "n_positions": 14,
+        "n_temp": 14,
+        "n_signals": 11,
+        "win_rate": 50.0,
+        "pnl_closed": -2.61,
+        "price_dist": {
+          "low": 0,
+          "mid": 11,
+          "high": 3
+        },
+        "top_cities": {
+          "London": 4,
+          "Buenos Aires": 3,
+          "Ankara": 2,
+          "Paris": 2,
+          "Tel Aviv": 2
+        }
+      },
+      {
+        "name": "Outrageous-Litigatio",
+        "n_positions": 26,
+        "n_temp": 24,
+        "n_signals": 6,
+        "win_rate": 30.8,
+        "pnl_closed": -108.66,
+        "price_dist": {
+          "low": 16,
+          "mid": 10,
+          "high": 0
+        },
+        "top_cities": {
+          "Ankara": 6,
+          "Tokyo": 5,
+          "Chicago": 3,
+          "Shenzhen": 3,
+          "Wellington": 2
+        }
+      },
+      {
+        "name": "Nutty-Facility",
+        "n_positions": 17,
+        "n_temp": 17,
+        "n_signals": 6,
+        "win_rate": 23.5,
+        "pnl_closed": -7.79,
+        "price_dist": {
+          "low": 11,
+          "mid": 6,
+          "high": 0
+        },
+        "top_cities": {
+          "Paris": 10,
+          "London": 7
+        }
+      },
+      {
+        "name": "Kind-Flour",
+        "n_positions": 50,
+        "n_temp": 50,
+        "n_signals": 48,
+        "win_rate": 23.1,
+        "pnl_closed": -368.01,
+        "price_dist": {
+          "low": 1,
+          "mid": 49,
+          "high": 0
+        },
+        "top_cities": {
+          "New York City": 6,
+          "Seattle": 6,
+          "London": 6,
+          "Dallas": 6,
+          "Buenos Aires": 6
+        }
+      },
+      {
+        "name": "Lighthearted-Mammoth",
+        "n_positions": 27,
+        "n_temp": 9,
+        "n_signals": 7,
+        "win_rate": 18.5,
+        "pnl_closed": -425.35,
+        "price_dist": {
+          "low": 15,
+          "mid": 12,
+          "high": 0
+        },
+        "top_cities": {
+          "Seattle": 3,
+          "New York City": 3,
+          "Dallas": 3
+        }
+      },
+      {
+        "name": "Plain-Medicine",
+        "n_positions": 14,
+        "n_temp": 11,
+        "n_signals": 9,
+        "win_rate": 14.3,
+        "pnl_closed": -44.89,
+        "price_dist": {
+          "low": 1,
+          "mid": 13,
+          "high": 0
+        },
+        "top_cities": {
+          "Shanghai": 5,
+          "Shenzhen": 2,
+          "Chongqing": 2,
+          "Beijing": 2
+        }
+      },
+      {
+        "name": "Cheery-Pizza",
+        "n_positions": 50,
+        "n_temp": 42,
+        "n_signals": 20,
+        "win_rate": 39.0,
+        "pnl_closed": -171.83,
+        "price_dist": {
+          "low": 0,
+          "mid": 19,
+          "high": 31
+        },
+        "top_cities": {
+          "Hong Kong": 8,
+          "New York City": 6,
+          "Tokyo": 6,
+          "Shenzhen": 5,
+          "Shanghai": 4
+        }
+      },
+      {
+        "name": "Jubilant-Spending",
+        "n_positions": 50,
+        "n_temp": 50,
+        "n_signals": 49,
+        "win_rate": 44.0,
+        "pnl_closed": 138.92,
+        "price_dist": {
+          "low": 0,
+          "mid": 50,
+          "high": 0
+        },
+        "top_cities": {
+          "Dallas": 4,
+          "London": 3,
+          "Seattle": 3,
+          "Madrid": 3,
+          "Singapore": 2
+        }
+      },
+      {
+        "name": "Charming-Underwear-C",
+        "n_positions": 7,
+        "n_temp": 5,
+        "n_signals": 3,
+        "win_rate": 14.3,
+        "pnl_closed": -6.01,
+        "price_dist": {
+          "low": 2,
+          "mid": 5,
+          "high": 0
+        },
+        "top_cities": {
+          "London": 1,
+          "Paris": 1,
+          "Madrid": 1,
+          "Ankara": 1,
+          "Warsaw": 1
+        }
+      },
+      {
+        "name": "Eminent-Shack",
+        "n_positions": 26,
+        "n_temp": 26,
+        "n_signals": 5,
+        "win_rate": 32.0,
+        "pnl_closed": 0.23,
+        "price_dist": {
+          "low": 0,
+          "mid": 5,
+          "high": 21
+        },
+        "top_cities": {
+          "Buenos Aires": 5,
+          "New York City": 4,
+          "Ankara": 4,
+          "Atlanta": 3,
+          "Paris": 2
+        }
+      },
+      {
+        "name": "Actual-Examination",
+        "n_positions": 46,
+        "n_temp": 21,
+        "n_signals": 19,
+        "win_rate": 19.6,
+        "pnl_closed": -15.96,
+        "price_dist": {
+          "low": 6,
+          "mid": 40,
+          "high": 0
+        },
+        "top_cities": {
+          "London": 5,
+          "Paris": 2,
+          "Madrid": 2,
+          "Dallas": 2,
+          "Seoul": 2
+        }
+      },
+      {
+        "name": "Unaware-Engine",
+        "n_positions": 1,
+        "n_temp": 1,
+        "n_signals": 1,
+        "win_rate": 100.0,
+        "pnl_closed": 0.45,
+        "price_dist": {
+          "low": 0,
+          "mid": 1,
+          "high": 0
+        },
+        "top_cities": {
+          "Beijing": 1
+        }
+      },
+      {
+        "name": "Shy-Advertising",
+        "n_positions": 50,
+        "n_temp": 50,
+        "n_signals": 49,
+        "win_rate": 3.2,
+        "pnl_closed": -188.48,
+        "price_dist": {
+          "low": 1,
+          "mid": 49,
+          "high": 0
+        },
+        "top_cities": {
+          "London": 36,
+          "Paris": 7,
+          "Seoul": 3,
+          "Singapore": 2,
+          "Tokyo": 2
+        }
+      },
+      {
+        "name": "Flawed-Salute",
+        "n_positions": 13,
+        "n_temp": 13,
+        "n_signals": 10,
+        "win_rate": 15.4,
+        "pnl_closed": -10.08,
+        "price_dist": {
+          "low": 3,
+          "mid": 10,
+          "high": 0
+        },
+        "top_cities": {
+          "Buenos Aires": 3,
+          "London": 3,
+          "Seoul": 3,
+          "Sao Paulo": 2,
+          "Paris": 2
+        }
+      },
+      {
+        "name": "Intent-Plantation",
+        "n_positions": 50,
+        "n_temp": 32,
+        "n_signals": 9,
+        "win_rate": 15.2,
+        "pnl_closed": -560.52,
+        "price_dist": {
+          "low": 41,
+          "mid": 9,
+          "high": 0
+        },
+        "top_cities": {
+          "New York City": 10,
+          "London": 9,
+          "Paris": 4,
+          "Atlanta": 4,
+          "Tokyo": 2
+        }
+      },
+      {
+        "name": "Rubbery-Worshiper",
+        "n_positions": 45,
+        "n_temp": 45,
+        "n_signals": 45,
+        "win_rate": 62.2,
+        "pnl_closed": 34.59,
+        "price_dist": {
+          "low": 0,
+          "mid": 45,
+          "high": 0
+        },
+        "top_cities": {
+          "New York City": 4,
+          "Wellington": 4,
+          "Munich": 4,
+          "Atlanta": 4,
+          "Paris": 3
+        }
+      },
+      {
+        "name": "Pricey-Score",
+        "n_positions": 50,
+        "n_temp": 50,
+        "n_signals": 46,
+        "win_rate": 30.3,
+        "pnl_closed": 56.14,
+        "price_dist": {
+          "low": 3,
+          "mid": 47,
+          "high": 0
+        },
+        "top_cities": {
+          "Dallas": 8,
+          "London": 8,
+          "Tel Aviv": 6,
+          "Paris": 5,
+          "Munich": 5
+        }
+      }
+    ],
+    "n_consensus": 51
+  }
+]

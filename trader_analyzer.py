@@ -44,6 +44,10 @@ HISTORY_FILE = "trader_history.json"
 MIN_PRICE = 0.08
 MAX_PRICE = 0.92
 
+# v9: Filtro de calidad — solo traders rentables generan señales
+MIN_SIGNAL_WIN_RATE = 50.0    # WR mínimo para generar señales
+MIN_SIGNAL_PNL = 0.0          # PnL mínimo (no perder dinero)
+
 
 # ============================================================
 # API
@@ -278,12 +282,23 @@ def analyze_trader(name, address, is_reference=False):
 
 def find_consensus(all_results):
     """
-    Detecta mercados donde 2+ traders coinciden.
-    Usa match_key para identificar el mismo mercado.
+    Detecta mercados donde 2+ traders RENTABLES coinciden.
+    Solo cuenta traders con WR > 50% y PnL positivo.
     """
+    # Primero identificar traders de calidad
+    quality_traders = set()
+    for result in all_results:
+        if result["is_reference"]:
+            continue
+        if (result["win_rate"] >= MIN_SIGNAL_WIN_RATE
+                and result["pnl_closed"] >= MIN_SIGNAL_PNL):
+            quality_traders.add(result["name"])
+
     market_to_signals = {}  # match_key → lista de señales
 
     for result in all_results:
+        if result["name"] not in quality_traders:
+            continue
         for signal in result["signals"]:
             key = signal["match_key"]
             if key not in market_to_signals:
@@ -292,7 +307,7 @@ def find_consensus(all_results):
             if not any(s["trader"] == signal["trader"] for s in market_to_signals[key]):
                 market_to_signals[key].append(signal)
 
-    # Solo mercados con 2+ traders
+    # Solo mercados con 2+ traders de calidad
     consensus = {
         k: v for k, v in market_to_signals.items()
         if len(v) >= 2
@@ -307,15 +322,27 @@ def find_consensus(all_results):
 def generate_signals_file(all_results, consensus):
     """
     Genera signals.json que bot.py lee en cada ciclo.
-    Estructura simple: lista de señales con toda la info necesaria
-    para que bot.py pueda cruzar con sus propios candidatos.
+    Solo incluye señales de traders RENTABLES (WR>50%, PnL>0).
+    Traders malos se analizan pero no generan señales.
     """
-    # Todas las señales de traders no-reference
     actionable = []
+    skipped_low_quality = 0
+
     for result in all_results:
         if result["is_reference"]:
             continue
+
+        # Filtro de calidad: solo traders que ganan dinero
+        if (result["win_rate"] < MIN_SIGNAL_WIN_RATE
+                or result["pnl_closed"] < MIN_SIGNAL_PNL):
+            skipped_low_quality += len(result["signals"])
+            continue
+
         for signal in result["signals"]:
+            # Añadir win rate del trader a la señal
+            signal["trader_win_rate"] = result["win_rate"]
+            signal["trader_pnl"] = result["pnl_closed"]
+
             # Marcar si hay consenso
             signal["has_consensus"] = signal["match_key"] in consensus
             if signal["has_consensus"]:
@@ -328,10 +355,21 @@ def generate_signals_file(all_results, consensus):
                 signal["consensus_with"] = []
             actionable.append(signal)
 
+    # Contar traders de calidad
+    quality_traders = [
+        r["name"] for r in all_results
+        if not r["is_reference"]
+        and r["win_rate"] >= MIN_SIGNAL_WIN_RATE
+        and r["pnl_closed"] >= MIN_SIGNAL_PNL
+    ]
+
     output = {
         "generated": datetime.now(timezone.utc).isoformat(),
         "n_traders_analyzed": len(all_results),
+        "n_quality_traders": len(quality_traders),
+        "quality_traders": quality_traders,
         "n_actionable_signals": len(actionable),
+        "n_skipped_low_quality": skipped_low_quality,
         "n_consensus_markets": len(consensus),
         "signals": actionable,
     }
@@ -416,11 +454,20 @@ def print_summary(all_results, consensus, signals_output):
     """Resumen legible para consola."""
     print(f"\n{'='*60}")
     print(f"📊 RESUMEN DE ANÁLISIS")
+    print(f"   Filtro de calidad: WR≥{MIN_SIGNAL_WIN_RATE}% + PnL≥${MIN_SIGNAL_PNL}")
     print(f"{'='*60}")
 
     for r in all_results:
         ref = " (REF)" if r["is_reference"] else ""
-        print(f"\n  {r['name']}{ref} — {r['address'][:14]}...")
+        # Marcar si pasa filtro de calidad
+        is_quality = (not r["is_reference"]
+                      and r["win_rate"] >= MIN_SIGNAL_WIN_RATE
+                      and r["pnl_closed"] >= MIN_SIGNAL_PNL)
+        quality_mark = " ⭐" if is_quality else ""
+        if not r["is_reference"] and not is_quality:
+            quality_mark = " ❌ filtrado"
+
+        print(f"\n  {r['name']}{ref}{quality_mark} — {r['address'][:14]}...")
         print(f"    Posiciones: {r['n_positions']} total, {r['n_temp']} temp, "
               f"{r['n_signals']} en nuestro rango")
         print(f"    Win rate: {r['win_rate']:.1f}% ({r['wins']}W/{r['losses']}L) | "
@@ -430,6 +477,12 @@ def print_summary(all_results, consensus, signals_output):
         if r["cities"]:
             top_3 = sorted(r["cities"].items(), key=lambda x: -x[1])[:3]
             print(f"    Ciudades: {', '.join(f'{c}({n})' for c,n in top_3)}")
+
+    # Resumen de filtro
+    n_quality = signals_output.get("n_quality_traders", 0)
+    n_skipped = signals_output.get("n_skipped_low_quality", 0)
+    print(f"\n  ─────────────────────────────")
+    print(f"  Traders calidad: {n_quality} | Señales filtradas: {n_skipped}")
 
     # Señales accionables
     actionable = [s for s in signals_output.get("signals", []) if not s.get("is_reference")]

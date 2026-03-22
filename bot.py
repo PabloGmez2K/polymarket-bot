@@ -604,10 +604,17 @@ def cmd_traders():
     n_signals = data.get("n_actionable_signals", 0)
     n_consensus = data.get("n_consensus_markets", 0)
     n_traders = data.get("n_traders_analyzed", 0)
+    n_quality = data.get("n_quality_traders", 0)
+    quality_names = data.get("quality_traders", [])
+    n_skipped = data.get("n_skipped_low_quality", 0)
 
     text = f"🔍 <b>Traders Intel</b>\n"
-    text += f"Última actualización: {generated} UTC\n"
-    text += f"Traders: {n_traders} | Señales: {n_signals} | Consenso: {n_consensus}\n"
+    text += f"Actualización: {generated} UTC\n"
+    text += f"Analizados: {n_traders} | Calidad: {n_quality} | Filtrados: {n_skipped} señales\n"
+    text += f"Señales: {n_signals} | Consenso: {n_consensus}\n"
+
+    if quality_names:
+        text += f"\n⭐ <b>Traders calidad:</b> {', '.join(quality_names[:8])}\n"
 
     # Último scan y análisis
     scan = bot_state.get("last_trader_scan")
