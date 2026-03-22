@@ -1,0 +1,20 @@
+{
+  "timestamp": "2026-03-22T10:25:34.468543+00:00",
+  "markets_scanned": 40,
+  "traders_found": 1,
+  "added_to_db": 1,
+  "results": [
+    {
+      "address": "0x41743af6dd023a75e34c0a851d67fbe3427818fa",
+      "total_invested": 221.162635663538,
+      "total_current": 225.9580844385,
+      "n_positions": 50,
+      "n_temp_markets": 50,
+      "in_our_range": 5,
+      "win_rate": 100.0,
+      "wins": 50,
+      "losses": 0,
+      "n_temp_score": 2
+    }
+  ]
+}

@@ -1,0 +1,1708 @@
+[
+  {
+    "timestamp": "2026-03-22T10:03:55.795497+00:00",
+    "traders": [
+      {
+        "name": "ColdMath",
+        "address": "0x594edb9112f526fa6a80b8f858a6379c8a2c1c11",
+        "n_positions": 50,
+        "win_rate": 85.0,
+        "pnl_closed": 526.65,
+        "our_range_count": 2,
+        "price_distribution": {
+          "0.00-0.10": 0,
+          "0.10-0.50": 0,
+          "0.50-0.90": 1,
+          "0.90-1.00": 49
+        },
+        "conditions": {
+          "at_or_above": 5,
+          "exact": 28,
+          "at_or_below": 8,
+          "range": 9
+        },
+        "top_cities": {
+          "Warsaw": 9,
+          "Lucknow": 5,
+          "Atlanta": 4,
+          "Sao Paulo": 4,
+          "Munich": 3,
+          "New York City": 3,
+          "Buenos Aires": 3,
+          "Chicago": 2,
+          "Miami": 2,
+          "Shanghai": 2
+        },
+        "timing_hours": {
+          "9": 8,
+          "8": 42
+        },
+        "our_range_positions": [
+          {
+            "title": "Will the highest temperature in Miami be between 72-73°F on ",
+            "outcome": "No",
+            "avg_price": 0.884103,
+            "cur_price": 0.9975,
+            "pct_pnl": 12.826220474311256,
+            "cash_pnl": 117.51845115921604,
+            "condition": "range",
+            "city": "Miami"
+          },
+          {
+            "title": "Will the highest temperature in Warsaw be 13°C or higher on ",
+            "outcome": "Yes",
+            "avg_price": 0.914123,
+            "cur_price": 0.945,
+            "pct_pnl": 3.377773013040907,
+            "cash_pnl": 30.88965956999993,
+            "condition": "at_or_above",
+            "city": "Warsaw"
+          }
+        ],
+        "big_movers": []
+      },
+      {
+        "name": "Trader2",
+        "address": "0xd3938e1d885f7849215c49d87465709d63400744",
+        "n_positions": 50,
+        "win_rate": 44.9,
+        "pnl_closed": 14.11,
+        "our_range_count": 0,
+        "price_distribution": {
+          "0.00-0.10": 50,
+          "0.10-0.50": 0,
+          "0.50-0.90": 0,
+          "0.90-1.00": 0
+        },
+        "conditions": {
+          "at_or_below": 8,
+          "exact": 32,
+          "at_or_above": 2,
+          "range": 8
+        },
+        "top_cities": {
+          "Seoul": 5,
+          "London": 5,
+          "Warsaw": 5,
+          "Taipei": 4,
+          "Tokyo": 4,
+          "Singapore": 3,
+          "Chicago": 3,
+          "Atlanta": 3,
+          "Madrid": 2,
+          "Tel Aviv": 2
+        },
+        "timing_hours": {
+          "10": 2,
+          "9": 48
+        },
+        "our_range_positions": [],
+        "big_movers": [
+          {
+            "city": "Taipei",
+            "title": "Will the highest temperature in Taipei be 22°C or below",
+            "outcome": "Yes",
+            "avg_price": 0.006336,
+            "cur_price": 0.0215,
+            "pct_pnl": 239.33080808080808,
+            "cash_pnl": 6.356567332412
+          },
+          {
+            "city": "Taipei",
+            "title": "Will the highest temperature in Taipei be 23°C on March",
+            "outcome": "Yes",
+            "avg_price": 0.013634,
+            "cur_price": 0.0385,
+            "pct_pnl": 182.38227959512986,
+            "cash_pnl": 5.470388707520001
+          },
+          {
+            "city": "Wellington",
+            "title": "Will the highest temperature in Wellington be 14°C on M",
+            "outcome": "Yes",
+            "avg_price": 0.003,
+            "cur_price": 0.0195,
+            "pct_pnl": 550.0,
+            "cash_pnl": 5.08893
+          },
+          {
+            "city": "Tokyo",
+            "title": "Will the highest temperature in Tokyo be 8°C on March 2",
+            "outcome": "Yes",
+            "avg_price": 0.01,
+            "cur_price": 0.054,
+            "pct_pnl": 440.00000000000006,
+            "cash_pnl": 4.4
+          },
+          {
+            "city": "Sao Paulo",
+            "title": "Will the highest temperature in Sao Paulo be 26°C on Ma",
+            "outcome": "Yes",
+            "avg_price": 0.01,
+            "cur_price": 0.038,
+            "pct_pnl": 280.0,
+            "cash_pnl": 2.8
+          },
+          {
+            "city": "Taipei",
+            "title": "Will the highest temperature in Taipei be 24°C on March",
+            "outcome": "Yes",
+            "avg_price": 0.01,
+            "cur_price": 0.0295,
+            "pct_pnl": 195.0,
+            "cash_pnl": 1.95
+          },
+          {
+            "city": "Seoul",
+            "title": "Will the highest temperature in Seoul be 13°C on March ",
+            "outcome": "Yes",
+            "avg_price": 0.05,
+            "cur_price": 0.135,
+            "pct_pnl": 170.0,
+            "cash_pnl": 1.7
+          },
+          {
+            "city": "Tokyo",
+            "title": "Will the highest temperature in Tokyo be 12°C on March ",
+            "outcome": "Yes",
+            "avg_price": 0.027263,
+            "cur_price": 0.078,
+            "pct_pnl": 186.10204306202547,
+            "cash_pnl": 1.6915315992439999
+          },
+          {
+            "city": "London",
+            "title": "Will the highest temperature in London be 11°C on March",
+            "outcome": "Yes",
+            "avg_price": 0.011,
+            "cur_price": 0.023,
+            "pct_pnl": 109.09090909090908,
+            "cash_pnl": 1.09092
+          },
+          {
+            "city": "Madrid",
+            "title": "Will the highest temperature in Madrid be 16°C on March",
+            "outcome": "Yes",
+            "avg_price": 0.05,
+            "cur_price": 0.1005,
+            "pct_pnl": 101.00000000000003,
+            "cash_pnl": 1.0100000000000002
+          },
+          {
+            "city": "Tokyo",
+            "title": "Will the highest temperature in Tokyo be 13°C on March ",
+            "outcome": "Yes",
+            "avg_price": 0.05,
+            "cur_price": 0.4165,
+            "pct_pnl": 733.0,
+            "cash_pnl": 1.74363841
+          },
+          {
+            "city": "Tel Aviv",
+            "title": "Will the highest temperature in Tel Aviv be 18°C on Mar",
+            "outcome": "Yes",
+            "avg_price": 0.05,
+            "cur_price": 0.08,
+            "pct_pnl": 60.00000000000001,
+            "cash_pnl": 0.6388416000000001
+          },
+          {
+            "city": "Buenos Aires",
+            "title": "Will the highest temperature in Buenos Aires be 20°C or",
+            "outcome": "Yes",
+            "avg_price": 0.003,
+            "cur_price": 0.025,
+            "pct_pnl": 733.3333333333333,
+            "cash_pnl": 1.40954
+          },
+          {
+            "city": "London",
+            "title": "Will the highest temperature in London be 10°C on March",
+            "outcome": "Yes",
+            "avg_price": 0.01,
+            "cur_price": 0.015,
+            "pct_pnl": 50.0,
+            "cash_pnl": 0.5
+          },
+          {
+            "city": "Warsaw",
+            "title": "Will the highest temperature in Warsaw be 12°C on March",
+            "outcome": "Yes",
+            "avg_price": 0.05,
+            "cur_price": 0.0365,
+            "pct_pnl": -27.0,
+            "cash_pnl": -0.54
+          },
+          {
+            "city": "Madrid",
+            "title": "Will the highest temperature in Madrid be 14°C on March",
+            "outcome": "Yes",
+            "avg_price": 0.01,
+            "cur_price": 0.0145,
+            "pct_pnl": 45.0,
+            "cash_pnl": 0.45
+          },
+          {
+            "city": "Singapore",
+            "title": "Will the highest temperature in Singapore be 30°C on Ma",
+            "outcome": "Yes",
+            "avg_price": 0.003,
+            "cur_price": 0.004,
+            "pct_pnl": 33.33333333333333,
+            "cash_pnl": 0.34268
+          },
+          {
+            "city": "Warsaw",
+            "title": "Will the highest temperature in Warsaw be 9°C on March ",
+            "outcome": "Yes",
+            "avg_price": 0.003,
+            "cur_price": 0.004,
+            "pct_pnl": 33.33333333333333,
+            "cash_pnl": 0.33333
+          },
+          {
+            "city": "Singapore",
+            "title": "Will the highest temperature in Singapore be 30°C on Ma",
+            "outcome": "Yes",
+            "avg_price": 0.03,
+            "cur_price": 0.0395,
+            "pct_pnl": 31.666666666666664,
+            "cash_pnl": 0.316635
+          },
+          {
+            "city": "London",
+            "title": "Will the highest temperature in London be 9°C or below ",
+            "outcome": "Yes",
+            "avg_price": 0.01,
+            "cur_price": 0.013,
+            "pct_pnl": 30.0,
+            "cash_pnl": 0.299943
+          },
+          {
+            "city": "Seoul",
+            "title": "Will the highest temperature in Seoul be 9°C on March 2",
+            "outcome": "Yes",
+            "avg_price": 0.00997,
+            "cur_price": 0.006,
+            "pct_pnl": -39.81945837512538,
+            "cash_pnl": -0.794
+          },
+          {
+            "city": "Munich",
+            "title": "Will the highest temperature in Munich be 11°C on March",
+            "outcome": "Yes",
+            "avg_price": 0.05,
+            "cur_price": 0.0715,
+            "pct_pnl": 43.0,
+            "cash_pnl": 0.3241985
+          },
+          {
+            "city": "Warsaw",
+            "title": "Will the highest temperature in Warsaw be 11°C on March",
+            "outcome": "Yes",
+            "avg_price": 0.003,
+            "cur_price": 0.0075,
+            "pct_pnl": 149.99999999999994,
+            "cash_pnl": 0.6456764969999998
+          },
+          {
+            "city": "London",
+            "title": "Will the highest temperature in London be 13°C on March",
+            "outcome": "Yes",
+            "avg_price": 0.03,
+            "cur_price": 0.053,
+            "pct_pnl": 76.66666666666667,
+            "cash_pnl": 0.45264
+          },
+          {
+            "city": "London",
+            "title": "Will the highest temperature in London be 13°C on March",
+            "outcome": "Yes",
+            "avg_price": 0.014,
+            "cur_price": 0.048,
+            "pct_pnl": 242.85714285714283,
+            "cash_pnl": 0.721378
+          },
+          {
+            "city": "Tokyo",
+            "title": "Will the highest temperature in Tokyo be 17°C on March ",
+            "outcome": "Yes",
+            "avg_price": 0.010813,
+            "cur_price": 0.0075,
+            "pct_pnl": -30.639045593267355,
+            "cash_pnl": -0.43880684999999986
+          },
+          {
+            "city": "Chicago",
+            "title": "Will the highest temperature in Chicago be 49°F or belo",
+            "outcome": "Yes",
+            "avg_price": 0.03,
+            "cur_price": 0.049,
+            "pct_pnl": 63.33333333333334,
+            "cash_pnl": 0.36978938100000003
+          },
+          {
+            "city": "Lucknow",
+            "title": "Will the highest temperature in Lucknow be 38°C on Marc",
+            "outcome": "Yes",
+            "avg_price": 0.021837,
+            "cur_price": 0.009,
+            "pct_pnl": -58.78554746531117,
+            "cash_pnl": -1.33132527
+          },
+          {
+            "city": "Toronto",
+            "title": "Will the highest temperature in Toronto be 5°C or highe",
+            "outcome": "Yes",
+            "avg_price": 0.03,
+            "cur_price": 0.045,
+            "pct_pnl": 50.0,
+            "cash_pnl": 0.28875
+          },
+          {
+            "city": "Tel Aviv",
+            "title": "Will the highest temperature in Tel Aviv be 13°C or bel",
+            "outcome": "Yes",
+            "avg_price": 0.01,
+            "cur_price": 0.006,
+            "pct_pnl": -40.0,
+            "cash_pnl": -0.54
+          },
+          {
+            "city": "Seoul",
+            "title": "Will the highest temperature in Seoul be 6°C on March 2",
+            "outcome": "Yes",
+            "avg_price": 0.01,
+            "cur_price": 0.004,
+            "pct_pnl": -60.0,
+            "cash_pnl": -1.2
+          },
+          {
+            "city": "Ankara",
+            "title": "Will the highest temperature in Ankara be 7°C or below ",
+            "outcome": "Yes",
+            "avg_price": 0.01,
+            "cur_price": 0.008,
+            "pct_pnl": -20.0,
+            "cash_pnl": -0.2
+          },
+          {
+            "city": "Miami",
+            "title": "Will the highest temperature in Miami be between 76-77°",
+            "outcome": "Yes",
+            "avg_price": 0.03,
+            "cur_price": 0.0235,
+            "pct_pnl": -21.666666666666668,
+            "cash_pnl": -0.216645
+          },
+          {
+            "city": "New York City",
+            "title": "Will the highest temperature in New York City be betwee",
+            "outcome": "Yes",
+            "avg_price": 0.03,
+            "cur_price": 0.04,
+            "pct_pnl": 33.33333333333333,
+            "cash_pnl": 0.1849
+          }
+        ]
+      },
+      {
+        "name": "Trader3",
+        "address": "0x09f4265f01d6f73d6cf3ccdb8a37e1f7bb42e9c2",
+        "n_positions": 0,
+        "win_rate": 0,
+        "pnl_closed": 0,
+        "our_range_count": 0,
+        "price_distribution": {
+          "0.00-0.10": 0,
+          "0.10-0.50": 0,
+          "0.50-0.90": 0,
+          "0.90-1.00": 0
+        },
+        "conditions": {},
+        "top_cities": {},
+        "timing_hours": {},
+        "our_range_positions": [],
+        "big_movers": []
+      },
+      {
+        "name": "Trader4",
+        "address": "0xbb7a6e5b0d5b6a2fe797c00c5c7b8b11772ded18",
+        "n_positions": 50,
+        "win_rate": 17.8,
+        "pnl_closed": -88.48,
+        "our_range_count": 15,
+        "price_distribution": {
+          "0.00-0.10": 36,
+          "0.10-0.50": 14,
+          "0.50-0.90": 0,
+          "0.90-1.00": 0
+        },
+        "conditions": {
+          "at_or_below": 3,
+          "range": 18,
+          "exact": 24,
+          "at_or_above": 5
+        },
+        "top_cities": {
+          "Paris": 12,
+          "Seattle": 8,
+          "Munich": 8,
+          "Miami": 7,
+          "Ankara": 5,
+          "Wellington": 4,
+          "Lucknow": 3,
+          "Chicago": 3
+        },
+        "timing_hours": {
+          "10": 4,
+          "9": 46
+        },
+        "our_range_positions": [
+          {
+            "title": "Will the highest temperature in Lucknow be 31°C or below on ",
+            "outcome": "No",
+            "avg_price": 0.15386,
+            "cur_price": 0.12,
+            "pct_pnl": -22.00701936825686,
+            "cash_pnl": -1.9799992223000005,
+            "condition": "at_or_below",
+            "city": "Lucknow"
+          },
+          {
+            "title": "Will the highest temperature in Miami be between 82-83°F on ",
+            "outcome": "Yes",
+            "avg_price": 0.31,
+            "cur_price": 0.325,
+            "pct_pnl": 4.838709677419355,
+            "cash_pnl": 0.2322,
+            "condition": "range",
+            "city": "Miami"
+          },
+          {
+            "title": "Will the highest temperature in Ankara be 12°C on March 22?",
+            "outcome": "Yes",
+            "avg_price": 0.11598,
+            "cur_price": 0.11,
+            "pct_pnl": -5.156061389894809,
+            "cash_pnl": -0.256243,
+            "condition": "exact",
+            "city": "Ankara"
+          },
+          {
+            "title": "Will the highest temperature in Seattle be between 52-53°F o",
+            "outcome": "Yes",
+            "avg_price": 0.3,
+            "cur_price": 0.285,
+            "pct_pnl": -5.0000000000000115,
+            "cash_pnl": -0.19995000000000046,
+            "condition": "range",
+            "city": "Seattle"
+          },
+          {
+            "title": "Will the highest temperature in Paris be 16°C on March 22?",
+            "outcome": "Yes",
+            "avg_price": 0.28,
+            "cur_price": 0.215,
+            "pct_pnl": -23.214285714285722,
+            "cash_pnl": -0.9282000000000005,
+            "condition": "exact",
+            "city": "Paris"
+          },
+          {
+            "title": "Will the highest temperature in Paris be 15°C on March 23?",
+            "outcome": "Yes",
+            "avg_price": 0.12,
+            "cur_price": 0.115,
+            "pct_pnl": -4.166666666666666,
+            "cash_pnl": -0.125,
+            "condition": "exact",
+            "city": "Paris"
+          },
+          {
+            "title": "Will the highest temperature in Chicago be between 70-71°F o",
+            "outcome": "Yes",
+            "avg_price": 0.19434,
+            "cur_price": 1.0,
+            "pct_pnl": 414.56210764639286,
+            "cash_pnl": 0.44725570372,
+            "condition": "range",
+            "city": "Chicago"
+          },
+          {
+            "title": "Will the highest temperature in Lucknow be 35°C on March 19?",
+            "outcome": "Yes",
+            "avg_price": 0.189808,
+            "cur_price": 1.0,
+            "pct_pnl": 426.84818342746354,
+            "cash_pnl": 0.35243352,
+            "condition": "exact",
+            "city": "Lucknow"
+          },
+          {
+            "title": "Will the highest temperature in Paris be 17°C on March 19?",
+            "outcome": "Yes",
+            "avg_price": 0.31,
+            "cur_price": 1.0,
+            "pct_pnl": 222.58064516129033,
+            "cash_pnl": 0.27759804000000005,
+            "condition": "exact",
+            "city": "Paris"
+          },
+          {
+            "title": "Will the highest temperature in Munich be 13°C on March 22?",
+            "outcome": "No",
+            "avg_price": 0.33,
+            "cur_price": 0.38,
+            "pct_pnl": 15.151515151515152,
+            "cash_pnl": 0.006,
+            "condition": "exact",
+            "city": "Munich"
+          },
+          {
+            "title": "Will the highest temperature in Paris be 17°C on March 17?",
+            "outcome": "No",
+            "avg_price": 0.290269,
+            "cur_price": 0.0,
+            "pct_pnl": -100.0,
+            "cash_pnl": -0.141589734972,
+            "condition": "exact",
+            "city": "Paris"
+          },
+          {
+            "title": "Will the highest temperature in Lucknow be 31°C or below on ",
+            "outcome": "Yes",
+            "avg_price": 0.16,
+            "cur_price": 0.0,
+            "pct_pnl": -100.0,
+            "cash_pnl": -0.1168,
+            "condition": "at_or_below",
+            "city": "Lucknow"
+          },
+          {
+            "title": "Will the highest temperature in Seattle be between 48-49°F o",
+            "outcome": "Yes",
+            "avg_price": 0.312424,
+            "cur_price": 0.0,
+            "pct_pnl": -100.0,
+            "cash_pnl": -0.265259535688,
+            "condition": "range",
+            "city": "Seattle"
+          },
+          {
+            "title": "Will the highest temperature in Miami be between 84-85°F on ",
+            "outcome": "No",
+            "avg_price": 0.358169,
+            "cur_price": 0.0,
+            "pct_pnl": -100.0,
+            "cash_pnl": -0.1777592747,
+            "condition": "range",
+            "city": "Miami"
+          },
+          {
+            "title": "Will the highest temperature in Miami be between 72-73°F on ",
+            "outcome": "Yes",
+            "avg_price": 0.093708,
+            "cur_price": 0.0,
+            "pct_pnl": -100.0,
+            "cash_pnl": -0.679231567872,
+            "condition": "range",
+            "city": "Miami"
+          }
+        ],
+        "big_movers": [
+          {
+            "city": "Lucknow",
+            "title": "Will the highest temperature in Lucknow be 31°C or belo",
+            "outcome": "No",
+            "avg_price": 0.15386,
+            "cur_price": 0.12,
+            "pct_pnl": -22.00701936825686,
+            "cash_pnl": -1.9799992223000005
+          },
+          {
+            "city": "Paris",
+            "title": "Will the highest temperature in Paris be 16°C on March ",
+            "outcome": "Yes",
+            "avg_price": 0.28,
+            "cur_price": 0.215,
+            "pct_pnl": -23.214285714285722,
+            "cash_pnl": -0.9282000000000005
+          },
+          {
+            "city": "Seattle",
+            "title": "Will the highest temperature in Seattle be between 46-4",
+            "outcome": "Yes",
+            "avg_price": 0.007582,
+            "cur_price": 0.005,
+            "pct_pnl": -34.05433922447902,
+            "cash_pnl": -1.131611286124
+          },
+          {
+            "city": "Paris",
+            "title": "Will the highest temperature in Paris be 18°C or higher",
+            "outcome": "Yes",
+            "avg_price": 0.003,
+            "cur_price": 0.007,
+            "pct_pnl": 133.33333333333331,
+            "cash_pnl": 1.11876
+          },
+          {
+            "city": "Ankara",
+            "title": "Will the highest temperature in Ankara be 9°C on March ",
+            "outcome": "Yes",
+            "avg_price": 0.032301,
+            "cur_price": 0.0195,
+            "pct_pnl": -39.630352001486024,
+            "cash_pnl": -1.1922424870680002
+          },
+          {
+            "city": "Munich",
+            "title": "Will the highest temperature in Munich be 10°C on March",
+            "outcome": "Yes",
+            "avg_price": 0.011,
+            "cur_price": 0.015,
+            "pct_pnl": 36.363636363636346,
+            "cash_pnl": 0.4565974519999998
+          },
+          {
+            "city": "Chicago",
+            "title": "Will the highest temperature in Chicago be between 46-4",
+            "outcome": "Yes",
+            "avg_price": 0.065,
+            "cur_price": 0.0345,
+            "pct_pnl": -46.92307692307692,
+            "cash_pnl": -1.4029999999999998
+          },
+          {
+            "city": "Seattle",
+            "title": "Will the highest temperature in Seattle be between 54-5",
+            "outcome": "Yes",
+            "avg_price": 0.064613,
+            "cur_price": 0.0225,
+            "pct_pnl": -65.17728630461363,
+            "cash_pnl": -2.433005551058
+          },
+          {
+            "city": "Munich",
+            "title": "Will the highest temperature in Munich be 11°C on March",
+            "outcome": "Yes",
+            "avg_price": 0.017559,
+            "cur_price": 0.004,
+            "pct_pnl": -77.21965943390855,
+            "cash_pnl": -4.208372713181001
+          },
+          {
+            "city": "Chicago",
+            "title": "Will the highest temperature in Chicago be between 70-7",
+            "outcome": "Yes",
+            "avg_price": 0.19434,
+            "cur_price": 1.0,
+            "pct_pnl": 414.56210764639286,
+            "cash_pnl": 0.44725570372
+          },
+          {
+            "city": "Seattle",
+            "title": "Will the highest temperature in Seattle be between 58-5",
+            "outcome": "Yes",
+            "avg_price": 0.004,
+            "cur_price": 0.007,
+            "pct_pnl": 75.0,
+            "cash_pnl": 0.23661
+          },
+          {
+            "city": "Lucknow",
+            "title": "Will the highest temperature in Lucknow be 35°C on Marc",
+            "outcome": "Yes",
+            "avg_price": 0.189808,
+            "cur_price": 1.0,
+            "pct_pnl": 426.84818342746354,
+            "cash_pnl": 0.35243352
+          },
+          {
+            "city": "Paris",
+            "title": "Will the highest temperature in Paris be 17°C on March ",
+            "outcome": "Yes",
+            "avg_price": 0.31,
+            "cur_price": 1.0,
+            "pct_pnl": 222.58064516129033,
+            "cash_pnl": 0.27759804000000005
+          },
+          {
+            "city": "Seattle",
+            "title": "Will the highest temperature in Seattle be between 56-5",
+            "outcome": "Yes",
+            "avg_price": 0.014031,
+            "cur_price": 0.0175,
+            "pct_pnl": 24.723825814268423,
+            "cash_pnl": 0.07250843092500005
+          },
+          {
+            "city": "Paris",
+            "title": "Will the highest temperature in Paris be 20°C or higher",
+            "outcome": "Yes",
+            "avg_price": 0.008,
+            "cur_price": 0.011,
+            "pct_pnl": 37.5,
+            "cash_pnl": 0.06831
+          },
+          {
+            "city": "Paris",
+            "title": "Will the highest temperature in Paris be 12°C on March ",
+            "outcome": "Yes",
+            "avg_price": 0.004547,
+            "cur_price": 0.0015,
+            "pct_pnl": -67.0112161864966,
+            "cash_pnl": -0.46613691574999994
+          },
+          {
+            "city": "Ankara",
+            "title": "Will the highest temperature in Ankara be 8°C on March ",
+            "outcome": "Yes",
+            "avg_price": 0.006,
+            "cur_price": 0.0045,
+            "pct_pnl": -25.0,
+            "cash_pnl": -0.025494
+          },
+          {
+            "city": "Ankara",
+            "title": "Will the highest temperature in Ankara be 14°C or highe",
+            "outcome": "Yes",
+            "avg_price": 0.006,
+            "cur_price": 0.016,
+            "pct_pnl": 166.66666666666666,
+            "cash_pnl": 0.01042166
+          },
+          {
+            "city": "Paris",
+            "title": "Will the highest temperature in Paris be 14°C on March ",
+            "outcome": "Yes",
+            "avg_price": 0.03,
+            "cur_price": 0.014,
+            "pct_pnl": -53.333333333333336,
+            "cash_pnl": -0.0176
+          },
+          {
+            "city": "Seattle",
+            "title": "Will the highest temperature in Seattle be between 54-5",
+            "outcome": "Yes",
+            "avg_price": 0.012,
+            "cur_price": 0.0005,
+            "pct_pnl": -95.83333333333334,
+            "cash_pnl": -0.0498484865
+          },
+          {
+            "city": "Wellington",
+            "title": "Will the highest temperature in Wellington be 22°C or h",
+            "outcome": "Yes",
+            "avg_price": 0.022,
+            "cur_price": 0.0005,
+            "pct_pnl": -97.72727272727273,
+            "cash_pnl": -0.0914299755
+          },
+          {
+            "city": "Paris",
+            "title": "Will the highest temperature in Paris be 17°C on March ",
+            "outcome": "No",
+            "avg_price": 0.290269,
+            "cur_price": 0.0,
+            "pct_pnl": -100.0,
+            "cash_pnl": -0.141589734972
+          },
+          {
+            "city": "Ankara",
+            "title": "Will the highest temperature in Ankara be 8°C on March ",
+            "outcome": "Yes",
+            "avg_price": 0.004652,
+            "cur_price": 0.0,
+            "pct_pnl": -100.0,
+            "cash_pnl": -0.19285966663200002
+          },
+          {
+            "city": "Lucknow",
+            "title": "Will the highest temperature in Lucknow be 31°C or belo",
+            "outcome": "Yes",
+            "avg_price": 0.16,
+            "cur_price": 0.0,
+            "pct_pnl": -100.0,
+            "cash_pnl": -0.1168
+          },
+          {
+            "city": "Paris",
+            "title": "Will the highest temperature in Paris be 14°C on March ",
+            "outcome": "Yes",
+            "avg_price": 0.003723,
+            "cur_price": 0.0,
+            "pct_pnl": -100.0,
+            "cash_pnl": -1.94350000575
+          },
+          {
+            "city": "Seattle",
+            "title": "Will the highest temperature in Seattle be between 48-4",
+            "outcome": "Yes",
+            "avg_price": 0.312424,
+            "cur_price": 0.0,
+            "pct_pnl": -100.0,
+            "cash_pnl": -0.265259535688
+          },
+          {
+            "city": "Munich",
+            "title": "Will the highest temperature in Munich be 9°C on March ",
+            "outcome": "Yes",
+            "avg_price": 0.004,
+            "cur_price": 0.0,
+            "pct_pnl": -100.0,
+            "cash_pnl": -0.07896
+          },
+          {
+            "city": "Munich",
+            "title": "Will the highest temperature in Munich be 5°C on March ",
+            "outcome": "Yes",
+            "avg_price": 0.007,
+            "cur_price": 0.0,
+            "pct_pnl": -100.0,
+            "cash_pnl": -2.840271994
+          },
+          {
+            "city": "Paris",
+            "title": "Will the highest temperature in Paris be 13°C on March ",
+            "outcome": "Yes",
+            "avg_price": 0.002,
+            "cur_price": 0.0,
+            "pct_pnl": -100.0,
+            "cash_pnl": -0.557024
+          },
+          {
+            "city": "Miami",
+            "title": "Will the highest temperature in Miami be between 86-87°",
+            "outcome": "Yes",
+            "avg_price": 0.006999,
+            "cur_price": 0.0,
+            "pct_pnl": -100.0,
+            "cash_pnl": -0.028978491624
+          },
+          {
+            "city": "Miami",
+            "title": "Will the highest temperature in Miami be between 84-85°",
+            "outcome": "No",
+            "avg_price": 0.358169,
+            "cur_price": 0.0,
+            "pct_pnl": -100.0,
+            "cash_pnl": -0.1777592747
+          },
+          {
+            "city": "Paris",
+            "title": "Will the highest temperature in Paris be 12°C or below ",
+            "outcome": "Yes",
+            "avg_price": 0.009,
+            "cur_price": 0.0,
+            "pct_pnl": -100.0,
+            "cash_pnl": -2.87496
+          },
+          {
+            "city": "Miami",
+            "title": "Will the highest temperature in Miami be between 72-73°",
+            "outcome": "Yes",
+            "avg_price": 0.075,
+            "cur_price": 0.0,
+            "pct_pnl": -100.0,
+            "cash_pnl": -0.20851545
+          },
+          {
+            "city": "Munich",
+            "title": "Will the highest temperature in Munich be 8°C on March ",
+            "outcome": "Yes",
+            "avg_price": 0.01,
+            "cur_price": 0.0,
+            "pct_pnl": -100.0,
+            "cash_pnl": -1.296703
+          },
+          {
+            "city": "Miami",
+            "title": "Will the highest temperature in Miami be between 72-73°",
+            "outcome": "Yes",
+            "avg_price": 0.093708,
+            "cur_price": 0.0,
+            "pct_pnl": -100.0,
+            "cash_pnl": -0.679231567872
+          },
+          {
+            "city": "Munich",
+            "title": "Will the highest temperature in Munich be 7°C on March ",
+            "outcome": "Yes",
+            "avg_price": 0.008,
+            "cur_price": 0.0,
+            "pct_pnl": -100.0,
+            "cash_pnl": -0.5386
+          },
+          {
+            "city": "Seattle",
+            "title": "Will the highest temperature in Seattle be between 50-5",
+            "outcome": "Yes",
+            "avg_price": 0.005,
+            "cur_price": 0.0,
+            "pct_pnl": -100.0,
+            "cash_pnl": -0.33045
+          }
+        ]
+      }
+    ],
+    "consensus_markets": [
+      "will the highest temperature in chicago be 49°f or below on",
+      "will the highest temperature in miami be between 72-73°f on",
+      "will the highest temperature in ankara be 7°c or below on ma",
+      "will the highest temperature in buenos aires be 20°c or belo",
+      "will the highest temperature in london be 10°c on march 24?",
+      "will the highest temperature in chicago be between 50-51°f o",
+      "will the highest temperature in madrid be 14°c on march 24?",
+      "will the highest temperature in sao paulo be 26°c on march 2",
+      "will the highest temperature in singapore be 30°c on march 2",
+      "will the highest temperature in miami be between 76-77°f on",
+      "will the highest temperature in lucknow be 31°c or below on",
+      "will the highest temperature in seattle be between 54-55°f o"
+    ],
+    "n_consensus": 12
+  },
+  {
+    "timestamp": "2026-03-22T10:27:28.261596+00:00",
+    "traders": [
+      {
+        "name": "ColdMath",
+        "address": "0x594edb9112f526fa6a80b8f858a6379c8a2c1c11",
+        "n_positions": 50,
+        "win_rate": 87.0,
+        "pnl_closed": 721.83,
+        "our_range_count": 3,
+        "price_distribution": {
+          "0.00-0.10": 0,
+          "0.10-0.50": 0,
+          "0.50-0.90": 2,
+          "0.90-1.00": 48
+        },
+        "conditions": {
+          "at_or_above": 5,
+          "exact": 25,
+          "at_or_below": 11,
+          "range": 9
+        },
+        "top_cities": {
+          "Warsaw": 8,
+          "Sao Paulo": 6,
+          "Lucknow": 5,
+          "Atlanta": 4,
+          "Munich": 3,
+          "New York City": 3,
+          "London": 3,
+          "Chicago": 2,
+          "Miami": 2,
+          "Shanghai": 2
+        },
+        "timing_hours": {
+          "10": 50
+        },
+        "our_range_positions": [
+          {
+            "title": "Will the highest temperature in Miami be between 72-73°F on ",
+            "outcome": "No",
+            "avg_price": 0.884103,
+            "cur_price": 0.995,
+            "pct_pnl": 12.543447991919493,
+            "cash_pnl": 114.92758783921599,
+            "condition": "range",
+            "city": "Miami"
+          },
+          {
+            "title": "Will the highest temperature in Warsaw be 13°C or higher on ",
+            "outcome": "Yes",
+            "avg_price": 0.914123,
+            "cur_price": 0.945,
+            "pct_pnl": 3.377773013040907,
+            "cash_pnl": 30.88965956999993,
+            "condition": "at_or_above",
+            "city": "Warsaw"
+          },
+          {
+            "title": "Will the highest temperature in Sao Paulo be 22°C or below o",
+            "outcome": "No",
+            "avg_price": 0.604623,
+            "cur_price": 0.9945,
+            "pct_pnl": 64.4826610962534,
+            "cash_pnl": 174.61010229654306,
+            "condition": "at_or_below",
+            "city": "Sao Paulo"
+          }
+        ],
+        "big_movers": [
+          {
+            "city": "Sao Paulo",
+            "title": "Will the highest temperature in Sao Paulo be 22°C or be",
+            "outcome": "No",
+            "avg_price": 0.604623,
+            "cur_price": 0.9945,
+            "pct_pnl": 64.4826610962534,
+            "cash_pnl": 174.61010229654306
+          }
+        ]
+      },
+      {
+        "name": "Trader2",
+        "address": "0xd3938e1d885f7849215c49d87465709d63400744",
+        "n_positions": 50,
+        "win_rate": 37.8,
+        "pnl_closed": -7.77,
+        "our_range_count": 0,
+        "price_distribution": {
+          "0.00-0.10": 50,
+          "0.10-0.50": 0,
+          "0.50-0.90": 0,
+          "0.90-1.00": 0
+        },
+        "conditions": {
+          "exact": 31,
+          "at_or_below": 8,
+          "at_or_above": 2,
+          "range": 9
+        },
+        "top_cities": {
+          "Tokyo": 5,
+          "Seoul": 5,
+          "Warsaw": 5,
+          "Taipei": 4,
+          "Singapore": 4,
+          "Chicago": 3,
+          "Atlanta": 3,
+          "Tel Aviv": 2,
+          "Madrid": 2,
+          "London": 2
+        },
+        "timing_hours": {
+          "10": 5,
+          "9": 45
+        },
+        "our_range_positions": [],
+        "big_movers": [
+          {
+            "city": "Tokyo",
+            "title": "Will the highest temperature in Tokyo be 8°C on March 2",
+            "outcome": "Yes",
+            "avg_price": 0.01,
+            "cur_price": 0.0635,
+            "pct_pnl": 535.0,
+            "cash_pnl": 5.35
+          },
+          {
+            "city": "Wellington",
+            "title": "Will the highest temperature in Wellington be 14°C on M",
+            "outcome": "Yes",
+            "avg_price": 0.003,
+            "cur_price": 0.0195,
+            "pct_pnl": 550.0,
+            "cash_pnl": 5.08893
+          },
+          {
+            "city": "Sao Paulo",
+            "title": "Will the highest temperature in Sao Paulo be 26°C on Ma",
+            "outcome": "Yes",
+            "avg_price": 0.01,
+            "cur_price": 0.042,
+            "pct_pnl": 320.0,
+            "cash_pnl": 3.2
+          },
+          {
+            "city": "Tokyo",
+            "title": "Will the highest temperature in Tokyo be 12°C on March ",
+            "outcome": "Yes",
+            "avg_price": 0.027263,
+            "cur_price": 0.0795,
+            "pct_pnl": 191.60400542860287,
+            "cash_pnl": 1.7415404172439999
+          },
+          {
+            "city": "Seoul",
+            "title": "Will the highest temperature in Seoul be 13°C on March ",
+            "outcome": "Yes",
+            "avg_price": 0.05,
+            "cur_price": 0.11,
+            "pct_pnl": 120.0,
+            "cash_pnl": 1.2
+          },
+          {
+            "city": "Tokyo",
+            "title": "Will the highest temperature in Tokyo be 13°C on March ",
+            "outcome": "Yes",
+            "avg_price": 0.05,
+            "cur_price": 0.4315,
+            "pct_pnl": 763.0,
+            "cash_pnl": 1.81500151
+          },
+          {
+            "city": "Taipei",
+            "title": "Will the highest temperature in Taipei be 23°C on March",
+            "outcome": "Yes",
+            "avg_price": 0.013634,
+            "cur_price": 0.0075,
+            "pct_pnl": -44.990465013935754,
+            "cash_pnl": -1.3494476124800001
+          },
+          {
+            "city": "Buenos Aires",
+            "title": "Will the highest temperature in Buenos Aires be 20°C or",
+            "outcome": "Yes",
+            "avg_price": 0.003,
+            "cur_price": 0.025,
+            "pct_pnl": 733.3333333333333,
+            "cash_pnl": 1.40954
+          },
+          {
+            "city": "Tel Aviv",
+            "title": "Will the highest temperature in Tel Aviv be 18°C on Mar",
+            "outcome": "Yes",
+            "avg_price": 0.05,
+            "cur_price": 0.075,
+            "pct_pnl": 50.0,
+            "cash_pnl": 0.532368
+          },
+          {
+            "city": "Madrid",
+            "title": "Will the highest temperature in Madrid be 14°C on March",
+            "outcome": "Yes",
+            "avg_price": 0.01,
+            "cur_price": 0.0155,
+            "pct_pnl": 55.00000000000001,
+            "cash_pnl": 0.55
+          },
+          {
+            "city": "Singapore",
+            "title": "Will the highest temperature in Singapore be 30°C on Ma",
+            "outcome": "Yes",
+            "avg_price": 0.003,
+            "cur_price": 0.0045,
+            "pct_pnl": 49.99999999999998,
+            "cash_pnl": 0.5140199999999998
+          },
+          {
+            "city": "Warsaw",
+            "title": "Will the highest temperature in Warsaw be 12°C on March",
+            "outcome": "Yes",
+            "avg_price": 0.05,
+            "cur_price": 0.036,
+            "pct_pnl": -28.000000000000004,
+            "cash_pnl": -0.56
+          },
+          {
+            "city": "Warsaw",
+            "title": "Will the highest temperature in Warsaw be 9°C on March ",
+            "outcome": "Yes",
+            "avg_price": 0.003,
+            "cur_price": 0.004,
+            "pct_pnl": 33.33333333333333,
+            "cash_pnl": 0.33333
+          },
+          {
+            "city": "Singapore",
+            "title": "Will the highest temperature in Singapore be 30°C on Ma",
+            "outcome": "Yes",
+            "avg_price": 0.03,
+            "cur_price": 0.0385,
+            "pct_pnl": 28.333333333333332,
+            "cash_pnl": 0.283305
+          },
+          {
+            "city": "London",
+            "title": "Will the highest temperature in London be 11°C on March",
+            "outcome": "Yes",
+            "avg_price": 0.011,
+            "cur_price": 0.014,
+            "pct_pnl": 27.27272727272727,
+            "cash_pnl": 0.27273
+          },
+          {
+            "city": "Munich",
+            "title": "Will the highest temperature in Munich be 11°C on March",
+            "outcome": "Yes",
+            "avg_price": 0.05,
+            "cur_price": 0.0835,
+            "pct_pnl": 67.0,
+            "cash_pnl": 0.5051465
+          },
+          {
+            "city": "Seoul",
+            "title": "Will the highest temperature in Seoul be 9°C on March 2",
+            "outcome": "Yes",
+            "avg_price": 0.00997,
+            "cur_price": 0.006,
+            "pct_pnl": -39.81945837512538,
+            "cash_pnl": -0.794
+          },
+          {
+            "city": "Warsaw",
+            "title": "Will the highest temperature in Warsaw be 11°C on March",
+            "outcome": "Yes",
+            "avg_price": 0.003,
+            "cur_price": 0.0075,
+            "pct_pnl": 149.99999999999994,
+            "cash_pnl": 0.6456764969999998
+          },
+          {
+            "city": "Chicago",
+            "title": "Will the highest temperature in Chicago be 49°F or belo",
+            "outcome": "Yes",
+            "avg_price": 0.03,
+            "cur_price": 0.049,
+            "pct_pnl": 63.33333333333334,
+            "cash_pnl": 0.36978938100000003
+          },
+          {
+            "city": "Lucknow",
+            "title": "Will the highest temperature in Lucknow be 38°C on Marc",
+            "outcome": "Yes",
+            "avg_price": 0.021837,
+            "cur_price": 0.009,
+            "pct_pnl": -58.78554746531117,
+            "cash_pnl": -1.33132527
+          },
+          {
+            "city": "Tokyo",
+            "title": "Will the highest temperature in Tokyo be 10°C or below ",
+            "outcome": "Yes",
+            "avg_price": 0.003819,
+            "cur_price": 0.0025,
+            "pct_pnl": -34.537837130138776,
+            "cash_pnl": -0.47125990161199993
+          },
+          {
+            "city": "Toronto",
+            "title": "Will the highest temperature in Toronto be 5°C or highe",
+            "outcome": "Yes",
+            "avg_price": 0.03,
+            "cur_price": 0.045,
+            "pct_pnl": 50.0,
+            "cash_pnl": 0.28875
+          },
+          {
+            "city": "London",
+            "title": "Will the highest temperature in London be 13°C on March",
+            "outcome": "Yes",
+            "avg_price": 0.014,
+            "cur_price": 0.0395,
+            "pct_pnl": 182.14285714285714,
+            "cash_pnl": 0.5410335
+          },
+          {
+            "city": "Shanghai",
+            "title": "Will the highest temperature in Shanghai be 10°C on Mar",
+            "outcome": "Yes",
+            "avg_price": 0.012811,
+            "cur_price": 0.037,
+            "pct_pnl": 188.8143002107564,
+            "cash_pnl": 0.53627013
+          },
+          {
+            "city": "Tel Aviv",
+            "title": "Will the highest temperature in Tel Aviv be 13°C or bel",
+            "outcome": "Yes",
+            "avg_price": 0.01,
+            "cur_price": 0.006,
+            "pct_pnl": -40.0,
+            "cash_pnl": -0.54
+          },
+          {
+            "city": "Ankara",
+            "title": "Will the highest temperature in Ankara be 7°C or below ",
+            "outcome": "Yes",
+            "avg_price": 0.01,
+            "cur_price": 0.008,
+            "pct_pnl": -20.0,
+            "cash_pnl": -0.2
+          },
+          {
+            "city": "Seoul",
+            "title": "Will the highest temperature in Seoul be 6°C on March 2",
+            "outcome": "Yes",
+            "avg_price": 0.01,
+            "cur_price": 0.004,
+            "pct_pnl": -60.0,
+            "cash_pnl": -1.2
+          },
+          {
+            "city": "Miami",
+            "title": "Will the highest temperature in Miami be between 76-77°",
+            "outcome": "Yes",
+            "avg_price": 0.03,
+            "cur_price": 0.0235,
+            "pct_pnl": -21.666666666666668,
+            "cash_pnl": -0.216645
+          },
+          {
+            "city": "Taipei",
+            "title": "Will the highest temperature in Taipei be 24°C on March",
+            "outcome": "Yes",
+            "avg_price": 0.01,
+            "cur_price": 0.0075,
+            "pct_pnl": -25.0,
+            "cash_pnl": -0.25
+          },
+          {
+            "city": "Taipei",
+            "title": "Will the highest temperature in Taipei be 31°C on March",
+            "outcome": "Yes",
+            "avg_price": 0.004,
+            "cur_price": 0.003,
+            "pct_pnl": -25.0,
+            "cash_pnl": -0.25
+          },
+          {
+            "city": "New York City",
+            "title": "Will the highest temperature in New York City be betwee",
+            "outcome": "Yes",
+            "avg_price": 0.03,
+            "cur_price": 0.04,
+            "pct_pnl": 33.33333333333333,
+            "cash_pnl": 0.1849
+          },
+          {
+            "city": "Lucknow",
+            "title": "Will the highest temperature in Lucknow be 33°C on Marc",
+            "outcome": "Yes",
+            "avg_price": 0.03,
+            "cur_price": 0.022,
+            "pct_pnl": -26.666666666666668,
+            "cash_pnl": -0.26664
+          },
+          {
+            "city": "New York City",
+            "title": "Will the highest temperature in New York City be betwee",
+            "outcome": "Yes",
+            "avg_price": 0.03,
+            "cur_price": 0.022,
+            "pct_pnl": -26.666666666666668,
+            "cash_pnl": -0.26664
+          },
+          {
+            "city": "Madrid",
+            "title": "Will the highest temperature in Madrid be 16°C on March",
+            "outcome": "Yes",
+            "avg_price": 0.05,
+            "cur_price": 0.0365,
+            "pct_pnl": -27.0,
+            "cash_pnl": -0.27
+          },
+          {
+            "city": "Singapore",
+            "title": "Will the highest temperature in Singapore be 27°C on Ma",
+            "outcome": "Yes",
+            "avg_price": 0.01,
+            "cur_price": 0.0035,
+            "pct_pnl": -65.0,
+            "cash_pnl": -1.3
+          }
+        ]
+      },
+      {
+        "name": "Trader3",
+        "address": "0x09f4265f01d6f73d6cf3ccdb8a37e1f7bb42e9c2",
+        "n_positions": 0,
+        "win_rate": 0,
+        "pnl_closed": 0,
+        "our_range_count": 0,
+        "price_distribution": {
+          "0.00-0.10": 0,
+          "0.10-0.50": 0,
+          "0.50-0.90": 0,
+          "0.90-1.00": 0
+        },
+        "conditions": {},
+        "top_cities": {},
+        "timing_hours": {},
+        "our_range_positions": [],
+        "big_movers": []
+      },
+      {
+        "name": "Found1",
+        "address": "0x41743af6dd023a75e34c0a851d67fbe3427818fa",
+        "n_positions": 50,
+        "win_rate": 75.8,
+        "pnl_closed": 12.32,
+        "our_range_count": 5,
+        "price_distribution": {
+          "0.00-0.10": 20,
+          "0.10-0.50": 2,
+          "0.50-0.90": 2,
+          "0.90-1.00": 26
+        },
+        "conditions": {
+          "exact": 31,
+          "range": 6,
+          "at_or_above": 8,
+          "at_or_below": 5
+        },
+        "top_cities": {
+          "London": 13,
+          "Lucknow": 8,
+          "Chicago": 7,
+          "Ankara": 5,
+          "Chongqing": 4,
+          "Tokyo": 4,
+          "Shenzhen": 3,
+          "New York City": 2,
+          "Seoul": 2,
+          "Toronto": 1
+        },
+        "timing_hours": {
+          "10": 29,
+          "9": 21
+        },
+        "our_range_positions": [
+          {
+            "title": "Will the highest temperature in Ankara be 12°C on March 22?",
+            "outcome": "No",
+            "avg_price": 0.85,
+            "cur_price": 0.845,
+            "pct_pnl": -0.5882352941176471,
+            "cash_pnl": -0.075,
+            "condition": "exact",
+            "city": "Ankara"
+          },
+          {
+            "title": "Will the highest temperature in London be 16°C on March 23?",
+            "outcome": "No",
+            "avg_price": 0.91,
+            "cur_price": 0.895,
+            "pct_pnl": -1.6483516483516485,
+            "cash_pnl": -0.11025,
+            "condition": "exact",
+            "city": "London"
+          },
+          {
+            "title": "Will the highest temperature in London be 14°C on March 23?",
+            "outcome": "No",
+            "avg_price": 0.82,
+            "cur_price": 0.78,
+            "pct_pnl": -4.878048780487805,
+            "cash_pnl": -0.294,
+            "condition": "exact",
+            "city": "London"
+          },
+          {
+            "title": "Will the highest temperature in London be 15°C on March 23?",
+            "outcome": "No",
+            "avg_price": 0.320082,
+            "cur_price": 0.4,
+            "pct_pnl": 24.967976955905055,
+            "cash_pnl": 0.5884685208720002,
+            "condition": "exact",
+            "city": "London"
+          },
+          {
+            "title": "Will the highest temperature in Ankara be 11°C on March 22?",
+            "outcome": "No",
+            "avg_price": 0.14,
+            "cur_price": 0.16,
+            "pct_pnl": 14.285714285714285,
+            "cash_pnl": 0.3,
+            "condition": "exact",
+            "city": "Ankara"
+          }
+        ],
+        "big_movers": [
+          {
+            "city": "London",
+            "title": "Will the highest temperature in London be 15°C on March",
+            "outcome": "No",
+            "avg_price": 0.320082,
+            "cur_price": 0.4,
+            "pct_pnl": 24.967976955905055,
+            "cash_pnl": 0.5884685208720002
+          },
+          {
+            "city": "Tokyo",
+            "title": "Will the highest temperature in Tokyo be 18°C on March ",
+            "outcome": "Yes",
+            "avg_price": 0.001662,
+            "cur_price": 0.0035,
+            "pct_pnl": 110.58965102286402,
+            "cash_pnl": 0.19299
+          },
+          {
+            "city": "Seoul",
+            "title": "Will the highest temperature in Seoul be 6°C or below o",
+            "outcome": "Yes",
+            "avg_price": -0.009868,
+            "cur_price": 0.0015,
+            "pct_pnl": -115.20064856100527,
+            "cash_pnl": 1.64347176
+          },
+          {
+            "city": "Tokyo",
+            "title": "Will the highest temperature in Tokyo be 19°C on March ",
+            "outcome": "Yes",
+            "avg_price": -0.000498,
+            "cur_price": 0.001,
+            "pct_pnl": -300.8032128514057,
+            "cash_pnl": 0.26962502
+          },
+          {
+            "city": "Chicago",
+            "title": "Will the highest temperature in Chicago be 82°F or high",
+            "outcome": "Yes",
+            "avg_price": -0.000267,
+            "cur_price": 0.001,
+            "pct_pnl": -474.53183520599254,
+            "cash_pnl": 0.22086344
+          },
+          {
+            "city": "Tokyo",
+            "title": "Will the highest temperature in Tokyo be 20°C on March ",
+            "outcome": "Yes",
+            "avg_price": 0.000709,
+            "cur_price": 0.001,
+            "pct_pnl": 41.04372355430183,
+            "cash_pnl": 0.047139089999999995
+          },
+          {
+            "city": "Lucknow",
+            "title": "Will the highest temperature in Lucknow be 35°C on Marc",
+            "outcome": "Yes",
+            "avg_price": -0.000271,
+            "cur_price": 0.002,
+            "pct_pnl": -838.0073800738008,
+            "cash_pnl": 0.13626
+          },
+          {
+            "city": "Lucknow",
+            "title": "Will the highest temperature in Lucknow be 30°C or belo",
+            "outcome": "No",
+            "avg_price": 0.043,
+            "cur_price": 0.0265,
+            "pct_pnl": -38.372093023255815,
+            "cash_pnl": -0.059565
+          },
+          {
+            "city": "Tokyo",
+            "title": "Will the highest temperature in Tokyo be 21°C or higher",
+            "outcome": "Yes",
+            "avg_price": -0.000567,
+            "cur_price": 0.0005,
+            "pct_pnl": -188.18342151675483,
+            "cash_pnl": 0.17589812966
+          },
+          {
+            "city": "New York City",
+            "title": "Will the highest temperature in New York City be betwee",
+            "outcome": "Yes",
+            "avg_price": 0.003,
+            "cur_price": 0.0065,
+            "pct_pnl": 116.66666666666667,
+            "cash_pnl": 0.04116
+          },
+          {
+            "city": "Chongqing",
+            "title": "Will the highest temperature in Chongqing be 21°C on Ma",
+            "outcome": "No",
+            "avg_price": 0.011,
+            "cur_price": 0.005,
+            "pct_pnl": -54.54545454545454,
+            "cash_pnl": -0.09
+          },
+          {
+            "city": "London",
+            "title": "Will the highest temperature in London be 17°C or highe",
+            "outcome": "Yes",
+            "avg_price": -0.003229,
+            "cur_price": 0.0015,
+            "pct_pnl": -146.45401052957573,
+            "cash_pnl": 0.212805
+          },
+          {
+            "city": "Chicago",
+            "title": "Will the highest temperature in Chicago be between 78-7",
+            "outcome": "Yes",
+            "avg_price": -0.000304,
+            "cur_price": 0.0005,
+            "pct_pnl": -264.4736842105263,
+            "cash_pnl": 0.1036758
+          },
+          {
+            "city": "Chicago",
+            "title": "Will the highest temperature in Chicago be between 80-8",
+            "outcome": "Yes",
+            "avg_price": -0.000304,
+            "cur_price": 0.0005,
+            "pct_pnl": -264.4736842105263,
+            "cash_pnl": 0.1036758
+          },
+          {
+            "city": "Shenzhen",
+            "title": "Will the highest temperature in Shenzhen be 30°C or hig",
+            "outcome": "Yes",
+            "avg_price": -0.000201,
+            "cur_price": 0.0005,
+            "pct_pnl": -348.7562189054726,
+            "cash_pnl": 0.08412
+          },
+          {
+            "city": "London",
+            "title": "Will the highest temperature in London be 7°C or below ",
+            "outcome": "Yes",
+            "avg_price": -0.00517,
+            "cur_price": 0.0005,
+            "pct_pnl": -109.67117988394584,
+            "cash_pnl": 0.6677559000000001
+          },
+          {
+            "city": "Seoul",
+            "title": "Will the highest temperature in Seoul be 7°C on March 2",
+            "outcome": "Yes",
+            "avg_price": -0.007092,
+            "cur_price": 0.0005,
+            "pct_pnl": -107.05019740552734,
+            "cash_pnl": 0.8698154400000001
+          },
+          {
+            "city": "Toronto",
+            "title": "Will the highest temperature in Toronto be 17°C on Marc",
+            "outcome": "Yes",
+            "avg_price": -3.7e-05,
+            "cur_price": 0.001,
+            "pct_pnl": -2802.7027027027034,
+            "cash_pnl": 0.057076480000000006
+          },
+          {
+            "city": "Shanghai",
+            "title": "Will the highest temperature in Shanghai be 21°C or hig",
+            "outcome": "Yes",
+            "avg_price": -0.00011,
+            "cur_price": 0.0005,
+            "pct_pnl": -554.5454545454546,
+            "cash_pnl": 0.05986970843000001
+          },
+          {
+            "city": "Lucknow",
+            "title": "Will the highest temperature in Lucknow be 40°C or high",
+            "outcome": "Yes",
+            "avg_price": -0.000711,
+            "cur_price": 0.0005,
+            "pct_pnl": -170.32348804500702,
+            "cash_pnl": 0.09839375
+          }
+        ]
+      }
+    ],
+    "consensus_markets": [
+      "will the highest temperature in chicago be 49°f or below on",
+      "will the highest temperature in london be 9°c or below on ma",
+      "will the highest temperature in ankara be 7°c or below on ma",
+      "will the highest temperature in sao paulo be 22°c or below o",
+      "will the highest temperature in buenos aires be 20°c or belo",
+      "will the highest temperature in london be 10°c on march 23?",
+      "will the highest temperature in chicago be between 50-51°f o",
+      "will the highest temperature in madrid be 14°c on march 24?",
+      "will the highest temperature in sao paulo be 26°c on march 2",
+      "will the highest temperature in singapore be 30°c on march 2",
+      "will the highest temperature in new york city be between 68-",
+      "will the highest temperature in lucknow be 35°c on march 22?",
+      "will the highest temperature in chicago be 82°f or higher on"
+    ],
+    "n_consensus": 13
+  }
+]
