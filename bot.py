@@ -43,10 +43,10 @@ load_dotenv()
 DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
 BANKROLL = float(os.getenv("BANKROLL", "15.00"))
 
-MIN_EDGE = float(os.getenv("MIN_EDGE", "7.0"))   # v9: env var, bajado de 10 a 7
-MIN_BET = 1.00
-MAX_BET_PCT = 0.05
-MAX_EXPOSURE_PCT = 0.40
+MIN_EDGE = float(os.getenv("MIN_EDGE", "7.0"))
+MIN_BET = float(os.getenv("MIN_BET", "0.50"))           # v9: bajado de 1.00 a 0.50
+MAX_BET_PCT = float(os.getenv("MAX_BET_PCT", "0.10"))   # v9: subido de 0.05 a 0.10 (10%)
+MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = 0
@@ -1139,11 +1139,12 @@ def calculate_position(bankroll, estimated_prob, market_price):
     if amount < MIN_BET:
         return None
     shares = amount / aggressive_price
-    if shares < 5.0:
-        amount = round(5.0 * aggressive_price, 2)
+    # Mínimo 1 share (Polymarket acepta fracciones)
+    if shares < 1.0:
+        amount = round(1.0 * aggressive_price, 2)
         if amount > bankroll * MAX_BET_PCT or amount < MIN_BET:
             return None
-        shares = 5.0
+        shares = 1.0
     profit = round(shares * (1.0 - aggressive_price), 2)
     loss = round(amount, 2)
     ev = round(estimated_prob * profit - (1 - estimated_prob) * loss, 2)
