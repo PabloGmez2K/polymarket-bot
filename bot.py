@@ -1473,6 +1473,12 @@ def manage_positions(client, dl):
 
         estimated_return = round(shares_to_sell * sell_price, 2)
 
+        # No intentar vender posiciones que no valen nada
+        # Polymarket rechaza ventas con "not enough balance/allowance" si es muy poco
+        if estimated_return < 0.10:
+            dl.append(f"    ⏭ {outcome} {title} | valor ~${estimated_return:.2f} < $0.10, no vale la pena")
+            continue
+
         log.info(f"{'[DRY] ' if DRY_RUN else ''}VENTA: {outcome} {shares_to_sell}sh × ${sell_price:.2f} | {title}")
 
         if DRY_RUN:
