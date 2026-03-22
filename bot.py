@@ -147,6 +147,11 @@ RESOLUTION_STATIONS = {
     "Lucknow":        {"lat": 26.7606,  "lon": 80.8893,   "name": "Chaudhary Charan Singh"},
     "Sao Paulo":      {"lat": -23.4355, "lon": -46.4730,  "name": "Guarulhos"},
     "Taipei":         {"lat": 25.0777,  "lon": 121.2330,  "name": "Taoyuan Intl"},
+    # Ciudades añadidas en v8 — análisis tercer trader
+    "Milan":          {"lat": 45.6306,  "lon": 8.7281,   "name": "Malpensa"},
+    "Chongqing":      {"lat": 29.7123,  "lon": 106.6519, "name": "Jiangbei"},
+    "Chengdu":        {"lat": 30.5737,  "lon": 103.9415, "name": "Shuangliu"},
+    "Wuhan":          {"lat": 30.7748,  "lon": 114.2137, "name": "Tianhe"},
 }
 
 

@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 # ============================================================
 # CONFIGURACIÓN — pon aquí la address real de ColdMath
 # ============================================================
-COLDMATH_ADDRESS = "0xd3938e1d885f7849215c49d87465709d63400744"
+COLDMATH_ADDRESS = "0x09f4265f01d63cbf177a0763e0369ce6a8f51eb5"
 
 # Nuestra dirección (para comparar posiciones)
 MY_ADDRESS = ""  # ← opcional: pon tu FUNDER address para comparar
