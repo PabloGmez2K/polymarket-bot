@@ -19,20 +19,22 @@ from py_clob_client.order_builder.constants import BUY, SELL
 load_dotenv()
 
 # =============================================================
-# bot.py v9 — Pipeline de inteligencia de traders integrado
-# Sesión 9: Señales de traders + descubrimiento automático
+# bot.py v10 — Fix exposición + calibración sigma
+# Sesión 10: Análisis de pérdidas → correcciones
 # =============================================================
 #
-# Nuevo en v9:
-#   - Cruza edge con señales de traders tracked (signals.json)
-#   - Comando /traders en Telegram
-#   - Descubrimiento semanal automático (lunes 08:00 UTC)
-#   - Análisis diario de traders (primer ciclo del día)
-#   - Decision log anota cuando trader confirma edge
+# Nuevo en v10:
+#   - FIX CRÍTICO: Exposición acumulativa entre ciclos
+#     (consulta Data API para posiciones reales antes de apostar)
+#   - FIX: Detecta posiciones existentes → no duplica apuestas
+#   - Sigma recalibrada (v9 sobreconfiaba → 0/5 en resueltos)
+#     Día 0: 0.8→1.2 | Día 1: 1.0→1.5 | Día 2: 1.4→2.0
+#   - FIX: /detalle con fallback a archivo + manejo errores
+#   - Mensaje "Ejecutando primer ciclo..." al arrancar
 #
-# Heredado de v8:
-#   - MIN_DAYS_AHEAD = 0, MAX_DAYS_AHEAD = 5
-#   - Reintentos automáticos en APIs
+# Heredado de v9:
+#   - Pipeline de traders (signals.json, descubrimiento semanal)
+#   - Scheduler estratégico + Telegram bidireccional
 # =============================================================
 
 
@@ -401,7 +403,7 @@ def cmd_cartera():
         })
         url = f"{DATA_API_URL}/positions?{params}"
         req = urllib.request.Request(url)
-        req.add_header("User-Agent", "polymarket-bot/0.7")
+        req.add_header("User-Agent", "polymarket-bot/0.10")
         resp = urllib.request.urlopen(req, timeout=15)
         positions = json.loads(resp.read())
     except Exception as e:
@@ -575,84 +577,113 @@ def cmd_logfull():
     📋 Log detallado: muestra TODOS los mercados evaluados,
     incluyendo por qué se descartó cada uno.
     Cruza con señales de traders.
+
+    v10: mejor manejo de errores + fallback a decisions.log
     """
-    edge_analysis = bot_state.get("last_edge_analysis", [])
-    trader_signals = bot_state.get("last_trader_signals", {})
+    try:
+        edge_analysis = bot_state.get("last_edge_analysis", [])
+        trader_signals = bot_state.get("last_trader_signals", {})
 
-    if not edge_analysis:
-        send_telegram(
-            "📋 <b>Log detallado</b>\n\nSin datos. Espera a que complete un ciclo.",
-            with_menu=True,
-        )
-        return
-
-    # Clasificar las líneas
-    accepted = []      # ✓
-    near_misses = []   # ✗ BAJO con edge ≥3%
-    no_edge = []       # ✗ SIN EDGE
-    duplicates = []    # ⏭
-    kelly_low = []     # ✗ KELLY
-
-    for line in edge_analysis:
-        stripped = line.strip()
-        if stripped.startswith("✓"):
-            accepted.append(stripped)
-        elif "BAJO" in stripped:
-            # Extraer edge %
-            edge_match = re.search(r"edge=(\d+\.?\d*)%", stripped)
-            edge_val = float(edge_match.group(1)) if edge_match else 0
-            near_misses.append((edge_val, stripped[2:]))
-        elif "SIN EDGE" in stripped:
-            no_edge.append(stripped[2:])
-        elif stripped.startswith("⏭"):
-            duplicates.append(stripped[2:])
-        elif "KELLY" in stripped:
-            kelly_low.append(stripped[2:])
-
-    near_misses.sort(key=lambda x: -x[0])
-
-    text = f"📋 <b>Log detallado del último ciclo</b>\n\n"
-    text += f"Total: {len(edge_analysis)} mercados evaluados\n"
-    text += f"✅ Aceptados: {len(accepted)}\n"
-    text += f"🔶 Near miss (edge ≥3%): {len([n for n in near_misses if n[0] >= 3])}\n"
-    text += f"⏭ Duplicados: {len(duplicates)}\n"
-    text += f"❌ Sin edge: {len(no_edge)}\n"
-    text += f"❌ Kelly bajo: {len(kelly_low)}\n"
-
-    # Aceptados
-    if accepted:
-        text += f"\n<b>✅ ACEPTADOS:</b>\n"
-        for line in accepted[:5]:
-            text += f"🟢 {line[2:70]}\n"
-
-    # Near misses con cruce de traders (lo más útil)
-    interesting = [(e, t) for e, t in near_misses if e >= 3.0]
-    if interesting:
-        text += f"\n<b>🔶 NEAR MISSES (edge ≥3%, < {MIN_EDGE}%):</b>\n"
-        for edge_val, line_text in interesting[:8]:
-            # Cruzar con traders
-            trader_info = ""
-            if trader_signals:
-                for key, sigs in trader_signals.items():
-                    # Buscar coincidencia por ciudad en la línea
-                    parts = key.split("|")
-                    if len(parts) >= 1:
-                        city = parts[0]
-                        if city.lower() in line_text.lower():
-                            traders = [s["trader"] for s in sigs]
-                            trader_info = f"\n    👀 Traders aquí: {', '.join(traders[:4])}"
+        if not edge_analysis:
+            # Fallback: intentar leer del archivo decisions.log
+            if os.path.exists("decisions.log"):
+                try:
+                    with open("decisions.log", "r", encoding="utf-8") as f:
+                        lines = f.readlines()
+                    # Buscar el último ciclo
+                    last_start = -1
+                    for i in range(len(lines) - 1, -1, -1):
+                        if "CICLO" in lines[i]:
+                            last_start = i
                             break
+                    if last_start >= 0:
+                        cycle_text = "📋 <b>Detalle (de archivo)</b>\n\n"
+                        for line in lines[last_start:last_start + 40]:
+                            clean = line.strip()
+                            # Quitar timestamp del log
+                            if " | " in clean:
+                                clean = clean.split(" | ", 1)[-1]
+                            if clean:
+                                cycle_text += f"{clean}\n"
+                        if len(cycle_text) > 3900:
+                            cycle_text = cycle_text[:3890] + "\n..."
+                        send_telegram(cycle_text, with_menu=True)
+                        return
+                except Exception as e:
+                    log.warning(f"Error leyendo decisions.log para /detalle: {e}")
 
-            text += f"  🔶 edge={edge_val:.1f}% | {line_text[:65]}{trader_info}\n"
+            send_telegram(
+                "📋 <b>Log detallado</b>\n\nSin datos. Espera a que complete un ciclo.",
+                with_menu=True,
+            )
+            return
 
-        if len(interesting) > 8:
-            text += f"  ... y {len(interesting) - 8} más\n"
-    else:
-        text += f"\n<i>Sin near misses ≥3% — el mercado está muy eficiente ahora.</i>\n"
+        # Clasificar las líneas
+        accepted = []
+        near_misses = []
+        no_edge = []
+        duplicates = []
+        kelly_low = []
 
-    if len(text) > 3900:
-        text = text[:3890] + "\n..."
-    send_telegram(text, with_menu=True)
+        for line in edge_analysis:
+            stripped = line.strip()
+            if stripped.startswith("✓"):
+                accepted.append(stripped)
+            elif "BAJO" in stripped:
+                edge_match = re.search(r"edge=(\d+\.?\d*)%", stripped)
+                edge_val = float(edge_match.group(1)) if edge_match else 0
+                near_misses.append((edge_val, stripped[2:]))
+            elif "SIN EDGE" in stripped:
+                no_edge.append(stripped[2:])
+            elif stripped.startswith("⏭"):
+                duplicates.append(stripped[2:])
+            elif "KELLY" in stripped:
+                kelly_low.append(stripped[2:])
+
+        near_misses.sort(key=lambda x: -x[0])
+
+        text = f"📋 <b>Log detallado del último ciclo</b>\n\n"
+        text += f"Total: {len(edge_analysis)} mercados evaluados\n"
+        text += f"✅ Aceptados: {len(accepted)}\n"
+        text += f"🔶 Near miss (edge ≥3%): {len([n for n in near_misses if n[0] >= 3])}\n"
+        text += f"⏭ Duplicados: {len(duplicates)}\n"
+        text += f"❌ Sin edge: {len(no_edge)}\n"
+        text += f"❌ Kelly bajo: {len(kelly_low)}\n"
+
+        # Aceptados
+        if accepted:
+            text += f"\n<b>✅ ACEPTADOS:</b>\n"
+            for line in accepted[:5]:
+                text += f"🟢 {line[2:70]}\n"
+
+        # Near misses con cruce de traders
+        interesting = [(e, t) for e, t in near_misses if e >= 3.0]
+        if interesting:
+            text += f"\n<b>🔶 NEAR MISSES (edge ≥3%, &lt; {MIN_EDGE}%):</b>\n"
+            for edge_val, line_text in interesting[:8]:
+                trader_info = ""
+                if trader_signals:
+                    for key, sigs in trader_signals.items():
+                        parts = key.split("|")
+                        if len(parts) >= 1:
+                            city = parts[0]
+                            if city.lower() in line_text.lower():
+                                traders = [s["trader"] for s in sigs]
+                                trader_info = f"\n    👀 {', '.join(traders[:4])}"
+                                break
+                text += f"  🔶 edge={edge_val:.1f}% | {line_text[:65]}{trader_info}\n"
+            if len(interesting) > 8:
+                text += f"  ... y {len(interesting) - 8} más\n"
+        else:
+            text += f"\n<i>Sin near misses ≥3%</i>\n"
+
+        if len(text) > 3900:
+            text = text[:3890] + "\n..."
+        send_telegram(text, with_menu=True)
+
+    except Exception as e:
+        log.error(f"Error en /detalle: {e}")
+        send_telegram(f"❌ Error en detalle: {str(e)[:200]}", with_menu=True)
 
 
 def cmd_modo():
@@ -891,7 +922,7 @@ def api_get(endpoint, retries=3, delay=5):
     for attempt in range(retries):
         try:
             req = urllib.request.Request(url)
-            req.add_header("User-Agent", "polymarket-bot/0.8")
+            req.add_header("User-Agent", "polymarket-bot/0.10")
             resp = urllib.request.urlopen(req, timeout=30)
             return json.loads(resp.read())
         except Exception as e:
@@ -984,6 +1015,53 @@ def clean_stale_orders(client, open_orders, max_age_hours):
             except Exception as e:
                 log.warning(f"Cancel error: {e}")
     return cancelled
+
+
+# =============================================================
+# FUNCIONES: EXPOSICIÓN REAL (v10)
+# =============================================================
+
+def get_current_exposure():
+    """
+    Consulta la Data API para saber cuánto dinero hay invertido en posiciones.
+
+    Esto es CRÍTICO: sin esto, cada ciclo cree que tiene presupuesto completo
+    y puede sobreinvertir (bug de v9 que causó 80% de exposición).
+
+    Devuelve total_invested (float): dinero real comprometido en posiciones vivas.
+    Solo cuenta posiciones con valor actual > $0.01 (ignora las resueltas a 0).
+    """
+    funder = os.getenv("FUNDER", "")
+    if not funder:
+        return 0.0
+    try:
+        params = urllib.parse.urlencode({
+            "user": funder.lower(),
+            "sizeThreshold": "0",
+            "limit": "50",
+            "sortBy": "CURRENT",
+            "sortDirection": "DESC",
+        })
+        url = f"{DATA_API_URL}/positions?{params}"
+        req = urllib.request.Request(url)
+        req.add_header("User-Agent", "polymarket-bot/0.10")
+        resp = urllib.request.urlopen(req, timeout=15)
+        positions = json.loads(resp.read())
+
+        total_invested = 0.0
+        for p in positions:
+            current_value = float(p.get("currentValue", 0))
+            initial_value = float(p.get("initialValue", 0))
+            # Solo contar posiciones que aún valen algo (no resueltas a $0)
+            if current_value > 0.01:
+                total_invested += initial_value
+
+        return total_invested
+    except Exception as e:
+        log.warning(f"Error consultando exposición: {e}")
+        # Si falla la consulta, asumir que NO hay presupuesto disponible
+        # Es mejor no apostar que apostar de más
+        return BANKROLL  # Conservador: asume todo invertido
 
 
 # =============================================================
@@ -1086,7 +1164,10 @@ def normal_cdf(x, mu, sigma):
 
 
 def get_uncertainty(days_ahead):
-    return {0: 0.8, 1: 1.0, 2: 1.4, 3: 1.8}.get(days_ahead, 2.5 if days_ahead <= 5 else 3.0)
+    # v10: sigma más alta = modelo más humilde
+    # v9 (0.8/1.0/1.4/1.8) sobreconfiaba: 0/5 en mercados resueltos
+    # Ahora: reconocemos que Open-Meteo tiene error típico de 1-2°C
+    return {0: 1.2, 1: 1.5, 2: 2.0, 3: 2.5}.get(days_ahead, 3.0 if days_ahead <= 5 else 3.5)
 
 
 def estimate_prob(forecast_max, threshold_c, condition, days_ahead, threshold_high_c=None):
@@ -1193,7 +1274,7 @@ def main(client):
     bot_state["last_run"] = datetime.now(timezone.utc)
 
     log.info("=" * 65)
-    log.info(f"BOT v9 | {today_str} | {mode_label} | ${BANKROLL:.2f}")
+    log.info(f"BOT v10 | {today_str} | {mode_label} | ${BANKROLL:.2f}")
     log.info("=" * 65)
 
     # Decision log: registrar inicio
@@ -1430,34 +1511,41 @@ def main(client):
         dl.append(f"\n  {skipped_dup} saltados (orden ya abierta)")
     dl.append(f"\nRESULTADO: {len(trades)} oportunidades con edge")
 
-    # ---- PASO 5: Presupuesto ----
-    max_budget = BANKROLL * MAX_EXPOSURE_PCT
-    budget_left = max_budget
-    selected = []
+    # ---- PASO 5: Presupuesto (v10: acumulativo) ----
+    # Consultar cuánto hay REALMENTE invertido en posiciones
+    current_exposure = get_current_exposure()
+    max_total_exposure = BANKROLL * MAX_EXPOSURE_PCT
+    budget_left = max(0, max_total_exposure - current_exposure)
 
-    for t in trades:
-        pos = t["position"]
-        if pos["amount"] <= budget_left:
-            budget_left -= pos["amount"]
-            selected.append(t)
-        elif budget_left >= MIN_BET:
-            reduced = round(budget_left, 2)
-            agg_p = pos.get("aggressive_price", t["mkt_price"] / 100)
-            sh = reduced / agg_p
-            pr = round(sh * (1.0 - agg_p), 2)
-            pd = t["our_prob"] / 100
-            ev = round(pd * pr - (1 - pd) * reduced, 2)
-            t["position"] = {
-                "fraction_pct": round(reduced / BANKROLL * 100, 2),
-                "amount": reduced, "shares": round(sh, 2),
-                "profit_if_win": pr, "loss_if_lose": reduced,
-                "expected_value": ev, "aggressive_price": agg_p,
-                "market_price": t["mkt_price"] / 100,
-            }
-            budget_left = 0
-            selected.append(t)
+    dl.append(f"\nEXPOSICIÓN: ${current_exposure:.2f} invertido | Máx: ${max_total_exposure:.2f} | Disponible: ${budget_left:.2f}")
 
-    dl.append(f"\nPRESUPUESTO: ${max_budget:.2f} (40% de ${BANKROLL:.2f})")
+    if budget_left < MIN_BET:
+        dl.append(f"⛔ Presupuesto agotado (${budget_left:.2f} < ${MIN_BET} mín)")
+        selected = []
+    else:
+        selected = []
+        for t in trades:
+            pos = t["position"]
+            if pos["amount"] <= budget_left:
+                budget_left -= pos["amount"]
+                selected.append(t)
+            elif budget_left >= MIN_BET:
+                reduced = round(budget_left, 2)
+                agg_p = pos.get("aggressive_price", t["mkt_price"] / 100)
+                sh = reduced / agg_p
+                pr = round(sh * (1.0 - agg_p), 2)
+                pd = t["our_prob"] / 100
+                ev = round(pd * pr - (1 - pd) * reduced, 2)
+                t["position"] = {
+                    "fraction_pct": round(reduced / BANKROLL * 100, 2),
+                    "amount": reduced, "shares": round(sh, 2),
+                    "profit_if_win": pr, "loss_if_lose": reduced,
+                    "expected_value": ev, "aggressive_price": agg_p,
+                    "market_price": t["mkt_price"] / 100,
+                }
+                budget_left = 0
+                selected.append(t)
+
     dl.append(f"SELECCIONADAS: {len(selected)} de {len(trades)}")
 
     # ---- PASO 6: Ejecución ----
@@ -1666,7 +1754,7 @@ def run_trader_tasks():
 
 if __name__ == "__main__":
     log.info("=" * 65)
-    log.info(f"POLYMARKET BOT v9 | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
+    log.info(f"POLYMARKET BOT v10 | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
     log.info(f"Modo: {'DRY RUN' if DRY_RUN else 'REAL'}")
     log.info("=" * 65)
 
@@ -1681,9 +1769,10 @@ if __name__ == "__main__":
     modo = "DRY RUN" if DRY_RUN else "REAL"
     schedule = ", ".join(f"{h:02d}:00" for h in sorted(SCHEDULE_HOURS_UTC))
     send_telegram(
-        f"🤖 <b>Bot v9 arrancado</b>\n"
+        f"🤖 <b>Bot v10 arrancado</b>\n"
         f"Modo: {modo} | ${BANKROLL:.2f}\n"
         f"Min edge: {MIN_EDGE}% | Schedule: {schedule} UTC\n"
+        f"🔧 Fix: exposición acumulativa + sigma calibrada\n"
         f"🔍 Traders: auto-análisis diario, descubrimiento lunes",
         with_menu=True,
     )
@@ -1692,6 +1781,8 @@ if __name__ == "__main__":
     run_trader_tasks()
 
     log.info("Primer ciclo...")
+    # v10: Avisar que el primer ciclo está corriendo
+    send_telegram("🔄 <b>Ejecutando primer ciclo...</b>\nEsto puede tardar ~30s")
     try:
         main(clob_client)
     except Exception as e:
