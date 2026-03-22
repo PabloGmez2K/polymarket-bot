@@ -127,6 +127,113 @@ clob_client = None
 # Así cuando consultas /ordenes, sabe a qué mercado pertenece cada token.
 known_tokens = {}
 
+PERFORMANCE_FILE = "performance.json"
+
+
+def parse_city_from_title(title):
+    """Extrae ciudad de un título de posición. Helper para el tracker."""
+    match = re.search(r"temperature in (.+?) (?:be |between |\d)", title, re.IGNORECASE)
+    return match.group(1).strip() if match else "?"
+
+
+# =============================================================
+# TRACKER DE RENDIMIENTO (v10.1)
+# =============================================================
+
+def track_trade(action, **kwargs):
+    """
+    Registra cada BUY y SELL en performance.json.
+
+    Esto es lo que permite analizar:
+      - ROI por ciudad, por tipo de mercado, por días ahead
+      - Accuracy del modelo (previsión vs resultado real)
+      - Qué stop-losses/take-profits fueron correctos
+      - Si los traders confirmados dan mejor resultado
+
+    Uso:
+      track_trade("BUY", city="Taipei", side="YES", price=0.11, ...)
+      track_trade("SELL", city="Taipei", side="YES", price=0.19, reason="take_profit", ...)
+    """
+    entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "action": action,
+    }
+    entry.update(kwargs)
+
+    try:
+        history = []
+        if os.path.exists(PERFORMANCE_FILE):
+            with open(PERFORMANCE_FILE, "r", encoding="utf-8") as f:
+                history = json.load(f)
+
+        history.append(entry)
+
+        # Máximo 500 entradas (evitar que crezca infinito)
+        if len(history) > 500:
+            history = history[-500:]
+
+        with open(PERFORMANCE_FILE, "w", encoding="utf-8") as f:
+            json.dump(history, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        log.warning(f"Error guardando performance: {e}")
+
+
+def get_performance_summary():
+    """
+    Calcula ROI y estadísticas desde performance.json.
+    Para el comando /rendimiento de Telegram.
+    """
+    if not os.path.exists(PERFORMANCE_FILE):
+        return None
+
+    try:
+        with open(PERFORMANCE_FILE, "r", encoding="utf-8") as f:
+            history = json.load(f)
+    except Exception:
+        return None
+
+    buys = [h for h in history if h.get("action") == "BUY"]
+    sells = [h for h in history if h.get("action") == "SELL"]
+
+    total_invested = sum(h.get("amount", 0) for h in buys)
+    total_returned = sum(h.get("return_est", 0) for h in sells)
+
+    # Ventas por tipo
+    stop_losses = [s for s in sells if s.get("reason") == "stop_loss"]
+    take_profits = [s for s in sells if s.get("reason") == "take_profit"]
+    reevals = [s for s in sells if s.get("reason") == "reeval"]
+
+    # PnL de ventas
+    sell_pnl = sum(s.get("pnl_cash", 0) for s in sells)
+
+    # Ciudades con más operaciones
+    city_counts = {}
+    city_pnl = {}
+    for s in sells:
+        c = s.get("city", "?")
+        city_counts[c] = city_counts.get(c, 0) + 1
+        city_pnl[c] = city_pnl.get(c, 0) + s.get("pnl_cash", 0)
+
+    # Trades con confirmación de traders vs sin
+    confirmed_sells = [s for s in sells if s.get("trader_confirmed")]
+    unconfirmed_sells = [s for s in sells if not s.get("trader_confirmed")]
+
+    return {
+        "total_buys": len(buys),
+        "total_sells": len(sells),
+        "total_invested": total_invested,
+        "sell_pnl": sell_pnl,
+        "stop_losses": len(stop_losses),
+        "take_profits": len(take_profits),
+        "reevals": len(reevals),
+        "top_cities": sorted(city_counts.items(), key=lambda x: -x[1])[:5],
+        "city_pnl": city_pnl,
+        "confirmed_count": len(confirmed_sells),
+        "confirmed_pnl": sum(s.get("pnl_cash", 0) for s in confirmed_sells),
+        "unconfirmed_count": len(unconfirmed_sells),
+        "unconfirmed_pnl": sum(s.get("pnl_cash", 0) for s in unconfirmed_sells),
+    }
+
 
 # =============================================================
 # PIPELINE DE TRADERS (v9)
@@ -294,10 +401,13 @@ MENU_KEYBOARD = {
         ],
         [
             {"text": "🔍 Traders", "callback_data": "traders"},
-            {"text": "📋 Órdenes", "callback_data": "ordenes"},
+            {"text": "📈 Rendimiento", "callback_data": "rendimiento"},
         ],
         [
+            {"text": "📋 Órdenes", "callback_data": "ordenes"},
             {"text": "🚀 Forzar ciclo", "callback_data": "forzar"},
+        ],
+        [
             {"text": "⚡ Modo", "callback_data": "modo"},
         ],
     ]
@@ -812,10 +922,43 @@ def cmd_traders():
     send_telegram(text, with_menu=True)
 
 
+def cmd_rendimiento():
+    """📈 Rendimiento: ROI y estadísticas desde performance.json."""
+    stats = get_performance_summary()
+    if not stats:
+        send_telegram("📈 <b>Rendimiento</b>\n\nSin datos todavía. Se registran con cada BUY/SELL.", with_menu=True)
+        return
+
+    text = f"📈 <b>Rendimiento</b>\n\n"
+    text += f"Compras: {stats['total_buys']} | Ventas: {stats['total_sells']}\n"
+    text += f"Total invertido: ${stats['total_invested']:.2f}\n"
+    text += f"PnL ventas: ${stats['sell_pnl']:+.2f}\n\n"
+
+    text += f"<b>Ventas por tipo:</b>\n"
+    text += f"  💰 Take-profit: {stats['take_profits']}\n"
+    text += f"  🔻 Stop-loss: {stats['stop_losses']}\n"
+    text += f"  🔄 Re-evaluación: {stats['reevals']}\n\n"
+
+    if stats['confirmed_count'] + stats['unconfirmed_count'] > 0:
+        text += f"<b>Traders vs solo:</b>\n"
+        if stats['confirmed_count'] > 0:
+            text += f"  🤝 Con trader: {stats['confirmed_count']} ventas, ${stats['confirmed_pnl']:+.2f}\n"
+        if stats['unconfirmed_count'] > 0:
+            text += f"  🔹 Sin trader: {stats['unconfirmed_count']} ventas, ${stats['unconfirmed_pnl']:+.2f}\n"
+
+    if stats['top_cities']:
+        text += f"\n<b>Ciudades:</b>\n"
+        for city, count in stats['top_cities']:
+            pnl = stats['city_pnl'].get(city, 0)
+            text += f"  {city}: {count} ops, ${pnl:+.2f}\n"
+
+    send_telegram(text, with_menu=True)
+
+
 COMMANDS = {
     "estado": cmd_estado, "cartera": cmd_cartera, "ordenes": cmd_ordenes,
     "log": cmd_log, "logfull": cmd_logfull, "forzar": cmd_forzar,
-    "modo": cmd_modo, "traders": cmd_traders,
+    "modo": cmd_modo, "traders": cmd_traders, "rendimiento": cmd_rendimiento,
     "confirmar_real": cmd_confirmar_real, "confirmar_dry": cmd_confirmar_dry,
     "cancelar_modo": cmd_cancelar_modo,
 }
@@ -1070,6 +1213,58 @@ def get_current_exposure():
         return BANKROLL  # Conservador: asume todo invertido
 
 
+def get_effective_bankroll(client=None):
+    """
+    Calcula el bankroll REAL: cash libre + valor de posiciones.
+
+    El BANKROLL de Railway es un tope máximo. Pero si hemos perdido dinero,
+    el bankroll real es menor. Sin esto, el bot calcula presupuestos
+    sobre dinero que ya no existe.
+
+    Usa client.get_balance() para cash libre (USDC disponible).
+    Usa Data API para valor de posiciones activas.
+    """
+    cash_balance = 0.0
+    positions_value = 0.0
+
+    # ---- Cash libre (USDC disponible para operar) ----
+    if client is not None:
+        try:
+            balance_wei = client.get_balance()
+            cash_balance = int(balance_wei) / 1e6  # wei → USDC
+        except Exception as e:
+            log.warning(f"Error consultando balance: {e}")
+
+    # ---- Valor de posiciones activas ----
+    funder = os.getenv("FUNDER", "")
+    if funder:
+        try:
+            params = urllib.parse.urlencode({
+                "user": funder.lower(),
+                "sizeThreshold": "0",
+                "limit": "50",
+                "sortBy": "CURRENT",
+                "sortDirection": "DESC",
+            })
+            url = f"{DATA_API_URL}/positions?{params}"
+            req = urllib.request.Request(url)
+            req.add_header("User-Agent", "polymarket-bot/0.10")
+            resp = urllib.request.urlopen(req, timeout=15)
+            positions = json.loads(resp.read())
+            positions_value = sum(float(p.get("currentValue", 0)) for p in positions)
+        except Exception as e:
+            log.warning(f"Error consultando posiciones: {e}")
+
+    effective = cash_balance + positions_value
+    # Tope: nunca asumir más del BANKROLL depositado
+    effective = min(effective, BANKROLL)
+    # Mínimo: $1 para que el bot no se pare totalmente
+    effective = max(effective, 1.0)
+
+    log.info(f"Bankroll: ${effective:.2f} (cash=${cash_balance:.2f} + posiciones=${positions_value:.2f}, tope=${BANKROLL:.2f})")
+    return effective
+
+
 # =============================================================
 # GESTIÓN ACTIVA DE POSICIONES (v10.1)
 # =============================================================
@@ -1317,12 +1512,226 @@ def manage_positions(client, dl):
                 f"PnL: {pct:+.1f}% (${float(p.get('cashPnl', 0)):+.2f})"
             )
 
+            # v10.1: Registrar en performance tracker
+            track_trade("SELL",
+                reason=sell_type,
+                city=parse_city_from_title(title),
+                side=outcome,
+                price=sell_price,
+                shares=shares_to_sell,
+                return_est=estimated_return,
+                avg_buy_price=float(p.get("avgPrice", 0)),
+                pnl_pct=pct,
+                pnl_cash=float(p.get("cashPnl", 0)),
+            )
+
+            # Registrar para verificar fill en próximo ciclo
+            audit_register_pending_sell(
+                order_id=oid, city=parse_city_from_title(title),
+                side=outcome, price=sell_price, shares=shares_to_sell,
+                return_est=estimated_return, reason=sell_type,
+            )
+
         except Exception as e:
             dl.append(f"    ❌ ERROR vendiendo {outcome} {title}: {e}")
             log.error(f"Error vendiendo posición: {e}")
 
     dl.append(f"\n  Resultado: {n_sold} vendidas | ~${capital_freed:.2f} liberados")
     return n_sold, capital_freed
+
+
+AUDIT_FILE = "audit.json"
+
+def load_audit_data():
+    """Carga datos de auditoría acumulativos."""
+    if os.path.exists(AUDIT_FILE):
+        try:
+            with open(AUDIT_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"pending_sells": [], "forecast_vs_real": [], "errors": []}
+
+
+def save_audit_data(data):
+    """Guarda datos de auditoría."""
+    # Limitar tamaño
+    for key in ["pending_sells", "forecast_vs_real", "errors"]:
+        if key in data and len(data[key]) > 200:
+            data[key] = data[key][-200:]
+    try:
+        with open(AUDIT_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        log.warning(f"Error guardando audit: {e}")
+
+
+def audit_check_sell_fills(client, dl):
+    """
+    Verifica si las órdenes de VENTA pendientes se llenaron.
+
+    Flujo:
+      1. Lee pending_sells de audit.json (orden_id, ciudad, precio)
+      2. Consulta open_orders del CLOB
+      3. Si una pending_sell ya NO está en open_orders → se llenó
+      4. Registra el resultado en performance.json
+    """
+    audit = load_audit_data()
+    pending = audit.get("pending_sells", [])
+
+    if not pending:
+        return
+
+    # Obtener órdenes abiertas actuales
+    try:
+        open_orders = get_open_orders(client)
+    except Exception:
+        return
+
+    open_ids = set(o.get("id", "") for o in open_orders)
+    still_pending = []
+    filled = []
+
+    for sell in pending:
+        order_id = sell.get("order_id", "")
+        age_hours = 0
+        try:
+            placed = datetime.fromisoformat(sell.get("timestamp", ""))
+            age_hours = (datetime.now(timezone.utc) - placed).total_seconds() / 3600
+        except Exception:
+            pass
+
+        if order_id in open_ids:
+            # Sigue pendiente
+            if age_hours > 12:
+                dl.append(f"  ⚠ Venta pendiente >12h: {sell.get('city', '?')} {sell.get('side', '?')} | ${sell.get('price', 0):.2f}")
+            still_pending.append(sell)
+        else:
+            # Ya no está → se llenó (o fue cancelada)
+            filled.append(sell)
+            dl.append(f"  ✅ Venta llenada: {sell.get('city', '?')} {sell.get('side', '?')} | ~${sell.get('return_est', 0):.2f} recuperados")
+
+    audit["pending_sells"] = still_pending
+    save_audit_data(audit)
+
+    if filled:
+        dl.append(f"  FILLS: {len(filled)} ventas completadas | {len(still_pending)} aún pendientes")
+
+
+def audit_register_pending_sell(order_id, city, side, price, shares, return_est, reason):
+    """Registra una orden de venta pendiente para seguimiento."""
+    audit = load_audit_data()
+    audit["pending_sells"].append({
+        "order_id": order_id,
+        "city": city,
+        "side": side,
+        "price": price,
+        "shares": shares,
+        "return_est": return_est,
+        "reason": reason,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+    save_audit_data(audit)
+
+
+def audit_check_forecasts(dl):
+    """
+    Compara previsiones pasadas con temperatura REAL observada.
+
+    Open-Meteo devuelve datos observados para fechas pasadas.
+    Si ayer predijimos 16°C para Paris y hoy Open-Meteo dice que
+    fue 15°C, registramos el error (1°C) para calibrar sigma.
+    """
+    if not os.path.exists(PERFORMANCE_FILE):
+        return
+
+    try:
+        with open(PERFORMANCE_FILE, "r", encoding="utf-8") as f:
+            perf = json.load(f)
+    except Exception:
+        return
+
+    # Buscar BUYs de días pasados sin verificación
+    audit = load_audit_data()
+    already_checked = set(
+        f"{v.get('city')}|{v.get('date')}"
+        for v in audit.get("forecast_vs_real", [])
+    )
+
+    to_check = []
+    for entry in perf:
+        if entry.get("action") != "BUY":
+            continue
+        market_date = entry.get("date", "")
+        city = entry.get("city", "")
+        if not market_date or not city:
+            continue
+        key = f"{city}|{market_date}"
+        if key in already_checked:
+            continue
+        try:
+            days_ago = (date.today() - date.fromisoformat(market_date)).days
+        except ValueError:
+            continue
+        # Solo verificar mercados de ayer o antes (ya resueltos)
+        if days_ago >= 1:
+            to_check.append(entry)
+            already_checked.add(key)
+
+    if not to_check:
+        return
+
+    # Consultar temperatura real para cada ciudad/fecha
+    checked_cities = {}
+    n_checked = 0
+
+    for entry in to_check[:10]:  # Max 10 por ciclo para no saturar API
+        city = entry["city"]
+        market_date = entry["date"]
+
+        # Obtener previsión (que para fechas pasadas es dato real)
+        if city not in checked_cities:
+            station = RESOLUTION_STATIONS.get(city)
+            if not station:
+                continue
+            try:
+                checked_cities[city] = get_forecast(station["lat"], station["lon"])
+            except Exception:
+                continue
+
+        fc = checked_cities.get(city)
+        if not fc or market_date not in fc:
+            continue
+
+        real_temp = fc[market_date]["temp_max"]
+        forecast_temp = entry.get("forecast_max", 0)
+        error = round(real_temp - forecast_temp, 1)
+
+        record = {
+            "city": city,
+            "date": market_date,
+            "forecast": forecast_temp,
+            "real": real_temp,
+            "error_c": error,
+            "abs_error_c": abs(error),
+            "side": entry.get("side", "?"),
+            "edge_pct": entry.get("edge_pct", 0),
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+        audit["forecast_vs_real"].append(record)
+        n_checked += 1
+
+        emoji = "✅" if abs(error) <= 1.0 else "⚠️" if abs(error) <= 2.0 else "❌"
+        dl.append(f"  {emoji} {city} {market_date}: previsión={forecast_temp:.1f}°C real={real_temp:.1f}°C error={error:+.1f}°C")
+
+    if n_checked > 0:
+        # Calcular error medio global
+        all_errors = [v["abs_error_c"] for v in audit.get("forecast_vs_real", [])]
+        if all_errors:
+            avg_error = sum(all_errors) / len(all_errors)
+            dl.append(f"  📊 Error medio acumulado: {avg_error:.1f}°C ({len(all_errors)} mercados)")
+
+    save_audit_data(audit)
 
 
 # =============================================================
@@ -1534,15 +1943,18 @@ def main(client):
     bot_state["running"] = True
     bot_state["last_run"] = datetime.now(timezone.utc)
 
+    # v10.1: Bankroll real (no el hardcoded de $15)
+    effective_bankroll = get_effective_bankroll(client)
+
     log.info("=" * 65)
-    log.info(f"BOT v10.1 | {today_str} | {mode_label} | ${BANKROLL:.2f}")
+    log.info(f"BOT v10.1 | {today_str} | {mode_label} | ${effective_bankroll:.2f} (tope ${BANKROLL:.2f})")
     log.info("=" * 65)
 
     # Decision log: registrar inicio
     dl = []  # Lista de líneas para el log de decisiones
     dl.append(f"{'='*50}")
     dl.append(f"CICLO {bot_state['cycle_count']+1} | {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} | {mode_label}")
-    dl.append(f"MIN_DAYS={MIN_DAYS_AHEAD} MAX_DAYS={MAX_DAYS_AHEAD} MIN_EDGE={MIN_EDGE}%")
+    dl.append(f"BANKROLL: ${effective_bankroll:.2f} (tope ${BANKROLL:.2f}) | MIN_EDGE={MIN_EDGE}%")
     dl.append(f"{'='*50}")
 
     if client is None:
@@ -1579,6 +1991,19 @@ def main(client):
     except Exception as e:
         dl.append(f"GESTIÓN: error: {e}")
         log.warning(f"Error en gestión de posiciones: {e}")
+
+    # ---- PASO 0.6: AUDITORÍA (v10.1 final) ----
+    # Verificar si ventas anteriores se llenaron
+    try:
+        audit_check_sell_fills(client, dl)
+    except Exception as e:
+        log.warning(f"Error audit fills: {e}")
+
+    # Comparar previsiones pasadas con temperatura real
+    try:
+        audit_check_forecasts(dl)
+    except Exception as e:
+        log.warning(f"Error audit forecasts: {e}")
 
     # ---- PASO 1: Mercados ----
     try:
@@ -1737,7 +2162,7 @@ def main(client):
             edge_analysis.append(f"  ⏭ {city} {side} | edge={edge_pct:.1f}% → YA HAY ORDEN")
             continue
 
-        position = calculate_position(BANKROLL, our_prob, mkt_price)
+        position = calculate_position(effective_bankroll, our_prob, mkt_price)
         if not position:
             edge_analysis.append(f"  ✗ {city} {side} | edge={edge_pct:.1f}% → KELLY MUY BAJO (no alcanza $1 mín)")
             continue
@@ -1786,7 +2211,7 @@ def main(client):
     # ---- PASO 5: Presupuesto (v10: acumulativo) ----
     # Consultar cuánto hay REALMENTE invertido en posiciones
     current_exposure = get_current_exposure()
-    max_total_exposure = BANKROLL * MAX_EXPOSURE_PCT
+    max_total_exposure = effective_bankroll * MAX_EXPOSURE_PCT
     budget_left = max(0, max_total_exposure - current_exposure)
 
     dl.append(f"\nEXPOSICIÓN: ${current_exposure:.2f} invertido | Máx: ${max_total_exposure:.2f} | Disponible: ${budget_left:.2f}")
@@ -1809,7 +2234,7 @@ def main(client):
                 pd = t["our_prob"] / 100
                 ev = round(pd * pr - (1 - pd) * reduced, 2)
                 t["position"] = {
-                    "fraction_pct": round(reduced / BANKROLL * 100, 2),
+                    "fraction_pct": round(reduced / effective_bankroll * 100, 2),
                     "amount": reduced, "shares": round(sh, 2),
                     "profit_if_win": pr, "loss_if_lose": reduced,
                     "expected_value": ev, "aggressive_price": agg_p,
@@ -1863,6 +2288,24 @@ def main(client):
                     f"Edge: {trade['edge_pct']}% | EV: ${trade['position']['expected_value']:+.2f}"
                     f"{trader_line}"
                 )
+
+                # v10.1: Registrar en performance tracker
+                if result["ok"]:
+                    track_trade("BUY",
+                        city=trade["city"],
+                        side=trade["side"],
+                        date=trade["date"],
+                        days_ahead=trade["days_ahead"],
+                        price=trade["position"].get("aggressive_price", 0),
+                        shares=trade["position"]["shares"],
+                        amount=trade["position"]["amount"],
+                        edge_pct=trade["edge_pct"],
+                        our_prob=trade["our_prob"],
+                        mkt_price=trade["mkt_price"],
+                        forecast_max=trade["forecast_max"],
+                        condition=trade["condition"],
+                        trader_confirmed=trade.get("trader_confirmed", []),
+                    )
 
         ok = sum(1 for r in results if r["ok"])
         bot_state["last_orders_placed"] = ok
