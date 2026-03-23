@@ -19,21 +19,22 @@ from py_clob_client.order_builder.constants import BUY, SELL
 load_dotenv()
 
 # =============================================================
-# bot.py v10.1 — Gestión activa de posiciones
-# Sesión 10: Stop-loss + take-profit + re-evaluación
+# bot.py v10.2 — Fix exposición fantasma + MIN_DAYS dinámico
+# Sesión 11: 3 bugs críticos corregidos
 # =============================================================
 #
-# Nuevo en v10.1:
-#   - manage_positions(): gestión activa cada ciclo
-#     Stop-loss: vende si posición pierde > STOP_LOSS_PCT
-#     Take-profit: vende si posición gana > TAKE_PROFIT_PCT
-#     Basado en investigación de traders reales:
-#       Entire-Hood: 58% gestión activa, 0 pérdidas por resolución
-#       Stop-loss avg -10%, take-profit avg +17%
+# Nuevo en v10.2:
+#   - get_current_exposure(): usa currentValue (no initialValue)
+#     Posiciones muertas ($0.11) ya no bloquean presupuesto ($9.23)
+#   - get_min_days_ahead(): MIN_DAYS_AHEAD dinámico por hora UTC
+#     08:00 → 0 (temperaturas no registradas)
+#     16:00+ → 1 (muchas ciudades ya tienen dato real)
+#   - manage_positions(): skip curPrice >= 0.98 (mercado resuelto)
+#     Evita error "orderbook does not exist"
 #
-# Heredado de v10:
-#   - Exposición acumulativa, sigma calibrada
-#   - Pipeline de traders, scheduler, Telegram
+# Heredado de v10.1:
+#   - Gestión activa: stop-loss, take-profit, re-evaluación
+#   - Performance tracker, auditoría, bankroll dinámico
 # =============================================================
 
 
@@ -50,7 +51,32 @@ MAX_BET_PCT = float(os.getenv("MAX_BET_PCT", "0.10"))   # v9: subido de 0.05 a 0
 MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
-MIN_DAYS_AHEAD = 0
+MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
+
+
+def get_min_days_ahead():
+    """
+    Calcula MIN_DAYS_AHEAD dinámicamente según la hora UTC.
+
+    Problema que resuelve: a las 16:00-23:00 UTC, las temperaturas máximas
+    de Europa/Asia ya se registraron. El mercado sabe la respuesta, pero
+    el bot usa la previsión y apuesta contra información conocida.
+    Resultado real: -$7.50 en un solo ciclo (23 marzo 2026).
+
+    Lógica:
+      - 08:00 UTC → min_days=0 (temperaturas de hoy aún no se han registrado)
+      - 16:00+ UTC → min_days=1 (muchas ciudades ya tienen dato real)
+
+    Si MIN_DAYS_AHEAD está forzado en Railway (≥0), usa ese valor.
+    """
+    if MIN_DAYS_AHEAD >= 0:
+        return MIN_DAYS_AHEAD  # Override manual desde Railway
+
+    hour_utc = datetime.now(timezone.utc).hour
+    if hour_utc < 12:
+        return 0  # Mañana: temperaturas de hoy aún no se han registrado
+    else:
+        return 1  # Tarde/noche: muchas ciudades ya tienen dato real
 
 # v10.1: Gestión activa de posiciones
 # Basado en investigación: Entire-Hood corta a -10%, toma a +17%
@@ -499,10 +525,10 @@ def cmd_estado():
 
 def cmd_cartera():
     """
-    💰 Cartera completa: balance + posiciones + PnL.
+    💰 Cartera: cash + posiciones activas + resumen de muertas.
 
-    Usa data-api.polymarket.com/positions para posiciones.
-    El balance disponible se calcula: bankroll - valor posiciones.
+    v10.2: Rediseñado para claridad. Separa posiciones vivas de muertas,
+    muestra cash disponible, y no satura con posiciones de $0.01.
     """
     funder = os.getenv("FUNDER", "")
     if not funder:
@@ -513,7 +539,7 @@ def cmd_cartera():
         params = urllib.parse.urlencode({
             "user": funder.lower(),
             "sizeThreshold": "0",
-            "limit": "20",
+            "limit": "50",
             "sortBy": "CURRENT",
             "sortDirection": "DESC",
         })
@@ -526,53 +552,89 @@ def cmd_cartera():
         send_telegram(f"❌ Error cartera: {e}", with_menu=True)
         return
 
-    # ---- Calcular totales ----
-    total_invested = 0
-    total_current = 0
-    total_pnl = 0
-    lines = []
+    # ---- Cash balance ----
+    cash = 0.0
+    if clob_client is not None:
+        try:
+            balance_wei = clob_client.get_balance()
+            cash = int(balance_wei) / 1e6
+        except Exception:
+            pass
 
-    for i, pos in enumerate(positions):
-        title = pos.get("title", "?")
-        outcome = pos.get("outcome", "?")
-        size = float(pos.get("size", 0))
-        avg_price = float(pos.get("avgPrice", 0))
-        cur_price = float(pos.get("curPrice", 0))
-        initial_value = float(pos.get("initialValue", 0))
+    # ---- Separar posiciones activas vs muertas ----
+    active = []     # currentValue >= $0.10 → vale la pena mostrar
+    dead = []       # currentValue < $0.10 → resueltas o sin valor
+    resolved_won = []  # curPrice >= 0.98 → ganamos, esperando pago
+
+    for pos in positions:
         current_value = float(pos.get("currentValue", 0))
-        cash_pnl = float(pos.get("cashPnl", 0))
-        pct_pnl = float(pos.get("percentPnl", 0))
+        cur_price = float(pos.get("curPrice", 0))
+        if cur_price >= 0.98:
+            resolved_won.append(pos)
+        elif current_value >= 0.10:
+            active.append(pos)
+        else:
+            dead.append(pos)
 
-        total_invested += initial_value
-        total_current += current_value
-        total_pnl += cash_pnl
+    # ---- Calcular totales solo de activas ----
+    total_active_value = sum(float(p.get("currentValue", 0)) for p in active)
+    total_active_invested = sum(float(p.get("initialValue", 0)) for p in active)
+    total_active_pnl = sum(float(p.get("cashPnl", 0)) for p in active)
+    resolved_value = sum(float(p.get("currentValue", 0)) for p in resolved_won)
+    dead_lost = sum(float(p.get("initialValue", 0)) for p in dead)
+    portfolio_total = cash + total_active_value + resolved_value
 
-        icon = "🟢" if cash_pnl >= 0 else "🔴"
-        t_short = title[:50] + "..." if len(title) > 50 else title
+    # ---- Header ----
+    pnl_icon = "🟢" if total_active_pnl >= 0 else "🔴"
+    msg = (
+        f"💰 <b>Cartera</b>\n\n"
+        f"💵 Cash: <b>${cash:.2f}</b>\n"
+        f"📊 Posiciones activas: <b>${total_active_value:.2f}</b> ({len(active)})\n"
+    )
+    if resolved_won:
+        msg += f"🏁 Resueltas (esperando pago): ${resolved_value:.2f} ({len(resolved_won)})\n"
+    msg += (
+        f"{'─' * 28}\n"
+        f"💼 Total: <b>${portfolio_total:.2f}</b>\n"
+    )
 
-        lines.append(
-            f"{i+1}. {icon} <b>{outcome}</b>\n"
-            f"   {t_short}\n"
-            f"   {size:.1f}sh @ ${avg_price:.2f} → ${cur_price:.2f}\n"
-            f"   Invertido: ${initial_value:.2f} | Valor: ${current_value:.2f}\n"
-            f"   PnL: ${cash_pnl:+.2f} ({pct_pnl:+.1f}%)"
-        )
+    # ---- Posiciones activas detalladas ----
+    if active:
+        msg += f"\n<b>📊 Posiciones activas:</b>\n"
+        for i, pos in enumerate(active):
+            title = pos.get("title", "?")
+            outcome = pos.get("outcome", "?")
+            size = float(pos.get("size", 0))
+            avg_price = float(pos.get("avgPrice", 0))
+            cur_price = float(pos.get("curPrice", 0))
+            current_value = float(pos.get("currentValue", 0))
+            pct_pnl = float(pos.get("percentPnl", 0))
+            cash_pnl = float(pos.get("cashPnl", 0))
 
-    pnl_icon = "🟢" if total_pnl >= 0 else "🔴"
+            icon = "🟢" if cash_pnl >= 0 else "🔴"
+            # Extraer ciudad y temperatura del título
+            city = parse_city_from_title(title)
+            t_short = title[:45] + "..." if len(title) > 45 else title
 
-    if not positions:
-        header = "💰 <b>Cartera</b>\n\nNo hay posiciones abiertas.\n"
-    else:
-        header = (
-            f"💰 <b>Cartera</b>\n\n"
-            f"Posiciones: {len(positions)}\n"
-            f"Invertido: ${total_invested:.2f}\n"
-            f"Valor actual: ${total_current:.2f}\n"
-            f"PnL: {pnl_icon} <b>${total_pnl:+.2f}</b>\n"
-            f"\n{'─' * 30}\n"
-        )
+            msg += (
+                f"\n{i+1}. {icon} <b>{outcome}</b> {city}\n"
+                f"   {size:.1f}sh @ ${avg_price:.2f} → ${cur_price:.2f}\n"
+                f"   Valor: ${current_value:.2f} | PnL: {pct_pnl:+.1f}% (${cash_pnl:+.2f})\n"
+            )
 
-    msg = header + "\n".join(lines)
+    # ---- Resueltas ganadas ----
+    if resolved_won:
+        msg += f"\n<b>🏁 Esperando pago:</b>\n"
+        for pos in resolved_won:
+            outcome = pos.get("outcome", "?")
+            city = parse_city_from_title(pos.get("title", "?"))
+            current_value = float(pos.get("currentValue", 0))
+            msg += f"  ✅ {outcome} {city} → ${current_value:.2f}\n"
+
+    # ---- Muertas (solo resumen) ----
+    if dead:
+        msg += f"\n<i>💀 {len(dead)} posiciones sin valor (${dead_lost:.2f} invertidos)</i>\n"
+
     if len(msg) > 4000:
         msg = msg[:3990] + "\n..."
     send_telegram(msg, with_menu=True)
@@ -1197,15 +1259,17 @@ def get_current_exposure():
         resp = urllib.request.urlopen(req, timeout=15)
         positions = json.loads(resp.read())
 
-        total_invested = 0.0
+        total_exposure = 0.0
         for p in positions:
             current_value = float(p.get("currentValue", 0))
-            initial_value = float(p.get("initialValue", 0))
-            # Solo contar posiciones que aún valen algo (no resueltas a $0)
+            # Exposición = lo que VALE ahora, no lo que pagamos
+            # Una posición comprada a $2.50 que vale $0.11 es $0.11 de exposición,
+            # no $2.50 — ese dinero ya está perdido.
+            # Ignorar posiciones < $0.01 (resueltas a $0)
             if current_value > 0.01:
-                total_invested += initial_value
+                total_exposure += current_value
 
-        return total_invested
+        return total_exposure
     except Exception as e:
         log.warning(f"Error consultando exposición: {e}")
         # Si falla la consulta, asumir que NO hay presupuesto disponible
@@ -1298,7 +1362,7 @@ def manage_positions(client, dl):
     funder = os.getenv("FUNDER", "")
     if not funder:
         dl.append(f"GESTIÓN: sin FUNDER, saltando")
-        return 0, 0.0
+        return {"n_sold": 0, "capital_freed": 0, "kept": 0, "resolved": 0, "sells": []}
 
     # ---- Obtener posiciones actuales ----
     try:
@@ -1316,7 +1380,7 @@ def manage_positions(client, dl):
         positions = json.loads(resp.read())
     except Exception as e:
         dl.append(f"GESTIÓN: error obteniendo posiciones: {e}")
-        return 0, 0.0
+        return {"n_sold": 0, "capital_freed": 0, "kept": 0, "resolved": 0, "sells": []}
 
     # ---- Filtrar posiciones de temperatura con valor ----
     temp_positions = []
@@ -1331,7 +1395,7 @@ def manage_positions(client, dl):
 
     if not temp_positions:
         dl.append(f"GESTIÓN: sin posiciones de temperatura activas")
-        return 0, 0.0
+        return {"n_sold": 0, "capital_freed": 0, "kept": 0, "resolved": 0, "sells": []}
 
     dl.append(f"\nGESTIÓN DE POSICIONES: {len(temp_positions)} posiciones activas")
     dl.append(f"  Stop-loss: {STOP_LOSS_PCT}% | Take-profit: +{TAKE_PROFIT_PCT}% | Re-eval: edge<-3%")
@@ -1342,6 +1406,7 @@ def manage_positions(client, dl):
     # ---- Evaluar cada posición ----
     to_sell = []        # lista de (posición, tipo, razón)
     keeping = []        # info de las que mantenemos
+    n_resolved = 0      # mercados ya resueltos (curPrice >= 0.98)
 
     for p in temp_positions:
         title_full = p.get("title", "?")
@@ -1354,6 +1419,15 @@ def manage_positions(client, dl):
         cash_pnl = float(p.get("cashPnl", 0))
         initial_value = float(p.get("initialValue", 0))
         asset_id = p.get("asset", "")
+
+        # Fix v10.2: Si curPrice >= 0.98, el mercado se resolvió a YES
+        # El orderbook ya no existe — intentar vender da error.
+        # Dejar que resuelva: si ganamos, paga $1.00 por share automáticamente.
+        if cur_price >= 0.98:
+            dl.append(f"  🏁 RESUELTO ({outcome} @ {cur_price:.2f}) | {title} | Esperando pago")
+            keeping.append(p)
+            n_resolved += 1
+            continue
 
         # Sin asset_id no podemos vender
         if not asset_id:
@@ -1455,12 +1529,13 @@ def manage_positions(client, dl):
 
     if not to_sell:
         dl.append(f"\n  Sin posiciones que cerrar este ciclo")
-        return 0, 0.0
+        return {"n_sold": 0, "capital_freed": 0, "kept": len(keeping), "resolved": n_resolved, "sells": []}
 
     # ---- Ejecutar ventas ----
     dl.append(f"\n  VENDIENDO {len(to_sell)} posiciones:")
     n_sold = 0
     capital_freed = 0.0
+    sell_summaries = []  # v10.2: para resumen de Telegram
 
     for p, sell_type, reason in to_sell:
         asset_id = p.get("asset", "")
@@ -1468,6 +1543,7 @@ def manage_positions(client, dl):
         size = float(p.get("size", 0))
         cur_price = float(p.get("curPrice", 0))
         title = p.get("title", "?")[:50]
+        city = parse_city_from_title(title)
 
         # Precio agresivo: ligeramente por debajo del mercado para asegurar fill
         sell_price = round(max(0.01, cur_price - SELL_AGGRESSION), 2)
@@ -1492,6 +1568,7 @@ def manage_positions(client, dl):
             dl.append(f"    [DRY] SELL {outcome} {shares_to_sell}sh × ${sell_price:.2f} = ~${estimated_return:.2f} | {title}")
             n_sold += 1
             capital_freed += estimated_return
+            sell_summaries.append({"type": sell_type, "city": city, "side": outcome, "pnl_pct": 0})
             continue
 
         try:
@@ -1510,6 +1587,9 @@ def manage_positions(client, dl):
             n_sold += 1
             capital_freed += estimated_return
 
+            pct = float(p.get("percentPnl", 0))
+            sell_summaries.append({"type": sell_type, "city": city, "side": outcome, "pnl_pct": pct})
+
             # Notificar por Telegram
             if sell_type == "stop_loss":
                 icon, type_label = "🔻", "Stop-loss"
@@ -1517,10 +1597,9 @@ def manage_positions(client, dl):
                 icon, type_label = "💰", "Take-profit"
             else:
                 icon, type_label = "🔄", "Re-evaluación"
-            pct = float(p.get("percentPnl", 0))
             send_telegram(
                 f"{icon} <b>{type_label}</b>\n"
-                f"{outcome} {title}\n"
+                f"{outcome} {city}\n"
                 f"Venta: {shares_to_sell}sh × ${sell_price:.2f}\n"
                 f"PnL: {pct:+.1f}% (${float(p.get('cashPnl', 0)):+.2f})"
             )
@@ -1528,7 +1607,7 @@ def manage_positions(client, dl):
             # v10.1: Registrar en performance tracker
             track_trade("SELL",
                 reason=sell_type,
-                city=parse_city_from_title(title),
+                city=city,
                 side=outcome,
                 price=sell_price,
                 shares=shares_to_sell,
@@ -1540,7 +1619,7 @@ def manage_positions(client, dl):
 
             # Registrar para verificar fill en próximo ciclo
             audit_register_pending_sell(
-                order_id=oid, city=parse_city_from_title(title),
+                order_id=oid, city=city,
                 side=outcome, price=sell_price, shares=shares_to_sell,
                 return_est=estimated_return, reason=sell_type,
             )
@@ -1550,7 +1629,13 @@ def manage_positions(client, dl):
             log.error(f"Error vendiendo posición: {e}")
 
     dl.append(f"\n  Resultado: {n_sold} vendidas | ~${capital_freed:.2f} liberados")
-    return n_sold, capital_freed
+    return {
+        "n_sold": n_sold,
+        "capital_freed": capital_freed,
+        "kept": len(keeping),
+        "resolved": n_resolved,
+        "sells": sell_summaries,
+    }
 
 
 AUDIT_FILE = "audit.json"
@@ -1960,7 +2045,7 @@ def main(client):
     effective_bankroll = get_effective_bankroll(client)
 
     log.info("=" * 65)
-    log.info(f"BOT v10.1 | {today_str} | {mode_label} | ${effective_bankroll:.2f} (tope ${BANKROLL:.2f})")
+    log.info(f"BOT v10.2 | {today_str} | {mode_label} | ${effective_bankroll:.2f} (tope ${BANKROLL:.2f})")
     log.info("=" * 65)
 
     # Decision log: registrar inicio
@@ -1997,10 +2082,11 @@ def main(client):
     # ---- PASO 0.5: GESTIÓN ACTIVA (v10.1) ----
     # Antes de buscar nuevas oportunidades, gestionar posiciones existentes
     # Esto libera capital y corta pérdidas (como hacen Entire-Hood y Thrifty)
+    mgmt = {"n_sold": 0, "capital_freed": 0, "kept": 0, "resolved": 0, "sells": []}
     try:
-        n_sold, capital_freed = manage_positions(client, dl)
-        if n_sold > 0:
-            dl.append(f"GESTIÓN: {n_sold} posiciones cerradas, ~${capital_freed:.2f} liberados")
+        mgmt = manage_positions(client, dl)
+        if mgmt["n_sold"] > 0:
+            dl.append(f"GESTIÓN: {mgmt['n_sold']} posiciones cerradas, ~${mgmt['capital_freed']:.2f} liberados")
     except Exception as e:
         dl.append(f"GESTIÓN: error: {e}")
         log.warning(f"Error en gestión de posiciones: {e}")
@@ -2046,6 +2132,9 @@ def main(client):
     dl.append(f"\nMERCADOS: {len(all_markets)} encontrados")
 
     # ---- PASO 2: Parseo + filtro ----
+    min_days = get_min_days_ahead()
+    dl.append(f"MIN_DAYS_AHEAD: {min_days} (hora UTC: {datetime.now(timezone.utc).hour:02d})")
+
     candidates = []
     parse_fail = 0
     date_fail = 0
@@ -2069,7 +2158,7 @@ def main(client):
         except ValueError:
             continue
 
-        if days_ahead < MIN_DAYS_AHEAD or days_ahead > MAX_DAYS_AHEAD:
+        if days_ahead < min_days or days_ahead > MAX_DAYS_AHEAD:
             date_fail += 1
             continue
 
@@ -2259,19 +2348,12 @@ def main(client):
     dl.append(f"SELECCIONADAS: {len(selected)} de {len(trades)}")
 
     # ---- PASO 6: Ejecución ----
+    buy_summaries = []  # v10.2: para resumen de Telegram
+
     if not selected:
         dl.append(f"\nSin operaciones este ciclo.")
         bot_state["last_orders_placed"] = 0
         bot_state["last_trades"] = []
-        # v9: Siempre notificar que el ciclo terminó
-        if not DRY_RUN:
-            send_telegram(
-                f"💤 <b>Ciclo completado</b>\n"
-                f"Evaluados: {len(candidates)} | Edge: {len(trades)} | Seleccionados: 0\n"
-                f"Min edge: {MIN_EDGE}%\n"
-                f"Toca 📓 Log para detalle",
-                with_menu=True,
-            )
     else:
         results = []
         for i, trade in enumerate(selected):
@@ -2286,46 +2368,66 @@ def main(client):
 
             dl.append(f"\n  {'OK' if result['ok'] else 'FAIL'} #{i+1}: {trade['city']} {trade['side']} ${trade['position']['amount']:.2f} → {result['msg']}")
 
-            if not DRY_RUN:
-                icon = "✅" if result["ok"] else "❌"
-                # v9: añadir confirmación de traders si existe
-                trader_line = ""
-                if trade.get("trader_confirmed"):
-                    trader_line = f"\n🤝 Confirmado: {', '.join(trade['trader_confirmed'])}"
-                send_telegram(
-                    f"{icon} <b>Orden</b>\n"
-                    f"{trade['city']} {trade['side']}\n"
-                    f"${trade['position']['amount']:.2f} "
-                    f"({trade['position']['shares']:.1f}sh "
-                    f"@ ${trade['position'].get('aggressive_price', 0):.2f})\n"
-                    f"Edge: {trade['edge_pct']}% | EV: ${trade['position']['expected_value']:+.2f}"
-                    f"{trader_line}"
-                )
+            if not DRY_RUN and result["ok"]:
+                buy_summaries.append({
+                    "city": trade["city"],
+                    "side": trade["side"],
+                    "amount": trade["position"]["amount"],
+                    "edge": trade["edge_pct"],
+                    "traders": trade.get("trader_confirmed", []),
+                })
 
                 # v10.1: Registrar en performance tracker
-                if result["ok"]:
-                    track_trade("BUY",
-                        city=trade["city"],
-                        side=trade["side"],
-                        date=trade["date"],
-                        days_ahead=trade["days_ahead"],
-                        price=trade["position"].get("aggressive_price", 0),
-                        shares=trade["position"]["shares"],
-                        amount=trade["position"]["amount"],
-                        edge_pct=trade["edge_pct"],
-                        our_prob=trade["our_prob"],
-                        mkt_price=trade["mkt_price"],
-                        forecast_max=trade["forecast_max"],
-                        condition=trade["condition"],
-                        trader_confirmed=trade.get("trader_confirmed", []),
-                    )
+                track_trade("BUY",
+                    city=trade["city"],
+                    side=trade["side"],
+                    date=trade["date"],
+                    days_ahead=trade["days_ahead"],
+                    price=trade["position"].get("aggressive_price", 0),
+                    shares=trade["position"]["shares"],
+                    amount=trade["position"]["amount"],
+                    edge_pct=trade["edge_pct"],
+                    our_prob=trade["our_prob"],
+                    mkt_price=trade["mkt_price"],
+                    forecast_max=trade["forecast_max"],
+                    condition=trade["condition"],
+                    trader_confirmed=trade.get("trader_confirmed", []),
+                )
 
         ok = sum(1 for r in results if r["ok"])
         bot_state["last_orders_placed"] = ok
         bot_state["last_trades"] = selected
 
-        if not DRY_RUN:
-            send_telegram(f"📊 <b>Ciclo completado</b>\nÓrdenes: {ok}/{len(results)} OK", with_menu=True)
+    # ---- v10.2: RESUMEN COMPLETO DEL CICLO ----
+    if not DRY_RUN:
+        summary = f"📊 <b>Ciclo #{bot_state['cycle_count']+1}</b>\n"
+        summary += f"{'─' * 25}\n"
+
+        # Gestión activa
+        if mgmt["n_sold"] > 0:
+            for s in mgmt["sells"]:
+                icons = {"stop_loss": "🔻", "take_profit": "💰", "reeval": "🔄"}
+                icon = icons.get(s["type"], "📤")
+                summary += f"{icon} Vendido: {s['side']} {s['city']} ({s['pnl_pct']:+.0f}%)\n"
+        if mgmt["resolved"] > 0:
+            summary += f"🏁 {mgmt['resolved']} resueltas (esperando pago)\n"
+        if mgmt["kept"] > 0:
+            summary += f"✓ {mgmt['kept']} mantenidas\n"
+
+        # Compras
+        if buy_summaries:
+            for b in buy_summaries:
+                trader_tag = " 🤝" if b["traders"] else ""
+                summary += f"🛒 Compra: {b['side']} {b['city']} ${b['amount']:.2f} edge={b['edge']:.0f}%{trader_tag}\n"
+        elif not mgmt["n_sold"]:
+            summary += f"💤 Sin operaciones\n"
+
+        # Estado
+        summary += f"{'─' * 25}\n"
+        summary += f"Evaluados: {len(candidates)} | Edge: {len(trades)}\n"
+        summary += f"Exposición: ${current_exposure:.2f} | Disp: ${budget_left:.2f}\n"
+
+        send_telegram(summary, with_menu=True)
 
     dl.append(f"\n{'='*50}")
 
@@ -2482,7 +2584,7 @@ def run_trader_tasks():
 
 if __name__ == "__main__":
     log.info("=" * 65)
-    log.info(f"POLYMARKET BOT v10.1 | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
+    log.info(f"POLYMARKET BOT v10.2 | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
     log.info(f"Modo: {'DRY RUN' if DRY_RUN else 'REAL'}")
     log.info("=" * 65)
 
@@ -2497,7 +2599,7 @@ if __name__ == "__main__":
     modo = "DRY RUN" if DRY_RUN else "REAL"
     schedule = ", ".join(f"{h:02d}:00" for h in sorted(SCHEDULE_HOURS_UTC))
     send_telegram(
-        f"🤖 <b>Bot v10.1 arrancado</b>\n"
+        f"🤖 <b>Bot v10.2 arrancado</b>\n"
         f"Modo: {modo} | ${BANKROLL:.2f}\n"
         f"Min edge: {MIN_EDGE}% | Schedule: {schedule} UTC\n"
         f"🔧 Gestión activa: SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n"

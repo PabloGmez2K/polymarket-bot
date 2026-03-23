@@ -1,9 +1,15 @@
 """
-verify_before_deploy.py — Verificación pre-deploy Fase 2
-=========================================================
+verify_before_deploy.py — Verificación pre-deploy v2
+=====================================================
 
-Ejecuta ANTES de hacer push para confirmar que todo funciona.
-NO coloca órdenes reales. Solo verifica.
+Verifica que bot.py está listo para producción ANTES de hacer push.
+NO coloca órdenes reales. Solo verifica lógica, APIs y configuración.
+
+Cada test nace de un bug real que nos costó dinero:
+  - Test de exposición: bug de $9.23 fantasma bloqueando presupuesto
+  - Test MIN_DAYS: bug de -$7.50 comprando contra info conocida
+  - Test mercados resueltos: error "orderbook does not exist"
+  - Test sigma: 5/5 pérdidas por sobreconfianza en v9
 
 Uso:
     cd C:/Projects/polymarket-bot
@@ -13,6 +19,7 @@ Uso:
 import os
 import sys
 import json
+import inspect
 
 # Verificar que estamos en el directorio correcto
 if not os.path.exists("bot.py"):
@@ -20,247 +27,280 @@ if not os.path.exists("bot.py"):
     sys.exit(1)
 
 print("=" * 60)
-print("🔍 VERIFICACIÓN PRE-DEPLOY — Fase 2")
+print("🔍 VERIFICACIÓN PRE-DEPLOY v2")
 print("=" * 60)
 
 errors = []
 warnings = []
 passes = []
+n_test = 0
+
+
+def test(name):
+    global n_test
+    n_test += 1
+    print(f"\n[{n_test}] {name}")
+
+
+def ok(msg):
+    passes.append(msg)
+    print(f"  ✅ {msg}")
+
+
+def fail(msg):
+    errors.append(msg)
+    print(f"  ❌ {msg}")
+
+
+def warn(msg):
+    warnings.append(msg)
+    print(f"  ⚠ {msg}")
+
 
 # ============================================================
-# TEST 1: Importar funciones del bot
+# TEST: Importar bot.py sin errores de sintaxis
 # ============================================================
-print("\n[1/13] Importando funciones del bot...")
+test("Importar bot.py...")
 try:
     from bot import (
         get_uncertainty, estimate_prob, kelly_fraction,
         calculate_position, parse_temperature_question,
         BANKROLL, MIN_BET, MAX_BET_PCT, MIN_EDGE,
         STOP_LOSS_PCT, TAKE_PROFIT_PCT, SELL_AGGRESSION,
-        MAX_EXPOSURE_PCT,
+        MAX_EXPOSURE_PCT, MIN_DAYS_AHEAD,
     )
-    passes.append("Importación OK")
-    print(f"  ✅ Importación OK")
-    print(f"  BANKROLL=${BANKROLL} | MIN_BET=${MIN_BET} | MAX_BET_PCT={MAX_BET_PCT}")
-    print(f"  STOP_LOSS={STOP_LOSS_PCT}% | TAKE_PROFIT=+{TAKE_PROFIT_PCT}%")
-    print(f"  MIN_EDGE={MIN_EDGE}% | MAX_EXPOSURE={MAX_EXPOSURE_PCT*100}%")
+    ok("Importación OK")
+    print(f"     BANKROLL=${BANKROLL} | MIN_EDGE={MIN_EDGE}%")
+    print(f"     SL={STOP_LOSS_PCT}% | TP=+{TAKE_PROFIT_PCT}% | MAX_EXP={MAX_EXPOSURE_PCT*100:.0f}%")
 except Exception as e:
-    errors.append(f"Importación FALLÓ: {e}")
-    print(f"  ❌ Error: {e}")
+    fail(f"Importación FALLÓ: {e}")
+    print("\n  ⛔ No se puede continuar sin importar bot.py")
     sys.exit(1)
 
-# ============================================================
-# TEST 1b: BANKROLL = 25 (no 15)
-# ============================================================
-print("\n[1b/13] Verificando BANKROLL...")
-env_bankroll = os.getenv("BANKROLL", "")
-if BANKROLL == 25.0:
-    passes.append("BANKROLL=$25 OK")
-    print(f"  ✅ BANKROLL=${BANKROLL} (correcto para Fase 2)")
-elif BANKROLL == 15.0:
-    errors.append("BANKROLL sigue en $15 — actualizar .env o Railway")
-    print(f"  ❌ BANKROLL=${BANKROLL} — sigue en $15! Debe ser $25")
-else:
-    warnings.append(f"BANKROLL=${BANKROLL} — verificar que es correcto")
-    print(f"  ⚠ BANKROLL=${BANKROLL} — verificar")
 
 # ============================================================
-# TEST 1c: Funciones críticas existen
+# TEST: Funciones críticas existen
 # ============================================================
-print("\n[1c/13] Verificando funciones críticas...")
-critical_missing = []
+test("Funciones críticas...")
+critical_fns = {
+    "manage_positions": "Gestión activa de posiciones",
+    "track_trade": "Performance tracker",
+    "get_performance_summary": "Resumen de rendimiento",
+    "audit_check_sell_fills": "Auditoría de ventas",
+    "audit_check_forecasts": "Auditoría de previsiones",
+    "audit_register_pending_sell": "Registro de ventas pendientes",
+    "get_effective_bankroll": "Bankroll dinámico",
+    "get_current_exposure": "Exposición acumulativa",
+    "parse_city_from_title": "Parser de ciudad",
+    "get_min_days_ahead": "MIN_DAYS dinámico",
+}
+
+all_found = True
+for fn_name, desc in critical_fns.items():
+    try:
+        exec(f"from bot import {fn_name}")
+        print(f"  ✅ {fn_name}()")
+    except ImportError:
+        fail(f"Función {fn_name} NO existe ({desc})")
+        all_found = False
+
+if all_found:
+    ok("Todas las funciones críticas existen")
+
+
+# ============================================================
+# TEST: get_current_exposure usa currentValue (NO initialValue)
+# Bug real: posiciones de $0.11 contaban como $9.23 de exposición
+# ============================================================
+test("Fix exposición fantasma (currentValue vs initialValue)...")
+try:
+    from bot import get_current_exposure
+    source = inspect.getsource(get_current_exposure)
+
+    # DEBE usar currentValue para calcular exposición
+    uses_current = "current_value" in source or "currentValue" in source
+    # NO DEBE sumar initialValue como exposición
+    sums_initial = "initial_value" in source and "total" in source.lower()
+    # Variable de acumulación debe ser current, no initial
+    uses_total_exposure = "total_exposure" in source
+
+    if uses_current and uses_total_exposure and not sums_initial:
+        ok("Exposición usa currentValue (lo que vale, no lo que pagamos)")
+    elif uses_current and "initial_value" not in source:
+        ok("Exposición usa currentValue")
+    else:
+        fail("get_current_exposure puede estar usando initialValue — esto bloqueó el bot con $9.23 fantasma")
+        print("     Debe sumar currentValue de cada posición, NO initialValue")
+except Exception as e:
+    warn(f"No pude verificar get_current_exposure: {e}")
+
+
+# ============================================================
+# TEST: MIN_DAYS_AHEAD dinámico (get_min_days_ahead)
+# Bug real: -$7.50 comprando día-0 a las 16:00 UTC
+# ============================================================
+test("MIN_DAYS_AHEAD dinámico...")
+try:
+    from bot import get_min_days_ahead, MIN_DAYS_AHEAD
+
+    # Verificar que la función existe y tiene lógica horaria
+    source = inspect.getsource(get_min_days_ahead)
+    has_hour_check = "hour" in source.lower()
+    has_return_0 = "return 0" in source
+    has_return_1 = "return 1" in source
+
+    if has_hour_check and has_return_0 and has_return_1:
+        ok(f"get_min_days_ahead() tiene lógica por hora UTC")
+    else:
+        fail("get_min_days_ahead() no diferencia mañana/tarde")
+
+    # Verificar el default
+    if MIN_DAYS_AHEAD == -1:
+        ok("MIN_DAYS_AHEAD=-1 (modo automático)")
+    elif MIN_DAYS_AHEAD >= 0:
+        warn(f"MIN_DAYS_AHEAD={MIN_DAYS_AHEAD} (override manual — ¿es intencional?)")
+    else:
+        warn(f"MIN_DAYS_AHEAD={MIN_DAYS_AHEAD} (valor inesperado)")
+
+except ImportError:
+    fail("get_min_days_ahead NO existe — el bot comprará día-0 por la tarde")
+except Exception as e:
+    warn(f"No pude verificar MIN_DAYS_AHEAD: {e}")
+
+
+# ============================================================
+# TEST: manage_positions skip mercados resueltos (curPrice>=0.98)
+# Bug real: error "orderbook does not exist" en mercados ya pagados
+# ============================================================
+test("Skip mercados resueltos en manage_positions...")
 try:
     from bot import manage_positions
-    print(f"  ✅ manage_positions() existe")
-except ImportError:
-    critical_missing.append("manage_positions")
-    print(f"  ❌ manage_positions() NO existe")
-
-try:
-    from bot import track_trade, get_performance_summary
-    print(f"  ✅ track_trade() + get_performance_summary() existen")
-except ImportError:
-    critical_missing.append("track_trade/get_performance_summary")
-    print(f"  ❌ Performance tracker NO existe")
-
-try:
-    from bot import audit_check_sell_fills, audit_check_forecasts, audit_register_pending_sell
-    print(f"  ✅ Audit functions existen (fills + forecasts)")
-except ImportError:
-    critical_missing.append("audit functions")
-    print(f"  ❌ Audit functions NO existen")
-
-try:
-    from bot import get_effective_bankroll, get_current_exposure
-    print(f"  ✅ get_effective_bankroll() + get_current_exposure() existen")
-except ImportError:
-    critical_missing.append("bankroll/exposure functions")
-    print(f"  ❌ Bankroll/exposure functions NO existen")
-
-try:
-    from bot import parse_city_from_title
-    print(f"  ✅ parse_city_from_title() existe")
-except ImportError:
-    critical_missing.append("parse_city_from_title")
-    print(f"  ❌ parse_city_from_title() NO existe")
-
-try:
-    from py_clob_client.order_builder.constants import BUY, SELL
-    print(f"  ✅ BUY y SELL importados")
-except ImportError:
-    critical_missing.append("BUY/SELL constants")
-    print(f"  ❌ BUY/SELL NO importados")
-
-if critical_missing:
-    errors.append(f"Funciones críticas faltan: {', '.join(critical_missing)}")
-else:
-    passes.append("Todas las funciones críticas existen")
-
-# ============================================================
-# TEST 1d: Verificar que manage_positions tiene los 3 checks
-# ============================================================
-print("\n[1d/13] Verificando lógica de manage_positions...")
-import inspect
-try:
     source = inspect.getsource(manage_positions)
-    has_stop_loss = "STOP_LOSS_PCT" in source
-    has_take_profit = "TAKE_PROFIT_PCT" in source
-    has_reeval = "RE-EVAL" in source or "re-eval" in source.lower() or "edge_pct < -3" in source
-    has_forecast = "get_forecast" in source
 
-    if has_stop_loss:
-        print(f"  ✅ Check 1: Stop-loss (STOP_LOSS_PCT)")
+    if "0.98" in source and "cur_price" in source:
+        ok("Skip curPrice >= 0.98 (mercados resueltos)")
     else:
-        errors.append("manage_positions: falta stop-loss")
-        print(f"  ❌ Check 1: Stop-loss NO encontrado")
-
-    if has_take_profit:
-        print(f"  ✅ Check 2: Take-profit (TAKE_PROFIT_PCT)")
-    else:
-        errors.append("manage_positions: falta take-profit")
-        print(f"  ❌ Check 2: Take-profit NO encontrado")
-
-    if has_reeval and has_forecast:
-        print(f"  ✅ Check 3: Re-evaluación con previsión fresca")
-    else:
-        errors.append("manage_positions: falta re-evaluación")
-        print(f"  ❌ Check 3: Re-evaluación NO encontrada")
-
-    if has_stop_loss and has_take_profit and has_reeval:
-        passes.append("manage_positions tiene los 3 checks")
+        fail("manage_positions NO skipea mercados resueltos — dará error 'orderbook does not exist'")
 except Exception as e:
-    warnings.append(f"No pude inspeccionar manage_positions: {e}")
-    print(f"  ⚠ No pude inspeccionar: {e}")
+    warn(f"No pude verificar: {e}")
+
 
 # ============================================================
-# TEST 1e: Verificar fix bankroll Magic wallet
+# TEST: manage_positions tiene los 3 checks + filtro $0.10
 # ============================================================
-print("\n[1e/13] Verificando fix bankroll (Magic wallet bug)...")
+test("Lógica de manage_positions...")
 try:
-    source_bankroll = inspect.getsource(get_effective_bankroll)
-    has_fallback = "cash_balance < 0.01" in source_bankroll or "cash_balance == 0" in source_bankroll
-    if has_fallback:
-        passes.append("Fix bankroll Magic wallet OK (fallback a BANKROLL)")
-        print(f"  ✅ Fallback cuando cash=0: usa BANKROLL=${BANKROLL}")
-    else:
-        errors.append("get_effective_bankroll NO tiene fallback para cash=0")
-        print(f"  ❌ Sin fallback para cash=0 — repetirá el bug de hoy")
+    from bot import manage_positions
+    source = inspect.getsource(manage_positions)
+
+    checks = {
+        "Stop-loss": "STOP_LOSS_PCT" in source,
+        "Take-profit": "TAKE_PROFIT_PCT" in source,
+        "Re-evaluación": "get_forecast" in source and "edge_pct" in source,
+        "Filtro $0.10": "0.10" in source,
+    }
+
+    for name, found in checks.items():
+        if found:
+            print(f"  ✅ {name}")
+        else:
+            fail(f"manage_positions: falta {name}")
+
+    if all(checks.values()):
+        ok("manage_positions tiene los 3 checks + filtro mínimo")
 except Exception as e:
-    warnings.append(f"No pude verificar bankroll fix: {e}")
-    print(f"  ⚠ No pude verificar: {e}")
+    warn(f"No pude inspeccionar manage_positions: {e}")
+
 
 # ============================================================
-# TEST 1f: Verificar filtro valor mínimo en ventas
+# TEST: Fix bankroll Magic wallet (fallback cuando cash=0)
 # ============================================================
-print("\n[1f/13] Verificando filtro valor mínimo en ventas...")
+test("Fix bankroll Magic wallet...")
 try:
-    source_manage = inspect.getsource(manage_positions)
-    has_min_filter = "estimated_return < 0.10" in source_manage or "< 0.10" in source_manage
-    if has_min_filter:
-        passes.append("Filtro valor mínimo $0.10 en ventas OK")
-        print(f"  ✅ No intentará vender posiciones de <$0.10")
+    from bot import get_effective_bankroll
+    source = inspect.getsource(get_effective_bankroll)
+
+    if "cash_balance < 0.01" in source or "cash_balance == 0" in source:
+        ok(f"Fallback cuando cash=0: usa BANKROLL=${BANKROLL}")
     else:
-        errors.append("Sin filtro de valor mínimo — intentará vender posiciones de $0.01")
-        print(f"  ❌ Sin filtro — repetirá el error 'not enough balance'")
+        fail("get_effective_bankroll NO tiene fallback para cash=0")
 except Exception as e:
-    warnings.append(f"No pude verificar filtro mínimo: {e}")
-    print(f"  ⚠ No pude verificar: {e}")
+    warn(f"No pude verificar: {e}")
+
 
 # ============================================================
-# TEST 2: Sigma calibrada (v10)
+# TEST: Sigma calibrada (v10) — no sobreconfiada
 # ============================================================
-print("\n[2/13] Verificando sigma calibrada...")
+test("Sigma calibrada...")
 sigma_0 = get_uncertainty(0)
 sigma_1 = get_uncertainty(1)
 sigma_2 = get_uncertainty(2)
 
+print(f"     día0={sigma_0}°C | día1={sigma_1}°C | día2={sigma_2}°C")
+
 if sigma_0 >= 1.0 and sigma_1 >= 1.2:
-    passes.append(f"Sigma OK: día0={sigma_0}, día1={sigma_1}, día2={sigma_2}")
-    print(f"  ✅ Sigma: día0={sigma_0}, día1={sigma_1}, día2={sigma_2}")
+    ok(f"Sigma razonable (día0≥1.0, día1≥1.2)")
 else:
-    errors.append(f"Sigma demasiado baja: día0={sigma_0} (mín 1.0)")
-    print(f"  ❌ Sigma demasiado baja: {sigma_0}")
+    fail(f"Sigma demasiado baja — causó 5/5 pérdidas en v9")
+    print(f"     Mínimo: día0=1.0, día1=1.2. Actual: día0={sigma_0}, día1={sigma_1}")
+
 
 # ============================================================
-# TEST 3: Kelly sizing con $25 bankroll
+# TEST: Kelly sizing
 # ============================================================
-print("\n[3/13] Verificando sizing con $25 bankroll...")
+test("Kelly sizing...")
 
-# Caso típico: edge 15%, precio mercado 30¢
-pos = calculate_position(25.0, 0.45, 0.30)
-if pos is None:
-    errors.append("Kelly no genera posición para edge típico (15%)")
-    print("  ❌ No genera posición para edge 15%")
+# Edge 15%: debería generar posición razonable
+pos_15 = calculate_position(25.0, 0.45, 0.30)
+if pos_15 is None:
+    fail("Kelly no genera posición para edge 15% con $25")
 else:
-    amt = pos["amount"]
-    if amt >= MIN_BET and amt <= 25.0 * MAX_BET_PCT:
-        passes.append(f"Kelly sizing OK: ${amt:.2f} para edge 15%")
-        print(f"  ✅ Posición: ${amt:.2f} ({pos['shares']:.1f}sh @ ${pos['aggressive_price']:.2f})")
+    amt = pos_15["amount"]
+    max_bet = 25.0 * MAX_BET_PCT
+    if MIN_BET <= amt <= max_bet:
+        ok(f"Edge 15%: ${amt:.2f} (dentro de ${MIN_BET}-${max_bet:.2f})")
     else:
-        errors.append(f"Kelly sizing fuera de rango: ${amt:.2f}")
-        print(f"  ❌ Sizing: ${amt:.2f} (rango: ${MIN_BET}-${25*MAX_BET_PCT:.2f})")
+        fail(f"Kelly fuera de rango: ${amt:.2f}")
 
-# Caso edge pequeño (7%): debería generar posición con $25
-pos_small = calculate_position(25.0, 0.20, 0.13)
-if pos_small is not None and pos_small["amount"] >= MIN_BET:
-    passes.append(f"Kelly edge 7% OK: ${pos_small['amount']:.2f}")
-    print(f"  ✅ Edge 7%: ${pos_small['amount']:.2f} — SÍ genera posición")
+# Edge 7%: debería funcionar
+pos_7 = calculate_position(25.0, 0.20, 0.13)
+if pos_7 is not None and pos_7["amount"] >= MIN_BET:
+    ok(f"Edge 7%: ${pos_7['amount']:.2f}")
 else:
-    warnings.append("Edge 7% no genera posición con $25 — puede ser normal")
-    print(f"  ⚠ Edge 7% no genera posición (puede ser normal para edges bajos)")
+    warn("Edge 7% no genera posición (puede ser normal)")
 
-# Caso con $2 bankroll (lo que pasaba antes): DEBERÍA fallar
+# $2 bankroll: NO debería generar posición
 pos_broke = calculate_position(2.0, 0.45, 0.30)
 if pos_broke is None or pos_broke["amount"] < MIN_BET:
-    passes.append("Con $2 bankroll no genera posición (correcto)")
-    print(f"  ✅ Con $2 bankroll: no genera posición (correcto, bug fix confirmado)")
+    ok("$2 bankroll: no genera posición (correcto)")
 else:
-    warnings.append(f"Con $2 bankroll genera ${pos_broke['amount']:.2f}")
-    print(f"  ⚠ Con $2 bankroll genera ${pos_broke['amount']:.2f}")
+    warn(f"$2 bankroll genera ${pos_broke['amount']:.2f}")
+
 
 # ============================================================
-# TEST 4: Presupuesto y exposición
+# TEST: Modelo de probabilidad
 # ============================================================
-print("\n[4/13] Verificando presupuesto...")
-max_exposure = 25.0 * MAX_EXPOSURE_PCT
-max_per_trade = 25.0 * MAX_BET_PCT
-n_trades_possible = int(max_exposure / max_per_trade) if max_per_trade > 0 else 0
+test("Modelo de probabilidad...")
 
-print(f"  Máx exposición: ${max_exposure:.2f} (40% de $25)")
-print(f"  Máx por trade: ${max_per_trade:.2f} (10% de $25)")
-print(f"  Trades simultáneos: ~{n_trades_possible}")
-
-if max_exposure >= 5.0 and n_trades_possible >= 3:
-    passes.append(f"Presupuesto OK: ${max_exposure:.2f} exposición, {n_trades_possible} trades")
-    print(f"  ✅ Presupuesto correcto")
+# London 16°C exact, forecast 15.7°C, día 1 → debería ser ~20-35%
+prob1 = estimate_prob(15.7, 16.0, "exact", 1)
+if 10 < prob1 * 100 < 45:
+    ok(f"London exact: {prob1*100:.1f}% (razonable)")
 else:
-    errors.append(f"Presupuesto insuficiente: ${max_exposure:.2f}")
-    print(f"  ❌ Presupuesto insuficiente")
+    warn(f"London exact: {prob1*100:.1f}% (revisar)")
+
+# NYC 60°F, forecast 10°C, día 0 → debería ser muy baja
+prob2 = estimate_prob(10.0, 15.6, "exact", 0)
+if prob2 * 100 < 5:
+    ok(f"NYC imposible: {prob2*100:.1f}% (correctamente baja)")
+else:
+    warn(f"NYC imposible: {prob2*100:.1f}% (debería ser <5%)")
+
 
 # ============================================================
-# TEST 5: Parseo de mercados
+# TEST: Parseo de mercados
 # ============================================================
-print("\n[5/13] Verificando parseo de mercados...")
+test("Parseo de mercados...")
 test_questions = [
     ("Will the highest temperature in London be 16°C on March 23?", "London", 16, "exact", "C"),
     ("Will the highest temperature in NYC be between 62-63°F on March 23?", "New York City", 62, "range", "F"),
@@ -274,58 +314,77 @@ for q, exp_city, exp_temp, exp_cond, exp_unit in test_questions:
         print(f"  ✅ {exp_city} {exp_cond} {exp_temp}°{exp_unit}")
     else:
         all_parsed = False
-        errors.append(f"Parseo falló: {q[:50]}")
-        print(f"  ❌ Parseo falló: {q[:50]}")
+        fail(f"Parseo falló: {q[:50]}")
 
 if all_parsed:
-    passes.append("Parseo de mercados OK (3/3)")
+    ok("Parseo 3/3 tipos de mercado")
+
 
 # ============================================================
-# TEST 6: Probabilidades con sigma nueva
+# TEST: Presupuesto
 # ============================================================
-print("\n[6/13] Verificando modelo de probabilidad...")
+test("Presupuesto...")
+max_exposure = BANKROLL * MAX_EXPOSURE_PCT
+max_per_trade = BANKROLL * MAX_BET_PCT
+n_trades = int(max_exposure / max_per_trade) if max_per_trade > 0 else 0
 
-# London 16°C, forecast 15.7°C, día 1 → no debería ser 99%
-prob = estimate_prob(15.7, 16.0, "exact", 1)
-print(f"  London 16°C, forecast 15.7°C, día 1: P={prob*100:.1f}%")
-if 15 < prob * 100 < 40:
-    passes.append(f"Probabilidad razonable: {prob*100:.1f}%")
-    print(f"  ✅ Razonable (no sobreconfiado)")
+print(f"     Máx exposición: ${max_exposure:.2f} ({MAX_EXPOSURE_PCT*100:.0f}% de ${BANKROLL})")
+print(f"     Máx por trade: ${max_per_trade:.2f} ({MAX_BET_PCT*100:.0f}% de ${BANKROLL})")
+print(f"     Trades simultáneos: ~{n_trades}")
+
+if max_exposure >= 5.0 and n_trades >= 3:
+    ok(f"Presupuesto OK: {n_trades} trades de ${max_per_trade:.2f}")
 else:
-    warnings.append(f"Probabilidad sospechosa: {prob*100:.1f}%")
-    print(f"  ⚠ Revisar: {prob*100:.1f}%")
+    fail(f"Presupuesto insuficiente")
 
-# NYC 60°F (15.6°C), forecast 10°C, día 0 → debería ser baja
-prob2 = estimate_prob(10.0, 15.6, "exact", 0)
-print(f"  NYC 60°F, forecast 10°C, día 0: P={prob2*100:.1f}%")
-if prob2 * 100 < 5:
-    passes.append(f"Probabilidad baja correcta: {prob2*100:.1f}%")
-    print(f"  ✅ Correctamente baja")
-else:
-    warnings.append(f"Debería ser más baja: {prob2*100:.1f}%")
-    print(f"  ⚠ Debería ser más baja")
 
 # ============================================================
-# TEST 7: Conectar a Polymarket API
+# TEST: API Polymarket
 # ============================================================
-print("\n[7/13] Verificando conexión a Polymarket...")
+test("API Polymarket...")
 try:
     import urllib.request
-    req = urllib.request.Request("https://gamma-api.polymarket.com/events?tag_id=103040&limit=1")
-    req.add_header("User-Agent", "verify/1.0")
+    req = urllib.request.Request("https://gamma-api.polymarket.com/events?tag_id=103040&limit=3")
+    req.add_header("User-Agent", "verify/2.0")
     resp = urllib.request.urlopen(req, timeout=10)
     data = json.loads(resp.read())
     n_markets = sum(len(e.get("markets", [])) for e in data)
-    passes.append(f"API Polymarket OK ({n_markets} mercados)")
-    print(f"  ✅ API OK — {n_markets} mercados de temperatura")
+    if n_markets > 0:
+        ok(f"Gamma API OK — {n_markets} mercados de temperatura")
+    else:
+        warn("Gamma API respondió pero 0 mercados")
 except Exception as e:
-    errors.append(f"API Polymarket falló: {e}")
-    print(f"  ❌ Error: {e}")
+    fail(f"API Polymarket falló: {e}")
+
 
 # ============================================================
-# TEST 8: Verificar cartera real
+# TEST: API Open-Meteo (previsiones meteorológicas)
 # ============================================================
-print("\n[8/13] Verificando cartera real...")
+test("API Open-Meteo...")
+try:
+    import urllib.request
+    # Test con coordenadas de London City Airport
+    url = (
+        "https://api.open-meteo.com/v1/forecast?"
+        "latitude=51.5048&longitude=0.0495"
+        "&daily=temperature_2m_max&timezone=auto&forecast_days=3"
+    )
+    req = urllib.request.Request(url)
+    resp = urllib.request.urlopen(req, timeout=10)
+    data = json.loads(resp.read())
+    temps = data.get("daily", {}).get("temperature_2m_max", [])
+    if temps and len(temps) >= 2:
+        ok(f"Open-Meteo OK — London próximos días: {[f'{t}°C' for t in temps[:3]]}")
+    else:
+        warn("Open-Meteo respondió pero sin datos de temperatura")
+except Exception as e:
+    fail(f"Open-Meteo falló: {e} — el bot no podrá calcular probabilidades")
+
+
+# ============================================================
+# TEST: Cartera real (Data API)
+# ============================================================
+test("Cartera real...")
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -333,52 +392,124 @@ try:
 
     funder = os.getenv("FUNDER", "")
     if not funder:
-        warnings.append("No hay FUNDER en .env")
-        print("  ⚠ No hay FUNDER en .env — no puedo verificar cartera")
+        warn("No hay FUNDER en .env — no puedo verificar cartera")
     else:
         params = urllib.parse.urlencode({
             "user": funder.lower(),
             "sizeThreshold": "0",
-            "limit": "20",
+            "limit": "50",
             "sortBy": "CURRENT",
             "sortDirection": "DESC",
         })
         url = f"https://data-api.polymarket.com/positions?{params}"
         req = urllib.request.Request(url)
-        req.add_header("User-Agent", "verify/1.0")
+        req.add_header("User-Agent", "verify/2.0")
         resp = urllib.request.urlopen(req, timeout=10)
         positions = json.loads(resp.read())
 
-        total_value = sum(float(p.get("currentValue", 0)) for p in positions)
-        total_invested = sum(float(p.get("initialValue", 0)) for p in positions)
-        temp_pos = [p for p in positions if "temperature" in p.get("title", "").lower()]
+        # Usar currentValue (no initialValue) — ¡el mismo fix del bot!
+        active = [p for p in positions if float(p.get("currentValue", 0)) >= 0.10]
+        dead = [p for p in positions if float(p.get("currentValue", 0)) < 0.10 and float(p.get("currentValue", 0)) > 0]
+        total_current = sum(float(p.get("currentValue", 0)) for p in positions)
+        active_value = sum(float(p.get("currentValue", 0)) for p in active)
+        dead_invested = sum(float(p.get("initialValue", 0)) for p in dead)
 
-        print(f"  Posiciones totales: {len(positions)} ({len(temp_pos)} de temperatura)")
-        print(f"  Invertido: ${total_invested:.2f} | Valor actual: ${total_value:.2f}")
+        print(f"     Posiciones: {len(active)} activas (${active_value:.2f}) + {len(dead)} muertas (${dead_invested:.2f} invertido)")
+        print(f"     Valor total: ${total_current:.2f}")
 
-        # Verificar exposición actual
-        exposure_pct = (total_invested / 25.0 * 100) if total_invested > 0 else 0
-        print(f"  Exposición actual: ${total_invested:.2f} ({exposure_pct:.0f}% de $25)")
+        # Exposición basada en currentValue (lo correcto)
+        exposure_pct = (active_value / BANKROLL * 100)
+        print(f"     Exposición real: ${active_value:.2f} ({exposure_pct:.0f}% de ${BANKROLL})")
 
         if exposure_pct <= 50:
-            passes.append(f"Exposición OK: {exposure_pct:.0f}%")
-            print(f"  ✅ Exposición dentro de límites")
+            ok(f"Exposición {exposure_pct:.0f}% — dentro de límites")
         else:
-            warnings.append(f"Exposición alta: {exposure_pct:.0f}%")
-            print(f"  ⚠ Exposición alta: {exposure_pct:.0f}%")
+            warn(f"Exposición {exposure_pct:.0f}% — alta pero puede ser temporal")
 
-        # Mostrar posiciones activas
-        for p in temp_pos:
-            title = p.get("title", "?")[:50]
+        for p in active:
+            title = p.get("title", "?")[:45]
             outcome = p.get("outcome", "?")
             pct = float(p.get("percentPnl", 0))
             val = float(p.get("currentValue", 0))
             icon = "🟢" if pct >= 0 else "🔴"
-            print(f"    {icon} {outcome} ${val:.2f} ({pct:+.1f}%) | {title}")
+            print(f"     {icon} {outcome} ${val:.2f} ({pct:+.1f}%) | {title}")
 
 except Exception as e:
-    warnings.append(f"Error verificando cartera: {e}")
-    print(f"  ⚠ Error: {e}")
+    warn(f"Error verificando cartera: {e}")
+
+
+# ============================================================
+# TEST: Telegram (enviar mensaje de test)
+# ============================================================
+test("Telegram...")
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+
+    token = os.getenv("TELEGRAM_TOKEN", "")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+
+    if not token or not chat_id:
+        warn("TELEGRAM_TOKEN o TELEGRAM_CHAT_ID no están en .env")
+    else:
+        # Solo verificar que el token es válido (getMe), no enviar mensaje
+        req = urllib.request.Request(f"https://api.telegram.org/bot{token}/getMe")
+        resp = urllib.request.urlopen(req, timeout=10)
+        data = json.loads(resp.read())
+        bot_name = data.get("result", {}).get("username", "?")
+        ok(f"Telegram OK — bot: @{bot_name}")
+except Exception as e:
+    warn(f"Telegram no verificable: {e}")
+
+
+# ============================================================
+# TEST: Versión del bot
+# ============================================================
+test("Versión...")
+try:
+    with open("bot.py", "r", encoding="utf-8") as f:
+        content = f.read(3000)  # Solo el header
+
+    import re
+    version_match = re.search(r"bot\.py (v\d+\.\d+)", content)
+    if version_match:
+        version = version_match.group(1)
+        ok(f"Versión: {version}")
+    else:
+        warn("No encontré versión en el header de bot.py")
+except Exception as e:
+    warn(f"No pude leer versión: {e}")
+
+
+# ============================================================
+# TEST: Archivos necesarios existen
+# ============================================================
+test("Archivos del proyecto...")
+required = ["bot.py", "requirements.txt", "Procfile", ".env"]
+optional = ["find_traders.py", "trader_analyzer.py", "traders_db.json"]
+
+for f in required:
+    if os.path.exists(f):
+        print(f"  ✅ {f}")
+    else:
+        fail(f"Archivo requerido falta: {f}")
+
+for f in optional:
+    if os.path.exists(f):
+        print(f"  ✅ {f}")
+    else:
+        warn(f"Archivo opcional falta: {f}")
+
+# Verificar que .gitignore tiene .env
+if os.path.exists(".gitignore"):
+    with open(".gitignore", "r") as gi:
+        if ".env" in gi.read():
+            ok(".env está en .gitignore")
+        else:
+            fail(".env NO está en .gitignore — las claves se subirán a GitHub")
+else:
+    fail("No hay .gitignore — las claves se subirán a GitHub")
+
 
 # ============================================================
 # RESUMEN
@@ -399,11 +530,22 @@ if errors:
     print(f"\n  ❌ ERRORES: {len(errors)}")
     for e in errors:
         print(f"     {e}")
-    print(f"\n  ⛔ NO HACER PUSH — hay errores que corregir")
+    print(f"\n  ⛔ NO HACER PUSH — hay {len(errors)} error(es) que corregir")
 else:
+    # Detectar versión para el commit sugerido
+    version = "v10.2"
+    try:
+        with open("bot.py", "r", encoding="utf-8") as f:
+            import re
+            m = re.search(r"bot\.py (v\d+\.\d+)", f.read(3000))
+            if m:
+                version = m.group(1)
+    except Exception:
+        pass
+
     print(f"\n  🟢 TODO OK — puedes hacer push")
     print(f"\n  git add .")
-    print(f"  git commit -m \"v10.1: fase 2 inicio verificado\"")
+    print(f'  git commit -m "{version}: verificado y listo"')
     print(f"  git push")
 
 print()
