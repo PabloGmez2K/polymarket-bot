@@ -13,7 +13,7 @@ from datetime import date, datetime, timezone, timedelta
 
 from dotenv import load_dotenv
 from py_clob_client.client import ClobClient
-from py_clob_client.clob_types import OrderArgs, OrderType
+from py_clob_client.clob_types import OrderArgs, OrderType, BalanceAllowanceParams, AssetType
 from py_clob_client.order_builder.constants import BUY, SELL
 
 load_dotenv()
@@ -553,13 +553,7 @@ def cmd_cartera():
         return
 
     # ---- Cash balance ----
-    cash = 0.0
-    if clob_client is not None:
-        try:
-            balance_wei = clob_client.get_balance()
-            cash = int(balance_wei) / 1e6
-        except Exception:
-            pass
+    cash, cash_ok = get_cash_balance(clob_client)
 
     # ---- Separar posiciones activas vs muertas ----
     active = []     # currentValue >= $0.10 → vale la pena mostrar
@@ -586,17 +580,28 @@ def cmd_cartera():
 
     # ---- Header ----
     pnl_icon = "🟢" if total_active_pnl >= 0 else "🔴"
-    msg = (
-        f"💰 <b>Cartera</b>\n\n"
-        f"💵 Cash: <b>${cash:.2f}</b>\n"
-        f"📊 Posiciones activas: <b>${total_active_value:.2f}</b> ({len(active)})\n"
-    )
+    msg = f"💰 <b>Cartera</b>\n\n"
+
+    if cash_ok:
+        msg += f"💵 Cash: <b>${cash:.2f}</b>\n"
+    else:
+        msg += f"💵 Cash: <i>no disponible</i>\n"
+
+    msg += f"📊 Posiciones activas: <b>${total_active_value:.2f}</b> ({len(active)})\n"
+
     if resolved_won:
         msg += f"🏁 Resueltas (esperando pago): ${resolved_value:.2f} ({len(resolved_won)})\n"
-    msg += (
-        f"{'─' * 28}\n"
-        f"💼 Total: <b>${portfolio_total:.2f}</b>\n"
-    )
+
+    if cash_ok:
+        msg += (
+            f"{'─' * 28}\n"
+            f"💼 Total: <b>${portfolio_total:.2f}</b>\n"
+        )
+    else:
+        msg += (
+            f"{'─' * 28}\n"
+            f"💼 Posiciones: <b>${total_active_value + resolved_value:.2f}</b>\n"
+        )
 
     # ---- Posiciones activas detalladas ----
     if active:
@@ -1277,6 +1282,33 @@ def get_current_exposure():
         return BANKROLL  # Conservador: asume todo invertido
 
 
+def get_cash_balance(client):
+    """
+    Obtiene el cash (USDC) disponible para operar.
+
+    v10.2 fix: client.get_balance() no existe en py_clob_client.
+    El método correcto es get_balance_allowance() con AssetType.COLLATERAL.
+
+    Devuelve: (cash_float, success_bool)
+    """
+    if client is None:
+        return 0.0, False
+    try:
+        params = BalanceAllowanceParams(asset_type=AssetType.COLLATERAL)
+        result = client.get_balance_allowance(params)
+        # result puede ser dict con 'balance' key, o string numérico
+        if isinstance(result, dict):
+            raw = result.get("balance", 0)
+        else:
+            raw = result
+        # El balance viene en unidades base (6 decimales para USDC)
+        cash = float(raw) / 1e6
+        return cash, True
+    except Exception as e:
+        log.warning(f"Error consultando cash balance: {e}")
+        return 0.0, False
+
+
 def get_effective_bankroll(client=None):
     """
     Calcula el bankroll REAL: cash libre + valor de posiciones.
@@ -1284,20 +1316,10 @@ def get_effective_bankroll(client=None):
     El BANKROLL de Railway es un tope máximo. Pero si hemos perdido dinero,
     el bankroll real es menor.
 
-    IMPORTANTE: client.get_balance() no funciona con Magic wallet
-    (devuelve 0). Si cash=0, usamos BANKROLL como fallback — es el
-    dato más fiable que tenemos de cuánto depositamos.
+    Si cash no se puede leer, usa BANKROLL como fallback.
     """
-    cash_balance = 0.0
+    cash_balance, cash_ok = get_cash_balance(client)
     positions_value = 0.0
-
-    # ---- Cash libre (USDC disponible para operar) ----
-    if client is not None:
-        try:
-            balance_wei = client.get_balance()
-            cash_balance = int(balance_wei) / 1e6  # wei → USDC
-        except Exception as e:
-            log.warning(f"Error consultando balance: {e}")
 
     # ---- Valor de posiciones activas ----
     funder = os.getenv("FUNDER", "")
@@ -1321,11 +1343,9 @@ def get_effective_bankroll(client=None):
 
     effective = cash_balance + positions_value
 
-    # Si cash=0, probablemente get_balance() no funciona (Magic wallet bug)
-    # En ese caso, usar BANKROLL como fallback — es lo que depositamos
-    if cash_balance < 0.01 and BANKROLL > 0:
+    if not cash_ok or cash_balance < 0.01:
         effective = BANKROLL
-        log.info(f"Bankroll: ${effective:.2f} (cash API no disponible, usando BANKROLL tope=${BANKROLL:.2f}, posiciones=${positions_value:.2f})")
+        log.info(f"Bankroll: ${effective:.2f} (cash no disponible, usando BANKROLL tope=${BANKROLL:.2f}, posiciones=${positions_value:.2f})")
     else:
         # Tope: nunca asumir más del BANKROLL depositado
         effective = min(effective, BANKROLL)

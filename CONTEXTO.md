@@ -439,6 +439,7 @@ NO. Track record actual: v10.1 tuvo un día rentable (+$3.36) pero con 3 bugs ac
 2. **Aumentar frecuencia de gestión:** Cambiar de cada 8h a cada 3-4h.
    Solo requiere cambiar SCHEDULE_HOURS_UTC en Railway.
    Implementar después de validar que las decisiones son correctas.
+3. **Bug conocido pendiente:** El bot no filtra duplicados por posición (solo por orden abierta). El primer deploy tuvo doble arranque y creó posiciones duplicadas en London y Shanghai. No requiere acción ahora — lo arreglamos en la próxima sesión de coding.
 
 ~~3. Mejorar output de Telegram~~ → **HECHO en v10.2**
 ~~4. Detectar mercados resueltos~~ → **HECHO en v10.2**

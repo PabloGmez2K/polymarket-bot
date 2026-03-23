@@ -91,6 +91,7 @@ critical_fns = {
     "audit_register_pending_sell": "Registro de ventas pendientes",
     "get_effective_bankroll": "Bankroll dinámico",
     "get_current_exposure": "Exposición acumulativa",
+    "get_cash_balance": "Cash balance (USDC)",
     "parse_city_from_title": "Parser de ciudad",
     "get_min_days_ahead": "MIN_DAYS dinámico",
 }
@@ -213,15 +214,28 @@ except Exception as e:
 
 
 # ============================================================
-# TEST: Fix bankroll Magic wallet (fallback cuando cash=0)
+# TEST: Cash balance usa get_balance_allowance (no get_balance)
 # ============================================================
-test("Fix bankroll Magic wallet...")
+test("Cash balance (get_balance_allowance)...")
 try:
-    from bot import get_effective_bankroll
-    source = inspect.getsource(get_effective_bankroll)
+    from bot import get_cash_balance
+    source = inspect.getsource(get_cash_balance)
 
-    if "cash_balance < 0.01" in source or "cash_balance == 0" in source:
-        ok(f"Fallback cuando cash=0: usa BANKROLL=${BANKROLL}")
+    uses_correct = "get_balance_allowance" in source and "COLLATERAL" in source
+    uses_old_broken = "get_balance()" in source and "get_balance_allowance" not in source
+
+    if uses_correct:
+        ok("get_cash_balance() usa get_balance_allowance(COLLATERAL)")
+    elif uses_old_broken:
+        fail("Usa get_balance() que NO EXISTE — /cartera mostrará Cash: $0.00")
+    else:
+        warn("No pude verificar qué método usa para cash")
+
+    # Verificar fallback en get_effective_bankroll
+    from bot import get_effective_bankroll
+    source_br = inspect.getsource(get_effective_bankroll)
+    if "cash_ok" in source_br or "cash_balance < 0.01" in source_br:
+        ok(f"Fallback cuando cash no disponible: usa BANKROLL=${BANKROLL}")
     else:
         fail("get_effective_bankroll NO tiene fallback para cash=0")
 except Exception as e:
