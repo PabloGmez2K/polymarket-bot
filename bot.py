@@ -19,22 +19,30 @@ from py_clob_client.order_builder.constants import BUY, SELL
 load_dotenv()
 
 # =============================================================
-# bot.py v10.2 — Fix exposición fantasma + MIN_DAYS dinámico
-# Sesión 11: 3 bugs críticos corregidos
+# bot.py v10.3 — Fix zonas horarias + exposición + sell tracking
+# Sesión 13: 5 bugs corregidos
 # =============================================================
 #
-# Nuevo en v10.2:
-#   - get_current_exposure(): usa currentValue (no initialValue)
-#     Posiciones muertas ($0.11) ya no bloquean presupuesto ($9.23)
-#   - get_min_days_ahead(): MIN_DAYS_AHEAD dinámico por hora UTC
-#     08:00 → 0 (temperaturas no registradas)
-#     16:00+ → 1 (muchas ciudades ya tienen dato real)
-#   - manage_positions(): skip curPrice >= 0.98 (mercado resuelto)
-#     Evita error "orderbook does not exist"
+# Nuevo en v10.3:
+#   - Fix Bug #5: get_min_days_for_city() — zona horaria per-city
+#     A las 08:00 UTC, ciudades asiáticas (UTC+8/+9) necesitan min_days=1
+#     porque allí ya son las 16:00 local y la temp máxima ya se registró.
+#     Costó ~$5.16. Tabla de UTC offsets para 30 ciudades.
+#   - Fix Bug #4: get_current_exposure() excluye curPrice >= 0.98
+#     Posiciones resueltas son cash garantizado, no riesgo.
+#     Shanghai $8 bloqueaba presupuesto innecesariamente.
+#   - Fix Bug #7: SELL → SELL_PENDING hasta confirmar fill
+#     track_trade registra SELL_PENDING. audit_check_sell_fills
+#     lo convierte en SELL (confirmado) o SELL_FAILED (>24h sin fill).
+#   - Fix Bug #6: signals.json freshness 12h → 26h + alerta Telegram
+#     Las señales expiraban silenciosamente entre ciclos.
+#   - Fix Bug #8: Posiciones micro (<$0.10) → LOSS_TOTAL
+#     No se pueden vender. Se registran como pérdida y se excluyen.
 #
-# Heredado de v10.1:
-#   - Gestión activa: stop-loss, take-profit, re-evaluación
-#   - Performance tracker, auditoría, bankroll dinámico
+# Heredado de v10.2:
+#   - get_current_exposure(): usa currentValue (no initialValue)
+#   - get_min_days_ahead(): MIN_DAYS base dinámico por hora UTC
+#   - manage_positions(): skip curPrice >= 0.98 (mercado resuelto)
 # =============================================================
 
 
@@ -56,17 +64,9 @@ MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
 
 def get_min_days_ahead():
     """
-    Calcula MIN_DAYS_AHEAD dinámicamente según la hora UTC.
-
-    Problema que resuelve: a las 16:00-23:00 UTC, las temperaturas máximas
-    de Europa/Asia ya se registraron. El mercado sabe la respuesta, pero
-    el bot usa la previsión y apuesta contra información conocida.
-    Resultado real: -$7.50 en un solo ciclo (23 marzo 2026).
-
-    Lógica:
-      - 08:00 UTC → min_days=0 (temperaturas de hoy aún no se han registrado)
-      - 16:00+ UTC → min_days=1 (muchas ciudades ya tienen dato real)
-
+    Calcula MIN_DAYS_AHEAD base dinámicamente según la hora UTC.
+    SOLO para logging y display. Para filtrar mercados, usar get_min_days_for_city().
+    
     Si MIN_DAYS_AHEAD está forzado en Railway (≥0), usa ese valor.
     """
     if MIN_DAYS_AHEAD >= 0:
@@ -74,9 +74,54 @@ def get_min_days_ahead():
 
     hour_utc = datetime.now(timezone.utc).hour
     if hour_utc < 12:
-        return 0  # Mañana: temperaturas de hoy aún no se han registrado
+        return 0  # Mañana: la mayoría de ciudades aún no registraron temp
     else:
         return 1  # Tarde/noche: muchas ciudades ya tienen dato real
+
+
+def get_min_days_for_city(city):
+    """
+    Calcula MIN_DAYS_AHEAD para una ciudad específica, considerando su zona horaria.
+
+    Problema que resuelve (Bug #5, sesión 12):
+      A las 08:00 UTC, el bot compró Chongqing porque min_days=0 (mañana UTC).
+      Pero en Chongqing (UTC+8) eran las 16:00 local → temperatura máxima ya registrada.
+      Resultado: -$5.16 apostando contra información conocida.
+
+    Lógica:
+      La temperatura máxima diaria ocurre ~14:00-16:00 hora local.
+      Si hora_local >= 14 → la temperatura de hoy ya se registró → min_days=1
+      Si hora_local < 14 → aún puede subir → min_days=0
+
+    Usamos 14 como umbral (conservador: a las 14:00 local muchas estaciones
+    ya reportaron la máxima, aunque técnicamente puede subir hasta las 16:00).
+    """
+    if MIN_DAYS_AHEAD >= 0:
+        return MIN_DAYS_AHEAD  # Override manual desde Railway
+
+    hour_utc = datetime.now(timezone.utc).hour
+    utc_offset = CITY_UTC_OFFSETS.get(city, 0)
+    local_hour = hour_utc + utc_offset
+
+    # Caso 1: local_hour >= 24 → la ciudad ya está en el DÍA SIGUIENTE.
+    # "Hoy" (fecha UTC) ya terminó completamente allí.
+    # Ejemplo: 16:00 UTC + Tokyo UTC+9 = 25 (01:00 del día siguiente).
+    # La temperatura de "hoy" (fecha UTC) ya se registró entera.
+    if local_hour >= 24:
+        return 1
+
+    # Caso 2: local_hour < 0 → la ciudad está aún en el DÍA ANTERIOR.
+    # "Hoy" (fecha UTC) aún no empezó allí. El mercado para "hoy" es futuro.
+    # Ejemplo: 02:00 UTC + Seattle UTC-8 = -6 (18:00 del día anterior).
+    # min_days=0 es correcto: el día del mercado ni siquiera empezó allí.
+    if local_hour < 0:
+        local_hour += 24
+
+    # Caso 3: hora local normal (0-23)
+    if local_hour >= 14:
+        return 1  # Temperatura máxima de hoy ya registrada en esta ciudad
+    else:
+        return 0  # Aún puede subir
 
 # v10.1: Gestión activa de posiciones
 # Basado en investigación: Entire-Hood corta a -10%, toma a +17%
@@ -220,6 +265,8 @@ def get_performance_summary():
 
     buys = [h for h in history if h.get("action") == "BUY"]
     sells = [h for h in history if h.get("action") == "SELL"]
+    # v10.3: SELLs pendientes de confirmación (Bug #7)
+    pending_sells = [h for h in history if h.get("action") == "SELL_PENDING"]
 
     total_invested = sum(h.get("amount", 0) for h in buys)
     total_returned = sum(h.get("return_est", 0) for h in sells)
@@ -247,6 +294,7 @@ def get_performance_summary():
     return {
         "total_buys": len(buys),
         "total_sells": len(sells),
+        "pending_sells": len(pending_sells),  # v10.3: ventas sin confirmar fill
         "total_invested": total_invested,
         "sell_pnl": sell_pnl,
         "stop_losses": len(stop_losses),
@@ -269,18 +317,26 @@ def load_trader_signals():
     """
     Lee signals.json generado por trader_analyzer.py.
     Devuelve dict de match_key → lista de señales para cruce rápido.
-    Si el archivo no existe o es viejo (>12h), devuelve vacío.
+
+    v10.3 Fix Bug #6: Freshness aumentada de 12h a 26h.
+    Bug real: signals.json se generó a las 08:00, expiró a las 20:00 (12h).
+    El ciclo de las 16:00 del día siguiente (32h) no tenía señales.
+    Con 26h cubre todos los ciclos hasta la siguiente regeneración diaria.
+
+    También añade logging explícito cuando está vacío para debugging.
     """
     signals_file = "signals.json"
     if not os.path.exists(signals_file):
+        log.info("load_trader_signals: signals.json no existe")
         return {}
     try:
         with open(signals_file, "r", encoding="utf-8") as f:
             data = json.load(f)
-        # Check freshness
+        # Check freshness — v10.3: 26h (era 12h)
         generated = datetime.fromisoformat(data.get("generated", "2000-01-01T00:00:00+00:00"))
         age_hours = (datetime.now(timezone.utc) - generated).total_seconds() / 3600
-        if age_hours > 12:
+        if age_hours > 26:
+            log.warning(f"load_trader_signals: signals.json expirado ({age_hours:.1f}h > 26h)")
             return {}
         # Indexar por match_key para cruce O(1)
         index = {}
@@ -290,6 +346,9 @@ def load_trader_signals():
                 if key not in index:
                     index[key] = []
                 index[key].append(s)
+        n_signals = sum(len(v) for v in index.values())
+        if n_signals == 0:
+            log.warning(f"load_trader_signals: signals.json tiene 0 señales (edad: {age_hours:.1f}h)")
         return index
     except Exception as e:
         log.warning(f"Error cargando signals.json: {e}")
@@ -390,6 +449,50 @@ RESOLUTION_STATIONS = {
     "Chongqing":      {"lat": 29.7123,  "lon": 106.6519, "name": "Jiangbei"},
     "Chengdu":        {"lat": 30.5737,  "lon": 103.9415, "name": "Shuangliu"},
     "Wuhan":          {"lat": 30.7748,  "lon": 114.2137, "name": "Tianhe"},
+}
+
+# UTC offsets por ciudad — para saber si la temperatura máxima ya se registró
+# La temp máxima ocurre ~14:00-16:00 hora local. Si ya pasó → min_days=1 para esa ciudad.
+# Bug #5 (sesión 12): a las 08:00 UTC, Chongqing está a las 16:00 local → temp ya registrada.
+# Sin esto, el bot apuesta contra información conocida. Costó ~$5.16.
+CITY_UTC_OFFSETS = {
+    # Asia — UTC+7 a UTC+9 (las más peligrosas a las 08:00 UTC)
+    "Tokyo":          9,
+    "Seoul":          9,
+    "Chongqing":      8,
+    "Shanghai":       8,
+    "Beijing":        8,
+    "Taipei":         8,
+    "Shenzhen":       8,
+    "Chengdu":        8,
+    "Wuhan":          8,
+    "Hong Kong":      8,
+    "Singapore":      8,
+    "Bangkok":        7,
+    # India
+    "Lucknow":        5.5,
+    # Oceanía
+    "Wellington":     12,   # NZST (13 en verano, pero 12 es conservador)
+    # Turquía
+    "Ankara":         3,
+    # Europa — UTC+1 a UTC+2
+    "London":         0,    # GMT (1 en verano)
+    "Paris":          1,
+    "Madrid":         1,
+    "Milan":          1,
+    "Munich":         1,
+    "Warsaw":         1,
+    "Tel Aviv":       2,
+    # América — UTC-3 a UTC-8
+    "Buenos Aires":  -3,
+    "Sao Paulo":     -3,
+    "New York City": -5,    # EST (-4 en verano)
+    "Toronto":       -5,
+    "Atlanta":       -5,
+    "Miami":         -5,
+    "Chicago":       -6,
+    "Dallas":        -6,
+    "Seattle":       -8,
 }
 
 # Alias → nombre canónico (mercados de rango usan abreviaturas)
@@ -998,8 +1101,11 @@ def cmd_rendimiento():
 
     text = f"📈 <b>Rendimiento</b>\n\n"
     text += f"Compras: {stats['total_buys']} | Ventas: {stats['total_sells']}\n"
+    if stats.get('pending_sells', 0) > 0:
+        text += f"⏳ Ventas pendientes de fill: {stats['pending_sells']}\n"
     text += f"Total invertido: ${stats['total_invested']:.2f}\n"
-    text += f"PnL ventas: ${stats['sell_pnl']:+.2f}\n\n"
+    text += f"PnL ventas: ${stats['sell_pnl']:+.2f}\n"
+    text += f"\n<i>⚠️ Solo cuenta trades del bot v10.2+. PnL fiable: dashboard Polymarket.</i>\n\n"
 
     text += f"<b>Ventas por tipo:</b>\n"
     text += f"  💰 Take-profit: {stats['take_profits']}\n"
@@ -1267,12 +1373,20 @@ def get_current_exposure():
         total_exposure = 0.0
         for p in positions:
             current_value = float(p.get("currentValue", 0))
+            cur_price = float(p.get("curPrice", 0))
             # Exposición = lo que VALE ahora, no lo que pagamos
             # Una posición comprada a $2.50 que vale $0.11 es $0.11 de exposición,
             # no $2.50 — ese dinero ya está perdido.
             # Ignorar posiciones < $0.01 (resueltas a $0)
-            if current_value > 0.01:
-                total_exposure += current_value
+            if current_value <= 0.01:
+                continue
+            # v10.3 Fix Bug #4: posiciones resueltas (curPrice >= 0.98) son cash
+            # garantizado, NO riesgo. No deben contar como exposición.
+            # Bug real: Shanghai resuelta a $8.04 bloqueó $8 de presupuesto,
+            # el bot encontró 15 oportunidades y no pudo entrar en ninguna.
+            if cur_price >= 0.98:
+                continue
+            total_exposure += current_value
 
         return total_exposure
     except Exception as e:
@@ -1360,6 +1474,42 @@ def get_effective_bankroll(client=None):
 # GESTIÓN ACTIVA DE POSICIONES (v10.1)
 # =============================================================
 
+# v10.3: Set de asset_ids ya marcados como LOSS_TOTAL para no repetir
+_loss_total_tracked = set()
+
+
+def _mark_micro_as_loss_total(position, dl):
+    """
+    v10.3 Fix Bug #8: Marca una posición micro (<$0.10) como pérdida total.
+
+    Bug real: Chongqing NO 18°C (17 shares × 0.1¢ = $0.017) reaparecía ciclo
+    tras ciclo en gestión. Polymarket rechaza ventas tan pequeñas.
+
+    Solo registra una vez por sesión (usa _loss_total_tracked set en memoria).
+    """
+    asset_id = position.get("asset", "")
+    if asset_id in _loss_total_tracked:
+        return  # Ya marcada esta sesión
+
+    _loss_total_tracked.add(asset_id)
+
+    outcome = position.get("outcome", "?")
+    title = position.get("title", "?")[:50]
+    city = parse_city_from_title(title)
+    initial_value = float(position.get("initialValue", 0))
+    current_value = float(position.get("currentValue", 0))
+
+    dl.append(f"    💀 LOSS_TOTAL: {outcome} {city} | invertido ${initial_value:.2f} → vale ${current_value:.3f}")
+
+    track_trade("LOSS_TOTAL",
+        city=city,
+        side=outcome,
+        initial_value=initial_value,
+        current_value=current_value,
+        loss=round(-initial_value, 2),
+        reason="micro_position_unsellable",
+    )
+
 def manage_positions(client, dl):
     """
     Gestión activa: stop-loss, take-profit, Y re-evaluación con datos frescos.
@@ -1404,6 +1554,7 @@ def manage_positions(client, dl):
 
     # ---- Filtrar posiciones de temperatura con valor ----
     temp_positions = []
+    n_micro = 0  # v10.3: posiciones demasiado pequeñas para vender
     for p in positions:
         title = p.get("title", "")
         if not re.search(r"temperature", title, re.IGNORECASE):
@@ -1411,10 +1562,22 @@ def manage_positions(client, dl):
         current_value = float(p.get("currentValue", 0))
         if current_value < 0.01:
             continue  # Ya resuelta a $0, nada que hacer
+
+        # v10.3 Fix Bug #8: Posiciones micro (<$0.10) no se pueden vender
+        # Polymarket rechaza órdenes tan pequeñas. En vez de intentar ciclo
+        # tras ciclo, las marcamos como pérdida total una sola vez.
+        if current_value < 0.10:
+            n_micro += 1
+            _mark_micro_as_loss_total(p, dl)
+            continue
+
         temp_positions.append(p)
 
+    if n_micro > 0:
+        dl.append(f"  💀 {n_micro} posiciones micro (<$0.10) → pérdida total")
+
     if not temp_positions:
-        dl.append(f"GESTIÓN: sin posiciones de temperatura activas")
+        dl.append(f"GESTIÓN: sin posiciones de temperatura gestionables")
         return {"n_sold": 0, "capital_freed": 0, "kept": 0, "resolved": 0, "sells": []}
 
     dl.append(f"\nGESTIÓN DE POSICIONES: {len(temp_positions)} posiciones activas")
@@ -1603,7 +1766,7 @@ def manage_positions(client, dl):
             oid = resp.get("orderID", resp.get("id", "?"))
             status = resp.get("status", "?")
 
-            dl.append(f"    ✅ SELL {outcome} {shares_to_sell}sh × ${sell_price:.2f} → {status} | {title}")
+            dl.append(f"    📤 SELL orden colocada: {outcome} {shares_to_sell}sh × ${sell_price:.2f} → {status} | {title}")
             n_sold += 1
             capital_freed += estimated_return
 
@@ -1618,14 +1781,18 @@ def manage_positions(client, dl):
             else:
                 icon, type_label = "🔄", "Re-evaluación"
             send_telegram(
-                f"{icon} <b>{type_label}</b>\n"
+                f"{icon} <b>{type_label} — orden colocada</b>\n"
                 f"{outcome} {city}\n"
                 f"Venta: {shares_to_sell}sh × ${sell_price:.2f}\n"
-                f"PnL: {pct:+.1f}% (${float(p.get('cashPnl', 0)):+.2f})"
+                f"PnL estimado: {pct:+.1f}% (${float(p.get('cashPnl', 0)):+.2f})\n"
+                f"<i>⏳ Pendiente de fill</i>"
             )
 
-            # v10.1: Registrar en performance tracker
-            track_trade("SELL",
+            # v10.3 Fix Bug #7: Registrar como SELL_PENDING, NO como SELL
+            # Solo se convierte en SELL cuando audit_check_sell_fills confirma el fill.
+            # Bug real: Chongqing stop-loss se registró como vendida pero la orden
+            # nunca se llenó (nadie quiso comprar a 1¢). Performance.json mentía.
+            track_trade("SELL_PENDING",
                 reason=sell_type,
                 city=city,
                 side=outcome,
@@ -1635,6 +1802,7 @@ def manage_positions(client, dl):
                 avg_buy_price=float(p.get("avgPrice", 0)),
                 pnl_pct=pct,
                 pnl_cash=float(p.get("cashPnl", 0)),
+                order_id=oid,
             )
 
             # Registrar para verificar fill en próximo ciclo
@@ -1688,11 +1856,16 @@ def audit_check_sell_fills(client, dl):
     """
     Verifica si las órdenes de VENTA pendientes se llenaron.
 
+    v10.3 Fix Bug #7: Ahora actualiza performance.json cuando confirma fill.
+    Bug real: Chongqing stop-loss se registró como vendida en performance.json,
+    pero la orden nunca se llenó (nadie compra a 1¢). El tracking mentía.
+
     Flujo:
       1. Lee pending_sells de audit.json (orden_id, ciudad, precio)
       2. Consulta open_orders del CLOB
-      3. Si una pending_sell ya NO está en open_orders → se llenó
-      4. Registra el resultado en performance.json
+      3. Si una pending_sell ya NO está en open_orders → se llenó (o cancelada)
+      4. Actualiza SELL_PENDING → SELL en performance.json
+      5. Ventas pendientes >24h → probablemente no se llenarán, marcar como SELL_FAILED
     """
     audit = load_audit_data()
     pending = audit.get("pending_sells", [])
@@ -1709,6 +1882,7 @@ def audit_check_sell_fills(client, dl):
     open_ids = set(o.get("id", "") for o in open_orders)
     still_pending = []
     filled = []
+    expired = []
 
     for sell in pending:
         order_id = sell.get("order_id", "")
@@ -1721,19 +1895,77 @@ def audit_check_sell_fills(client, dl):
 
         if order_id in open_ids:
             # Sigue pendiente
-            if age_hours > 12:
-                dl.append(f"  ⚠ Venta pendiente >12h: {sell.get('city', '?')} {sell.get('side', '?')} | ${sell.get('price', 0):.2f}")
-            still_pending.append(sell)
+            if age_hours > 24:
+                # Llevan más de 24h sin llenarse — probablemente no se llenarán
+                expired.append(sell)
+                dl.append(f"  ⚠ Venta expirada >24h: {sell.get('city', '?')} {sell.get('side', '?')} | ${sell.get('price', 0):.2f} — marcando como fallida")
+            elif age_hours > 12:
+                dl.append(f"  ⏳ Venta pendiente >12h: {sell.get('city', '?')} {sell.get('side', '?')} | ${sell.get('price', 0):.2f}")
+                still_pending.append(sell)
+            else:
+                still_pending.append(sell)
         else:
-            # Ya no está → se llenó (o fue cancelada)
+            # Ya no está en open_orders → se llenó (o fue cancelada por stale cleanup)
             filled.append(sell)
             dl.append(f"  ✅ Venta llenada: {sell.get('city', '?')} {sell.get('side', '?')} | ~${sell.get('return_est', 0):.2f} recuperados")
 
     audit["pending_sells"] = still_pending
     save_audit_data(audit)
 
-    if filled:
-        dl.append(f"  FILLS: {len(filled)} ventas completadas | {len(still_pending)} aún pendientes")
+    # v10.3: Actualizar performance.json — convertir SELL_PENDING → SELL para fills confirmados
+    if filled or expired:
+        _confirm_sell_fills_in_performance(filled, expired, dl)
+
+    if filled or expired:
+        n_filled = len(filled)
+        n_expired = len(expired)
+        dl.append(f"  FILLS: {n_filled} confirmadas | {n_expired} expiradas | {len(still_pending)} pendientes")
+        if n_filled > 0:
+            send_telegram(
+                f"✅ <b>{n_filled} venta(s) confirmada(s)</b>\n"
+                + "\n".join(f"  {s.get('city','?')} {s.get('side','?')} ~${s.get('return_est',0):.2f}" for s in filled)
+            )
+
+
+def _confirm_sell_fills_in_performance(filled, expired, dl):
+    """
+    Actualiza performance.json: SELL_PENDING → SELL (confirmadas) o SELL_FAILED (expiradas).
+    Busca por order_id para hacer match exacto.
+    """
+    if not os.path.exists(PERFORMANCE_FILE):
+        return
+
+    try:
+        with open(PERFORMANCE_FILE, "r", encoding="utf-8") as f:
+            history = json.load(f)
+    except Exception:
+        return
+
+    filled_ids = set(s.get("order_id", "") for s in filled)
+    expired_ids = set(s.get("order_id", "") for s in expired)
+
+    updated = 0
+    for entry in history:
+        if entry.get("action") != "SELL_PENDING":
+            continue
+        oid = entry.get("order_id", "")
+        if oid in filled_ids:
+            entry["action"] = "SELL"
+            entry["fill_confirmed"] = datetime.now(timezone.utc).isoformat()
+            updated += 1
+        elif oid in expired_ids:
+            entry["action"] = "SELL_FAILED"
+            entry["fail_reason"] = "expired_no_fill_24h"
+            entry["failed_at"] = datetime.now(timezone.utc).isoformat()
+            updated += 1
+
+    if updated > 0:
+        try:
+            with open(PERFORMANCE_FILE, "w", encoding="utf-8") as f:
+                json.dump(history, f, indent=2, ensure_ascii=False)
+            dl.append(f"  📝 performance.json: {updated} entradas actualizadas")
+        except Exception as e:
+            log.warning(f"Error actualizando performance.json: {e}")
 
 
 def audit_register_pending_sell(order_id, city, side, price, shares, return_est, reason):
@@ -2065,7 +2297,7 @@ def main(client):
     effective_bankroll = get_effective_bankroll(client)
 
     log.info("=" * 65)
-    log.info(f"BOT v10.2 | {today_str} | {mode_label} | ${effective_bankroll:.2f} (tope ${BANKROLL:.2f})")
+    log.info(f"BOT v10.3 | {today_str} | {mode_label} | ${effective_bankroll:.2f} (tope ${BANKROLL:.2f})")
     log.info("=" * 65)
 
     # Decision log: registrar inicio
@@ -2089,6 +2321,8 @@ def main(client):
         dl.append(f"TRADERS: {n_signals} señales cargadas de signals.json")
     else:
         dl.append(f"TRADERS: sin señales (signals.json vacío o ausente)")
+        # v10.3: Alerta Telegram si no hay señales (Bug #6)
+        send_telegram("⚠️ <b>Ciclo sin señales de traders</b>\nsignals.json vacío o expirado. Compras sin confirmación de trader.")
 
     # ---- PASO 0: STALE ----
     open_orders = get_open_orders(client)
@@ -2152,12 +2386,15 @@ def main(client):
     dl.append(f"\nMERCADOS: {len(all_markets)} encontrados")
 
     # ---- PASO 2: Parseo + filtro ----
-    min_days = get_min_days_ahead()
-    dl.append(f"MIN_DAYS_AHEAD: {min_days} (hora UTC: {datetime.now(timezone.utc).hour:02d})")
+    # v10.3: min_days es ahora PER-CITY (Bug #5 fix — zona horaria asiática)
+    min_days_global = get_min_days_ahead()  # Solo para logging
+    dl.append(f"MIN_DAYS_AHEAD base: {min_days_global} (hora UTC: {datetime.now(timezone.utc).hour:02d})")
+    dl.append(f"  ↳ Ajuste por zona horaria activo: ciudades asiáticas pueden requerir min_days=1 incluso a las 08:00 UTC")
 
     candidates = []
     parse_fail = 0
     date_fail = 0
+    timezone_skip = 0  # v10.3: contador de filtrados por zona horaria
     price_fail = 0
     liq_fail = 0
 
@@ -2178,7 +2415,19 @@ def main(client):
         except ValueError:
             continue
 
-        if days_ahead < min_days or days_ahead > MAX_DAYS_AHEAD:
+        # v10.3: min_days PER-CITY según zona horaria (Bug #5 fix)
+        city = parsed["city"]
+        min_days = get_min_days_for_city(city)
+
+        if days_ahead < min_days:
+            # Distinguir si fue por zona horaria o por filtro global
+            if min_days > min_days_global:
+                timezone_skip += 1
+            else:
+                date_fail += 1
+            continue
+
+        if days_ahead > MAX_DAYS_AHEAD:
             date_fail += 1
             continue
 
@@ -2218,7 +2467,7 @@ def main(client):
         })
         candidates.append(parsed)
 
-    dl.append(f"FILTROS: {len(candidates)} pasan | {parse_fail} no parseables | {date_fail} fuera de fecha | {price_fail} fuera de precio | {liq_fail} sin liquidez")
+    dl.append(f"FILTROS: {len(candidates)} pasan | {parse_fail} no parseables | {date_fail} fuera de fecha | {timezone_skip} bloqueados por zona horaria | {price_fail} fuera de precio | {liq_fail} sin liquidez")
 
     # ---- PASO 3: Previsiones ----
     cities_needed = set(c["city"] for c in candidates)
@@ -2604,7 +2853,7 @@ def run_trader_tasks():
 
 if __name__ == "__main__":
     log.info("=" * 65)
-    log.info(f"POLYMARKET BOT v10.2 | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
+    log.info(f"POLYMARKET BOT v10.3 | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
     log.info(f"Modo: {'DRY RUN' if DRY_RUN else 'REAL'}")
     log.info("=" * 65)
 
@@ -2619,10 +2868,11 @@ if __name__ == "__main__":
     modo = "DRY RUN" if DRY_RUN else "REAL"
     schedule = ", ".join(f"{h:02d}:00" for h in sorted(SCHEDULE_HOURS_UTC))
     send_telegram(
-        f"🤖 <b>Bot v10.2 arrancado</b>\n"
+        f"🤖 <b>Bot v10.3 arrancado</b>\n"
         f"Modo: {modo} | ${BANKROLL:.2f}\n"
         f"Min edge: {MIN_EDGE}% | Schedule: {schedule} UTC\n"
         f"🔧 Gestión activa: SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n"
+        f"🌏 Zona horaria per-city activa\n"
         f"🔍 Traders: auto-análisis diario, descubrimiento lunes",
         with_menu=True,
     )
