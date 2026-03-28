@@ -9,6 +9,7 @@ import time
 import logging
 import threading
 import subprocess
+import shutil
 from datetime import date, datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
@@ -175,6 +176,20 @@ def _data_path(filename):
         return os.path.join(DATA_DIR, filename)
     return filename
 
+
+def _seed_data_file(filename):
+    """
+    Si DATA_DIR está activo y el archivo aún no existe en el volume,
+    lo inicializa copiando la versión local del repo una sola vez.
+    """
+    target = _data_path(filename)
+    if DATA_DIR and not os.path.exists(target) and os.path.exists(filename):
+        try:
+            shutil.copy2(filename, target)
+        except Exception:
+            pass
+    return target
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)-8s | %(message)s",
@@ -232,6 +247,8 @@ PERFORMANCE_FILE = _data_path("performance.json")
 CYCLE_SUMMARY_FILE = _data_path("cycle_summary.json")
 CYCLES_HISTORY_FILE = _data_path("cycles_history.jsonl")
 POSTMORTEM_FILE = _data_path("postmortem.json")
+SIGNALS_FILE = _seed_data_file("signals.json")
+TRADERS_DB_FILE = _seed_data_file("traders_db.json")
 
 
 def _load_cycle_count():
@@ -748,12 +765,11 @@ def load_trader_signals():
 
     También añade logging explícito cuando está vacío para debugging.
     """
-    signals_file = "signals.json"
-    if not os.path.exists(signals_file):
+    if not os.path.exists(SIGNALS_FILE):
         log.info("load_trader_signals: signals.json no existe")
         return {}
     try:
-        with open(signals_file, "r", encoding="utf-8") as f:
+        with open(SIGNALS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
         # Check freshness — v10.3: 26h (era 12h)
         generated = datetime.fromisoformat(data.get("generated", "2000-01-01T00:00:00+00:00"))
@@ -1479,8 +1495,7 @@ def cmd_traders():
     🔍 Traders Intel: señales + coincidencias con posiciones activas.
     v10.4.2: cruza señales con cartera actual.
     """
-    signals_file = "signals.json"
-    if not os.path.exists(signals_file):
+    if not os.path.exists(SIGNALS_FILE):
         send_telegram(
             "🔍 <b>Traders Intel</b>\n\n"
             "Sin datos todavía.\n"
@@ -1490,7 +1505,7 @@ def cmd_traders():
         return
 
     try:
-        with open(signals_file, "r", encoding="utf-8") as f:
+        with open(SIGNALS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception as e:
         send_telegram(f"❌ Error: {e}", with_menu=True)
@@ -1576,6 +1591,70 @@ def cmd_traders():
             price_c = int(round(price * 100))
             text += f"{icon} {city} {outcome} {date_str} @ {price_c}¢\n"
             shown += 1
+
+    send_telegram_paged(text, with_menu=True)
+
+
+def cmd_postmortem():
+    """
+    📚 Vista simple de postmortem.json para inspección rápida desde Telegram.
+    No sustituye análisis profundo, pero permite ver cierres/abiertas sin SSH.
+    """
+    records = load_postmortem_data()
+    if not records:
+        send_telegram(
+            "📚 <b>Postmortem</b>\n\n"
+            "Sin datos todavía.\n"
+            "Se irá llenando automáticamente con compras, ventas y resoluciones.",
+            with_menu=True,
+        )
+        return
+
+    open_count = sum(1 for r in records if r.get("status") == "open")
+    pending_count = sum(1 for r in records if r.get("status") == "pending_exit")
+    failed_count = sum(1 for r in records if r.get("status") == "exit_failed")
+    closed = [r for r in records if r.get("status") == "closed"]
+    closed_count = len(closed)
+    sell_closed = sum(1 for r in closed if r.get("close_action") == "SELL")
+    resolved_closed = sum(1 for r in closed if r.get("close_action") == "RESOLVED_WIN")
+
+    text = (
+        "📚 <b>Postmortem</b>\n\n"
+        f"Open: {open_count} | Pending exit: {pending_count}\n"
+        f"Exit failed: {failed_count} | Closed: {closed_count}\n"
+        f"Cierres SELL: {sell_closed} | Resoluciones WIN: {resolved_closed}\n"
+    )
+
+    if closed:
+        text += "\n<b>Últimos cierres:</b>\n"
+        recent_closed = sorted(
+            closed,
+            key=lambda r: r.get("closed_at") or r.get("opened_at") or "",
+            reverse=True,
+        )[:8]
+        for rec in recent_closed:
+            label = _parse_position_label(rec.get("question", rec.get("city", "?")), rec.get("side", "?"))
+            close_action = rec.get("close_action", "?")
+            reason = rec.get("close_reason", "") or "n/a"
+            pnl_cash = rec.get("pnl_cash")
+            pnl_str = f"${float(pnl_cash):+.2f}" if isinstance(pnl_cash, (int, float)) else "n/a"
+            text += f"  • {label} | {close_action} | {reason} | {pnl_str}\n"
+
+    openish = [r for r in records if r.get("status") in {"open", "pending_exit", "exit_failed"}]
+    if openish:
+        text += "\n<b>Abiertas / seguimiento:</b>\n"
+        recent_open = sorted(
+            openish,
+            key=lambda r: r.get("last_buy_at") or r.get("opened_at") or "",
+            reverse=True,
+        )[:8]
+        for rec in recent_open:
+            label = _parse_position_label(rec.get("question", rec.get("city", "?")), rec.get("side", "?"))
+            status = rec.get("status", "?")
+            amount = rec.get("total_amount", 0)
+            edge = rec.get("latest_edge_pct")
+            edge_str = f"edge {edge:+.1f}%" if isinstance(edge, (int, float)) else "edge n/a"
+            text += f"  • {label} | {status} | ${float(amount):.2f} | {edge_str}\n"
 
     send_telegram_paged(text, with_menu=True)
 
@@ -1718,7 +1797,7 @@ COMMANDS = {
     "estado": cmd_estado, "cartera": cmd_cartera, "ordenes": cmd_ordenes,
     "log": cmd_log, "logfull": cmd_logfull, "forzar": cmd_forzar,
     "modo": cmd_modo, "traders": cmd_traders, "rendimiento": cmd_rendimiento,
-    "info": cmd_info,
+    "info": cmd_info, "postmortem": cmd_postmortem,
     "confirmar_real": cmd_confirmar_real, "confirmar_dry": cmd_confirmar_dry,
     "cancelar_modo": cmd_cancelar_modo,
 }

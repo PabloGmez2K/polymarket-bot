@@ -28,6 +28,7 @@ import re
 import os
 import sys
 import time
+import shutil
 from datetime import datetime, timezone
 
 # ============================================================
@@ -69,7 +70,24 @@ CORE_TRADERS = {
     },
 }
 
-DB_FILE = "traders_db.json"
+DATA_DIR = os.getenv("DATA_DIR", "")
+
+def _data_path(filename):
+    if DATA_DIR:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        return os.path.join(DATA_DIR, filename)
+    return filename
+
+def _seed_data_file(filename):
+    target = _data_path(filename)
+    if DATA_DIR and not os.path.exists(target) and os.path.exists(filename):
+        try:
+            shutil.copy2(filename, target)
+        except Exception:
+            pass
+    return target
+
+DB_FILE = _seed_data_file("traders_db.json")
 
 
 # ============================================================

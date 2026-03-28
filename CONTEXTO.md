@@ -72,14 +72,15 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 | Archivo | Función |
 |---------|---------|
 | `bot.py` | Script principal v10.4.5 |
-| `verify_before_deploy.py` | v6 — 128 tests de comportamiento |
-| `trader_analyzer.py` | Genera signals.json diariamente |
-| `find_traders.py` | Descubrimiento semanal de traders |
+| `verify_before_deploy.py` | v7 — 146 tests de comportamiento |
+| `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
+| `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |
 | `CONTEXTO.md` | Estado del proyecto (este archivo) |
+| `HISTORIAL_SESIONES.md` | Bitácora append-only de sesiones e hitos reconstruidos desde Git |
 | `OBSERVABILIDAD_Y_APRENDIZAJE.md` | Plan de fases futuras |
-| `signals.json` | Señales traders actuales (cache local) |
-| `traders_db.json` | Base de datos de traders (cache local) |
+| `signals.json` | Copia bootstrap local; producción usa la copia persistente del Volume |
+| `traders_db.json` | Copia bootstrap local; producción usa la copia persistente del Volume |
 | `requirements.txt` | Dependencias Railway |
 | `Procfile` | Arranque Railway |
 
@@ -88,6 +89,9 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 |---------|---------|
 | `performance.json` | 33 trades (BUY/SELL/LOSS_TOTAL desde 25 mar) |
 | `postmortem.json` | Postmortems estructurados de apertura/cierre por mercado |
+| `signals.json` | Señales de traders activas usadas por el bot en producción |
+| `traders_db.json` | Base de datos persistente de traders descubiertos/calificados |
+| `trader_history.json` | Historial auxiliar del pipeline de traders |
 | `cycle_summary.json` | Último ciclo (se sobreescribe) |
 | `cycles_history.jsonl` | Historial acumulativo de todos los ciclos |
 | `audit.json` | Ventas pendientes + forecast vs real |
@@ -128,6 +132,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 | `/ordenes` | Órdenes GTC pendientes con etiquetas legibles |
 | `/traders` | Señales activas + coincidencias filtradas con cartera actual |
 | `/info` | Bloque resumen completo para pegar en Claude/ChatGPT |
+| `/postmortem` | Resumen rápido de abiertas/cierres desde `postmortem.json` |
 | `/forzar` | Ejecuta ciclo inmediatamente |
 | `/modo` | Cambia DRY RUN ↔ REAL |
 
@@ -172,7 +177,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 | v10.4.2 | 28 mar | Rediseño Telegram + Bug #13 + helpers + /info |
 | v10.4.3 | 28 mar | Ciclos persistentes + fixes post-deploy + limpieza repo |
 | v10.4.4 | 28 mar | Ajuste temporal manual de DST |
-| v10.4.5 | 28 mar | `ZoneInfo` + zonas IANA reales + `.claude/` fuera del repo + `postmortem.json` base |
+| v10.4.5 | 28 mar | `ZoneInfo` + zonas IANA reales + `.claude/` fuera del repo + `postmortem.json` base + trader data al Volume + `/postmortem` |
 
 ---
 
@@ -239,13 +244,14 @@ Usar esta plantilla al cerrar cada sesión relevante:
 - Si solo participa una herramienta, se rellena solo su bloque y se dejan las demás como `No usado en esta sesión`.
 - Si una herramienta corrige o valida trabajo de otra, dejarlo explícito en `Problemas detectados en trabajo previo` y `Correcciones aplicadas en esta sesión`.
 - Si hay cambios en Railway, Volume, Telegram o datos históricos, anotarlo también en el bloque `Estado final`.
+- Antes de cada push relevante, actualizar `CONTEXTO.md` y `HISTORIAL_SESIONES.md` si la sesión cambió estado, arquitectura, datos persistentes, comandos Telegram, workflow o trazabilidad multi-agente.
 
 ### Sesión 19 — Registro multi-herramienta
 
 - **Claude Code:** implementó v10.4.2, v10.4.3 y v10.4.4; rediseño Telegram, paginación, `/info`, persistencia de ciclos, limpieza del repo y un fix manual de DST basado en offsets estáticos.
 - **Codex:** revisó críticamente esa secuencia y detectó dos deudas importantes: el fix de DST seguía siendo frágil por usar offsets manuales, y `.claude/settings.local.json` había quedado versionado por error.
-- **Codex:** corrigió el enfoque de DST en `bot.py` migrando a `ZoneInfo` + `CITY_TIMEZONES` con zonas IANA reales (`v10.4.5`), actualizó `verify_before_deploy.py`, sacó `.claude/settings.local.json` del control de versiones sin borrar la copia local, reparó manualmente una entrada truncada en `performance.json` de Railway e implementó la capa base de `postmortem.json`.
-- **Estado final de la sesión 19:** versión activa `v10.4.5`, tests `128/128`, repo limpio, DST robusto para futuros cambios de horario y observabilidad base de postmortem lista para crecer.
+- **Codex:** corrigió el enfoque de DST en `bot.py` migrando a `ZoneInfo` + `CITY_TIMEZONES` con zonas IANA reales (`v10.4.5`), actualizó `verify_before_deploy.py`, sacó `.claude/settings.local.json` del control de versiones sin borrar la copia local, reparó manualmente una entrada truncada en `performance.json` de Railway, implementó la capa base de `postmortem.json`, movió `signals.json` / `traders_db.json` / `trader_history.json` al flujo persistente de Volume con bootstrap automático y añadió `/postmortem` para inspección rápida desde Telegram.
+- **Estado final de la sesión 19:** versión activa `v10.4.5`, tests `146/146`, repo listo para deploy, DST robusto para futuros cambios de horario, observabilidad base de postmortem lista para crecer y pipeline de traders persistente en Volume.
 
 ---
 
@@ -308,7 +314,7 @@ Con ~15 trades cerrados no hay suficiente evidencia estadística para cambiar la
 
 ### Fase 1 — ✅ Implementada:
 - Persistencia Railway Volume, cycles_history.jsonl, cycle_summary.json ✅
-- Bugs #3-#14 corregidos, 128 tests ✅
+- Bugs #3-#14 corregidos, 146 tests ✅
 - Claude Code instalado y funcional ✅
 
 ### Fase 1.5 — ✅ Implementada (sesión 19):
@@ -319,6 +325,8 @@ Con ~15 trades cerrados no hay suficiente evidencia estadística para cambiar la
 - performance.json fusionado con historial completo (33 trades) ✅
 - DST robusto con `ZoneInfo` y zonas IANA reales ✅
 - `postmortem.json` base implementado ✅
+- `signals.json`, `traders_db.json` y `trader_history.json` persistidos en Volume ✅
+- `/postmortem` disponible para inspección rápida desde Telegram ✅
 
 ### Fase 2 — Cuando haya 30+ trades limpios:
 - Monitor ligero intra-ciclo: revisar posiciones cada 2-4h
@@ -348,12 +356,16 @@ railway ssh "ls /app/data/"         # ver archivos del volume
 - Para tests: `$env:PYTHONIOENCODING="utf-8"` antes de ejecutar
 
 ### Trabajo multi-agente:
-- `CONTEXTO.md` debe mantenerse como bitácora compartida entre ChatGPT, Codex, Claude.ai y Claude Code.
+- `CONTEXTO.md` debe mantenerse como foto actual compartida entre ChatGPT, Codex, Claude.ai y Claude Code.
+- `HISTORIAL_SESIONES.md` debe usarse como memoria histórica append-only para no perder qué sesiones ya existieron y qué se corrigió en cada etapa.
+- Antes de cada push relevante, actualizar ambos archivos si cambió algo material del sistema.
 - Antes de cerrar una sesión relevante, anotar qué herramienta hizo los cambios finales y qué corrigió de sesiones previas.
 
 ### Workflow de deploy:
 ```bash
-python verify_before_deploy.py   # 99/99 deben pasar
+python verify_before_deploy.py   # 146/146 deben pasar
+# actualizar CONTEXTO.md si cambió el estado actual
+# actualizar HISTORIAL_SESIONES.md si hubo una sesión/hito nuevo
 git add .
 git commit -m "v10.X.X: descripción"
 git push
@@ -367,7 +379,7 @@ git push
 
 1. **Monitor ligero intra-ciclo:** cada 2-4h revisar posiciones vivas
 2. **Weather Underground:** sustituir o complementar Open-Meteo
-3. **Horario de verano (DST):** CITY_UTC_OFFSETS usa offsets fijos — impacta desde abril
-4. **Dashboard web:** Fase 3 cuando haya 30+ trades
-5. **Migrar signals.json y traders_db.json al Volume**
+3. **Dashboard web:** Fase 3 cuando haya 30+ trades
+4. **Enriquecer `/postmortem`:** filtros por ciudad/estado/últimos N cierres
+5. **Ampliar `postmortem.json`** con más campos de forecast y comparación resolución vs decisión
 6. **Aumentar frecuencia ciclos:** [8,16,23] → [6,10,14,18,22]

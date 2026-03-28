@@ -63,6 +63,17 @@ def run_tests():
     with open(bot_path, "r", encoding="utf-8") as f:
         code = f.read()
 
+    trader_analyzer_path = os.path.join(os.path.dirname(__file__), "trader_analyzer.py")
+    find_traders_path = os.path.join(os.path.dirname(__file__), "find_traders.py")
+    trader_code = ""
+    finder_code = ""
+    if os.path.exists(trader_analyzer_path):
+        with open(trader_analyzer_path, "r", encoding="utf-8") as f:
+            trader_code = f.read()
+    if os.path.exists(find_traders_path):
+        with open(find_traders_path, "r", encoding="utf-8") as f:
+            finder_code = f.read()
+
     # ---- Test 0: Sintaxis válida ----
     print("\n🔍 Sintaxis")
     try:
@@ -166,6 +177,10 @@ def run_tests():
          'PERFORMANCE_FILE = _data_path("performance.json")' in code)
     test("POSTMORTEM_FILE usa _data_path",
          'POSTMORTEM_FILE = _data_path("postmortem.json")' in code)
+    test("SIGNALS_FILE usa _seed_data_file",
+         'SIGNALS_FILE = _seed_data_file("signals.json")' in code)
+    test("TRADERS_DB_FILE usa _seed_data_file",
+         'TRADERS_DB_FILE = _seed_data_file("traders_db.json")' in code)
     test("AUDIT_FILE usa _data_path",
          'AUDIT_FILE = _data_path("audit.json")' in code)
     test("trades.log usa _data_path",
@@ -198,6 +213,8 @@ def run_tests():
     test("import threading", "import threading" in code)
     test("from datetime import", "from datetime import" in code)
     test("from zoneinfo import ZoneInfo", "from zoneinfo import ZoneInfo" in code)
+    test("trader_analyzer.py presente", bool(trader_code))
+    test("find_traders.py presente", bool(finder_code))
 
     # ---- Test 12: Configuración sensata ----
     print("\n🔍 Configuración")
@@ -206,6 +223,23 @@ def run_tests():
     test("MAX_EXPOSURE_PCT es 0.40", '"0.40"' in code)
     test("MIN_EDGE default es 7.0", '"7.0"' in code)
     test("SCHEDULE_HOURS_UTC configurable", 'SCHEDULE_HOURS_UTC' in code)
+
+    print("\n🔍 Trader data en Volume")
+    try:
+        if trader_code:
+            ast.parse(trader_code)
+            test("trader_analyzer.py sintaxis válida", True)
+            test("trader_analyzer usa DATA_DIR", 'DATA_DIR = os.getenv("DATA_DIR", "")' in trader_code)
+            test("trader_analyzer mueve traders_db al Volume", 'DB_FILE      = _seed_data_file("traders_db.json")' in trader_code)
+            test("trader_analyzer mueve signals al Volume", 'SIGNALS_FILE = _seed_data_file("signals.json")' in trader_code)
+            test("trader_analyzer mueve trader_history al Volume", 'HISTORY_FILE = _seed_data_file("trader_history.json")' in trader_code)
+        if finder_code:
+            ast.parse(finder_code)
+            test("find_traders.py sintaxis válida", True)
+            test("find_traders usa DATA_DIR", 'DATA_DIR = os.getenv("DATA_DIR", "")' in finder_code)
+            test("find_traders mueve traders_db al Volume", 'DB_FILE = _seed_data_file("traders_db.json")' in finder_code)
+    except SyntaxError as e:
+        test("Scripts trader sintaxis válida", False, str(e))
 
     # ---- Test 13: Nuevas funcionalidades v10.4.1 ----
     print("\n🔍 Nuevas funcionalidades v10.4.1")
@@ -221,7 +255,9 @@ def run_tests():
     test("_parse_position_label definida", "def _parse_position_label(" in code)
     test("_get_portfolio_and_positions definida", "def _get_portfolio_and_positions(" in code)
     test("cmd_info definida", "def cmd_info(" in code)
+    test("cmd_postmortem definida", "def cmd_postmortem(" in code)
     test("/info en COMMANDS", '"info": cmd_info' in code)
+    test("/postmortem en COMMANDS", '"postmortem": cmd_postmortem' in code)
     test("/info en MENU_KEYBOARD", '"callback_data": "info"' in code)
     test("Bug #13: send_telegram_paged en cmd_log", "send_telegram_paged" in code and "cmd_log" in code)
     test("Bug #13: send_telegram_paged en cmd_cartera", "send_telegram_paged" in code)
@@ -256,14 +292,14 @@ def run_tests():
     # ---- Test 15: Integridad de COMMANDS (todos los botones siguen presentes) ----
     print("\n🔍 Integridad de COMMANDS")
     for cmd in ["estado", "cartera", "ordenes", "log", "logfull",
-                "forzar", "modo", "traders", "rendimiento", "info",
+                "forzar", "modo", "traders", "rendimiento", "info", "postmortem",
                 "confirmar_real", "confirmar_dry", "cancelar_modo"]:
         test(f'COMMANDS tiene "{cmd}"', f'"{cmd}"' in code)
 
     # ---- Test 16: send_telegram_paged en todos los comandos de respuesta larga ----
     print("\n🔍 send_telegram_paged en comandos relevantes")
     for cmd_name in ["cmd_cartera", "cmd_ordenes", "cmd_log", "cmd_logfull",
-                     "cmd_traders", "cmd_rendimiento", "cmd_info"]:
+                     "cmd_traders", "cmd_rendimiento", "cmd_info", "cmd_postmortem"]:
         # Buscar la función y verificar que usa send_telegram_paged
         fn_match = re.search(
             rf"def {cmd_name}\(.*?(?=\ndef |\Z)", code, re.DOTALL
@@ -388,6 +424,38 @@ def run_tests():
         info_ns["cmd_info"]()
         info_msg = info_messages[-1] if info_messages else ""
         test("info: versión visible correcta", "BOT POLYMARKET v10.4.5" in info_msg, info_msg[:120])
+
+        pm_messages = []
+        pm_ns = {
+            "load_postmortem_data": lambda: [
+                {
+                    "status": "closed",
+                    "question": "Will the temperature in Dallas be 18°C on March 28?",
+                    "city": "Dallas",
+                    "side": "YES",
+                    "close_action": "SELL",
+                    "close_reason": "reeval",
+                    "pnl_cash": 0.26,
+                    "closed_at": "2026-03-28T16:00:10+00:00",
+                },
+                {
+                    "status": "open",
+                    "question": "Will the temperature in Miami be 30°C on March 28?",
+                    "city": "Miami",
+                    "side": "YES",
+                    "total_amount": 2.50,
+                    "latest_edge_pct": 21.3,
+                    "opened_at": "2026-03-28T11:02:42+00:00",
+                },
+            ],
+            "_parse_position_label": lambda title, outcome="": f"{title.split(' in ')[1].split(' be')[0]} {outcome}".strip() if " in " in title else title,
+            "send_telegram_paged": lambda text, with_menu=False, page_size=3800: pm_messages.append(text),
+        }
+        exec(get_function_source(module_ast, code_lines, "cmd_postmortem"), pm_ns)
+        pm_ns["cmd_postmortem"]()
+        pm_msg = pm_messages[-1] if pm_messages else ""
+        test("postmortem cmd: muestra resumen de estados", "Open:" in pm_msg and "Closed:" in pm_msg, pm_msg[:160])
+        test("postmortem cmd: muestra últimos cierres", "reeval" in pm_msg and "$+0.26" in pm_msg, pm_msg[:200])
     except Exception as e:
         test("Tests funcionales ejecutan sin excepción", False, str(e))
 
