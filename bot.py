@@ -10,6 +10,7 @@ import logging
 import threading
 import subprocess
 from datetime import date, datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from py_clob_client.client import ClobClient
@@ -19,7 +20,7 @@ from py_clob_client.order_builder.constants import BUY, SELL
 load_dotenv()
 
 # =============================================================
-# bot.py v10.4.4 — DST Europa + EE.UU. + Tel Aviv
+# bot.py v10.4.5 — zonas horarias reales + limpieza config local
 # Sesión 19: Fase 1.5 — rediseño Telegram + fixes post-deploy
 # =============================================================
 #
@@ -58,6 +59,8 @@ load_dotenv()
 #   - Fix Bug #7: SELL → SELL_PENDING hasta confirmar fill
 #   - Fix Bug #6: signals.json freshness 12h → 26h + alerta Telegram
 #   - Fix Bug #8: Posiciones micro (<$0.10) → LOSS_TOTAL
+# v10.4.5:
+#   - CITY_TIMEZONES con zonas IANA reales (sin parches manuales de DST)
 # =============================================================
 
 
@@ -114,23 +117,22 @@ def get_min_days_for_city(city):
     if MIN_DAYS_AHEAD >= 0:
         return MIN_DAYS_AHEAD  # Override manual desde Railway
 
-    hour_utc = datetime.now(timezone.utc).hour
-    utc_offset = CITY_UTC_OFFSETS.get(city, 0)
-    local_hour = hour_utc + utc_offset
+    local_tz = ZoneInfo(CITY_TIMEZONES.get(city, "UTC"))
+    local_now = datetime.now(timezone.utc).astimezone(local_tz)
+    local_hour = local_now.hour
 
     # Caso 1: local_hour >= 24 → la ciudad ya está en el DÍA SIGUIENTE.
     # "Hoy" (fecha UTC) ya terminó completamente allí.
-    # Ejemplo: 16:00 UTC + Tokyo UTC+9 = 25 (01:00 del día siguiente).
+    # Con ZoneInfo no vemos 25 directamente; lo detectamos comparando fechas.
     # La temperatura de "hoy" (fecha UTC) ya se registró entera.
-    if local_hour >= 24:
+    if local_now.date() > datetime.now(timezone.utc).date():
         return 1
 
     # Caso 2: local_hour < 0 → la ciudad está aún en el DÍA ANTERIOR.
     # "Hoy" (fecha UTC) aún no empezó allí. El mercado para "hoy" es futuro.
-    # Ejemplo: 02:00 UTC + Seattle UTC-8 = -6 (18:00 del día anterior).
-    # min_days=0 es correcto: el día del mercado ni siquiera empezó allí.
-    if local_hour < 0:
-        local_hour += 24
+    # Con ZoneInfo tampoco vemos negativos; si la fecha local va retrasada, sigue siendo 0.
+    if local_now.date() < datetime.now(timezone.utc).date():
+        return 0
 
     # Caso 3: hora local normal (0-23)
     if local_hour >= 14:
@@ -605,48 +607,40 @@ RESOLUTION_STATIONS = {
     "Wuhan":          {"lat": 30.7748,  "lon": 114.2137, "name": "Tianhe"},
 }
 
-# UTC offsets por ciudad — para saber si la temperatura máxima ya se registró
-# La temp máxima ocurre ~14:00-16:00 hora local. Si ya pasó → min_days=1 para esa ciudad.
-# Bug #5 (sesión 12): a las 08:00 UTC, Chongqing está a las 16:00 local → temp ya registrada.
-# Sin esto, el bot apuesta contra información conocida. Costó ~$5.16.
-CITY_UTC_OFFSETS = {
-    # Asia — UTC+7 a UTC+9 (sin DST)
-    "Tokyo":          9,
-    "Seoul":          9,
-    "Chongqing":      8,
-    "Shanghai":       8,
-    "Beijing":        8,
-    "Taipei":         8,
-    "Shenzhen":       8,
-    "Chengdu":        8,
-    "Wuhan":          8,
-    "Hong Kong":      8,
-    "Singapore":      8,
-    "Bangkok":        7,
-    # India (sin DST)
-    "Lucknow":        5.5,
-    # Oceanía
-    "Wellington":     13,   # NZDT hasta primer domingo abril (13 en verano, 12 en invierno)
-    # Turquía (sin DST desde 2016)
-    "Ankara":         3,
-    # Europa — DST activo desde 29 mar 2026 (UTC+1/UTC+2)
-    "London":         1,    # BST (verano). Próximo cambio: oct 2026
-    "Paris":          2,    # CEST. Próximo cambio: oct 2026
-    "Madrid":         2,    # CEST
-    "Milan":          2,    # CEST
-    "Munich":         2,    # CEST
-    "Warsaw":         2,    # CEST
-    "Tel Aviv":       3,    # IDT desde 27 mar 2026. Sin cambio otoño (Israel DST variable)
-    # América — DST activo desde 8 mar 2026
-    "Buenos Aires":  -3,    # Sin DST
-    "Sao Paulo":     -3,    # Sin DST
-    "New York City": -4,    # EDT. Próximo cambio: nov 2026
-    "Toronto":       -4,    # EDT
-    "Atlanta":       -4,    # EDT
-    "Miami":         -4,    # EDT
-    "Chicago":       -5,    # CDT
-    "Dallas":        -5,    # CDT
-    "Seattle":       -7,    # PDT
+# Zonas horarias reales por ciudad — evitan tener que tocar offsets en cada DST.
+# Si una ciudad no está aquí, get_min_days_for_city() cae a UTC como fallback seguro.
+CITY_TIMEZONES = {
+    "Tokyo":          "Asia/Tokyo",
+    "Seoul":          "Asia/Seoul",
+    "Chongqing":      "Asia/Shanghai",
+    "Shanghai":       "Asia/Shanghai",
+    "Beijing":        "Asia/Shanghai",
+    "Taipei":         "Asia/Taipei",
+    "Shenzhen":       "Asia/Shanghai",
+    "Chengdu":        "Asia/Shanghai",
+    "Wuhan":          "Asia/Shanghai",
+    "Hong Kong":      "Asia/Hong_Kong",
+    "Singapore":      "Asia/Singapore",
+    "Bangkok":        "Asia/Bangkok",
+    "Lucknow":        "Asia/Kolkata",
+    "Wellington":     "Pacific/Auckland",
+    "Ankara":         "Europe/Istanbul",
+    "London":         "Europe/London",
+    "Paris":          "Europe/Paris",
+    "Madrid":         "Europe/Madrid",
+    "Milan":          "Europe/Rome",
+    "Munich":         "Europe/Berlin",
+    "Warsaw":         "Europe/Warsaw",
+    "Tel Aviv":       "Asia/Jerusalem",
+    "Buenos Aires":   "America/Argentina/Buenos_Aires",
+    "Sao Paulo":      "America/Sao_Paulo",
+    "New York City":  "America/New_York",
+    "Toronto":        "America/Toronto",
+    "Atlanta":        "America/New_York",
+    "Miami":          "America/New_York",
+    "Chicago":        "America/Chicago",
+    "Dallas":         "America/Chicago",
+    "Seattle":        "America/Los_Angeles",
 }
 
 # Alias → nombre canónico (mercados de rango usan abreviaturas)
@@ -823,7 +817,7 @@ def cmd_estado():
         )
 
     send_telegram(
-        f"📊 <b>Bot v10.4.4 | {modo}</b>\n\n"
+        f"📊 <b>Bot v10.4.5 | {modo}</b>\n\n"
         f"💰 Bankroll: <b>${BANKROLL:.2f}</b> | Edge mín: {MIN_EDGE}%\n"
         f"🔧 SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n\n"
         f"⏱ Estado: {running}\n"
@@ -2626,7 +2620,7 @@ def main(client):
     effective_bankroll = get_effective_bankroll(client)
 
     log.info("=" * 65)
-    log.info(f"BOT v10.4.4 | {today_str} | {mode_label} | ${effective_bankroll:.2f} (tope ${BANKROLL:.2f})")
+    log.info(f"BOT v10.4.5 | {today_str} | {mode_label} | ${effective_bankroll:.2f} (tope ${BANKROLL:.2f})")
     log.info("=" * 65)
 
     # Decision log: registrar inicio
@@ -3083,7 +3077,7 @@ def main(client):
     # --- v10.4.1: Guardar resumen de ciclo para historial ---
     try:
         cycle_data = {
-            "version": "v10.4.4",
+            "version": "v10.4.5",
             "cycle_number": bot_state["cycle_count"] + 1,
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
             "mode": "DRY_RUN" if DRY_RUN else "REAL",
@@ -3271,7 +3265,7 @@ def run_trader_tasks():
 
 if __name__ == "__main__":
     log.info("=" * 65)
-    log.info(f"POLYMARKET BOT v10.4.4 | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
+    log.info(f"POLYMARKET BOT v10.4.5 | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
     log.info(f"Modo: {'DRY RUN' if DRY_RUN else 'REAL'}")
     log.info("=" * 65)
 
@@ -3290,7 +3284,7 @@ if __name__ == "__main__":
     modo = "DRY RUN" if DRY_RUN else "REAL"
     schedule = ", ".join(f"{h:02d}:00" for h in sorted(SCHEDULE_HOURS_UTC))
     send_telegram(
-        f"🤖 <b>Bot v10.4.4 arrancado</b>\n"
+        f"🤖 <b>Bot v10.4.5 arrancado</b>\n"
         f"Modo: {modo} | ${BANKROLL:.2f}\n"
         f"Min edge: {MIN_EDGE}% | Schedule: {schedule} UTC\n"
         f"🔧 Gestión activa: SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n"

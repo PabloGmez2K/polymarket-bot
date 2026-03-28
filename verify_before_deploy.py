@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-verify_before_deploy.py v5 — Tests de comportamiento para bot.py v10.4.2
+verify_before_deploy.py v6 — Tests de comportamiento para bot.py v10.4.5
 
 Ejecutar ANTES de cada deploy:
   python verify_before_deploy.py
@@ -165,7 +165,7 @@ def run_tests():
 
     # ---- Test 10: Checks heredados v10.3 ----
     print("\n🔍 Checks heredados (v10.3)")
-    test("CITY_UTC_OFFSETS existe", "CITY_UTC_OFFSETS" in code)
+    test("CITY_TIMEZONES existe", "CITY_TIMEZONES" in code)
     test("get_min_days_for_city existe", "def get_min_days_for_city" in code)
     test("SELL_PENDING en track_trade", 'track_trade("SELL_PENDING"' in code)
     test("audit_check_sell_fills existe", "def audit_check_sell_fills" in code)
@@ -181,6 +181,7 @@ def run_tests():
     test("import math", "import math" in code)
     test("import threading", "import threading" in code)
     test("from datetime import", "from datetime import" in code)
+    test("from zoneinfo import ZoneInfo", "from zoneinfo import ZoneInfo" in code)
 
     # ---- Test 12: Configuración sensata ----
     print("\n🔍 Configuración")
@@ -196,7 +197,7 @@ def run_tests():
     test("CYCLES_HISTORY_FILE definido", "CYCLES_HISTORY_FILE" in code)
     test("cycles_history.jsonl append-only", "cycles_history.jsonl" in code)
     test("cycle_summary se guarda en main()", "cycle_data" in code and "CYCLE_SUMMARY_FILE" in code)
-    test("cycle_data incluye version v10.4.4", '"version"' in code and "v10.4.4" in code)
+    test("cycle_data incluye version v10.4.5", '"version"' in code and "v10.4.5" in code)
 
     # ---- Test 14: Rediseño Telegram v10.4.2 ----
     print("\n🔍 Rediseño Telegram v10.4.2")
@@ -209,20 +210,17 @@ def run_tests():
     test("Bug #13: send_telegram_paged en cmd_log", "send_telegram_paged" in code and "cmd_log" in code)
     test("Bug #13: send_telegram_paged en cmd_cartera", "send_telegram_paged" in code)
     test("_parse_position_label usa centavos (¢)", "¢" in code)
-    test("cmd_estado versión correcta", "Bot v10.4.4" in code or "v10.4.4" in code)
+    test("cmd_estado versión correcta", "Bot v10.4.5" in code or "v10.4.5" in code)
 
-    # ---- Test 14c: DST v10.4.4 ----
-    print("\n🔍 DST (horario de verano)")
-    # Europa verano (desde 29 mar 2026)
-    test("London en verano (BST = UTC+1)", '"London":         1' in code)
-    test("Paris en verano (CEST = UTC+2)",  '"Paris":          2' in code)
-    test("Madrid en verano (CEST = UTC+2)", '"Madrid":         2' in code)
-    # EE.UU. verano (desde 8 mar 2026)
-    test("New York en verano (EDT = UTC-4)", '"New York City": -4' in code)
-    test("Chicago en verano (CDT = UTC-5)",  '"Chicago":       -5' in code)
-    test("Seattle en verano (PDT = UTC-7)",  '"Seattle":       -7' in code)
-    # Israel verano (desde 27 mar 2026)
-    test("Tel Aviv en verano (IDT = UTC+3)", '"Tel Aviv":       3' in code)
+    # ---- Test 14c: Zonas horarias reales v10.4.5 ----
+    print("\n🔍 Zonas horarias reales")
+    test("get_min_days_for_city usa ZoneInfo", "ZoneInfo(" in code and "astimezone" in code)
+    test("London usa Europe/London", '"London":         "Europe/London"' in code)
+    test("Madrid usa Europe/Madrid", '"Madrid":         "Europe/Madrid"' in code)
+    test("New York usa America/New_York", '"New York City":  "America/New_York"' in code)
+    test("Chicago usa America/Chicago", '"Chicago":        "America/Chicago"' in code)
+    test("Seattle usa America/Los_Angeles", '"Seattle":        "America/Los_Angeles"' in code)
+    test("Tel Aviv usa Asia/Jerusalem", '"Tel Aviv":       "Asia/Jerusalem"' in code)
 
     # ---- Test 14b: Fixes v10.4.3 ----
     print("\n🔍 Fixes v10.4.3")
