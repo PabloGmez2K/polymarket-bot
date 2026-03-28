@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-verify_before_deploy.py v7 — Tests de comportamiento para bot.py v10.4.7
+verify_before_deploy.py v7 — Tests de comportamiento para bot.py v10.4.8
 
 Ejecutar ANTES de cada deploy:
   python verify_before_deploy.py
@@ -22,7 +22,7 @@ import re
 import types
 import json
 import tempfile
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 passed = 0
 failed = 0
@@ -227,6 +227,8 @@ def run_tests():
     test("SCHEDULE_HOURS_UTC configurable", 'SCHEDULE_HOURS_UTC' in code)
     test("BLOCKED_CITIES default incluye London", 'os.getenv("BLOCKED_CITIES", "London")' in code)
     test("is_city_blocked definida", "def is_city_blocked(" in code)
+    test("parse_market_date_iso definida", "def parse_market_date_iso(" in code)
+    test("format_postmortem_label definida", "def format_postmortem_label(" in code)
 
     print("\n🔍 Trader data en Volume")
     try:
@@ -251,7 +253,7 @@ def run_tests():
     test("CYCLES_HISTORY_FILE definido", "CYCLES_HISTORY_FILE" in code)
     test("cycles_history.jsonl append-only", "cycles_history.jsonl" in code)
     test("cycle_summary se guarda en main()", "cycle_data" in code and "CYCLE_SUMMARY_FILE" in code)
-    test("cycle_data incluye version v10.4.7", '"version"' in code and "v10.4.7" in code)
+    test("cycle_data incluye version v10.4.8", '"version"' in code and "v10.4.8" in code)
 
     # ---- Test 14: Rediseño Telegram v10.4.2 ----
     print("\n🔍 Rediseño Telegram v10.4.2")
@@ -267,7 +269,7 @@ def run_tests():
     test("Bug #13: send_telegram_paged en cmd_log", "send_telegram_paged" in code and "cmd_log" in code)
     test("Bug #13: send_telegram_paged en cmd_cartera", "send_telegram_paged" in code)
     test("_parse_position_label usa centavos (¢)", "¢" in code)
-    test("cmd_estado versión correcta", "Bot v10.4.7" in code or "v10.4.7" in code)
+    test("cmd_estado versión correcta", "Bot v10.4.8" in code or "v10.4.8" in code)
 
     # ---- Test 14c: Zonas horarias reales v10.4.5 ----
     print("\n🔍 Zonas horarias reales")
@@ -289,10 +291,13 @@ def run_tests():
          "Fix Bug #11: evita ciclo duplicado al deploy" not in code)
     test("Fix /detalle: escapa HTML (replace < y >)",
          'replace("<", "&lt;")' in code and 'replace(">", "&gt;")' in code)
-    test("Fix traders: filtra por ciudad+lado (active_positions set)",
-         "active_positions" in code and "outcome.lower()" in code)
-    test("Fix traders: filtra por fecha no pasada",
-         "today_str" in code and "sig_date < today_str" in code)
+    test("Fix /detalle: toma el último ciclo completo del archivo",
+         "lines[last_start:]" in code)
+    test("Fix traders: filtra por ciudad+lado", "active_positions" in code and "outcome.lower()" in code)
+    test("Fix traders: filtra por fecha exacta del mercado",
+         "matching_dates" in code and "sig_date_iso not in matching_dates" in code)
+    test("Fix traders: línea Scan/Análisis sin separador huérfano",
+         "timing_bits = []" in code and "' | '.join(timing_bits)" in code)
 
     print("\n🔍 Bloqueo London")
     test("main filtra ciudades bloqueadas", "blocked_city_skip" in code and "Ciudades bloqueadas operativamente" in code)
@@ -342,9 +347,12 @@ def run_tests():
     # ---- Test 19: Tests funcionales reales ----
     print("\n🔍 Tests funcionales")
     try:
-        ns = {"re": re}
+        ns = {"re": re, "datetime": datetime, "timezone": timezone}
         exec(get_function_source(module_ast, code_lines, "parse_city_from_title"), ns)
         exec(get_function_source(module_ast, code_lines, "_parse_position_label"), ns)
+        exec(get_function_source(module_ast, code_lines, "parse_market_date_iso"), ns)
+        exec(get_function_source(module_ast, code_lines, "format_market_date_short"), ns)
+        exec(get_function_source(module_ast, code_lines, "format_postmortem_label"), ns)
         helper_ns = {"BLOCKED_CITIES": {"london"}}
         exec(get_function_source(module_ast, code_lines, "is_city_blocked"), helper_ns)
 
@@ -355,6 +363,10 @@ def run_tests():
         test("parse label: ciudad/temp/fecha/outcome",
              label_paris == "Paris 11°C Mar29 NO",
              f"obtenido: {label_paris}")
+        test("parse market date: título largo a ISO",
+             ns["parse_market_date_iso"]("Will the temperature in Paris be 11°C on March 29?") == "2026-03-29")
+        test("postmortem label fallback: city+fecha+lado",
+             ns["format_postmortem_label"]({"city": "Dallas", "date": "2026-03-28", "side": "YES"}) == "Dallas Mar28 YES")
 
         test("blocked city helper: London bloqueada",
              helper_ns["is_city_blocked"]("London") and helper_ns["is_city_blocked"]("london"))
@@ -439,7 +451,7 @@ def run_tests():
             "json": __import__("json"),
             "datetime": datetime,
             "send_telegram_paged": lambda text, with_menu=False, page_size=3800: info_messages.append(text),
-            "BOT_VERSION": "v10.4.7",
+            "BOT_VERSION": "v10.4.8",
             "DRY_RUN": False,
             "BANKROLL": 25.0,
             "MIN_EDGE": 7.0,
@@ -455,7 +467,7 @@ def run_tests():
         exec(get_function_source(module_ast, code_lines, "cmd_info"), info_ns)
         info_ns["cmd_info"]()
         info_msg = info_messages[-1] if info_messages else ""
-        test("info: versión visible correcta", "BOT POLYMARKET v10.4.7" in info_msg, info_msg[:120])
+        test("info: versión visible correcta", "BOT POLYMARKET v10.4.8" in info_msg, info_msg[:120])
         test("info: usa cycle_summary como fallback de último", "Último: 2026-03-28 16:00 UTC" in info_msg, info_msg[:220])
 
         pm_messages = []
@@ -473,15 +485,16 @@ def run_tests():
                 },
                 {
                     "status": "open",
-                    "question": "Will the temperature in Miami be 30°C on March 28?",
-                    "city": "Miami",
+                    "question": "",
+                    "city": "Dallas",
                     "side": "YES",
+                    "date": "2026-03-28",
                     "total_amount": 2.50,
                     "latest_edge_pct": 21.3,
                     "opened_at": "2026-03-28T11:02:42+00:00",
                 },
             ],
-            "_parse_position_label": lambda title, outcome="": f"{title.split(' in ')[1].split(' be')[0]} {outcome}".strip() if " in " in title else title,
+            "format_postmortem_label": ns["format_postmortem_label"],
             "send_telegram_paged": lambda text, with_menu=False, page_size=3800: pm_messages.append(text),
         }
         exec(get_function_source(module_ast, code_lines, "cmd_postmortem"), pm_ns)
@@ -489,6 +502,62 @@ def run_tests():
         pm_msg = pm_messages[-1] if pm_messages else ""
         test("postmortem cmd: muestra resumen de estados", "Open:" in pm_msg and "Closed:" in pm_msg, pm_msg[:160])
         test("postmortem cmd: muestra últimos cierres", "reeval" in pm_msg and "$+0.26" in pm_msg, pm_msg[:200])
+        test("postmortem cmd: fallback legacy evita '? YES'",
+             "Dallas Mar28 YES" in pm_msg and "? YES" not in pm_msg,
+             pm_msg[:220])
+
+        fd, tmp_signals = tempfile.mkstemp(
+            dir=os.path.dirname(__file__),
+            prefix="_tmp_signals_test_",
+            suffix=".json",
+        )
+        os.close(fd)
+        traders_messages = []
+        traders_ns = {
+            "os": os,
+            "json": json,
+            "date": date,
+            "datetime": datetime,
+            "timezone": timezone,
+            "SIGNALS_FILE": tmp_signals,
+            "_get_portfolio_and_positions": lambda: {
+                "active": [{
+                    "title": "Will the temperature in London be 11°C on March 29?",
+                    "outcome": "NO",
+                }]
+            },
+            "parse_city_from_title": ns["parse_city_from_title"],
+            "parse_market_date_iso": ns["parse_market_date_iso"],
+            "bot_state": {
+                "last_trader_scan": None,
+                "last_trader_analysis": datetime(2026, 3, 28, 19, 30, tzinfo=timezone.utc),
+            },
+            "send_telegram_paged": lambda text, with_menu=False, page_size=3800: traders_messages.append(text),
+        }
+        with open(tmp_signals, "w", encoding="utf-8") as f:
+            json.dump({
+                "generated": "2026-03-28T19:30:00+00:00",
+                "n_actionable_signals": 2,
+                "n_consensus_markets": 0,
+                "n_traders_analyzed": 34,
+                "n_quality_traders": 8,
+                "quality_traders": [],
+                "n_skipped_low_quality": 10,
+                "signals": [
+                    {"city": "London", "outcome": "No", "date": "2026-03-28", "avg_price": 0.43, "is_reference": False, "has_consensus": False},
+                    {"city": "London", "outcome": "No", "date": "2026-03-29", "avg_price": 0.44, "is_reference": False, "has_consensus": False},
+                ],
+            }, f, ensure_ascii=False)
+        exec(get_function_source(module_ast, code_lines, "cmd_traders"), traders_ns)
+        traders_ns["cmd_traders"]()
+        traders_msg = traders_messages[-1] if traders_messages else ""
+        aligned_section = traders_msg.split("<b>Señales activas", 1)[0]
+        test("traders: alinea solo fecha exacta de cartera",
+             "London No 2026-03-29" in aligned_section and "London No 2026-03-28" not in aligned_section,
+             aligned_section[:260])
+        test("traders: análisis sin separador huérfano",
+             "\n| Análisis:" not in traders_msg and "Análisis: 28/03 19:30 UTC" in traders_msg,
+             traders_msg[:220])
 
         pm_empty_messages = []
         fd, tmp_perf_summary = tempfile.mkstemp(
@@ -515,6 +584,11 @@ def run_tests():
         if os.path.exists(tmp_cycle_summary):
             try:
                 os.remove(tmp_cycle_summary)
+            except PermissionError:
+                pass
+        if os.path.exists(tmp_signals):
+            try:
+                os.remove(tmp_signals)
             except PermissionError:
                 pass
         if os.path.exists(tmp_perf_summary):
@@ -569,7 +643,7 @@ def run_tests():
 
         buy_entry = {
             "timestamp": "2026-03-28T08:00:00+00:00",
-            "bot_version": "v10.4.7",
+            "bot_version": "v10.4.8",
             "city": "Dallas",
             "side": "YES",
             "date": "2026-03-28",
@@ -593,7 +667,7 @@ def run_tests():
 
         sell_pending = {
             "timestamp": "2026-03-28T16:00:00+00:00",
-            "bot_version": "v10.4.7",
+            "bot_version": "v10.4.8",
             "city": "Dallas",
             "side": "Yes",
             "date": "2026-03-28",

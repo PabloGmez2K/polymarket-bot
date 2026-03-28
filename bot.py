@@ -21,7 +21,7 @@ from py_clob_client.order_builder.constants import BUY, SELL
 load_dotenv()
 
 # =============================================================
-# bot.py v10.4.7 — bloqueo operativo London + alertas de observabilidad
+# bot.py v10.4.8 — refinamiento Telegram + bloqueo operativo London
 # Sesión 19: Fase 1.5 — rediseño Telegram + fixes post-deploy
 # =============================================================
 #
@@ -68,6 +68,10 @@ load_dotenv()
 #   - alertas: 30 trades limpios, signals stale/vacío, pending_exit atascadas
 # v10.4.7:
 #   - bloqueo operativo de London hasta resolver WU vs Open-Meteo
+# v10.4.8:
+#   - /traders alinea cartera por ciudad+lado+fecha exacta del mercado
+#   - /postmortem mejora etiquetas para registros legacy sin question
+#   - /detalle muestra el ultimo ciclo completo del log, sin corte fijo
 # =============================================================
 
 
@@ -85,7 +89,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.4.7"
+BOT_VERSION = "v10.4.8"
 LOGIC_SERIES = "10.4"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -392,6 +396,83 @@ def _parse_position_label(title, outcome=""):
         parts.append(date_str)
     if outcome:
         parts.append(outcome)
+    return " ".join(parts)
+
+
+def parse_market_date_iso(text):
+    """Normaliza varias representaciones de fecha de mercado a YYYY-MM-DD."""
+    if not text:
+        return ""
+
+    text = str(text).strip()
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        return text
+
+    month_map = {
+        "jan": 1, "january": 1,
+        "feb": 2, "february": 2,
+        "mar": 3, "march": 3,
+        "apr": 4, "april": 4,
+        "may": 5,
+        "jun": 6, "june": 6,
+        "jul": 7, "july": 7,
+        "aug": 8, "august": 8,
+        "sep": 9, "september": 9,
+        "oct": 10, "october": 10,
+        "nov": 11, "november": 11,
+        "dec": 12, "december": 12,
+    }
+
+    match = re.search(
+        r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})\b",
+        text,
+        re.IGNORECASE,
+    )
+    if not match:
+        match = re.search(
+            r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s*(\d{1,2})\b",
+            text,
+            re.IGNORECASE,
+        )
+    if not match:
+        return ""
+
+    month = month_map.get(match.group(1).lower())
+    day = int(match.group(2))
+    year = datetime.now(timezone.utc).year
+    return f"{year:04d}-{month:02d}-{day:02d}"
+
+
+def format_market_date_short(text):
+    """Convierte YYYY-MM-DD o texto parseable a Mar29."""
+    iso_date = parse_market_date_iso(text)
+    if not iso_date:
+        return ""
+
+    year_str, month_str, day_str = iso_date.split("-")
+    month_num = int(month_str)
+    day = int(day_str)
+    month_abbr = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][month_num - 1]
+    return f"{month_abbr}{day}"
+
+
+def format_postmortem_label(record):
+    """Etiqueta legible para postmortem, incluso en historico legacy sin question."""
+    side = str(record.get("side", "?")).upper()
+    question = record.get("question", "")
+    if question:
+        label = _parse_position_label(question, side)
+        if label and not label.startswith("?"):
+            return label
+
+    city = record.get("city", "?") or "?"
+    date_short = format_market_date_short(record.get("date", ""))
+    parts = [city]
+    if date_short:
+        parts.append(date_short)
+    if side:
+        parts.append(side)
     return " ".join(parts)
 
 
@@ -1645,7 +1726,7 @@ def cmd_logfull():
                             break
                     if last_start >= 0:
                         cycle_text = "📋 <b>Detalle (de archivo)</b>\n\n"
-                        for line in lines[last_start:last_start + 40]:
+                        for line in lines[last_start:]:
                             clean = line.strip()
                             # Quitar timestamp del log
                             if " | " in clean:
@@ -1818,15 +1899,19 @@ def cmd_traders():
     if quality_names:
         text += f"\n⭐ <b>Calidad:</b> {', '.join(quality_names[:6])}\n"
 
-    # Cruce con posiciones activas — filtra por ciudad + lado + fecha no pasada
+    # Cruce con posiciones activas — filtra por ciudad + lado + fecha exacta del mercado
     portfolio = _get_portfolio_and_positions()
-    active_positions = set()  # set de (city_lower, outcome_lower)
+    active_positions = {}  # (city_lower, outcome_lower) -> set(fecha_iso)
     if portfolio:
         for pos in portfolio["active"]:
             city = parse_city_from_title(pos.get("title", ""))
             outcome = pos.get("outcome", "")
+            market_date_iso = parse_market_date_iso(pos.get("title", ""))
             if city != "?" and outcome:
-                active_positions.add((city.lower(), outcome.lower()))
+                key = (city.lower(), outcome.lower())
+                active_positions.setdefault(key, set())
+                if market_date_iso:
+                    active_positions[key].add(market_date_iso)
 
     today_str = date.today().isoformat()  # "2026-03-28"
 
@@ -1839,13 +1924,19 @@ def cmd_traders():
             city = s.get("city", "")
             outcome = s.get("outcome", "")
             sig_date = s.get("date", "")  # formato "2026-03-28" o "Mar28"
+            key = (city.lower(), outcome.lower())
+            matching_dates = active_positions.get(key)
             # Filtrar: ciudad+lado coincide con posición activa
-            if (city.lower(), outcome.lower()) not in active_positions:
+            if matching_dates is None:
                 continue
-            # Filtrar: fecha no pasada (si el formato es ISO)
-            if sig_date and len(sig_date) == 10:
-                if sig_date < today_str:
+            sig_date_iso = parse_market_date_iso(sig_date)
+            # Si conocemos fechas de la cartera, exigir match exacto
+            if matching_dates:
+                if not sig_date_iso or sig_date_iso not in matching_dates:
                     continue
+            # Filtrar: fecha no pasada (si el formato es ISO)
+            if sig_date_iso and sig_date_iso < today_str:
+                continue
             icon = "🤝" if s.get("has_consensus") else "📍"
             price = s.get("avg_price", 0)
             text += f"  {icon} {city} {outcome} {sig_date} @ {int(price*100)}¢\n"
@@ -1856,12 +1947,13 @@ def cmd_traders():
     # Último scan y análisis
     scan_ts = bot_state.get("last_trader_scan")
     analysis_ts = bot_state.get("last_trader_analysis")
+    timing_bits = []
     if scan_ts:
-        text += f"\nScan: {scan_ts.strftime('%d/%m %H:%M UTC')}"
+        timing_bits.append(f"Scan: {scan_ts.strftime('%d/%m %H:%M UTC')}")
     if analysis_ts:
-        text += f" | Análisis: {analysis_ts.strftime('%d/%m %H:%M UTC')}"
-    if scan_ts or analysis_ts:
-        text += "\n"
+        timing_bits.append(f"Análisis: {analysis_ts.strftime('%d/%m %H:%M UTC')}")
+    if timing_bits:
+        text += f"\n{' | '.join(timing_bits)}\n"
 
     if n_signals == 0:
         text += "\n<i>Sin señales accionables ahora.</i>\n"
@@ -1941,7 +2033,7 @@ def cmd_postmortem():
             reverse=True,
         )[:8]
         for rec in recent_closed:
-            label = _parse_position_label(rec.get("question", rec.get("city", "?")), rec.get("side", "?"))
+            label = format_postmortem_label(rec)
             close_action = rec.get("close_action", "?")
             reason = rec.get("close_reason", "") or "n/a"
             pnl_cash = rec.get("pnl_cash")
@@ -1957,7 +2049,7 @@ def cmd_postmortem():
             reverse=True,
         )[:8]
         for rec in recent_open:
-            label = _parse_position_label(rec.get("question", rec.get("city", "?")), rec.get("side", "?"))
+            label = format_postmortem_label(rec)
             status = rec.get("status", "?")
             amount = rec.get("total_amount", 0)
             edge = rec.get("latest_edge_pct")
