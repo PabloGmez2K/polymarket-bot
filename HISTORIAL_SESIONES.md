@@ -1,4 +1,4 @@
-# HISTORIAL DE SESIONES
+﻿# HISTORIAL DE SESIONES
 
 Bitácora legible del proyecto reconstruida desde:
 
@@ -40,7 +40,7 @@ Comandos útiles:
 | 2026-03-22 | Explícita | Sesión 9 | `91162b0` | Pipeline traders v2 y primeras órdenes reales 4/4 OK. |
 | 2026-03-22 a 2026-03-23 | Inferida | Iteración v10-v10.2 | `d2ae676` `ce0684e` `931158e` `0ae32c9` `deb50b3` `3c408f3` `d01b4b9` | Exposición acumulativa, sigma calibrada, gestión activa, auditoría, bankroll real, performance tracker, cash balance y mejoras Telegram. |
 | 2026-03-24 | Inferida | Iteración v10.3 | `bef71e3` | Cinco bugs corregidos y `verify_before_deploy.py` consolidado. |
-| 2026-03-28 | Explícita | Sesión 19 | `a24fde2` `cd12121` `56aeb5a` `185f018` `374d6a8` `3c4b5f1` `19adfdd` `d382f47` | v10.4 a v10.4.6: persistencia, rediseño Telegram, ciclos persistentes, DST robusto, trazabilidad multi-agente, tests funcionales, base de `postmortem.json` y alertas de observabilidad. |
+| 2026-03-28 | Explícita | Sesión 19 | `a24fde2` `cd12121` `56aeb5a` `185f018` `374d6a8` `3c4b5f1` `19adfdd` `d382f47` | v10.4 a v10.4.7: persistencia, rediseño Telegram, ciclos persistentes, DST robusto, trazabilidad multi-agente, tests funcionales, base de `postmortem.json`, alertas de observabilidad y bloqueo operativo de London. |
 
 ---
 
@@ -92,6 +92,7 @@ Comandos útiles:
 - comando `/postmortem` para inspección rápida desde Telegram y botón visible en el menú;
 - backfill automático de `postmortem.json` desde `performance.json`;
 - `alerts_state.json` y alertas one-shot para `30 trades limpios`, `signals.json` y `pending_exit`;
+- bloqueo operativo de London en codigo para evitar nuevas entradas;
 - regla operativa: antes de cada push relevante, actualizar `CONTEXTO.md` y `HISTORIAL_SESIONES.md`.
 
 ---
@@ -162,6 +163,7 @@ Comandos útiles:
 - v10.4.4: parche manual temporal de DST;
 - v10.4.5: `ZoneInfo`, tests funcionales, trazabilidad, `postmortem.json`, trader data al Volume y `/postmortem`.
 - v10.4.6: backfill de `postmortem.json`, `alerts_state.json` y alertas Telegram de observabilidad.
+- v10.4.7: bloqueo operativo de London en codigo y tests de regresion.
 
 ---
 
@@ -188,3 +190,4 @@ Regla recomendada:
 - cuando una sesión cierre, añadir una entrada nueva aquí;
 - si una sesión antigua se reconstruye mejor desde Git, marcarla como `reconstruida` o `corregida`, sin borrar la entrada original.
 - antes de cada push relevante, revisar si también hay que actualizar `CONTEXTO.md` para la foto actual y este archivo para la memoria histórica.
+

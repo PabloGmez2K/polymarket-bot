@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-verify_before_deploy.py v7 — Tests de comportamiento para bot.py v10.4.6
+verify_before_deploy.py v7 — Tests de comportamiento para bot.py v10.4.7
 
 Ejecutar ANTES de cada deploy:
   python verify_before_deploy.py
@@ -225,6 +225,8 @@ def run_tests():
     test("MAX_EXPOSURE_PCT es 0.40", '"0.40"' in code)
     test("MIN_EDGE default es 7.0", '"7.0"' in code)
     test("SCHEDULE_HOURS_UTC configurable", 'SCHEDULE_HOURS_UTC' in code)
+    test("BLOCKED_CITIES default incluye London", 'os.getenv("BLOCKED_CITIES", "London")' in code)
+    test("is_city_blocked definida", "def is_city_blocked(" in code)
 
     print("\n🔍 Trader data en Volume")
     try:
@@ -249,7 +251,7 @@ def run_tests():
     test("CYCLES_HISTORY_FILE definido", "CYCLES_HISTORY_FILE" in code)
     test("cycles_history.jsonl append-only", "cycles_history.jsonl" in code)
     test("cycle_summary se guarda en main()", "cycle_data" in code and "CYCLE_SUMMARY_FILE" in code)
-    test("cycle_data incluye version v10.4.6", '"version"' in code and "v10.4.6" in code)
+    test("cycle_data incluye version v10.4.7", '"version"' in code and "v10.4.7" in code)
 
     # ---- Test 14: Rediseño Telegram v10.4.2 ----
     print("\n🔍 Rediseño Telegram v10.4.2")
@@ -265,7 +267,7 @@ def run_tests():
     test("Bug #13: send_telegram_paged en cmd_log", "send_telegram_paged" in code and "cmd_log" in code)
     test("Bug #13: send_telegram_paged en cmd_cartera", "send_telegram_paged" in code)
     test("_parse_position_label usa centavos (¢)", "¢" in code)
-    test("cmd_estado versión correcta", "Bot v10.4.6" in code or "v10.4.6" in code)
+    test("cmd_estado versión correcta", "Bot v10.4.7" in code or "v10.4.7" in code)
 
     # ---- Test 14c: Zonas horarias reales v10.4.5 ----
     print("\n🔍 Zonas horarias reales")
@@ -291,6 +293,10 @@ def run_tests():
          "active_positions" in code and "outcome.lower()" in code)
     test("Fix traders: filtra por fecha no pasada",
          "today_str" in code and "sig_date < today_str" in code)
+
+    print("\n🔍 Bloqueo London")
+    test("main filtra ciudades bloqueadas", "blocked_city_skip" in code and "Ciudades bloqueadas operativamente" in code)
+    test("London se bloquea por helper", 'if is_city_blocked(city):' in code)
 
     # ---- Test 15: Integridad de COMMANDS (todos los botones siguen presentes) ----
     print("\n🔍 Integridad de COMMANDS")
@@ -339,6 +345,8 @@ def run_tests():
         ns = {"re": re}
         exec(get_function_source(module_ast, code_lines, "parse_city_from_title"), ns)
         exec(get_function_source(module_ast, code_lines, "_parse_position_label"), ns)
+        helper_ns = {"BLOCKED_CITIES": {"london"}}
+        exec(get_function_source(module_ast, code_lines, "is_city_blocked"), helper_ns)
 
         label_paris = ns["_parse_position_label"](
             "Will the temperature in Paris be 11°C on March 29?",
@@ -347,6 +355,11 @@ def run_tests():
         test("parse label: ciudad/temp/fecha/outcome",
              label_paris == "Paris 11°C Mar29 NO",
              f"obtenido: {label_paris}")
+
+        test("blocked city helper: London bloqueada",
+             helper_ns["is_city_blocked"]("London") and helper_ns["is_city_blocked"]("london"))
+        test("blocked city helper: Paris permitida",
+             not helper_ns["is_city_blocked"]("Paris"))
 
         pager_calls = []
         pager_ns = {
@@ -426,7 +439,7 @@ def run_tests():
             "json": __import__("json"),
             "datetime": datetime,
             "send_telegram_paged": lambda text, with_menu=False, page_size=3800: info_messages.append(text),
-            "BOT_VERSION": "v10.4.6",
+            "BOT_VERSION": "v10.4.7",
             "DRY_RUN": False,
             "BANKROLL": 25.0,
             "MIN_EDGE": 7.0,
@@ -442,7 +455,7 @@ def run_tests():
         exec(get_function_source(module_ast, code_lines, "cmd_info"), info_ns)
         info_ns["cmd_info"]()
         info_msg = info_messages[-1] if info_messages else ""
-        test("info: versión visible correcta", "BOT POLYMARKET v10.4.6" in info_msg, info_msg[:120])
+        test("info: versión visible correcta", "BOT POLYMARKET v10.4.7" in info_msg, info_msg[:120])
         test("info: usa cycle_summary como fallback de último", "Último: 2026-03-28 16:00 UTC" in info_msg, info_msg[:220])
 
         pm_messages = []
@@ -556,7 +569,7 @@ def run_tests():
 
         buy_entry = {
             "timestamp": "2026-03-28T08:00:00+00:00",
-            "bot_version": "v10.4.6",
+            "bot_version": "v10.4.7",
             "city": "Dallas",
             "side": "YES",
             "date": "2026-03-28",
@@ -580,7 +593,7 @@ def run_tests():
 
         sell_pending = {
             "timestamp": "2026-03-28T16:00:00+00:00",
-            "bot_version": "v10.4.6",
+            "bot_version": "v10.4.7",
             "city": "Dallas",
             "side": "Yes",
             "date": "2026-03-28",

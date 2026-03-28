@@ -21,7 +21,7 @@ from py_clob_client.order_builder.constants import BUY, SELL
 load_dotenv()
 
 # =============================================================
-# bot.py v10.4.6 — alertas de observabilidad + backfill postmortem
+# bot.py v10.4.7 — bloqueo operativo London + alertas de observabilidad
 # Sesión 19: Fase 1.5 — rediseño Telegram + fixes post-deploy
 # =============================================================
 #
@@ -66,6 +66,8 @@ load_dotenv()
 #   - backfill automático de postmortem.json desde performance.json
 #   - alerts_state.json para alertas one-shot persistentes
 #   - alertas: 30 trades limpios, signals stale/vacío, pending_exit atascadas
+# v10.4.7:
+#   - bloqueo operativo de London hasta resolver WU vs Open-Meteo
 # =============================================================
 
 
@@ -83,10 +85,15 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.4.6"
+BOT_VERSION = "v10.4.7"
 LOGIC_SERIES = "10.4"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
+BLOCKED_CITIES = {
+    city.strip().lower()
+    for city in os.getenv("BLOCKED_CITIES", "London").split(",")
+    if city.strip()
+}
 
 
 def get_min_days_ahead():
@@ -104,6 +111,11 @@ def get_min_days_ahead():
         return 0  # Mañana: la mayoría de ciudades aún no registraron temp
     else:
         return 1  # Tarde/noche: muchas ciudades ya tienen dato real
+
+
+def is_city_blocked(city):
+    """Devuelve True si la ciudad está bloqueada operativamente."""
+    return city.strip().lower() in BLOCKED_CITIES if city else False
 
 
 def get_min_days_for_city(city):
@@ -3444,6 +3456,8 @@ def main(client):
     parse_fail = 0
     date_fail = 0
     timezone_skip = 0  # v10.3: contador de filtrados por zona horaria
+    blocked_city_skip = 0
+    blocked_seen = set()
     price_fail = 0
     liq_fail = 0
 
@@ -3466,6 +3480,10 @@ def main(client):
 
         # v10.3: min_days PER-CITY según zona horaria (Bug #5 fix)
         city = parsed["city"]
+        if is_city_blocked(city):
+            blocked_city_skip += 1
+            blocked_seen.add(city)
+            continue
         min_days = get_min_days_for_city(city)
 
         if days_ahead < min_days:
@@ -3516,7 +3534,9 @@ def main(client):
         })
         candidates.append(parsed)
 
-    dl.append(f"FILTROS: {len(candidates)} pasan | {parse_fail} no parseables | {date_fail} fuera de fecha | {timezone_skip} bloqueados por zona horaria | {price_fail} fuera de precio | {liq_fail} sin liquidez")
+    dl.append(f"FILTROS: {len(candidates)} pasan | {parse_fail} no parseables | {date_fail} fuera de fecha | {timezone_skip} bloqueados por zona horaria | {blocked_city_skip} bloqueados por ciudad | {price_fail} fuera de precio | {liq_fail} sin liquidez")
+    if blocked_seen:
+        dl.append(f"  🚫 Ciudades bloqueadas operativamente: {', '.join(sorted(blocked_seen))} (WU vs Open-Meteo)")
 
     # ---- PASO 3: Previsiones ----
     cities_needed = set(c["city"] for c in candidates)
