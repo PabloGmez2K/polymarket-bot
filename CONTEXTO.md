@@ -72,7 +72,7 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 | Archivo | Función |
 |---------|---------|
 | `bot.py` | Script principal v10.4.5 |
-| `verify_before_deploy.py` | v7 — 146 tests de comportamiento |
+| `verify_before_deploy.py` | v7 — 149 tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |
@@ -132,7 +132,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 | `/ordenes` | Órdenes GTC pendientes con etiquetas legibles |
 | `/traders` | Señales activas + coincidencias filtradas con cartera actual |
 | `/info` | Bloque resumen completo para pegar en Claude/ChatGPT |
-| `/postmortem` | Resumen rápido de abiertas/cierres desde `postmortem.json` |
+| `/postmortem` | Resumen rápido de abiertas/cierres desde `postmortem.json` y botón visible en el menú |
 | `/forzar` | Ejecuta ciclo inmediatamente |
 | `/modo` | Cambia DRY RUN ↔ REAL |
 
@@ -251,7 +251,7 @@ Usar esta plantilla al cerrar cada sesión relevante:
 - **Claude Code:** implementó v10.4.2, v10.4.3 y v10.4.4; rediseño Telegram, paginación, `/info`, persistencia de ciclos, limpieza del repo y un fix manual de DST basado en offsets estáticos.
 - **Codex:** revisó críticamente esa secuencia y detectó dos deudas importantes: el fix de DST seguía siendo frágil por usar offsets manuales, y `.claude/settings.local.json` había quedado versionado por error.
 - **Codex:** corrigió el enfoque de DST en `bot.py` migrando a `ZoneInfo` + `CITY_TIMEZONES` con zonas IANA reales (`v10.4.5`), actualizó `verify_before_deploy.py`, sacó `.claude/settings.local.json` del control de versiones sin borrar la copia local, reparó manualmente una entrada truncada en `performance.json` de Railway, implementó la capa base de `postmortem.json`, movió `signals.json` / `traders_db.json` / `trader_history.json` al flujo persistente de Volume con bootstrap automático y añadió `/postmortem` para inspección rápida desde Telegram.
-- **Estado final de la sesión 19:** versión activa `v10.4.5`, tests `146/146`, repo listo para deploy, DST robusto para futuros cambios de horario, observabilidad base de postmortem lista para crecer y pipeline de traders persistente en Volume.
+- **Estado final de la sesión 19:** versión activa `v10.4.5`, tests `149/149`, repo listo para deploy, DST robusto para futuros cambios de horario, observabilidad base de postmortem lista para crecer, pipeline de traders persistente en Volume y botón visible de `/postmortem`.
 
 ---
 
@@ -314,7 +314,7 @@ Con ~15 trades cerrados no hay suficiente evidencia estadística para cambiar la
 
 ### Fase 1 — ✅ Implementada:
 - Persistencia Railway Volume, cycles_history.jsonl, cycle_summary.json ✅
-- Bugs #3-#14 corregidos, 146 tests ✅
+- Bugs #3-#14 corregidos, 149 tests ✅
 - Claude Code instalado y funcional ✅
 
 ### Fase 1.5 — ✅ Implementada (sesión 19):
@@ -363,7 +363,7 @@ railway ssh "ls /app/data/"         # ver archivos del volume
 
 ### Workflow de deploy:
 ```bash
-python verify_before_deploy.py   # 146/146 deben pasar
+python verify_before_deploy.py   # 149/149 deben pasar
 # actualizar CONTEXTO.md si cambió el estado actual
 # actualizar HISTORIAL_SESIONES.md si hubo una sesión/hito nuevo
 git add .

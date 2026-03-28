@@ -89,7 +89,7 @@ Comandos útiles:
 - reparación manual de una entrada truncada en `performance.json` de Railway;
 - base de `postmortem.json`;
 - persistencia de `signals.json`, `traders_db.json` y `trader_history.json` en Volume;
-- comando `/postmortem` para inspección rápida desde Telegram;
+- comando `/postmortem` para inspección rápida desde Telegram y botón visible en el menú;
 - regla operativa: antes de cada push relevante, actualizar `CONTEXTO.md` y `HISTORIAL_SESIONES.md`.
 
 ---

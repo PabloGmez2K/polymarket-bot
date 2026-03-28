@@ -968,6 +968,7 @@ MENU_KEYBOARD = {
             {"text": "ℹ️ Info", "callback_data": "info"},
         ],
         [
+            {"text": "📚 Postmortem", "callback_data": "postmortem"},
             {"text": "🚀 Forzar ciclo", "callback_data": "forzar"},
             {"text": "⚡ Modo", "callback_data": "modo"},
         ],
@@ -1067,15 +1068,16 @@ def cmd_estado():
     else:
         next_str = "No programado"
 
-    last_str = bot_state["last_run"].strftime('%d/%m %H:%M UTC') if bot_state["last_run"] else "Nunca"
     schedule = ", ".join(f"{h:02d}:00" for h in sorted(SCHEDULE_HOURS_UTC))
 
     # Último ciclo desde cycle_summary.json si existe
     cycle_line = ""
+    cycle_ts = None
     if os.path.exists(CYCLE_SUMMARY_FILE):
         try:
             with open(CYCLE_SUMMARY_FILE, "r", encoding="utf-8") as f:
                 cd = json.load(f)
+            cycle_ts = cd.get("timestamp_utc")
             mgmt = cd.get("management", {})
             scan = cd.get("scan", {})
             buys = cd.get("buys", [])
@@ -1091,6 +1093,16 @@ def cmd_estado():
             )
         except Exception:
             pass
+
+    if bot_state["last_run"]:
+        last_str = bot_state["last_run"].strftime('%d/%m %H:%M UTC')
+    elif cycle_ts:
+        try:
+            last_str = datetime.fromisoformat(cycle_ts.replace("Z", "+00:00")).strftime('%d/%m %H:%M UTC')
+        except Exception:
+            last_str = f"{cycle_ts[:16]} UTC"
+    else:
+        last_str = "Nunca"
 
     if not cycle_line:
         cycle_line = (
@@ -1602,10 +1614,27 @@ def cmd_postmortem():
     """
     records = load_postmortem_data()
     if not records:
+        has_performance = False
+        if os.path.exists(PERFORMANCE_FILE):
+            try:
+                with open(PERFORMANCE_FILE, "r", encoding="utf-8") as f:
+                    history = json.load(f)
+                has_performance = bool(history)
+            except Exception:
+                pass
+
+        extra = ""
+        if has_performance:
+            extra = (
+                "\n\nHay histórico en performance.json, pero "
+                "postmortem.json todavía no se ha rellenado con datos anteriores.\n"
+                "Se irá llenando automáticamente con nuevos BUY, SELL y resoluciones."
+            )
         send_telegram(
             "📚 <b>Postmortem</b>\n\n"
             "Sin datos todavía.\n"
-            "Se irá llenando automáticamente con compras, ventas y resoluciones.",
+            "Se irá llenando automáticamente con compras, ventas y resoluciones."
+            f"{extra}",
             with_menu=True,
         )
         return
@@ -1725,14 +1754,15 @@ def cmd_info():
     """ℹ️ Bloque resumen del bot para pegar en ChatGPT/Claude."""
     modo = "DRY RUN" if DRY_RUN else "REAL"
     schedule = ", ".join(f"{h:02d}:00" for h in sorted(SCHEDULE_HOURS_UTC))
-    last_str = bot_state["last_run"].strftime('%Y-%m-%d %H:%M UTC') if bot_state["last_run"] else "Nunca"
 
     # Último ciclo desde cycle_summary.json
     cycle_block = ""
+    cycle_ts = None
     if os.path.exists(CYCLE_SUMMARY_FILE):
         try:
             with open(CYCLE_SUMMARY_FILE, "r", encoding="utf-8") as f:
                 cd = json.load(f)
+            cycle_ts = cd.get("timestamp_utc")
             mgmt = cd.get("management", {})
             scan = cd.get("scan", {})
             buys = cd.get("buys", [])
@@ -1758,6 +1788,16 @@ def cmd_info():
                 cycle_block += "\n"
         except Exception:
             pass
+
+    if bot_state["last_run"]:
+        last_str = bot_state["last_run"].strftime('%Y-%m-%d %H:%M UTC')
+    elif cycle_ts:
+        try:
+            last_str = datetime.fromisoformat(cycle_ts.replace("Z", "+00:00")).strftime('%Y-%m-%d %H:%M UTC')
+        except Exception:
+            last_str = f"{cycle_ts[:16]} UTC"
+    else:
+        last_str = "Nunca"
 
     # Estadísticas
     stats = get_performance_summary()

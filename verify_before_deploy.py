@@ -259,6 +259,7 @@ def run_tests():
     test("/info en COMMANDS", '"info": cmd_info' in code)
     test("/postmortem en COMMANDS", '"postmortem": cmd_postmortem' in code)
     test("/info en MENU_KEYBOARD", '"callback_data": "info"' in code)
+    test("/postmortem en MENU_KEYBOARD", '"callback_data": "postmortem"' in code)
     test("Bug #13: send_telegram_paged en cmd_log", "send_telegram_paged" in code and "cmd_log" in code)
     test("Bug #13: send_telegram_paged en cmd_cartera", "send_telegram_paged" in code)
     test("_parse_position_label usa centavos (¢)", "¢" in code)
@@ -404,9 +405,24 @@ def run_tests():
              "Posiciones activas" in cartera_msg and "Esperando pago" in cartera_msg and "posiciones sin valor" in cartera_msg)
 
         info_messages = []
+        fd, tmp_cycle_summary = tempfile.mkstemp(
+            dir=os.path.dirname(__file__),
+            prefix="_tmp_cycle_summary_test_",
+            suffix=".json",
+        )
+        os.close(fd)
+        with open(tmp_cycle_summary, "w", encoding="utf-8") as f:
+            json.dump({
+                "cycle_number": 1,
+                "timestamp_utc": "2026-03-28T16:00:33.073674+00:00",
+                "management": {"n_kept": 0, "n_sold": 1, "n_resolved": 0},
+                "scan": {"markets_evaluated": 46, "selected": 2},
+                "buys": [],
+            }, f)
         info_ns = {
             "os": os,
             "json": __import__("json"),
+            "datetime": datetime,
             "send_telegram_paged": lambda text, with_menu=False, page_size=3800: info_messages.append(text),
             "DRY_RUN": False,
             "BANKROLL": 25.0,
@@ -417,13 +433,14 @@ def run_tests():
             "MIN_BET": 1.0,
             "SCHEDULE_HOURS_UTC": [8, 16, 23],
             "bot_state": {"cycle_count": 12, "last_run": None},
-            "CYCLE_SUMMARY_FILE": "__missing__",
+            "CYCLE_SUMMARY_FILE": tmp_cycle_summary,
             "get_performance_summary": lambda: None,
         }
         exec(get_function_source(module_ast, code_lines, "cmd_info"), info_ns)
         info_ns["cmd_info"]()
         info_msg = info_messages[-1] if info_messages else ""
         test("info: versión visible correcta", "BOT POLYMARKET v10.4.5" in info_msg, info_msg[:120])
+        test("info: usa cycle_summary como fallback de último", "Último: 2026-03-28 16:00 UTC" in info_msg, info_msg[:220])
 
         pm_messages = []
         pm_ns = {
@@ -456,6 +473,39 @@ def run_tests():
         pm_msg = pm_messages[-1] if pm_messages else ""
         test("postmortem cmd: muestra resumen de estados", "Open:" in pm_msg and "Closed:" in pm_msg, pm_msg[:160])
         test("postmortem cmd: muestra últimos cierres", "reeval" in pm_msg and "$+0.26" in pm_msg, pm_msg[:200])
+
+        pm_empty_messages = []
+        fd, tmp_perf_summary = tempfile.mkstemp(
+            dir=os.path.dirname(__file__),
+            prefix="_tmp_postmortem_perf_test_",
+            suffix=".json",
+        )
+        os.close(fd)
+        pm_empty_ns = {
+            "os": os,
+            "json": json,
+            "PERFORMANCE_FILE": tmp_perf_summary,
+            "load_postmortem_data": lambda: [],
+            "send_telegram": lambda text, with_menu=False, custom_keyboard=None: pm_empty_messages.append(text),
+        }
+        with open(tmp_perf_summary, "w", encoding="utf-8") as f:
+            json.dump([{"action": "BUY"}], f)
+        exec(get_function_source(module_ast, code_lines, "cmd_postmortem"), pm_empty_ns)
+        pm_empty_ns["cmd_postmortem"]()
+        pm_empty_msg = pm_empty_messages[-1] if pm_empty_messages else ""
+        test("postmortem vacío: explica falta de backfill histórico",
+             "performance.json" in pm_empty_msg and "todavía no se ha rellenado" in pm_empty_msg,
+             pm_empty_msg[:220])
+        if os.path.exists(tmp_cycle_summary):
+            try:
+                os.remove(tmp_cycle_summary)
+            except PermissionError:
+                pass
+        if os.path.exists(tmp_perf_summary):
+            try:
+                os.remove(tmp_perf_summary)
+            except PermissionError:
+                pass
     except Exception as e:
         test("Tests funcionales ejecutan sin excepción", False, str(e))
 
