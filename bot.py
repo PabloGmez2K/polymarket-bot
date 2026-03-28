@@ -19,30 +19,32 @@ from py_clob_client.order_builder.constants import BUY, SELL
 load_dotenv()
 
 # =============================================================
-# bot.py v10.3 — Fix zonas horarias + exposición + sell tracking
-# Sesión 13: 5 bugs corregidos
+# bot.py v10.4 — Bug fixes #3 #9 #10 #11 #12 #14 + mejoras Telegram
+# Sesión 17: 6 bugs corregidos + observabilidad mejorada
 # =============================================================
 #
-# Nuevo en v10.3:
-#   - Fix Bug #5: get_min_days_for_city() — zona horaria per-city
-#     A las 08:00 UTC, ciudades asiáticas (UTC+8/+9) necesitan min_days=1
-#     porque allí ya son las 16:00 local y la temp máxima ya se registró.
-#     Costó ~$5.16. Tabla de UTC offsets para 30 ciudades.
-#   - Fix Bug #4: get_current_exposure() excluye curPrice >= 0.98
-#     Posiciones resueltas son cash garantizado, no riesgo.
-#     Shanghai $8 bloqueaba presupuesto innecesariamente.
-#   - Fix Bug #7: SELL → SELL_PENDING hasta confirmar fill
-#     track_trade registra SELL_PENDING. audit_check_sell_fills
-#     lo convierte en SELL (confirmado) o SELL_FAILED (>24h sin fill).
-#   - Fix Bug #6: signals.json freshness 12h → 26h + alerta Telegram
-#     Las señales expiraban silenciosamente entre ciclos.
-#   - Fix Bug #8: Posiciones micro (<$0.10) → LOSS_TOTAL
-#     No se pueden vender. Se registran como pérdida y se excluyen.
+# Nuevo en v10.4:
+#   - Fix Bug #3: check posiciones abiertas en Data API antes de comprar
+#     Madrid se compró 2 veces porque el check solo miraba órdenes pendientes.
+#     Ahora consulta posiciones llenadas → no duplica.
+#   - Fix Bug #9: sold_this_cycle — no re-comprar lo vendido en manage_positions
+#     NYC vendido por SL y recomprado en el mismo ciclo.
+#     Ahora manage_positions devuelve sold_token_ids → main() los salta.
+#   - Fix Bug #11: comprobar último ciclo al arrancar
+#     Deploy entre ciclos causaba ciclo extra inmediato (doble Chicago).
+#     Ahora lee timestamp del último ciclo. Si < 3h → espera scheduler.
+#   - Fix Bug #10: MIN_BET default 0.50 → 1.00 (alineado con Railway)
+#   - Fix Bug #12: resueltas no cuentan como "mantenidas" en Telegram
+#   - Fix Bug #14: mensajes Telegram clarifican "precio límite" vs fill
+#   - Mejora Telegram: /estado separa "Compras: X | Ventas: Y"
+#   - Mejora Telegram: resumen ciclo dice "Exposición actual" y "Presupuesto libre"
 #
-# Heredado de v10.2:
-#   - get_current_exposure(): usa currentValue (no initialValue)
-#   - get_min_days_ahead(): MIN_DAYS base dinámico por hora UTC
-#   - manage_positions(): skip curPrice >= 0.98 (mercado resuelto)
+# Heredado de v10.3:
+#   - Fix Bug #5: get_min_days_for_city() — zona horaria per-city
+#   - Fix Bug #4: get_current_exposure() excluye curPrice >= 0.98
+#   - Fix Bug #7: SELL → SELL_PENDING hasta confirmar fill
+#   - Fix Bug #6: signals.json freshness 12h → 26h + alerta Telegram
+#   - Fix Bug #8: Posiciones micro (<$0.10) → LOSS_TOTAL
 # =============================================================
 
 
@@ -54,7 +56,7 @@ DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
 BANKROLL = float(os.getenv("BANKROLL", "15.00"))
 
 MIN_EDGE = float(os.getenv("MIN_EDGE", "7.0"))
-MIN_BET = float(os.getenv("MIN_BET", "0.50"))           # v9: bajado de 1.00 a 0.50
+MIN_BET = float(os.getenv("MIN_BET", "1.00"))           # v10.4: default alineado con Railway
 MAX_BET_PCT = float(os.getenv("MAX_BET_PCT", "0.10"))   # v9: subido de 0.05 a 0.10 (10%)
 MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
@@ -146,12 +148,24 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 # LOGGING
 # =============================================================
 
+# v10.4: Directorio de datos persistente (Railway Volume)
+# En Railway, montar volume en /app/data y configurar DATA_DIR="/app/data"
+# Los archivos sobreviven deploys. Sin DATA_DIR, usa directorio actual (compatible).
+DATA_DIR = os.getenv("DATA_DIR", "")
+
+def _data_path(filename):
+    """Devuelve ruta completa para un archivo de datos."""
+    if DATA_DIR:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        return os.path.join(DATA_DIR, filename)
+    return filename
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)-8s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
-        logging.FileHandler("trades.log", encoding="utf-8"),
+        logging.FileHandler(_data_path("trades.log"), encoding="utf-8"),
         logging.StreamHandler(),
     ]
 )
@@ -165,7 +179,7 @@ log = logging.getLogger(__name__)
 # Esto es lo que leerás mañana para entender qué hizo el bot
 decision_log = logging.getLogger("decisions")
 decision_log.setLevel(logging.INFO)
-decision_handler = logging.FileHandler("decisions.log", encoding="utf-8")
+decision_handler = logging.FileHandler(_data_path("decisions.log"), encoding="utf-8")
 decision_handler.setFormatter(logging.Formatter("%(asctime)s | %(message)s", "%Y-%m-%d %H:%M:%S"))
 decision_log.addHandler(decision_handler)
 decision_log.propagate = False  # No duplicar en consola
@@ -179,6 +193,7 @@ bot_state = {
     "next_run": None,
     "last_run": None,
     "last_orders_placed": 0,
+    "last_sells_placed": 0,       # v10.4: ventas para /estado
     "last_opportunities": 0,
     "running": False,
     "cycle_count": 0,
@@ -198,7 +213,7 @@ clob_client = None
 # Así cuando consultas /ordenes, sabe a qué mercado pertenece cada token.
 known_tokens = {}
 
-PERFORMANCE_FILE = "performance.json"
+PERFORMANCE_FILE = _data_path("performance.json")
 
 
 def parse_city_from_title(title):
@@ -620,7 +635,7 @@ def cmd_estado():
         f"Ciclos: {bot_state['cycle_count']}\n\n"
         f"Último ciclo:\n"
         f"  Oportunidades: {bot_state['last_opportunities']}\n"
-        f"  Órdenes: {bot_state['last_orders_placed']}\n\n"
+        f"  Compras: {bot_state['last_orders_placed']} | Ventas: {bot_state.get('last_sells_placed', 0)}\n\n"
         f"⏰ Schedule: {schedule} UTC",
         with_menu=True,
     )
@@ -821,8 +836,8 @@ def cmd_log():
     # Si no hay en memoria, intentar leer del archivo decisions.log
     if not summary:
         try:
-            if os.path.exists("decisions.log"):
-                with open("decisions.log", "r", encoding="utf-8") as f:
+            if os.path.exists(_data_path("decisions.log")):
+                with open(_data_path("decisions.log"), "r", encoding="utf-8") as f:
                     lines = f.readlines()
                 # Buscar el último ciclo (empieza con "====")
                 last_cycle_start = -1
@@ -872,9 +887,9 @@ def cmd_logfull():
 
         if not edge_analysis:
             # Fallback: intentar leer del archivo decisions.log
-            if os.path.exists("decisions.log"):
+            if os.path.exists(_data_path("decisions.log")):
                 try:
-                    with open("decisions.log", "r", encoding="utf-8") as f:
+                    with open(_data_path("decisions.log"), "r", encoding="utf-8") as f:
                         lines = f.readlines()
                     # Buscar el último ciclo
                     last_start = -1
@@ -1532,7 +1547,7 @@ def manage_positions(client, dl):
     funder = os.getenv("FUNDER", "")
     if not funder:
         dl.append(f"GESTIÓN: sin FUNDER, saltando")
-        return {"n_sold": 0, "capital_freed": 0, "kept": 0, "resolved": 0, "sells": []}
+        return {"n_sold": 0, "capital_freed": 0, "kept": 0, "resolved": 0, "sells": [], "sold_token_ids": set()}
 
     # ---- Obtener posiciones actuales ----
     try:
@@ -1550,7 +1565,7 @@ def manage_positions(client, dl):
         positions = json.loads(resp.read())
     except Exception as e:
         dl.append(f"GESTIÓN: error obteniendo posiciones: {e}")
-        return {"n_sold": 0, "capital_freed": 0, "kept": 0, "resolved": 0, "sells": []}
+        return {"n_sold": 0, "capital_freed": 0, "kept": 0, "resolved": 0, "sells": [], "sold_token_ids": set()}
 
     # ---- Filtrar posiciones de temperatura con valor ----
     temp_positions = []
@@ -1578,7 +1593,7 @@ def manage_positions(client, dl):
 
     if not temp_positions:
         dl.append(f"GESTIÓN: sin posiciones de temperatura gestionables")
-        return {"n_sold": 0, "capital_freed": 0, "kept": 0, "resolved": 0, "sells": []}
+        return {"n_sold": 0, "capital_freed": 0, "kept": 0, "resolved": 0, "sells": [], "sold_token_ids": set()}
 
     dl.append(f"\nGESTIÓN DE POSICIONES: {len(temp_positions)} posiciones activas")
     dl.append(f"  Stop-loss: {STOP_LOSS_PCT}% | Take-profit: +{TAKE_PROFIT_PCT}% | Re-eval: edge<-3%")
@@ -1608,7 +1623,7 @@ def manage_positions(client, dl):
         # Dejar que resuelva: si ganamos, paga $1.00 por share automáticamente.
         if cur_price >= 0.98:
             dl.append(f"  🏁 RESUELTO ({outcome} @ {cur_price:.2f}) | {title} | Esperando pago")
-            keeping.append(p)
+            # v10.4 Fix Bug #12: NO añadir a keeping — son resueltas, no mantenidas
             n_resolved += 1
             continue
 
@@ -1712,7 +1727,7 @@ def manage_positions(client, dl):
 
     if not to_sell:
         dl.append(f"\n  Sin posiciones que cerrar este ciclo")
-        return {"n_sold": 0, "capital_freed": 0, "kept": len(keeping), "resolved": n_resolved, "sells": []}
+        return {"n_sold": 0, "capital_freed": 0, "kept": len(keeping), "resolved": n_resolved, "sells": [], "sold_token_ids": set()}
 
     # ---- Ejecutar ventas ----
     dl.append(f"\n  VENDIENDO {len(to_sell)} posiciones:")
@@ -1783,9 +1798,9 @@ def manage_positions(client, dl):
             send_telegram(
                 f"{icon} <b>{type_label} — orden colocada</b>\n"
                 f"{outcome} {city}\n"
-                f"Venta: {shares_to_sell}sh × ${sell_price:.2f}\n"
+                f"Venta: {shares_to_sell}sh × ${sell_price:.2f} (precio límite)\n"
                 f"PnL estimado: {pct:+.1f}% (${float(p.get('cashPnl', 0)):+.2f})\n"
-                f"<i>⏳ Pendiente de fill</i>"
+                f"<i>⏳ Pendiente de fill — precio real puede diferir</i>"
             )
 
             # v10.3 Fix Bug #7: Registrar como SELL_PENDING, NO como SELL
@@ -1817,16 +1832,19 @@ def manage_positions(client, dl):
             log.error(f"Error vendiendo posición: {e}")
 
     dl.append(f"\n  Resultado: {n_sold} vendidas | ~${capital_freed:.2f} liberados")
+    # v10.4 Fix Bug #9: devolver token_ids vendidos para evitar re-entrada mismo ciclo
+    sold_token_ids = set(p.get("asset", "") for p, _, _ in to_sell if p.get("asset"))
     return {
         "n_sold": n_sold,
         "capital_freed": capital_freed,
         "kept": len(keeping),
         "resolved": n_resolved,
         "sells": sell_summaries,
+        "sold_token_ids": sold_token_ids,
     }
 
 
-AUDIT_FILE = "audit.json"
+AUDIT_FILE = _data_path("audit.json")
 
 def load_audit_data():
     """Carga datos de auditoría acumulativos."""
@@ -2297,7 +2315,7 @@ def main(client):
     effective_bankroll = get_effective_bankroll(client)
 
     log.info("=" * 65)
-    log.info(f"BOT v10.3 | {today_str} | {mode_label} | ${effective_bankroll:.2f} (tope ${BANKROLL:.2f})")
+    log.info(f"BOT v10.4 | {today_str} | {mode_label} | ${effective_bankroll:.2f} (tope ${BANKROLL:.2f})")
     log.info("=" * 65)
 
     # Decision log: registrar inicio
@@ -2333,12 +2351,46 @@ def main(client):
     open_token_ids = get_order_token_ids(open_orders)
     dl.append(f"Órdenes activas: {len(open_token_ids)}")
 
+    # v10.4 Fix Bug #3: obtener token_ids de posiciones YA LLENADAS
+    # El check de open_token_ids solo mira órdenes pendientes.
+    # Si una orden ya se llenó, su token_id sale de open_orders pero
+    # la posición sigue abierta. Sin este check, el bot compra duplicados.
+    # Bug real: Madrid se compró en ciclo 7, y en ciclo 8 se volvió a comprar.
+    existing_position_tokens = set()
+    funder = os.getenv("FUNDER", "")
+    if funder:
+        try:
+            params = urllib.parse.urlencode({
+                "user": funder.lower(),
+                "sizeThreshold": "0",
+                "limit": "50",
+                "sortBy": "CURRENT",
+                "sortDirection": "DESC",
+            })
+            url = f"{DATA_API_URL}/positions?{params}"
+            req = urllib.request.Request(url)
+            req.add_header("User-Agent", "polymarket-bot/0.10")
+            resp = urllib.request.urlopen(req, timeout=15)
+            positions = json.loads(resp.read())
+            for p in positions:
+                cv = float(p.get("currentValue", 0))
+                cp = float(p.get("curPrice", 0))
+                asset = p.get("asset", "")
+                # Solo contar posiciones vivas (no micro ni resueltas)
+                if cv >= 0.10 and cp < 0.98 and asset:
+                    existing_position_tokens.add(asset)
+            dl.append(f"Posiciones activas: {len(existing_position_tokens)} token_ids")
+        except Exception as e:
+            dl.append(f"⚠ Error consultando posiciones para duplicados: {e}")
+            log.warning(f"Error consultando posiciones: {e}")
+
     # ---- PASO 0.5: GESTIÓN ACTIVA (v10.1) ----
     # Antes de buscar nuevas oportunidades, gestionar posiciones existentes
     # Esto libera capital y corta pérdidas (como hacen Entire-Hood y Thrifty)
-    mgmt = {"n_sold": 0, "capital_freed": 0, "kept": 0, "resolved": 0, "sells": []}
+    mgmt = {"n_sold": 0, "capital_freed": 0, "kept": 0, "resolved": 0, "sells": [], "sold_token_ids": set()}
     try:
         mgmt = manage_positions(client, dl)
+        bot_state["last_sells_placed"] = mgmt["n_sold"]  # v10.4: para /estado
         if mgmt["n_sold"] > 0:
             dl.append(f"GESTIÓN: {mgmt['n_sold']} posiciones cerradas, ~${mgmt['capital_freed']:.2f} liberados")
     except Exception as e:
@@ -2489,6 +2541,8 @@ def main(client):
     trades = []
     skipped_dup = 0
     edge_analysis = []  # Para el log detallado
+    # v10.4 Fix Bug #9: token_ids vendidos en manage_positions → no re-comprar
+    sold_this_cycle = mgmt.get("sold_token_ids", set())
 
     for c in candidates:
         city = c["city"]
@@ -2531,6 +2585,18 @@ def main(client):
         if token_id in open_token_ids:
             skipped_dup += 1
             edge_analysis.append(f"  ⏭ {city} {side} | edge={edge_pct:.1f}% → YA HAY ORDEN")
+            continue
+
+        # v10.4 Fix Bug #9: no re-comprar lo que vendimos este ciclo
+        if token_id in sold_this_cycle:
+            skipped_dup += 1
+            edge_analysis.append(f"  ⏭ {city} {side} | edge={edge_pct:.1f}% → VENDIDO ESTE CICLO (no re-entrada)")
+            continue
+
+        # v10.4 Fix Bug #3: no comprar si ya tenemos posición abierta
+        if token_id in existing_position_tokens:
+            skipped_dup += 1
+            edge_analysis.append(f"  ⏭ {city} {side} | edge={edge_pct:.1f}% → YA HAY POSICIÓN ABIERTA")
             continue
 
         position = calculate_position(effective_bankroll, our_prob, mkt_price)
@@ -2694,7 +2760,7 @@ def main(client):
         # Estado
         summary += f"{'─' * 25}\n"
         summary += f"Evaluados: {len(candidates)} | Edge: {len(trades)}\n"
-        summary += f"Exposición: ${current_exposure:.2f} | Disp: ${budget_left:.2f}\n"
+        summary += f"Exposición actual: ${current_exposure:.2f} | Presupuesto libre: ${budget_left:.2f}\n"
 
         send_telegram(summary, with_menu=True)
 
@@ -2853,7 +2919,7 @@ def run_trader_tasks():
 
 if __name__ == "__main__":
     log.info("=" * 65)
-    log.info(f"POLYMARKET BOT v10.3 | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
+    log.info(f"POLYMARKET BOT v10.4 | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
     log.info(f"Modo: {'DRY RUN' if DRY_RUN else 'REAL'}")
     log.info("=" * 65)
 
@@ -2868,7 +2934,7 @@ if __name__ == "__main__":
     modo = "DRY RUN" if DRY_RUN else "REAL"
     schedule = ", ".join(f"{h:02d}:00" for h in sorted(SCHEDULE_HOURS_UTC))
     send_telegram(
-        f"🤖 <b>Bot v10.3 arrancado</b>\n"
+        f"🤖 <b>Bot v10.4 arrancado</b>\n"
         f"Modo: {modo} | ${BANKROLL:.2f}\n"
         f"Min edge: {MIN_EDGE}% | Schedule: {schedule} UTC\n"
         f"🔧 Gestión activa: SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n"
@@ -2880,14 +2946,49 @@ if __name__ == "__main__":
     # v9: Ejecutar análisis de traders antes del primer ciclo
     run_trader_tasks()
 
-    log.info("Primer ciclo...")
-    # v10: Avisar que el primer ciclo está corriendo
-    send_telegram("🔄 <b>Ejecutando primer ciclo...</b>\nEsto puede tardar ~30s")
+    # v10.4 Fix Bug #11: comprobar si el último ciclo fue reciente
+    # Bug real: al hacer deploy, el bot ejecutaba un ciclo inmediato
+    # aunque el anterior fue hace 5 minutos. Causó doble Chicago.
+    # Si el último ciclo fue hace menos de 3 horas, saltamos al scheduler.
+    skip_first_cycle = False
+    min_cycle_gap_hours = 3.0  # mínimo entre ciclos para no duplicar
     try:
-        main(clob_client)
+        if os.path.exists(PERFORMANCE_FILE):
+            with open(PERFORMANCE_FILE, "r", encoding="utf-8") as f:
+                history = json.load(f)
+            if history:
+                # Buscar el timestamp más reciente
+                last_ts = None
+                for entry in reversed(history):
+                    ts_str = entry.get("timestamp", "")
+                    if ts_str:
+                        try:
+                            last_ts = datetime.fromisoformat(ts_str)
+                            break
+                        except (ValueError, TypeError):
+                            continue
+                if last_ts:
+                    age_hours = (datetime.now(timezone.utc) - last_ts).total_seconds() / 3600
+                    if age_hours < min_cycle_gap_hours:
+                        skip_first_cycle = True
+                        log.info(f"Último ciclo hace {age_hours:.1f}h (< {min_cycle_gap_hours}h) — saltando ciclo inicial")
+                        send_telegram(
+                            f"🤖 <b>Bot arrancado</b>\n"
+                            f"Último ciclo hace {age_hours:.1f}h — esperando al siguiente programado.\n"
+                            f"(Fix Bug #11: evita ciclo duplicado al deploy)"
+                        )
     except Exception as e:
-        log.error(f"Error primer ciclo: {e}")
-        send_telegram(f"❌ <b>Error</b>\n<code>{str(e)[:200]}</code>")
+        log.warning(f"Error comprobando último ciclo: {e}")
+
+    if not skip_first_cycle:
+        log.info("Primer ciclo...")
+        # v10: Avisar que el primer ciclo está corriendo
+        send_telegram("🔄 <b>Ejecutando primer ciclo...</b>\nEsto puede tardar ~30s")
+        try:
+            main(clob_client)
+        except Exception as e:
+            log.error(f"Error primer ciclo: {e}")
+            send_telegram(f"❌ <b>Error</b>\n<code>{str(e)[:200]}</code>")
 
     while True:
         next_run = get_next_run_time()
