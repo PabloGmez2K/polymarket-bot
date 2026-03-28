@@ -19,15 +19,22 @@ from py_clob_client.order_builder.constants import BUY, SELL
 load_dotenv()
 
 # =============================================================
-# bot.py v10.4.1 — Historial de ciclos + preparación Telegram v2
-# Sesión 17-18: versionado, cycles_history.jsonl
+# bot.py v10.4.2 — Rediseño Telegram + Bug #13 (paginación)
+# Sesión 19: Fase 1.5 — rediseño completo UI Telegram
 # =============================================================
 #
-# Nuevo en v10.4.1:
+# Nuevo en v10.4.2:
+#   - Rediseño completo Telegram: 7 botones mejorados + botón /info nuevo
+#   - Fix Bug #13: send_telegram_paged() — paginación automática >4096 chars
+#   - Helpers: _parse_position_label(), _get_portfolio_and_positions()
+#   - /log lee desde cycle_summary.json (estructurado, fiable)
+#   - /info: bloque resumen para pegar en ChatGPT/Claude
+#   - /cartera: precios en centavos, etiquetas legibles
+#
+# v10.4.1:
 #   - cycles_history.jsonl: historial append-only de todos los ciclos
 #   - cycle_summary.json: último ciclo para consulta rápida
 #   - Cada ciclo registra: gestión, escaneo, compras, exposición, versión
-#   - Base para versionado v10.4.X (UI) vs v10.5 (lógica)
 #
 # v10.4 (base):
 #   - Fix Bug #3: check posiciones abiertas en Data API antes de comprar
@@ -222,6 +229,115 @@ def parse_city_from_title(title):
     """Extrae ciudad de un título de posición. Helper para el tracker."""
     match = re.search(r"temperature in (.+?) (?:be |between |\d)", title, re.IGNORECASE)
     return match.group(1).strip() if match else "?"
+
+
+def _parse_position_label(title, outcome=""):
+    """
+    Convierte título de mercado + outcome en etiqueta corta y legible.
+    Ejemplos:
+      "Will the high temperature in Dallas, TX be between 58 and 59°F on March 28?"
+      → "Dallas 58-59°F Mar28 YES"
+      "Will the temperature in Paris be 11°C on March 29?" → "Paris 11°C Mar29 NO"
+      "Will the high temperature in Seattle be at most 51°F on March 28?" → "Seattle ≤51°F Mar28 YES"
+    """
+    city = parse_city_from_title(title)
+
+    temp = ""
+    m = re.search(r'between (\d+) and (\d+)\s*(°[CF])', title, re.IGNORECASE)
+    if m:
+        temp = f"{m.group(1)}-{m.group(2)}{m.group(3)}"
+    else:
+        m = re.search(r'at most (\d+)\s*(°[CF])', title, re.IGNORECASE)
+        if m:
+            temp = f"≤{m.group(1)}{m.group(2)}"
+        else:
+            m = re.search(r'at least (\d+)\s*(°[CF])', title, re.IGNORECASE)
+            if m:
+                temp = f"≥{m.group(1)}{m.group(2)}"
+            else:
+                m = re.search(r'be (\d+)\s*(°[CF])', title, re.IGNORECASE)
+                if m:
+                    temp = f"{m.group(1)}{m.group(2)}"
+
+    date_str = ""
+    m = re.search(
+        r'on (January|February|March|April|May|June|July|August|September|October|November|December) (\d+)',
+        title, re.IGNORECASE
+    )
+    if m:
+        date_str = f"{m.group(1)[:3]}{m.group(2)}"
+
+    parts = [city]
+    if temp:
+        parts.append(temp)
+    if date_str:
+        parts.append(date_str)
+    if outcome:
+        parts.append(outcome)
+    return " ".join(parts)
+
+
+def _get_portfolio_and_positions():
+    """
+    Obtiene posiciones y cash de la Data API en una sola llamada.
+    Devuelve dict con: cash, cash_ok, active, resolved_won, dead,
+                       active_value, resolved_value, portfolio_total,
+                       api_error (str o None).
+    Devuelve None si no hay FUNDER configurado.
+    """
+    funder = os.getenv("FUNDER", "")
+    if not funder:
+        return None
+
+    positions = []
+    api_error = None
+    try:
+        params = urllib.parse.urlencode({
+            "user": funder.lower(),
+            "sizeThreshold": "0",
+            "limit": "50",
+            "sortBy": "CURRENT",
+            "sortDirection": "DESC",
+        })
+        url = f"{DATA_API_URL}/positions?{params}"
+        req = urllib.request.Request(url)
+        req.add_header("User-Agent", "polymarket-bot/0.10")
+        resp = urllib.request.urlopen(req, timeout=15)
+        positions = json.loads(resp.read())
+    except Exception as e:
+        api_error = str(e)
+        log.warning(f"Error _get_portfolio_and_positions: {e}")
+
+    cash, cash_ok = get_cash_balance(clob_client)
+
+    active = []
+    resolved_won = []
+    dead = []
+    for pos in positions:
+        cv = float(pos.get("currentValue", 0))
+        cp = float(pos.get("curPrice", 0))
+        if cp >= 0.98:
+            resolved_won.append(pos)
+        elif cv >= 0.10:
+            active.append(pos)
+        else:
+            dead.append(pos)
+
+    active_value = sum(float(p.get("currentValue", 0)) for p in active)
+    resolved_value = sum(float(p.get("currentValue", 0)) for p in resolved_won)
+    portfolio_total = cash + active_value + resolved_value
+
+    return {
+        "cash": cash,
+        "cash_ok": cash_ok,
+        "active": active,
+        "resolved_won": resolved_won,
+        "dead": dead,
+        "active_value": active_value,
+        "resolved_value": resolved_value,
+        "portfolio_total": portfolio_total,
+        "api_error": api_error,
+    }
 
 
 # =============================================================
@@ -550,10 +666,11 @@ MENU_KEYBOARD = {
             {"text": "📈 Rendimiento", "callback_data": "rendimiento"},
         ],
         [
-            {"text": "📋 Órdenes", "callback_data": "ordenes"},
-            {"text": "🚀 Forzar ciclo", "callback_data": "forzar"},
+            {"text": "🗒 Órdenes", "callback_data": "ordenes"},
+            {"text": "ℹ️ Info", "callback_data": "info"},
         ],
         [
+            {"text": "🚀 Forzar ciclo", "callback_data": "forzar"},
             {"text": "⚡ Modo", "callback_data": "modo"},
         ],
     ]
@@ -602,6 +719,35 @@ def answer_callback_query(callback_id, text=""):
         pass
 
 
+def send_telegram_paged(text, with_menu=False, page_size=3800):
+    """
+    Fix Bug #13: envía mensajes largos divididos en páginas.
+    Telegram rechaza mensajes > 4096 chars con HTTP 400.
+    Divide en el último salto de línea antes del límite.
+    El menú solo se muestra en la última página.
+    """
+    if len(text) <= page_size:
+        send_telegram(text, with_menu=with_menu)
+        return
+
+    pages = []
+    remaining = text
+    while remaining:
+        if len(remaining) <= page_size:
+            pages.append(remaining)
+            break
+        cut = remaining.rfind("\n", 0, page_size)
+        if cut == -1:
+            cut = page_size
+        pages.append(remaining[:cut])
+        remaining = remaining[cut:].lstrip("\n")
+
+    for i, page in enumerate(pages):
+        is_last = (i == len(pages) - 1)
+        header = f"[{i+1}/{len(pages)}]\n" if len(pages) > 1 else ""
+        send_telegram(header + page, with_menu=(with_menu and is_last))
+
+
 # =============================================================
 # TELEGRAM — COMANDOS
 # =============================================================
@@ -623,150 +769,125 @@ def cmd_estado():
     else:
         next_str = "No programado"
 
-    last_str = bot_state["last_run"].strftime('%H:%M UTC') if bot_state["last_run"] else "Nunca"
+    last_str = bot_state["last_run"].strftime('%d/%m %H:%M UTC') if bot_state["last_run"] else "Nunca"
     schedule = ", ".join(f"{h:02d}:00" for h in sorted(SCHEDULE_HOURS_UTC))
 
+    # Último ciclo desde cycle_summary.json si existe
+    cycle_line = ""
+    if os.path.exists(CYCLE_SUMMARY_FILE):
+        try:
+            with open(CYCLE_SUMMARY_FILE, "r", encoding="utf-8") as f:
+                cd = json.load(f)
+            mgmt = cd.get("management", {})
+            scan = cd.get("scan", {})
+            buys = cd.get("buys", [])
+            n_buys = len(buys)
+            n_sold = mgmt.get("n_sold", 0)
+            n_mkts = scan.get("markets_evaluated", 0)
+            exp = cd.get("exposure_after")
+            exp_str = f" | Exp ${exp:.2f}" if exp is not None else ""
+            cycle_line = (
+                f"\n📋 Ciclo #{cd.get('cycle_number','?')} "
+                f"({cd.get('timestamp_utc','?')[:10]}):\n"
+                f"  Mercados: {n_mkts} | Compras: {n_buys} | Ventas: {n_sold}{exp_str}"
+            )
+        except Exception:
+            pass
+
+    if not cycle_line:
+        cycle_line = (
+            f"\n📋 Último ciclo:\n"
+            f"  Oportunidades: {bot_state['last_opportunities']}\n"
+            f"  Compras: {bot_state['last_orders_placed']} | Ventas: {bot_state.get('last_sells_placed', 0)}"
+        )
+
     send_telegram(
-        f"📊 <b>Estado del Bot</b>\n\n"
-        f"Modo: {modo}\n"
-        f"Bankroll: <b>${BANKROLL:.2f}</b>\n"
-        f"Min edge: {MIN_EDGE}%\n"
-        f"Estado: {running}\n\n"
-        f"Última ejecución: {last_str}\n"
-        f"Próxima: {next_str}\n"
-        f"Ciclos: {bot_state['cycle_count']}\n\n"
-        f"Último ciclo:\n"
-        f"  Oportunidades: {bot_state['last_opportunities']}\n"
-        f"  Compras: {bot_state['last_orders_placed']} | Ventas: {bot_state.get('last_sells_placed', 0)}\n\n"
-        f"⏰ Schedule: {schedule} UTC",
+        f"📊 <b>Bot v10.4.2 | {modo}</b>\n\n"
+        f"💰 Bankroll: <b>${BANKROLL:.2f}</b> | Edge mín: {MIN_EDGE}%\n"
+        f"🔧 SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n\n"
+        f"⏱ Estado: {running}\n"
+        f"📅 Último: {last_str}\n"
+        f"⏰ Próximo: {next_str}\n"
+        f"🔢 Ciclos: {bot_state['cycle_count']}"
+        f"{cycle_line}\n\n"
+        f"Schedule: {schedule} UTC",
         with_menu=True,
     )
 
 
 def cmd_cartera():
-    """
-    💰 Cartera: cash + posiciones activas + resumen de muertas.
-
-    v10.2: Rediseñado para claridad. Separa posiciones vivas de muertas,
-    muestra cash disponible, y no satura con posiciones de $0.01.
-    """
-    funder = os.getenv("FUNDER", "")
-    if not funder:
-        send_telegram("❌ No hay FUNDER.", with_menu=True)
+    """💰 Cartera: cash + posiciones activas. v10.4.2: etiquetas legibles, precios en centavos."""
+    portfolio = _get_portfolio_and_positions()
+    if portfolio is None:
+        send_telegram("❌ No hay FUNDER configurado.", with_menu=True)
         return
 
-    try:
-        params = urllib.parse.urlencode({
-            "user": funder.lower(),
-            "sizeThreshold": "0",
-            "limit": "50",
-            "sortBy": "CURRENT",
-            "sortDirection": "DESC",
-        })
-        url = f"{DATA_API_URL}/positions?{params}"
-        req = urllib.request.Request(url)
-        req.add_header("User-Agent", "polymarket-bot/0.10")
-        resp = urllib.request.urlopen(req, timeout=15)
-        positions = json.loads(resp.read())
-    except Exception as e:
-        send_telegram(f"❌ Error cartera: {e}", with_menu=True)
-        return
+    cash = portfolio["cash"]
+    cash_ok = portfolio["cash_ok"]
+    active = portfolio["active"]
+    resolved_won = portfolio["resolved_won"]
+    dead = portfolio["dead"]
+    active_value = portfolio["active_value"]
+    resolved_value = portfolio["resolved_value"]
+    portfolio_total = portfolio["portfolio_total"]
+    api_error = portfolio.get("api_error")
 
-    # ---- Cash balance ----
-    cash, cash_ok = get_cash_balance(clob_client)
-
-    # ---- Separar posiciones activas vs muertas ----
-    active = []     # currentValue >= $0.10 → vale la pena mostrar
-    dead = []       # currentValue < $0.10 → resueltas o sin valor
-    resolved_won = []  # curPrice >= 0.98 → ganamos, esperando pago
-
-    for pos in positions:
-        current_value = float(pos.get("currentValue", 0))
-        cur_price = float(pos.get("curPrice", 0))
-        if cur_price >= 0.98:
-            resolved_won.append(pos)
-        elif current_value >= 0.10:
-            active.append(pos)
-        else:
-            dead.append(pos)
-
-    # ---- Calcular totales solo de activas ----
-    total_active_value = sum(float(p.get("currentValue", 0)) for p in active)
-    total_active_invested = sum(float(p.get("initialValue", 0)) for p in active)
-    total_active_pnl = sum(float(p.get("cashPnl", 0)) for p in active)
-    resolved_value = sum(float(p.get("currentValue", 0)) for p in resolved_won)
     dead_lost = sum(float(p.get("initialValue", 0)) for p in dead)
-    portfolio_total = cash + total_active_value + resolved_value
+    active_pnl = sum(float(p.get("cashPnl", 0)) for p in active)
 
-    # ---- Header ----
-    pnl_icon = "🟢" if total_active_pnl >= 0 else "🔴"
     msg = f"💰 <b>Cartera</b>\n\n"
-
+    if api_error:
+        msg += f"⚠️ <i>Error API posiciones: {api_error[:80]}</i>\n\n"
     if cash_ok:
         msg += f"💵 Cash: <b>${cash:.2f}</b>\n"
     else:
         msg += f"💵 Cash: <i>no disponible</i>\n"
 
-    msg += f"📊 Posiciones activas: <b>${total_active_value:.2f}</b> ({len(active)})\n"
-
+    msg += f"📊 Posiciones vivas: <b>${active_value:.2f}</b> ({len(active)} pos)\n"
     if resolved_won:
-        msg += f"🏁 Resueltas (esperando pago): ${resolved_value:.2f} ({len(resolved_won)})\n"
-
+        msg += f"🏁 Pendiente pago: ${resolved_value:.2f} ({len(resolved_won)})\n"
     if cash_ok:
-        msg += (
-            f"{'─' * 28}\n"
-            f"💼 Total: <b>${portfolio_total:.2f}</b>\n"
-        )
-    else:
-        msg += (
-            f"{'─' * 28}\n"
-            f"💼 Posiciones: <b>${total_active_value + resolved_value:.2f}</b>\n"
-        )
+        msg += f"{'─'*24}\n💼 Total: <b>${portfolio_total:.2f}</b>\n"
 
     # ---- Posiciones activas detalladas ----
     if active:
-        msg += f"\n<b>📊 Posiciones activas:</b>\n"
+        msg += f"\n<b>Posiciones activas:</b>\n"
         for i, pos in enumerate(active):
-            title = pos.get("title", "?")
+            title = pos.get("title", "")
             outcome = pos.get("outcome", "?")
+            label = _parse_position_label(title, outcome)
             size = float(pos.get("size", 0))
             avg_price = float(pos.get("avgPrice", 0))
             cur_price = float(pos.get("curPrice", 0))
             current_value = float(pos.get("currentValue", 0))
             pct_pnl = float(pos.get("percentPnl", 0))
             cash_pnl = float(pos.get("cashPnl", 0))
-
             icon = "🟢" if cash_pnl >= 0 else "🔴"
-            # Extraer ciudad y temperatura del título
-            city = parse_city_from_title(title)
-            t_short = title[:45] + "..." if len(title) > 45 else title
-
+            avg_c = int(round(avg_price * 100))
+            cur_c = int(round(cur_price * 100))
             msg += (
-                f"\n{i+1}. {icon} <b>{outcome}</b> {city}\n"
-                f"   {size:.1f}sh @ ${avg_price:.2f} → ${cur_price:.2f}\n"
-                f"   Valor: ${current_value:.2f} | PnL: {pct_pnl:+.1f}% (${cash_pnl:+.2f})\n"
+                f"\n{i+1}. {icon} <b>{label}</b>\n"
+                f"   {size:.1f}sh @ {avg_c}¢ → {cur_c}¢\n"
+                f"   ${current_value:.2f} | {pct_pnl:+.1f}% (${cash_pnl:+.2f})\n"
             )
 
     # ---- Resueltas ganadas ----
     if resolved_won:
         msg += f"\n<b>🏁 Esperando pago:</b>\n"
         for pos in resolved_won:
-            outcome = pos.get("outcome", "?")
-            city = parse_city_from_title(pos.get("title", "?"))
+            label = _parse_position_label(pos.get("title", ""), pos.get("outcome", "?"))
             current_value = float(pos.get("currentValue", 0))
-            msg += f"  ✅ {outcome} {city} → ${current_value:.2f}\n"
+            msg += f"  ✅ {label} → ${current_value:.2f}\n"
 
     # ---- Muertas (solo resumen) ----
     if dead:
         msg += f"\n<i>💀 {len(dead)} posiciones sin valor (${dead_lost:.2f} invertidos)</i>\n"
 
-    if len(msg) > 4000:
-        msg = msg[:3990] + "\n..."
-    send_telegram(msg, with_menu=True)
+    send_telegram_paged(msg, with_menu=True)
 
 
 def cmd_ordenes():
-    """📋 Órdenes pendientes — usa known_tokens para enriquecer."""
+    """🗒 Órdenes pendientes — etiquetas legibles con ciudad+temp+fecha."""
     global clob_client
     if bot_state["running"]:
         send_telegram("🔄 Ciclo en ejecución...", with_menu=True)
@@ -782,15 +903,18 @@ def cmd_ordenes():
         return
 
     if not orders:
-        send_telegram("📋 <b>Órdenes pendientes:</b> ninguna", with_menu=True)
+        send_telegram("🗒 <b>Órdenes pendientes:</b> ninguna", with_menu=True)
         return
 
-    lines = [f"📋 <b>Órdenes pendientes: {len(orders)}</b>\n"]
+    lines = [f"🗒 <b>Órdenes pendientes: {len(orders)}</b>\n"]
 
     for i, order in enumerate(orders):
         price = order.get("price", "?")
-        size = order.get("original_size", order.get("size", "?"))
-        side = order.get("side", "?")
+        size_raw = order.get("original_size", order.get("size", "?"))
+        try:
+            size_str = f"{float(size_raw):.1f}sh"
+        except (ValueError, TypeError):
+            size_str = str(size_raw)
         asset_id = order.get("asset_id", "")
 
         # Edad
@@ -803,68 +927,99 @@ def cmd_ordenes():
                 else:
                     created = datetime.fromisoformat(str(created_raw).replace("Z", "+00:00"))
                 age_h = (datetime.now(timezone.utc) - created).total_seconds() / 3600
-                age_str = f" | ⏱ {age_h:.1f}h"
+                age_str = f" ⏱{age_h:.1f}h"
             except (ValueError, TypeError, OSError):
                 pass
 
-        # Buscar en known_tokens (cache del bot)
+        # Enriquecer con known_tokens (cache del bot)
         info = known_tokens.get(asset_id, {})
         question = info.get("question", "")
         token_side = info.get("side", "")
 
         if question:
-            q_short = question[:55] + "..." if len(question) > 55 else question
+            label = _parse_position_label(question, token_side)
+            price_c = int(round(float(price) * 100)) if price != "?" else "?"
             lines.append(
-                f"\n{i+1}. {side} {token_side} @ ${price}\n"
-                f"   {q_short}\n"
-                f"   Shares: {size}{age_str}"
+                f"\n{i+1}. <b>{label}</b>\n"
+                f"   BUY @ {price_c}¢ | {size_str}{age_str}"
             )
         else:
             lines.append(
-                f"\n{i+1}. {side} @ ${price}{age_str}\n"
-                f"   Token: {asset_id[:24]}..."
+                f"\n{i+1}. BUY @ ${price} | {size_str}{age_str}\n"
+                f"   Token: {asset_id[:20]}..."
             )
 
-    send_telegram("\n".join(lines), with_menu=True)
+    send_telegram_paged("\n".join(lines), with_menu=True)
 
 
 def cmd_log():
     """
-    📓 Muestra qué hizo el bot en el último ciclo.
-    Si no hay resumen en memoria (post-redeploy), lee del archivo.
+    📓 Resumen legible del último ciclo.
+    v10.4.2: Lee desde cycle_summary.json (estructurado). Fallback a bot_state.
     """
-    summary = bot_state.get("last_decision_summary", "")
-
-    # Si no hay en memoria, intentar leer del archivo decisions.log
-    if not summary:
+    # Fuente primaria: cycle_summary.json
+    if os.path.exists(CYCLE_SUMMARY_FILE):
         try:
-            if os.path.exists(_data_path("decisions.log")):
-                with open(_data_path("decisions.log"), "r", encoding="utf-8") as f:
-                    lines = f.readlines()
-                # Buscar el último ciclo (empieza con "====")
-                last_cycle_start = -1
-                for i in range(len(lines) - 1, -1, -1):
-                    if "CICLO" in lines[i] and "=====" in lines[max(0, i-1)]:
-                        last_cycle_start = max(0, i - 1)
-                        break
-                if last_cycle_start >= 0:
-                    cycle_lines = lines[last_cycle_start:]
-                    summary = "📓 <b>Último ciclo (de archivo)</b>\n\n"
-                    for line in cycle_lines[:30]:  # máx 30 líneas
-                        clean = line.strip()
-                        if clean:
-                            summary += f"{clean}\n"
-        except Exception:
-            pass
+            with open(CYCLE_SUMMARY_FILE, "r", encoding="utf-8") as f:
+                cd = json.load(f)
+            ts = cd.get("timestamp_utc", "?")[:16].replace("T", " ")
+            mode = cd.get("mode", "?")
+            cycle_n = cd.get("cycle_number", "?")
+            mgmt = cd.get("management", {})
+            scan = cd.get("scan", {})
+            buys = cd.get("buys", [])
+            exposure = cd.get("exposure_after")
+            budget = cd.get("budget_left")
 
-    if not summary:
-        send_telegram("📓 <b>Log</b>\n\nAún no hay ciclos registrados.", with_menu=True)
+            msg = f"📓 <b>Ciclo #{cycle_n}</b>\n"
+            msg += f"<i>{ts} UTC | {mode}</i>\n\n"
+
+            # Gestión
+            n_kept = mgmt.get("n_kept", 0)
+            n_sold = mgmt.get("n_sold", 0)
+            n_res = mgmt.get("n_resolved", 0)
+            n_loss = mgmt.get("n_loss_total", 0)
+            msg += f"<b>Gestión:</b> {n_kept} mantenidas"
+            if n_sold:
+                msg += f" | {n_sold} vendidas"
+            if n_res:
+                msg += f" | {n_res} resueltas"
+            if n_loss:
+                msg += f" | 💀 {n_loss} loss total"
+            msg += "\n"
+
+            # Escaneo
+            n_mkts = scan.get("markets_evaluated", 0)
+            n_edge = scan.get("with_edge", 0)
+            n_sel = scan.get("selected", 0)
+            msg += f"<b>Escaneo:</b> {n_mkts} mercados → {n_edge} con edge → {n_sel} seleccionados\n"
+
+            # Compras
+            if buys:
+                msg += f"\n<b>Compras ({len(buys)}):</b>\n"
+                for b in buys:
+                    trader_icon = " 🤝" if b.get("traders") else ""
+                    msg += f"  🟢 {b.get('city','?')} {b.get('side','?')} ${b.get('amount',0):.2f} | edge {b.get('edge',0)}%{trader_icon}\n"
+            else:
+                msg += "\n<i>Sin compras este ciclo</i>\n"
+
+            if exposure is not None:
+                msg += f"\nExposición actual: <b>${exposure:.2f}</b>\n"
+            if budget is not None:
+                msg += f"Presupuesto libre: <b>${budget:.2f}</b>\n"
+
+            send_telegram_paged(msg, with_menu=True)
+            return
+        except Exception as e:
+            log.warning(f"Error leyendo cycle_summary en cmd_log: {e}")
+
+    # Fallback: resumen en memoria
+    summary = bot_state.get("last_decision_summary", "")
+    if summary:
+        send_telegram_paged(summary, with_menu=True)
         return
 
-    if len(summary) > 3900:
-        summary = summary[:3900] + "\n..."
-
-    send_telegram(summary, with_menu=True)
+    send_telegram("📓 <b>Log</b>\n\nAún no hay ciclos registrados.", with_menu=True)
 
 
 def cmd_forzar():
@@ -908,9 +1063,7 @@ def cmd_logfull():
                                 clean = clean.split(" | ", 1)[-1]
                             if clean:
                                 cycle_text += f"{clean}\n"
-                        if len(cycle_text) > 3900:
-                            cycle_text = cycle_text[:3890] + "\n..."
-                        send_telegram(cycle_text, with_menu=True)
+                        send_telegram_paged(cycle_text, with_menu=True)
                         return
                 except Exception as e:
                     log.warning(f"Error leyendo decisions.log para /detalle: {e}")
@@ -980,9 +1133,7 @@ def cmd_logfull():
         else:
             text += f"\n<i>Sin near misses ≥3%</i>\n"
 
-        if len(text) > 3900:
-            text = text[:3890] + "\n..."
-        send_telegram(text, with_menu=True)
+        send_telegram_paged(text, with_menu=True)
 
     except Exception as e:
         log.error(f"Error en /detalle: {e}")
@@ -1041,8 +1192,8 @@ def cmd_cancelar_modo():
 
 def cmd_traders():
     """
-    🔍 Muestra resumen de inteligencia de traders.
-    Lee signals.json y muestra señales accionables.
+    🔍 Traders Intel: señales + coincidencias con posiciones activas.
+    v10.4.2: cruza señales con cartera actual.
     """
     signals_file = "signals.json"
     if not os.path.exists(signals_file):
@@ -1070,85 +1221,210 @@ def cmd_traders():
     n_skipped = data.get("n_skipped_low_quality", 0)
 
     text = f"🔍 <b>Traders Intel</b>\n"
-    text += f"Actualización: {generated} UTC\n"
-    text += f"Analizados: {n_traders} | Calidad: {n_quality} | Filtrados: {n_skipped} señales\n"
+    text += f"<i>{generated} UTC</i>\n"
+    text += f"Analizados: {n_traders} | Calidad: {n_quality} | Skip: {n_skipped}\n"
     text += f"Señales: {n_signals} | Consenso: {n_consensus}\n"
 
     if quality_names:
-        text += f"\n⭐ <b>Traders calidad:</b> {', '.join(quality_names[:8])}\n"
+        text += f"\n⭐ <b>Calidad:</b> {', '.join(quality_names[:6])}\n"
+
+    # Cruce con posiciones activas
+    portfolio = _get_portfolio_and_positions()
+    active_cities = set()
+    if portfolio:
+        for pos in portfolio["active"]:
+            city = parse_city_from_title(pos.get("title", ""))
+            if city != "?":
+                active_cities.add(city.lower())
+
+    if active_cities and n_signals > 0:
+        text += f"\n<b>🔗 Coincidencias con cartera:</b>\n"
+        found_any = False
+        for s in data.get("signals", []):
+            if s.get("is_reference"):
+                continue
+            city = s.get("city", "")
+            if city.lower() in active_cities:
+                icon = "🤝" if s.get("has_consensus") else "📍"
+                outcome = s.get("outcome", "?")
+                price = s.get("avg_price", 0)
+                text += f"  {icon} {city} {outcome} @ {int(price*100)}¢\n"
+                found_any = True
+        if not found_any:
+            text += "  <i>Ninguna señal coincide con posiciones actuales</i>\n"
 
     # Último scan y análisis
-    scan = bot_state.get("last_trader_scan")
-    analysis = bot_state.get("last_trader_analysis")
-    if scan:
-        text += f"\nÚltimo scan: {scan.strftime('%d/%m %H:%M')} UTC"
-    if analysis:
-        text += f"\nÚltimo análisis: {analysis.strftime('%d/%m %H:%M')} UTC"
+    scan_ts = bot_state.get("last_trader_scan")
+    analysis_ts = bot_state.get("last_trader_analysis")
+    if scan_ts:
+        text += f"\nScan: {scan_ts.strftime('%d/%m %H:%M UTC')}"
+    if analysis_ts:
+        text += f" | Análisis: {analysis_ts.strftime('%d/%m %H:%M UTC')}"
+    if scan_ts or analysis_ts:
+        text += "\n"
 
     if n_signals == 0:
-        text += "\n\nSin señales accionables ahora."
+        text += "\n<i>Sin señales accionables ahora.</i>\n"
     else:
-        text += f"\n\n<b>Señales activas:</b>\n"
+        text += f"\n<b>Señales activas ({n_signals}):</b>\n"
         shown = 0
         for s in data.get("signals", []):
             if s.get("is_reference"):
                 continue
-            if shown >= 8:
-                text += f"\n... y {n_signals - shown} más"
+            if shown >= 10:
+                text += f"<i>... y {n_signals - shown} más</i>\n"
                 break
             icon = "🤝" if s.get("has_consensus") else "📍"
             city = s.get("city", "?")
             date_str = s.get("date", "?")
             outcome = s.get("outcome", "?")
             price = s.get("avg_price", 0)
-            text += f"{icon} {s['trader']}: {outcome} {city} {date_str} ${price:.2f}\n"
+            price_c = int(round(price * 100))
+            text += f"{icon} {city} {outcome} {date_str} @ {price_c}¢\n"
             shown += 1
 
-    if len(text) > 4000:
-        text = text[:3990] + "\n..."
-    send_telegram(text, with_menu=True)
+    send_telegram_paged(text, with_menu=True)
 
 
 def cmd_rendimiento():
-    """📈 Rendimiento: ROI y estadísticas desde performance.json."""
+    """📈 Rendimiento: portfolio actual + estadísticas desde performance.json."""
+    # Portfolio en tiempo real
+    portfolio = _get_portfolio_and_positions()
+    text = f"📈 <b>Rendimiento</b>\n\n"
+
+    if portfolio:
+        cash = portfolio["cash"]
+        cash_ok = portfolio["cash_ok"]
+        active_value = portfolio["active_value"]
+        resolved_value = portfolio["resolved_value"]
+        active = portfolio["active"]
+        resolved_won = portfolio["resolved_won"]
+        active_pnl = sum(float(p.get("cashPnl", 0)) for p in active)
+
+        if cash_ok:
+            text += f"💵 Cash: ${cash:.2f}\n"
+        text += f"📊 Posiciones vivas: ${active_value:.2f}"
+        if active_pnl != 0:
+            text += f" ({active_pnl:+.2f})"
+        text += "\n"
+        if resolved_value > 0:
+            text += f"🏁 Pendiente pago: ${resolved_value:.2f} ({len(resolved_won)})\n"
+        if cash_ok:
+            total = portfolio["portfolio_total"]
+            text += f"💼 Total: <b>${total:.2f}</b>\n"
+        text += "\n"
+
+    # Estadísticas históricas
     stats = get_performance_summary()
     if not stats:
-        send_telegram("📈 <b>Rendimiento</b>\n\nSin datos todavía. Se registran con cada BUY/SELL.", with_menu=True)
+        text += "<i>Sin trades registrados todavía.</i>\n"
+        send_telegram(text, with_menu=True)
         return
 
-    text = f"📈 <b>Rendimiento</b>\n\n"
-    text += f"Compras: {stats['total_buys']} | Ventas: {stats['total_sells']}\n"
+    text += f"<b>Trades (v10.2+):</b>\n"
+    text += f"  Compras: {stats['total_buys']} | Ventas: {stats['total_sells']}\n"
     if stats.get('pending_sells', 0) > 0:
-        text += f"⏳ Ventas pendientes de fill: {stats['pending_sells']}\n"
-    text += f"Total invertido: ${stats['total_invested']:.2f}\n"
-    text += f"PnL ventas: ${stats['sell_pnl']:+.2f}\n"
-    text += f"\n<i>⚠️ Solo cuenta trades del bot v10.2+. PnL fiable: dashboard Polymarket.</i>\n\n"
+        text += f"  ⏳ Pendientes fill: {stats['pending_sells']}\n"
+    text += f"  Invertido: ${stats['total_invested']:.2f}\n"
+    text += f"  PnL ventas: <b>${stats['sell_pnl']:+.2f}</b>\n"
 
-    text += f"<b>Ventas por tipo:</b>\n"
-    text += f"  💰 Take-profit: {stats['take_profits']}\n"
-    text += f"  🔻 Stop-loss: {stats['stop_losses']}\n"
-    text += f"  🔄 Re-evaluación: {stats['reevals']}\n\n"
+    text += f"\n<b>Salidas:</b>\n"
+    text += f"  💰 TP: {stats['take_profits']} | 🔻 SL: {stats['stop_losses']} | 🔄 Reeval: {stats['reevals']}\n"
 
     if stats['confirmed_count'] + stats['unconfirmed_count'] > 0:
-        text += f"<b>Traders vs solo:</b>\n"
+        text += f"\n<b>Con/sin trader:</b>\n"
         if stats['confirmed_count'] > 0:
-            text += f"  🤝 Con trader: {stats['confirmed_count']} ventas, ${stats['confirmed_pnl']:+.2f}\n"
+            text += f"  🤝 {stats['confirmed_count']} ops → ${stats['confirmed_pnl']:+.2f}\n"
         if stats['unconfirmed_count'] > 0:
-            text += f"  🔹 Sin trader: {stats['unconfirmed_count']} ventas, ${stats['unconfirmed_pnl']:+.2f}\n"
+            text += f"  🔹 {stats['unconfirmed_count']} ops → ${stats['unconfirmed_pnl']:+.2f}\n"
 
     if stats['top_cities']:
-        text += f"\n<b>Ciudades:</b>\n"
+        text += f"\n<b>Top ciudades:</b>\n"
         for city, count in stats['top_cities']:
             pnl = stats['city_pnl'].get(city, 0)
             text += f"  {city}: {count} ops, ${pnl:+.2f}\n"
 
-    send_telegram(text, with_menu=True)
+    text += f"\n<i>⚠️ PnL fiable: dashboard Polymarket.</i>\n"
+    send_telegram_paged(text, with_menu=True)
+
+
+def cmd_info():
+    """ℹ️ Bloque resumen del bot para pegar en ChatGPT/Claude."""
+    modo = "DRY RUN" if DRY_RUN else "REAL"
+    schedule = ", ".join(f"{h:02d}:00" for h in sorted(SCHEDULE_HOURS_UTC))
+    last_str = bot_state["last_run"].strftime('%Y-%m-%d %H:%M UTC') if bot_state["last_run"] else "Nunca"
+
+    # Último ciclo desde cycle_summary.json
+    cycle_block = ""
+    if os.path.exists(CYCLE_SUMMARY_FILE):
+        try:
+            with open(CYCLE_SUMMARY_FILE, "r", encoding="utf-8") as f:
+                cd = json.load(f)
+            mgmt = cd.get("management", {})
+            scan = cd.get("scan", {})
+            buys = cd.get("buys", [])
+            buys_str = ", ".join(
+                f"{b.get('city','?')} {b.get('side','?')} ${b.get('amount',0):.2f}"
+                for b in buys
+            ) if buys else "ninguna"
+            exp = cd.get("exposure_after")
+            bud = cd.get("budget_left")
+            cycle_block = (
+                f"\nCiclo #{cd.get('cycle_number','?')} ({cd.get('timestamp_utc','?')[:16]} UTC)\n"
+                f"  Gestión: {mgmt.get('n_kept',0)} mantenidas, {mgmt.get('n_sold',0)} vendidas, "
+                f"{mgmt.get('n_resolved',0)} resueltas\n"
+                f"  Escaneo: {scan.get('markets_evaluated',0)} mercados → "
+                f"{scan.get('selected',0)} seleccionados\n"
+                f"  Compras: {buys_str}\n"
+            )
+            if exp is not None:
+                cycle_block += f"  Exposición: ${exp:.2f}"
+            if bud is not None:
+                cycle_block += f" | Libre: ${bud:.2f}"
+            if exp is not None or bud is not None:
+                cycle_block += "\n"
+        except Exception:
+            pass
+
+    # Estadísticas
+    stats = get_performance_summary()
+    perf_block = ""
+    if stats:
+        perf_block = (
+            f"\n{stats['total_buys']} compras, {stats['total_sells']} ventas\n"
+            f"PnL ventas: ${stats['sell_pnl']:+.2f}\n"
+            f"TP: {stats['take_profits']} | SL: {stats['stop_losses']} | Reeval: {stats['reevals']}\n"
+        )
+
+    text = (
+        f"<b>BOT POLYMARKET v10.4.2</b>\n"
+        f"Modo: {modo} | Bankroll: ${BANKROLL:.2f}\n"
+        f"Edge mín: {MIN_EDGE}% | SL: {STOP_LOSS_PCT}% | TP: +{TAKE_PROFIT_PCT}%\n"
+        f"Exp máx: {int(MAX_EXPOSURE_PCT*100)}% | Min bet: ${MIN_BET:.2f}\n"
+        f"Schedule: {schedule} UTC\n"
+        f"Ciclos completados: {bot_state['cycle_count']}\n"
+        f"Último: {last_str}\n"
+    )
+    if cycle_block:
+        text += f"\n<b>Último ciclo:</b>{cycle_block}"
+    if perf_block:
+        text += f"\n<b>Rendimiento (v10.2+):</b>{perf_block}"
+    text += (
+        f"\n<b>Arquitectura:</b>\n"
+        f"~330 mercados temp | Open-Meteo | normal(μ,σ)\n"
+        f"Sigma: D0=1.2 D1=1.5 D2=2.0 D3=2.5 D4+=3.0\n"
+        f"Half-Kelly | Railway EU-West (Amsterdam)\n"
+        f"⚠️ Polymarket resuelve con Weather Underground, no Open-Meteo"
+    )
+
+    send_telegram_paged(text, with_menu=True)
 
 
 COMMANDS = {
     "estado": cmd_estado, "cartera": cmd_cartera, "ordenes": cmd_ordenes,
     "log": cmd_log, "logfull": cmd_logfull, "forzar": cmd_forzar,
     "modo": cmd_modo, "traders": cmd_traders, "rendimiento": cmd_rendimiento,
+    "info": cmd_info,
     "confirmar_real": cmd_confirmar_real, "confirmar_dry": cmd_confirmar_dry,
     "cancelar_modo": cmd_cancelar_modo,
 }
@@ -2317,7 +2593,7 @@ def main(client):
     effective_bankroll = get_effective_bankroll(client)
 
     log.info("=" * 65)
-    log.info(f"BOT v10.4.1 | {today_str} | {mode_label} | ${effective_bankroll:.2f} (tope ${BANKROLL:.2f})")
+    log.info(f"BOT v10.4.2 | {today_str} | {mode_label} | ${effective_bankroll:.2f} (tope ${BANKROLL:.2f})")
     log.info("=" * 65)
 
     # Decision log: registrar inicio
@@ -2774,7 +3050,7 @@ def main(client):
     # --- v10.4.1: Guardar resumen de ciclo para historial ---
     try:
         cycle_data = {
-            "version": "v10.4.1",
+            "version": "v10.4.2",
             "cycle_number": bot_state["cycle_count"] + 1,
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
             "mode": "DRY_RUN" if DRY_RUN else "REAL",
@@ -2962,7 +3238,7 @@ def run_trader_tasks():
 
 if __name__ == "__main__":
     log.info("=" * 65)
-    log.info(f"POLYMARKET BOT v10.4.1 | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
+    log.info(f"POLYMARKET BOT v10.4.2 | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
     log.info(f"Modo: {'DRY RUN' if DRY_RUN else 'REAL'}")
     log.info("=" * 65)
 
@@ -2977,7 +3253,7 @@ if __name__ == "__main__":
     modo = "DRY RUN" if DRY_RUN else "REAL"
     schedule = ", ".join(f"{h:02d}:00" for h in sorted(SCHEDULE_HOURS_UTC))
     send_telegram(
-        f"🤖 <b>Bot v10.4.1 arrancado</b>\n"
+        f"🤖 <b>Bot v10.4.2 arrancado</b>\n"
         f"Modo: {modo} | ${BANKROLL:.2f}\n"
         f"Min edge: {MIN_EDGE}% | Schedule: {schedule} UTC\n"
         f"🔧 Gestión activa: SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n"

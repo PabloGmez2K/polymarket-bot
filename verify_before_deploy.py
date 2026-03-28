@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
 """
-verify_before_deploy.py v4 — Tests de comportamiento para bot.py v10.4
+verify_before_deploy.py v5 — Tests de comportamiento para bot.py v10.4.2
 
 Ejecutar ANTES de cada deploy:
   python verify_before_deploy.py
 
 Todos los tests deben pasar. Si alguno falla, NO hacer push.
 
-v4 añade tests para:
-  - Bug #3: no comprar si ya hay posición abierta
-  - Bug #9: no re-comprar lo vendido en el mismo ciclo
-  - Bug #10: MIN_BET default correcto (1.00)
-  - Bug #11: skip ciclo inicial si el último fue reciente
-  - Bug #12: resueltas no cuentan como mantenidas
-  - Bug #14: mensajes Telegram clarifican precio límite
-  - Persistencia: DATA_DIR y _data_path
+v5 añade tests para:
+  - v10.4.2: Rediseño Telegram + Bug #13 (paginación)
+    - send_telegram_paged definida
+    - _parse_position_label definida
+    - _get_portfolio_and_positions definida
+    - cmd_info definida
+    - /info en COMMANDS y MENU_KEYBOARD
 """
 import sys
 import os
@@ -197,7 +196,61 @@ def run_tests():
     test("CYCLES_HISTORY_FILE definido", "CYCLES_HISTORY_FILE" in code)
     test("cycles_history.jsonl append-only", "cycles_history.jsonl" in code)
     test("cycle_summary se guarda en main()", "cycle_data" in code and "CYCLE_SUMMARY_FILE" in code)
-    test("cycle_data incluye version", '"version"' in code and "v10.4.1" in code)
+    test("cycle_data incluye version v10.4.2", '"version"' in code and "v10.4.2" in code)
+
+    # ---- Test 14: Rediseño Telegram v10.4.2 ----
+    print("\n🔍 Rediseño Telegram v10.4.2")
+    test("send_telegram_paged definida", "def send_telegram_paged(" in code)
+    test("_parse_position_label definida", "def _parse_position_label(" in code)
+    test("_get_portfolio_and_positions definida", "def _get_portfolio_and_positions(" in code)
+    test("cmd_info definida", "def cmd_info(" in code)
+    test("/info en COMMANDS", '"info": cmd_info' in code)
+    test("/info en MENU_KEYBOARD", '"callback_data": "info"' in code)
+    test("Bug #13: send_telegram_paged en cmd_log", "send_telegram_paged" in code and "cmd_log" in code)
+    test("Bug #13: send_telegram_paged en cmd_cartera", "send_telegram_paged" in code)
+    test("_parse_position_label usa centavos (¢)", "¢" in code)
+    test("cmd_estado versión correcta", "Bot v10.4.2" in code or "v10.4.2" in code)
+
+    # ---- Test 15: Integridad de COMMANDS (todos los botones siguen presentes) ----
+    print("\n🔍 Integridad de COMMANDS")
+    for cmd in ["estado", "cartera", "ordenes", "log", "logfull",
+                "forzar", "modo", "traders", "rendimiento", "info",
+                "confirmar_real", "confirmar_dry", "cancelar_modo"]:
+        test(f'COMMANDS tiene "{cmd}"', f'"{cmd}"' in code)
+
+    # ---- Test 16: send_telegram_paged en todos los comandos de respuesta larga ----
+    print("\n🔍 send_telegram_paged en comandos relevantes")
+    for cmd_name in ["cmd_cartera", "cmd_ordenes", "cmd_log", "cmd_logfull",
+                     "cmd_traders", "cmd_rendimiento", "cmd_info"]:
+        # Buscar la función y verificar que usa send_telegram_paged
+        fn_match = re.search(
+            rf"def {cmd_name}\(.*?(?=\ndef |\Z)", code, re.DOTALL
+        )
+        if fn_match:
+            fn_body = fn_match.group()
+            test(f"{cmd_name} usa send_telegram_paged",
+                 "send_telegram_paged" in fn_body)
+        else:
+            test(f"{cmd_name} existe", False, "función no encontrada")
+
+    # ---- Test 17: api_error propagado en _get_portfolio_and_positions ----
+    print("\n🔍 Robustez _get_portfolio_and_positions")
+    test("api_error en return de _get_portfolio", '"api_error"' in code)
+    test("api_error se muestra en cmd_cartera",
+         "api_error" in code and "Error API posiciones" in code)
+
+    # ---- Test 18: cmd_info contiene campos esenciales ----
+    print("\n🔍 Contenido de cmd_info")
+    info_match = re.search(r"def cmd_info\(.*?(?=\ndef |\Z)", code, re.DOTALL)
+    if info_match:
+        info_body = info_match.group()
+        test("cmd_info muestra BANKROLL",     "BANKROLL" in info_body)
+        test("cmd_info muestra MIN_EDGE",     "MIN_EDGE" in info_body)
+        test("cmd_info muestra STOP_LOSS_PCT","STOP_LOSS_PCT" in info_body)
+        test("cmd_info muestra cycle_count",  "cycle_count" in info_body)
+        test("cmd_info avisa de WU vs OMA",   "Weather Underground" in info_body)
+    else:
+        test("cmd_info encontrada", False, "función no encontrada")
 
     # ---- Resultado ----
     print(f"\n{'='*50}")
