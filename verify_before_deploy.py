@@ -196,7 +196,7 @@ def run_tests():
     test("CYCLES_HISTORY_FILE definido", "CYCLES_HISTORY_FILE" in code)
     test("cycles_history.jsonl append-only", "cycles_history.jsonl" in code)
     test("cycle_summary se guarda en main()", "cycle_data" in code and "CYCLE_SUMMARY_FILE" in code)
-    test("cycle_data incluye version v10.4.3", '"version"' in code and "v10.4.3" in code)
+    test("cycle_data incluye version v10.4.4", '"version"' in code and "v10.4.4" in code)
 
     # ---- Test 14: Rediseño Telegram v10.4.2 ----
     print("\n🔍 Rediseño Telegram v10.4.2")
@@ -209,7 +209,20 @@ def run_tests():
     test("Bug #13: send_telegram_paged en cmd_log", "send_telegram_paged" in code and "cmd_log" in code)
     test("Bug #13: send_telegram_paged en cmd_cartera", "send_telegram_paged" in code)
     test("_parse_position_label usa centavos (¢)", "¢" in code)
-    test("cmd_estado versión correcta", "Bot v10.4.3" in code or "v10.4.3" in code)
+    test("cmd_estado versión correcta", "Bot v10.4.4" in code or "v10.4.4" in code)
+
+    # ---- Test 14c: DST v10.4.4 ----
+    print("\n🔍 DST (horario de verano)")
+    # Europa verano (desde 29 mar 2026)
+    test("London en verano (BST = UTC+1)", '"London":         1' in code)
+    test("Paris en verano (CEST = UTC+2)",  '"Paris":          2' in code)
+    test("Madrid en verano (CEST = UTC+2)", '"Madrid":         2' in code)
+    # EE.UU. verano (desde 8 mar 2026)
+    test("New York en verano (EDT = UTC-4)", '"New York City": -4' in code)
+    test("Chicago en verano (CDT = UTC-5)",  '"Chicago":       -5' in code)
+    test("Seattle en verano (PDT = UTC-7)",  '"Seattle":       -7' in code)
+    # Israel verano (desde 27 mar 2026)
+    test("Tel Aviv en verano (IDT = UTC+3)", '"Tel Aviv":       3' in code)
 
     # ---- Test 14b: Fixes v10.4.3 ----
     print("\n🔍 Fixes v10.4.3")

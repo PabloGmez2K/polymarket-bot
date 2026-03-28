@@ -19,7 +19,7 @@ from py_clob_client.order_builder.constants import BUY, SELL
 load_dotenv()
 
 # =============================================================
-# bot.py v10.4.3 — Ciclos persistentes + fixes Telegram
+# bot.py v10.4.4 — DST Europa + EE.UU. + Tel Aviv
 # Sesión 19: Fase 1.5 — rediseño Telegram + fixes post-deploy
 # =============================================================
 #
@@ -610,7 +610,7 @@ RESOLUTION_STATIONS = {
 # Bug #5 (sesión 12): a las 08:00 UTC, Chongqing está a las 16:00 local → temp ya registrada.
 # Sin esto, el bot apuesta contra información conocida. Costó ~$5.16.
 CITY_UTC_OFFSETS = {
-    # Asia — UTC+7 a UTC+9 (las más peligrosas a las 08:00 UTC)
+    # Asia — UTC+7 a UTC+9 (sin DST)
     "Tokyo":          9,
     "Seoul":          9,
     "Chongqing":      8,
@@ -623,30 +623,30 @@ CITY_UTC_OFFSETS = {
     "Hong Kong":      8,
     "Singapore":      8,
     "Bangkok":        7,
-    # India
+    # India (sin DST)
     "Lucknow":        5.5,
     # Oceanía
-    "Wellington":     12,   # NZST (13 en verano, pero 12 es conservador)
-    # Turquía
+    "Wellington":     13,   # NZDT hasta primer domingo abril (13 en verano, 12 en invierno)
+    # Turquía (sin DST desde 2016)
     "Ankara":         3,
-    # Europa — UTC+1 a UTC+2
-    "London":         0,    # GMT (1 en verano)
-    "Paris":          1,
-    "Madrid":         1,
-    "Milan":          1,
-    "Munich":         1,
-    "Warsaw":         1,
-    "Tel Aviv":       2,
-    # América — UTC-3 a UTC-8
-    "Buenos Aires":  -3,
-    "Sao Paulo":     -3,
-    "New York City": -5,    # EST (-4 en verano)
-    "Toronto":       -5,
-    "Atlanta":       -5,
-    "Miami":         -5,
-    "Chicago":       -6,
-    "Dallas":        -6,
-    "Seattle":       -8,
+    # Europa — DST activo desde 29 mar 2026 (UTC+1/UTC+2)
+    "London":         1,    # BST (verano). Próximo cambio: oct 2026
+    "Paris":          2,    # CEST. Próximo cambio: oct 2026
+    "Madrid":         2,    # CEST
+    "Milan":          2,    # CEST
+    "Munich":         2,    # CEST
+    "Warsaw":         2,    # CEST
+    "Tel Aviv":       3,    # IDT desde 27 mar 2026. Sin cambio otoño (Israel DST variable)
+    # América — DST activo desde 8 mar 2026
+    "Buenos Aires":  -3,    # Sin DST
+    "Sao Paulo":     -3,    # Sin DST
+    "New York City": -4,    # EDT. Próximo cambio: nov 2026
+    "Toronto":       -4,    # EDT
+    "Atlanta":       -4,    # EDT
+    "Miami":         -4,    # EDT
+    "Chicago":       -5,    # CDT
+    "Dallas":        -5,    # CDT
+    "Seattle":       -7,    # PDT
 }
 
 # Alias → nombre canónico (mercados de rango usan abreviaturas)
@@ -823,7 +823,7 @@ def cmd_estado():
         )
 
     send_telegram(
-        f"📊 <b>Bot v10.4.3 | {modo}</b>\n\n"
+        f"📊 <b>Bot v10.4.4 | {modo}</b>\n\n"
         f"💰 Bankroll: <b>${BANKROLL:.2f}</b> | Edge mín: {MIN_EDGE}%\n"
         f"🔧 SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n\n"
         f"⏱ Estado: {running}\n"
@@ -2626,7 +2626,7 @@ def main(client):
     effective_bankroll = get_effective_bankroll(client)
 
     log.info("=" * 65)
-    log.info(f"BOT v10.4.3 | {today_str} | {mode_label} | ${effective_bankroll:.2f} (tope ${BANKROLL:.2f})")
+    log.info(f"BOT v10.4.4 | {today_str} | {mode_label} | ${effective_bankroll:.2f} (tope ${BANKROLL:.2f})")
     log.info("=" * 65)
 
     # Decision log: registrar inicio
@@ -3083,7 +3083,7 @@ def main(client):
     # --- v10.4.1: Guardar resumen de ciclo para historial ---
     try:
         cycle_data = {
-            "version": "v10.4.3",
+            "version": "v10.4.4",
             "cycle_number": bot_state["cycle_count"] + 1,
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
             "mode": "DRY_RUN" if DRY_RUN else "REAL",
@@ -3271,7 +3271,7 @@ def run_trader_tasks():
 
 if __name__ == "__main__":
     log.info("=" * 65)
-    log.info(f"POLYMARKET BOT v10.4.3 | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
+    log.info(f"POLYMARKET BOT v10.4.4 | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
     log.info(f"Modo: {'DRY RUN' if DRY_RUN else 'REAL'}")
     log.info("=" * 65)
 
@@ -3290,7 +3290,7 @@ if __name__ == "__main__":
     modo = "DRY RUN" if DRY_RUN else "REAL"
     schedule = ", ".join(f"{h:02d}:00" for h in sorted(SCHEDULE_HOURS_UTC))
     send_telegram(
-        f"🤖 <b>Bot v10.4.3 arrancado</b>\n"
+        f"🤖 <b>Bot v10.4.4 arrancado</b>\n"
         f"Modo: {modo} | ${BANKROLL:.2f}\n"
         f"Min edge: {MIN_EDGE}% | Schedule: {schedule} UTC\n"
         f"🔧 Gestión activa: SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n"
