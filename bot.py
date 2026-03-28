@@ -19,20 +19,20 @@ from py_clob_client.order_builder.constants import BUY, SELL
 load_dotenv()
 
 # =============================================================
-# bot.py v10.4 — Bug fixes #3 #9 #10 #11 #12 #14 + mejoras Telegram
-# Sesión 17: 6 bugs corregidos + observabilidad mejorada
+# bot.py v10.4.1 — Historial de ciclos + preparación Telegram v2
+# Sesión 17-18: versionado, cycles_history.jsonl
 # =============================================================
 #
-# Nuevo en v10.4:
+# Nuevo en v10.4.1:
+#   - cycles_history.jsonl: historial append-only de todos los ciclos
+#   - cycle_summary.json: último ciclo para consulta rápida
+#   - Cada ciclo registra: gestión, escaneo, compras, exposición, versión
+#   - Base para versionado v10.4.X (UI) vs v10.5 (lógica)
+#
+# v10.4 (base):
 #   - Fix Bug #3: check posiciones abiertas en Data API antes de comprar
-#     Madrid se compró 2 veces porque el check solo miraba órdenes pendientes.
-#     Ahora consulta posiciones llenadas → no duplica.
 #   - Fix Bug #9: sold_this_cycle — no re-comprar lo vendido en manage_positions
-#     NYC vendido por SL y recomprado en el mismo ciclo.
-#     Ahora manage_positions devuelve sold_token_ids → main() los salta.
-#   - Fix Bug #11: comprobar último ciclo al arrancar
-#     Deploy entre ciclos causaba ciclo extra inmediato (doble Chicago).
-#     Ahora lee timestamp del último ciclo. Si < 3h → espera scheduler.
+#   - Fix Bug #11: comprobar último ciclo al arrancar (min 3h gap)
 #   - Fix Bug #10: MIN_BET default 0.50 → 1.00 (alineado con Railway)
 #   - Fix Bug #12: resueltas no cuentan como "mantenidas" en Telegram
 #   - Fix Bug #14: mensajes Telegram clarifican "precio límite" vs fill
@@ -214,6 +214,8 @@ clob_client = None
 known_tokens = {}
 
 PERFORMANCE_FILE = _data_path("performance.json")
+CYCLE_SUMMARY_FILE = _data_path("cycle_summary.json")
+CYCLES_HISTORY_FILE = _data_path("cycles_history.jsonl")
 
 
 def parse_city_from_title(title):
@@ -2315,7 +2317,7 @@ def main(client):
     effective_bankroll = get_effective_bankroll(client)
 
     log.info("=" * 65)
-    log.info(f"BOT v10.4 | {today_str} | {mode_label} | ${effective_bankroll:.2f} (tope ${BANKROLL:.2f})")
+    log.info(f"BOT v10.4.1 | {today_str} | {mode_label} | ${effective_bankroll:.2f} (tope ${BANKROLL:.2f})")
     log.info("=" * 65)
 
     # Decision log: registrar inicio
@@ -2769,6 +2771,47 @@ def main(client):
     # Guardar log de decisiones
     _save_decision_log(dl)
 
+    # --- v10.4.1: Guardar resumen de ciclo para historial ---
+    try:
+        cycle_data = {
+            "version": "v10.4.1",
+            "cycle_number": bot_state["cycle_count"] + 1,
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "mode": "DRY_RUN" if DRY_RUN else "REAL",
+            "management": {
+                "n_kept": mgmt.get("n_kept", 0),
+                "n_sold": mgmt.get("n_sold", 0),
+                "n_resolved": mgmt.get("n_resolved", 0),
+                "n_loss_total": mgmt.get("n_loss_total", 0),
+            },
+            "scan": {
+                "markets_evaluated": len(candidates) if 'candidates' in locals() else 0,
+                "with_edge": len(trades) if 'trades' in locals() else 0,
+                "selected": len(selected) if 'selected' in locals() else 0,
+            },
+            "buys": [
+                {
+                    "city": b.get("city", "?"),
+                    "side": b.get("side", "?"),
+                    "amount": round(b.get("amount", 0), 2),
+                    "edge": round(b.get("edge", 0), 1),
+                    "traders": bool(b.get("traders")),
+                }
+                for b in (buy_summaries if 'buy_summaries' in locals() else [])
+            ],
+            "exposure_after": round(current_exposure, 2) if 'current_exposure' in locals() else None,
+            "budget_left": round(budget_left, 2) if 'budget_left' in locals() else None,
+        }
+        # Último ciclo (se sobreescribe)
+        with open(CYCLE_SUMMARY_FILE, "w", encoding="utf-8") as f:
+            json.dump(cycle_data, f, indent=2, ensure_ascii=False)
+        # Historial acumulativo (append-only, una línea JSON por ciclo)
+        with open(CYCLES_HISTORY_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(cycle_data, ensure_ascii=False) + "\n")
+        log.info("cycle_summary guardado OK")
+    except Exception as e:
+        log.warning(f"Error guardando cycle_summary: {e}")
+
     bot_state["cycle_count"] += 1
     bot_state["running"] = False
     log.info("Ciclo finalizado.")
@@ -2919,7 +2962,7 @@ def run_trader_tasks():
 
 if __name__ == "__main__":
     log.info("=" * 65)
-    log.info(f"POLYMARKET BOT v10.4 | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
+    log.info(f"POLYMARKET BOT v10.4.1 | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
     log.info(f"Modo: {'DRY RUN' if DRY_RUN else 'REAL'}")
     log.info("=" * 65)
 
@@ -2934,7 +2977,7 @@ if __name__ == "__main__":
     modo = "DRY RUN" if DRY_RUN else "REAL"
     schedule = ", ".join(f"{h:02d}:00" for h in sorted(SCHEDULE_HOURS_UTC))
     send_telegram(
-        f"🤖 <b>Bot v10.4 arrancado</b>\n"
+        f"🤖 <b>Bot v10.4.1 arrancado</b>\n"
         f"Modo: {modo} | ${BANKROLL:.2f}\n"
         f"Min edge: {MIN_EDGE}% | Schedule: {schedule} UTC\n"
         f"🔧 Gestión activa: SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n"

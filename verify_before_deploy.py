@@ -66,7 +66,7 @@ def run_tests():
     print("\n🔍 Versión")
     test("Header dice v10.4", "bot.py v10.4" in code)
     test("Log arranque dice v10.4", 'BOT v10.4' in code)
-    test("Telegram arranque dice v10.4", 'Bot v10.4 arrancado' in code)
+    test("Telegram arranque dice v10.4", 'Bot v10.4' in code)
 
     # ---- Test 2: Bug #10 — MIN_BET default ----
     print("\n🔍 Bug #10: MIN_BET default")
@@ -190,6 +190,14 @@ def run_tests():
     test("MAX_EXPOSURE_PCT es 0.40", '"0.40"' in code)
     test("MIN_EDGE default es 7.0", '"7.0"' in code)
     test("SCHEDULE_HOURS_UTC configurable", 'SCHEDULE_HOURS_UTC' in code)
+
+    # ---- Test 13: Nuevas funcionalidades v10.4.1 ----
+    print("\n🔍 Nuevas funcionalidades v10.4.1")
+    test("CYCLE_SUMMARY_FILE definido", "CYCLE_SUMMARY_FILE" in code)
+    test("CYCLES_HISTORY_FILE definido", "CYCLES_HISTORY_FILE" in code)
+    test("cycles_history.jsonl append-only", "cycles_history.jsonl" in code)
+    test("cycle_summary se guarda en main()", "cycle_data" in code and "CYCLE_SUMMARY_FILE" in code)
+    test("cycle_data incluye version", '"version"' in code and "v10.4.1" in code)
 
     # ---- Resultado ----
     print(f"\n{'='*50}")
