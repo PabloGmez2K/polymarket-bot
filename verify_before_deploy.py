@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-verify_before_deploy.py v6 — Tests de comportamiento para bot.py v10.4.5
+verify_before_deploy.py v7 — Tests de comportamiento para bot.py v10.4.6
 
 Ejecutar ANTES de cada deploy:
   python verify_before_deploy.py
@@ -89,8 +89,8 @@ def run_tests():
     # ---- Test 1: Versión ----
     print("\n🔍 Versión")
     test("Header dice v10.4", "bot.py v10.4" in code)
-    test("Log arranque dice v10.4", 'BOT v10.4' in code)
-    test("Telegram arranque dice v10.4", 'Bot v10.4' in code)
+    test("Log arranque dice v10.4", 'POLYMARKET BOT {BOT_VERSION}' in code or 'BOT v10.4' in code)
+    test("Telegram arranque dice v10.4", 'Bot {BOT_VERSION} arrancado' in code or 'Bot v10.4' in code)
 
     # ---- Test 2: Bug #10 — MIN_BET default ----
     print("\n🔍 Bug #10: MIN_BET default")
@@ -177,6 +177,8 @@ def run_tests():
          'PERFORMANCE_FILE = _data_path("performance.json")' in code)
     test("POSTMORTEM_FILE usa _data_path",
          'POSTMORTEM_FILE = _data_path("postmortem.json")' in code)
+    test("ALERTS_FILE usa _data_path",
+         'ALERTS_FILE = _data_path("alerts_state.json")' in code)
     test("SIGNALS_FILE usa _seed_data_file",
          'SIGNALS_FILE = _seed_data_file("signals.json")' in code)
     test("TRADERS_DB_FILE usa _seed_data_file",
@@ -247,7 +249,7 @@ def run_tests():
     test("CYCLES_HISTORY_FILE definido", "CYCLES_HISTORY_FILE" in code)
     test("cycles_history.jsonl append-only", "cycles_history.jsonl" in code)
     test("cycle_summary se guarda en main()", "cycle_data" in code and "CYCLE_SUMMARY_FILE" in code)
-    test("cycle_data incluye version v10.4.5", '"version"' in code and "v10.4.5" in code)
+    test("cycle_data incluye version v10.4.6", '"version"' in code and "v10.4.6" in code)
 
     # ---- Test 14: Rediseño Telegram v10.4.2 ----
     print("\n🔍 Rediseño Telegram v10.4.2")
@@ -263,7 +265,7 @@ def run_tests():
     test("Bug #13: send_telegram_paged en cmd_log", "send_telegram_paged" in code and "cmd_log" in code)
     test("Bug #13: send_telegram_paged en cmd_cartera", "send_telegram_paged" in code)
     test("_parse_position_label usa centavos (¢)", "¢" in code)
-    test("cmd_estado versión correcta", "Bot v10.4.5" in code or "v10.4.5" in code)
+    test("cmd_estado versión correcta", "Bot v10.4.6" in code or "v10.4.6" in code)
 
     # ---- Test 14c: Zonas horarias reales v10.4.5 ----
     print("\n🔍 Zonas horarias reales")
@@ -424,6 +426,7 @@ def run_tests():
             "json": __import__("json"),
             "datetime": datetime,
             "send_telegram_paged": lambda text, with_menu=False, page_size=3800: info_messages.append(text),
+            "BOT_VERSION": "v10.4.6",
             "DRY_RUN": False,
             "BANKROLL": 25.0,
             "MIN_EDGE": 7.0,
@@ -439,7 +442,7 @@ def run_tests():
         exec(get_function_source(module_ast, code_lines, "cmd_info"), info_ns)
         info_ns["cmd_info"]()
         info_msg = info_messages[-1] if info_messages else ""
-        test("info: versión visible correcta", "BOT POLYMARKET v10.4.5" in info_msg, info_msg[:120])
+        test("info: versión visible correcta", "BOT POLYMARKET v10.4.6" in info_msg, info_msg[:120])
         test("info: usa cycle_summary como fallback de último", "Último: 2026-03-28 16:00 UTC" in info_msg, info_msg[:220])
 
         pm_messages = []
@@ -553,7 +556,7 @@ def run_tests():
 
         buy_entry = {
             "timestamp": "2026-03-28T08:00:00+00:00",
-            "bot_version": "v10.4.5",
+            "bot_version": "v10.4.6",
             "city": "Dallas",
             "side": "YES",
             "date": "2026-03-28",
@@ -577,7 +580,7 @@ def run_tests():
 
         sell_pending = {
             "timestamp": "2026-03-28T16:00:00+00:00",
-            "bot_version": "v10.4.5",
+            "bot_version": "v10.4.6",
             "city": "Dallas",
             "side": "Yes",
             "date": "2026-03-28",
@@ -616,6 +619,196 @@ def run_tests():
                 pass
     except Exception as e:
         test("Postmortem funcional ejecuta sin excepción", False, str(e))
+
+    # ---- Test 21: alertas de observabilidad ----
+    print("\n🔍 Alertas de observabilidad")
+    test("ALERTS_FILE definido", "ALERTS_FILE" in code)
+    test("load_alerts_state definida", "def load_alerts_state(" in code)
+    test("save_alerts_state definida", "def save_alerts_state(" in code)
+    test("backfill_postmortem_from_performance definida", "def backfill_postmortem_from_performance(" in code)
+    test("inspect_signals_file_health definida", "def inspect_signals_file_health(" in code)
+    test("get_clean_closed_trade_stats definida", "def get_clean_closed_trade_stats(" in code)
+    test("run_observability_alerts definida", "def run_observability_alerts(" in code)
+    test("arranque hace backfill de postmortem", "backfill_postmortem_from_performance()" in code)
+    test("alertas se evalúan en startup y fin de ciclo", code.count("run_observability_alerts()") >= 2)
+
+    try:
+        fd, tmp_perf = tempfile.mkstemp(
+            dir=os.path.dirname(__file__),
+            prefix="_tmp_perf_backfill_test_",
+            suffix=".json",
+        )
+        os.close(fd)
+        fd, tmp_pm = tempfile.mkstemp(
+            dir=os.path.dirname(__file__),
+            prefix="_tmp_pm_backfill_test_",
+            suffix=".json",
+        )
+        os.close(fd)
+        if os.path.exists(tmp_pm):
+            try:
+                os.remove(tmp_pm)
+            except PermissionError:
+                pass
+
+        with open(tmp_perf, "w", encoding="utf-8") as f:
+            json.dump([
+                {
+                    "timestamp": "2026-03-28T08:00:00+00:00",
+                    "action": "BUY",
+                    "city": "Dallas",
+                    "side": "YES",
+                    "date": "2026-03-28",
+                    "question": "Will the temperature in Dallas be 18°C on March 28?",
+                    "token_id": "tok-dallas",
+                    "amount": 2.5,
+                    "shares": 10.0,
+                    "price": 0.25,
+                    "edge_pct": 18.0,
+                    "forecast_max": 18.2,
+                    "our_prob": 48.0,
+                    "mkt_price": 21.0,
+                    "trader_confirmed": [],
+                },
+                {
+                    "timestamp": "2026-03-28T16:00:00+00:00",
+                    "fill_confirmed": "2026-03-28T16:00:10+00:00",
+                    "action": "SELL",
+                    "city": "Dallas",
+                    "side": "YES",
+                    "date": "2026-03-28",
+                    "question": "Will the temperature in Dallas be 18°C on March 28?",
+                    "token_id": "tok-dallas",
+                    "reason": "reeval",
+                    "price": 0.30,
+                    "shares": 10.0,
+                    "return_est": 3.0,
+                    "pnl_cash": 0.5,
+                    "pnl_pct": 20.0,
+                    "order_id": "oid-backfill",
+                },
+            ], f, ensure_ascii=False)
+
+        backfill_ns = {
+            "os": os,
+            "json": json,
+            "datetime": datetime,
+            "timezone": timezone,
+            "PERFORMANCE_FILE": tmp_perf,
+            "POSTMORTEM_FILE": tmp_pm,
+            "log": types.SimpleNamespace(info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None),
+        }
+        for fn_name in [
+            "load_performance_history",
+            "load_postmortem_data",
+            "save_postmortem_data",
+            "_find_open_postmortem",
+            "update_postmortem",
+            "backfill_postmortem_from_performance",
+        ]:
+            exec(get_function_source(module_ast, code_lines, fn_name), backfill_ns)
+
+        rebuilt = backfill_ns["backfill_postmortem_from_performance"]()
+        rebuilt_records = backfill_ns["load_postmortem_data"]()
+        rebuilt_rec = rebuilt_records[-1] if rebuilt_records else {}
+        test("backfill postmortem: reconstruye registros", rebuilt >= 1 and len(rebuilt_records) == 1, str(rebuilt_records))
+        test("backfill postmortem: deja cierre SELL", rebuilt_rec.get("status") == "closed" and rebuilt_rec.get("close_action") == "SELL", str(rebuilt_rec))
+        test("backfill postmortem: preserva order_id", rebuilt_rec.get("order_id") == "oid-backfill", str(rebuilt_rec))
+
+        for tmp_file in [tmp_perf, tmp_pm]:
+            if os.path.exists(tmp_file):
+                try:
+                    os.remove(tmp_file)
+                except PermissionError:
+                    pass
+
+        review_messages = []
+        saved_review_state = {}
+        review_ns = {
+            "datetime": datetime,
+            "timezone": timezone,
+            "REVIEW_READY_CLEAN_TRADES": 30,
+            "LOGIC_SERIES": "10.4",
+            "PENDING_EXIT_ALERT_HOURS": 12.0,
+            "load_alerts_state": lambda: {
+                "logic_series": "10.4",
+                "milestones": {},
+                "signals_health": {"last_issue": None},
+                "pending_exit_notified": {},
+            },
+            "save_alerts_state": lambda state: saved_review_state.update(state),
+            "get_clean_closed_trade_stats": lambda: {"count": 30, "sell": 20, "loss_total": 6, "resolved_win": 4},
+            "inspect_signals_file_health": lambda: {"status": "ok", "age_hours": 1.0, "actionable": 12},
+            "load_audit_data": lambda: {"pending_sells": []},
+            "send_telegram": lambda text, with_menu=False, custom_keyboard=None: review_messages.append(text),
+        }
+        exec(get_function_source(module_ast, code_lines, "run_observability_alerts"), review_ns)
+        review_ns["run_observability_alerts"]()
+        review_msg = review_messages[-1] if review_messages else ""
+        test("alerta review trigger: se envía al llegar a 30 trades", "Review Trigger" in review_msg and "30 trades limpios" in review_msg, review_msg[:220])
+        test("alerta review trigger: guarda milestone", "clean_trades_30" in saved_review_state.get("milestones", {}), str(saved_review_state))
+
+        signal_messages = []
+        signal_ns = {
+            "datetime": datetime,
+            "timezone": timezone,
+            "REVIEW_READY_CLEAN_TRADES": 30,
+            "LOGIC_SERIES": "10.4",
+            "PENDING_EXIT_ALERT_HOURS": 12.0,
+            "load_alerts_state": lambda: {
+                "logic_series": "10.4",
+                "milestones": {},
+                "signals_health": {"last_issue": None},
+                "pending_exit_notified": {},
+            },
+            "save_alerts_state": lambda state: None,
+            "get_clean_closed_trade_stats": lambda: {"count": 5, "sell": 4, "loss_total": 1, "resolved_win": 0},
+            "inspect_signals_file_health": lambda: {"status": "stale", "age_hours": 30.5, "actionable": 3},
+            "load_audit_data": lambda: {"pending_sells": []},
+            "send_telegram": lambda text, with_menu=False, custom_keyboard=None: signal_messages.append(text),
+        }
+        exec(get_function_source(module_ast, code_lines, "run_observability_alerts"), signal_ns)
+        signal_ns["run_observability_alerts"]()
+        signal_msg = signal_messages[-1] if signal_messages else ""
+        test("alerta signals stale: se envía", "signals.json está expirado" in signal_msg, signal_msg[:220])
+
+        pending_messages = []
+        saved_pending_state = {}
+        pending_ns = {
+            "datetime": datetime,
+            "timezone": timezone,
+            "REVIEW_READY_CLEAN_TRADES": 30,
+            "LOGIC_SERIES": "10.4",
+            "PENDING_EXIT_ALERT_HOURS": 12.0,
+            "load_alerts_state": lambda: {
+                "logic_series": "10.4",
+                "milestones": {},
+                "signals_health": {"last_issue": None},
+                "pending_exit_notified": {},
+            },
+            "save_alerts_state": lambda state: saved_pending_state.update(state),
+            "get_clean_closed_trade_stats": lambda: {"count": 2, "sell": 2, "loss_total": 0, "resolved_win": 0},
+            "inspect_signals_file_health": lambda: {"status": "ok", "age_hours": 1.0, "actionable": 10},
+            "load_audit_data": lambda: {
+                "pending_sells": [{
+                    "order_id": "oid-stuck",
+                    "city": "Dallas",
+                    "side": "YES",
+                    "price": 0.31,
+                    "timestamp": "2026-03-27T00:00:00+00:00",
+                }]
+            },
+            "send_telegram": lambda text, with_menu=False, custom_keyboard=None: pending_messages.append(text),
+        }
+        exec(get_function_source(module_ast, code_lines, "run_observability_alerts"), pending_ns)
+        pending_ns["run_observability_alerts"]()
+        pending_msg = pending_messages[-1] if pending_messages else ""
+        test("alerta pending_exit atascada: se envía", "Ventas pendientes atascadas" in pending_msg and "Dallas YES" in pending_msg, pending_msg[:220])
+        test("alerta pending_exit atascada: guarda order_id notificado",
+             "oid-stuck" in saved_pending_state.get("pending_exit_notified", {}),
+             str(saved_pending_state))
+    except Exception as e:
+        test("Alertas funcionales ejecutan sin excepción", False, str(e))
 
     # ---- Resultado ----
     print(f"\n{'='*50}")

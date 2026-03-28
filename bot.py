@@ -21,7 +21,7 @@ from py_clob_client.order_builder.constants import BUY, SELL
 load_dotenv()
 
 # =============================================================
-# bot.py v10.4.5 — zonas horarias reales + limpieza config local
+# bot.py v10.4.6 — alertas de observabilidad + backfill postmortem
 # Sesión 19: Fase 1.5 — rediseño Telegram + fixes post-deploy
 # =============================================================
 #
@@ -62,6 +62,10 @@ load_dotenv()
 #   - Fix Bug #8: Posiciones micro (<$0.10) → LOSS_TOTAL
 # v10.4.5:
 #   - CITY_TIMEZONES con zonas IANA reales (sin parches manuales de DST)
+# v10.4.6:
+#   - backfill automático de postmortem.json desde performance.json
+#   - alerts_state.json para alertas one-shot persistentes
+#   - alertas: 30 trades limpios, signals stale/vacío, pending_exit atascadas
 # =============================================================
 
 
@@ -79,6 +83,10 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
+BOT_VERSION = "v10.4.6"
+LOGIC_SERIES = "10.4"
+REVIEW_READY_CLEAN_TRADES = 30
+PENDING_EXIT_ALERT_HOURS = 12.0
 
 
 def get_min_days_ahead():
@@ -247,8 +255,65 @@ PERFORMANCE_FILE = _data_path("performance.json")
 CYCLE_SUMMARY_FILE = _data_path("cycle_summary.json")
 CYCLES_HISTORY_FILE = _data_path("cycles_history.jsonl")
 POSTMORTEM_FILE = _data_path("postmortem.json")
+ALERTS_FILE = _data_path("alerts_state.json")
 SIGNALS_FILE = _seed_data_file("signals.json")
 TRADERS_DB_FILE = _seed_data_file("traders_db.json")
+
+
+def load_performance_history():
+    """Carga el historial de performance; devuelve [] si no existe o está dañado."""
+    if not os.path.exists(PERFORMANCE_FILE):
+        return []
+    try:
+        with open(PERFORMANCE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def load_alerts_state():
+    """Carga el estado persistente de alertas y resetea si cambia la serie lógica."""
+    default = {
+        "logic_series": LOGIC_SERIES,
+        "milestones": {},
+        "signals_health": {"last_issue": None},
+        "pending_exit_notified": {},
+    }
+    if not os.path.exists(ALERTS_FILE):
+        return default
+    try:
+        with open(ALERTS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return default
+        if data.get("logic_series") != LOGIC_SERIES:
+            return default
+        state = dict(default)
+        state.update(data)
+        state["milestones"] = data.get("milestones", {}) if isinstance(data.get("milestones"), dict) else {}
+        state["signals_health"] = data.get("signals_health", {}) if isinstance(data.get("signals_health"), dict) else {"last_issue": None}
+        state["pending_exit_notified"] = data.get("pending_exit_notified", {}) if isinstance(data.get("pending_exit_notified"), dict) else {}
+        return state
+    except Exception:
+        return default
+
+
+def save_alerts_state(state):
+    """Guarda el estado de alertas evitando crecimiento innecesario."""
+    try:
+        pending = state.get("pending_exit_notified", {})
+        if isinstance(pending, dict) and len(pending) > 200:
+            keep_keys = sorted(
+                pending,
+                key=lambda k: pending[k].get("sent_at", ""),
+                reverse=True,
+            )[:200]
+            state["pending_exit_notified"] = {k: pending[k] for k in keep_keys}
+        with open(ALERTS_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        log.warning(f"Error guardando alerts_state: {e}")
 
 
 def _load_cycle_count():
@@ -402,15 +467,12 @@ def track_trade(action, **kwargs):
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "action": action,
-        "bot_version": "v10.4.5",
+        "bot_version": BOT_VERSION,
     }
     entry.update(kwargs)
 
     try:
-        history = []
-        if os.path.exists(PERFORMANCE_FILE):
-            with open(PERFORMANCE_FILE, "r", encoding="utf-8") as f:
-                history = json.load(f)
+        history = load_performance_history()
 
         history.append(entry)
 
@@ -687,6 +749,211 @@ def update_postmortem(action, entry):
         record.pop("pending_exit", None)
 
     save_postmortem_data(records)
+
+
+def backfill_postmortem_from_performance():
+    """
+    Reconstruye postmortem.json desde performance.json si aún no existe historial.
+    Se usa al arrancar tras introducir postmortem en un bot que ya tenía trades previos.
+    """
+    existing = load_postmortem_data()
+    if existing:
+        return len(existing)
+
+    history = load_performance_history()
+    replayable = {"BUY", "SELL_PENDING", "SELL", "SELL_FAILED", "LOSS_TOTAL", "RESOLVED_WIN"}
+    events = [dict(entry) for entry in history if entry.get("action") in replayable]
+    if not events:
+        return 0
+
+    events.sort(
+        key=lambda entry: (
+            entry.get("fill_confirmed")
+            or entry.get("failed_at")
+            or entry.get("timestamp")
+            or ""
+        )
+    )
+
+    save_postmortem_data([])
+    rebuilt = 0
+    for entry in events:
+        try:
+            update_postmortem(entry.get("action", ""), entry)
+            rebuilt += 1
+        except Exception as e:
+            log.warning(f"Error en backfill postmortem: {e}")
+
+    total = len(load_postmortem_data())
+    log.info(f"postmortem backfill OK: {total} registros reconstruidos desde {rebuilt} eventos")
+    return total
+
+
+def inspect_signals_file_health():
+    """Devuelve el estado operativo de signals.json para alertas/observabilidad."""
+    if not os.path.exists(SIGNALS_FILE):
+        return {"status": "missing", "age_hours": None, "actionable": 0}
+
+    try:
+        with open(SIGNALS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        generated = datetime.fromisoformat(data.get("generated", "2000-01-01T00:00:00+00:00"))
+        age_hours = (datetime.now(timezone.utc) - generated).total_seconds() / 3600
+        actionable = len([s for s in data.get("signals", []) if not s.get("is_reference")])
+        if age_hours > 26:
+            return {"status": "stale", "age_hours": age_hours, "actionable": actionable}
+        if actionable == 0:
+            return {"status": "empty", "age_hours": age_hours, "actionable": 0}
+        return {"status": "ok", "age_hours": age_hours, "actionable": actionable}
+    except Exception as e:
+        return {"status": "error", "age_hours": None, "actionable": 0, "detail": str(e)[:120]}
+
+
+def get_clean_closed_trade_stats():
+    """
+    Cuenta trades limpios cerrados para saber cuándo hay muestra suficiente
+    para revisar lógica de salida sin depender de estimaciones manuales.
+    """
+    records = load_postmortem_data()
+    if records:
+        closed = [
+            r for r in records
+            if r.get("status") == "closed"
+            and r.get("close_action") in {"SELL", "LOSS_TOTAL", "RESOLVED_WIN"}
+            and r.get("pnl_cash") is not None
+        ]
+        return {
+            "count": len(closed),
+            "sell": sum(1 for r in closed if r.get("close_action") == "SELL"),
+            "loss_total": sum(1 for r in closed if r.get("close_action") == "LOSS_TOTAL"),
+            "resolved_win": sum(1 for r in closed if r.get("close_action") == "RESOLVED_WIN"),
+        }
+
+    history = load_performance_history()
+    sells = [h for h in history if h.get("action") == "SELL" and h.get("pnl_cash") is not None]
+    loss_total = [h for h in history if h.get("action") == "LOSS_TOTAL" and h.get("loss") is not None]
+    resolved_win = [h for h in history if h.get("action") == "RESOLVED_WIN"]
+    return {
+        "count": len(sells) + len(loss_total) + len(resolved_win),
+        "sell": len(sells),
+        "loss_total": len(loss_total),
+        "resolved_win": len(resolved_win),
+    }
+
+
+def run_observability_alerts():
+    """
+    Alertas one-shot de observabilidad y review readiness.
+    No toca lógica de trading; solo avisa por Telegram cuando aparece información útil.
+    """
+    state = load_alerts_state()
+    changed = False
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    stats = get_clean_closed_trade_stats()
+    milestone_key = f"clean_trades_{REVIEW_READY_CLEAN_TRADES}"
+    if stats["count"] >= REVIEW_READY_CLEAN_TRADES and milestone_key not in state["milestones"]:
+        send_telegram(
+            f"🧠 <b>Review Trigger</b>\n"
+            f"Ya hay <b>{stats['count']} trades limpios cerrados</b>.\n"
+            f"SELL: {stats['sell']} | LOSS_TOTAL: {stats['loss_total']} | RESOLVED_WIN: {stats['resolved_win']}\n\n"
+            f"Recomendado abrir sesión de análisis/coding para revisar la lógica de salida de la serie <b>v{LOGIC_SERIES}.x</b>."
+        )
+        state["milestones"][milestone_key] = {
+            "sent_at": now_iso,
+            "count": stats["count"],
+            "logic_series": LOGIC_SERIES,
+        }
+        changed = True
+
+    signals = inspect_signals_file_health()
+    issue = None if signals["status"] == "ok" else signals["status"]
+    prev_issue = state.get("signals_health", {}).get("last_issue")
+    if issue != prev_issue:
+        if issue == "missing":
+            send_telegram(
+                "⚠️ <b>Alerta traders</b>\n"
+                "signals.json no existe en DATA_DIR.\n"
+                "El bot seguirá funcionando, pero sin confirmación de traders."
+            )
+        elif issue == "stale":
+            send_telegram(
+                f"⚠️ <b>Alerta traders</b>\n"
+                f"signals.json está expirado ({signals.get('age_hours', 0):.1f}h).\n"
+                f"Señales accionables actuales: {signals.get('actionable', 0)}."
+            )
+        elif issue == "empty":
+            send_telegram(
+                f"⚠️ <b>Alerta traders</b>\n"
+                f"signals.json está al día ({signals.get('age_hours', 0):.1f}h), pero sin señales accionables."
+            )
+        elif issue == "error":
+            send_telegram(
+                "⚠️ <b>Alerta traders</b>\n"
+                f"No se pudo leer signals.json.\n<code>{signals.get('detail', 'error')}</code>"
+            )
+        elif prev_issue:
+            send_telegram(
+                f"✅ <b>Alerta resuelta</b>\n"
+                f"signals.json vuelve a estar operativo.\n"
+                f"Edad: {signals.get('age_hours', 0):.1f}h | Señales: {signals.get('actionable', 0)}"
+            )
+
+        state["signals_health"] = {
+            "last_issue": issue,
+            "last_checked_at": now_iso,
+            "last_status": signals["status"],
+            "last_actionable": signals.get("actionable", 0),
+        }
+        changed = True
+
+    notified = state.get("pending_exit_notified", {})
+    pending = load_audit_data().get("pending_sells", [])
+    active_pending_ids = set()
+    stuck_new = []
+    now = datetime.now(timezone.utc)
+
+    for sell in pending:
+        order_id = sell.get("order_id") or f"{sell.get('city', '?')}|{sell.get('side', '?')}|{sell.get('timestamp', '?')}"
+        active_pending_ids.add(order_id)
+        try:
+            placed_at = datetime.fromisoformat(sell.get("timestamp", ""))
+            age_hours = (now - placed_at).total_seconds() / 3600
+        except Exception:
+            continue
+        if age_hours >= PENDING_EXIT_ALERT_HOURS and order_id not in notified:
+            stuck_new.append((order_id, sell, age_hours))
+
+    if stuck_new:
+        lines = [
+            "⏳ <b>Ventas pendientes atascadas</b>",
+            f"Hay {len(stuck_new)} orden(es) > {PENDING_EXIT_ALERT_HOURS:.0f}h sin fill.",
+            "",
+        ]
+        for order_id, sell, age_hours in stuck_new[:5]:
+            lines.append(
+                f"• {sell.get('city', '?')} {sell.get('side', '?')} | "
+                f"{age_hours:.1f}h | ${float(sell.get('price', 0) or 0):.2f}"
+            )
+            notified[order_id] = {
+                "sent_at": now_iso,
+                "age_hours": round(age_hours, 1),
+                "city": sell.get("city", "?"),
+                "side": sell.get("side", "?"),
+            }
+        if len(stuck_new) > 5:
+            lines.append(f"• ... y {len(stuck_new) - 5} más")
+        send_telegram("\n".join(lines))
+        changed = True
+
+    for order_id in list(notified):
+        if order_id not in active_pending_ids:
+            notified.pop(order_id, None)
+            changed = True
+    state["pending_exit_notified"] = notified
+
+    if changed:
+        save_alerts_state(state)
 
 
 def get_performance_summary():
@@ -1112,7 +1379,7 @@ def cmd_estado():
         )
 
     send_telegram(
-        f"📊 <b>Bot v10.4.5 | {modo}</b>\n\n"
+        f"📊 <b>Bot {BOT_VERSION} | {modo}</b>\n\n"
         f"💰 Bankroll: <b>${BANKROLL:.2f}</b> | Edge mín: {MIN_EDGE}%\n"
         f"🔧 SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n\n"
         f"⏱ Estado: {running}\n"
@@ -1810,7 +2077,7 @@ def cmd_info():
         )
 
     text = (
-        f"<b>BOT POLYMARKET v10.4.5</b>\n"
+        f"<b>BOT POLYMARKET {BOT_VERSION}</b>\n"
         f"Modo: {modo} | Bankroll: ${BANKROLL:.2f}\n"
         f"Edge mín: {MIN_EDGE}% | SL: {STOP_LOSS_PCT}% | TP: +{TAKE_PROFIT_PCT}%\n"
         f"Exp máx: {int(MAX_EXPOSURE_PCT*100)}% | Min bet: ${MIN_BET:.2f}\n"
@@ -2335,7 +2602,7 @@ def manage_positions(client, dl):
                     "initial_value": initial_value,
                     "payout_est": round(size, 2),
                     "cur_price": cur_price,
-                    "bot_version": "v10.4.5",
+                    "bot_version": BOT_VERSION,
                 })
             except Exception as e:
                 log.warning(f"Error actualizando postmortem resolved_win: {e}")
@@ -3047,7 +3314,7 @@ def main(client):
     effective_bankroll = get_effective_bankroll(client)
 
     log.info("=" * 65)
-    log.info(f"BOT v10.4.5 | {today_str} | {mode_label} | ${effective_bankroll:.2f} (tope ${BANKROLL:.2f})")
+    log.info(f"BOT {BOT_VERSION} | {today_str} | {mode_label} | ${effective_bankroll:.2f} (tope ${BANKROLL:.2f})")
     log.info("=" * 65)
 
     # Decision log: registrar inicio
@@ -3071,8 +3338,6 @@ def main(client):
         dl.append(f"TRADERS: {n_signals} señales cargadas de signals.json")
     else:
         dl.append(f"TRADERS: sin señales (signals.json vacío o ausente)")
-        # v10.3: Alerta Telegram si no hay señales (Bug #6)
-        send_telegram("⚠️ <b>Ciclo sin señales de traders</b>\nsignals.json vacío o expirado. Compras sin confirmación de trader.")
 
     # ---- PASO 0: STALE ----
     open_orders = get_open_orders(client)
@@ -3506,7 +3771,7 @@ def main(client):
     # --- v10.4.1: Guardar resumen de ciclo para historial ---
     try:
         cycle_data = {
-            "version": "v10.4.5",
+            "version": BOT_VERSION,
             "cycle_number": bot_state["cycle_count"] + 1,
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
             "mode": "DRY_RUN" if DRY_RUN else "REAL",
@@ -3543,6 +3808,11 @@ def main(client):
         log.info("cycle_summary guardado OK")
     except Exception as e:
         log.warning(f"Error guardando cycle_summary: {e}")
+
+    try:
+        run_observability_alerts()
+    except Exception as e:
+        log.warning(f"Error evaluando alertas de observabilidad: {e}")
 
     bot_state["cycle_count"] += 1
     bot_state["running"] = False
@@ -3694,7 +3964,7 @@ def run_trader_tasks():
 
 if __name__ == "__main__":
     log.info("=" * 65)
-    log.info(f"POLYMARKET BOT v10.4.5 | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
+    log.info(f"POLYMARKET BOT {BOT_VERSION} | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
     log.info(f"Modo: {'DRY RUN' if DRY_RUN else 'REAL'}")
     log.info("=" * 65)
 
@@ -3713,7 +3983,7 @@ if __name__ == "__main__":
     modo = "DRY RUN" if DRY_RUN else "REAL"
     schedule = ", ".join(f"{h:02d}:00" for h in sorted(SCHEDULE_HOURS_UTC))
     send_telegram(
-        f"🤖 <b>Bot v10.4.5 arrancado</b>\n"
+        f"🤖 <b>Bot {BOT_VERSION} arrancado</b>\n"
         f"Modo: {modo} | ${BANKROLL:.2f}\n"
         f"Min edge: {MIN_EDGE}% | Schedule: {schedule} UTC\n"
         f"🔧 Gestión activa: SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n"
@@ -3722,8 +3992,20 @@ if __name__ == "__main__":
         with_menu=True,
     )
 
+    try:
+        rebuilt = backfill_postmortem_from_performance()
+        if rebuilt > 0:
+            log.info(f"postmortem listo al arrancar: {rebuilt} registros")
+    except Exception as e:
+        log.warning(f"Error en backfill de postmortem al arrancar: {e}")
+
     # v9: Ejecutar análisis de traders antes del primer ciclo
     run_trader_tasks()
+
+    try:
+        run_observability_alerts()
+    except Exception as e:
+        log.warning(f"Error evaluando alertas al arrancar: {e}")
 
     # v10.4 Fix Bug #11: comprobar si el último ciclo fue reciente
     # Bug real: al hacer deploy, el bot ejecutaba un ciclo inmediato

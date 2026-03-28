@@ -1,6 +1,6 @@
 # CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 28 de marzo de 2026 (Sesión 19 — v10.4.5)
+**Última actualización:** 28 de marzo de 2026 (Sesión 19 — v10.4.6)
 **Próxima sesión:** Análisis / Coding según necesidad
 
 ---
@@ -31,7 +31,7 @@ Fusionado en sesión 19: backup local (ciclos 1-9) + Volume (ciclos 10-11).
 
 ---
 
-## Qué hace el bot v10.4.5 (paso a paso)
+## Qué hace el bot v10.4.6 (paso a paso)
 
 Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
@@ -59,6 +59,8 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Postmortem base (v10.4.5):** Mantiene `postmortem.json` sincronizado con `BUY`, `SELL_PENDING → SELL/SELL_FAILED`, `LOSS_TOTAL` y `RESOLVED_WIN` para poder analizar cierres y resoluciones con datos estructurados.
 
+**Alertas de observabilidad (v10.4.6):** Hace backfill automático de `postmortem.json` desde `performance.json` si aún no existía, guarda estado persistente en `alerts_state.json`, y envía alertas one-shot por Telegram para `30 trades limpios`, `signals.json` con problemas y `pending_exit` atascadas.
+
 ---
 
 ## Estado actual del código
@@ -66,13 +68,13 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción:** Railway — Online, EU West Amsterdam, MODO REAL, DRY_RUN=false
-**Versión activa:** v10.4.5
+**Versión activa:** v10.4.6
 
 ### Archivos del proyecto (tras limpieza sesión 19):
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.4.5 |
-| `verify_before_deploy.py` | v7 — 149 tests de comportamiento |
+| `bot.py` | Script principal v10.4.6 |
+| `verify_before_deploy.py` | v7 — 167 tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |
@@ -89,6 +91,7 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 |---------|---------|
 | `performance.json` | 33 trades (BUY/SELL/LOSS_TOTAL desde 25 mar) |
 | `postmortem.json` | Postmortems estructurados de apertura/cierre por mercado |
+| `alerts_state.json` | Estado persistente de alertas para evitar avisos duplicados |
 | `signals.json` | Señales de traders activas usadas por el bot en producción |
 | `traders_db.json` | Base de datos persistente de traders descubiertos/calificados |
 | `trader_history.json` | Historial auxiliar del pipeline de traders |
@@ -107,7 +110,7 @@ MIN_BET="1.00"
 DATA_DIR="/app/data"
 ```
 
-### Configuración en código (defaults bot.py v10.4.5):
+### Configuración en código (defaults bot.py v10.4.6):
 ```python
 MIN_EDGE = 7.0%
 STOP_LOSS_PCT = -25.0%
@@ -120,7 +123,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 ---
 
-## Telegram — Comandos disponibles (v10.4.5)
+## Telegram — Comandos disponibles (v10.4.6)
 
 | Comando | Qué muestra |
 |---------|-------------|
@@ -178,6 +181,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 | v10.4.3 | 28 mar | Ciclos persistentes + fixes post-deploy + limpieza repo |
 | v10.4.4 | 28 mar | Ajuste temporal manual de DST |
 | v10.4.5 | 28 mar | `ZoneInfo` + zonas IANA reales + `.claude/` fuera del repo + `postmortem.json` base + trader data al Volume + `/postmortem` |
+| v10.4.6 | 28 mar | backfill automático de `postmortem.json` + `alerts_state.json` + alertas Telegram de observabilidad |
 
 ---
 
@@ -250,8 +254,8 @@ Usar esta plantilla al cerrar cada sesión relevante:
 
 - **Claude Code:** implementó v10.4.2, v10.4.3 y v10.4.4; rediseño Telegram, paginación, `/info`, persistencia de ciclos, limpieza del repo y un fix manual de DST basado en offsets estáticos.
 - **Codex:** revisó críticamente esa secuencia y detectó dos deudas importantes: el fix de DST seguía siendo frágil por usar offsets manuales, y `.claude/settings.local.json` había quedado versionado por error.
-- **Codex:** corrigió el enfoque de DST en `bot.py` migrando a `ZoneInfo` + `CITY_TIMEZONES` con zonas IANA reales (`v10.4.5`), actualizó `verify_before_deploy.py`, sacó `.claude/settings.local.json` del control de versiones sin borrar la copia local, reparó manualmente una entrada truncada en `performance.json` de Railway, implementó la capa base de `postmortem.json`, movió `signals.json` / `traders_db.json` / `trader_history.json` al flujo persistente de Volume con bootstrap automático y añadió `/postmortem` para inspección rápida desde Telegram.
-- **Estado final de la sesión 19:** versión activa `v10.4.5`, tests `149/149`, repo listo para deploy, DST robusto para futuros cambios de horario, observabilidad base de postmortem lista para crecer, pipeline de traders persistente en Volume y botón visible de `/postmortem`.
+- **Codex:** corrigió el enfoque de DST en `bot.py` migrando a `ZoneInfo` + `CITY_TIMEZONES` con zonas IANA reales (`v10.4.5`), actualizó `verify_before_deploy.py`, sacó `.claude/settings.local.json` del control de versiones sin borrar la copia local, reparó manualmente una entrada truncada en `performance.json` de Railway, implementó la capa base de `postmortem.json`, movió `signals.json` / `traders_db.json` / `trader_history.json` al flujo persistente de Volume con bootstrap automático, añadió `/postmortem` para inspección rápida desde Telegram y preparó `v10.4.6` con backfill automático de postmortem y alertas de observabilidad persistentes.
+- **Estado final de la sesión 19:** versión activa `v10.4.6`, tests `167/167`, repo listo para deploy, DST robusto para futuros cambios de horario, observabilidad base de postmortem lista para crecer, pipeline de traders persistente en Volume, botón visible de `/postmortem` y alertas automáticas listas para avisar cuando haya suficiente muestra para revisar la lógica.
 
 ---
 
@@ -306,7 +310,7 @@ Usar esta plantilla al cerrar cada sesión relevante:
 London ha producido pérdidas seguidas porque Open-Meteo predice una temperatura y Weather Underground (fuente real de Polymarket) resuelve con otra. **No apostar en London hasta resolver.**
 
 ### Lógica de salida — casos reales
-Con ~15 trades cerrados no hay suficiente evidencia estadística para cambiar la lógica. La solución correcta es un monitor ligero intra-ciclo (Fase 2, cuando haya 30+ trades limpios).
+Con ~15 trades cerrados no hay suficiente evidencia estadística para cambiar la lógica. La solución correcta es un monitor ligero intra-ciclo (Fase 2, cuando haya 30+ trades limpios). Desde `v10.4.6`, Telegram avisará automáticamente cuando se alcance ese umbral para abrir una sesión de análisis/coding con Opus.
 
 ---
 
@@ -314,7 +318,7 @@ Con ~15 trades cerrados no hay suficiente evidencia estadística para cambiar la
 
 ### Fase 1 — ✅ Implementada:
 - Persistencia Railway Volume, cycles_history.jsonl, cycle_summary.json ✅
-- Bugs #3-#14 corregidos, 149 tests ✅
+- Bugs #3-#14 corregidos, 167 tests ✅
 - Claude Code instalado y funcional ✅
 
 ### Fase 1.5 — ✅ Implementada (sesión 19):
@@ -327,9 +331,12 @@ Con ~15 trades cerrados no hay suficiente evidencia estadística para cambiar la
 - `postmortem.json` base implementado ✅
 - `signals.json`, `traders_db.json` y `trader_history.json` persistidos en Volume ✅
 - `/postmortem` disponible para inspección rápida desde Telegram ✅
+- backfill automático de `postmortem.json` desde `performance.json` ✅
+- `alerts_state.json` + alertas Telegram de observabilidad ✅
 
 ### Fase 2 — Cuando haya 30+ trades limpios:
 - Monitor ligero intra-ciclo: revisar posiciones cada 2-4h
+- La alerta Telegram de `v10.4.6` avisará automáticamente cuando la muestra esté lista
 - Ampliar `postmortem.json` con análisis más rico al resolver cada mercado
 
 ### Fase 3 — Cuando escale:
@@ -363,7 +370,7 @@ railway ssh "ls /app/data/"         # ver archivos del volume
 
 ### Workflow de deploy:
 ```bash
-python verify_before_deploy.py   # 149/149 deben pasar
+python verify_before_deploy.py   # 167/167 deben pasar
 # actualizar CONTEXTO.md si cambió el estado actual
 # actualizar HISTORIAL_SESIONES.md si hubo una sesión/hito nuevo
 git add .
