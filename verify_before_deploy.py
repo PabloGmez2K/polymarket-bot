@@ -196,7 +196,7 @@ def run_tests():
     test("CYCLES_HISTORY_FILE definido", "CYCLES_HISTORY_FILE" in code)
     test("cycles_history.jsonl append-only", "cycles_history.jsonl" in code)
     test("cycle_summary se guarda en main()", "cycle_data" in code and "CYCLE_SUMMARY_FILE" in code)
-    test("cycle_data incluye version v10.4.2", '"version"' in code and "v10.4.2" in code)
+    test("cycle_data incluye version v10.4.3", '"version"' in code and "v10.4.3" in code)
 
     # ---- Test 14: Rediseño Telegram v10.4.2 ----
     print("\n🔍 Rediseño Telegram v10.4.2")
@@ -209,7 +209,22 @@ def run_tests():
     test("Bug #13: send_telegram_paged en cmd_log", "send_telegram_paged" in code and "cmd_log" in code)
     test("Bug #13: send_telegram_paged en cmd_cartera", "send_telegram_paged" in code)
     test("_parse_position_label usa centavos (¢)", "¢" in code)
-    test("cmd_estado versión correcta", "Bot v10.4.2" in code or "v10.4.2" in code)
+    test("cmd_estado versión correcta", "Bot v10.4.3" in code or "v10.4.3" in code)
+
+    # ---- Test 14b: Fixes v10.4.3 ----
+    print("\n🔍 Fixes v10.4.3")
+    test("Ciclos persistentes: _load_cycle_count definida",
+         "def _load_cycle_count(" in code)
+    test("Ciclos persistentes: se carga al arrancar",
+         "_load_cycle_count()" in code and 'bot_state["cycle_count"]' in code)
+    test("Fix arranque: sin texto 'Bug #11' en mensaje Telegram",
+         "Fix Bug #11: evita ciclo duplicado al deploy" not in code)
+    test("Fix /detalle: escapa HTML (replace < y >)",
+         'replace("<", "&lt;")' in code and 'replace(">", "&gt;")' in code)
+    test("Fix traders: filtra por ciudad+lado (active_positions set)",
+         "active_positions" in code and "outcome.lower()" in code)
+    test("Fix traders: filtra por fecha no pasada",
+         "today_str" in code and "sig_date < today_str" in code)
 
     # ---- Test 15: Integridad de COMMANDS (todos los botones siguen presentes) ----
     print("\n🔍 Integridad de COMMANDS")

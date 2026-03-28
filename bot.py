@@ -19,11 +19,17 @@ from py_clob_client.order_builder.constants import BUY, SELL
 load_dotenv()
 
 # =============================================================
-# bot.py v10.4.2 — Rediseño Telegram + Bug #13 (paginación)
-# Sesión 19: Fase 1.5 — rediseño completo UI Telegram
+# bot.py v10.4.3 — Ciclos persistentes + fixes Telegram
+# Sesión 19: Fase 1.5 — rediseño Telegram + fixes post-deploy
 # =============================================================
 #
-# Nuevo en v10.4.2:
+# Nuevo en v10.4.3:
+#   - Ciclos persistentes: _load_cycle_count() lee cycles_history.jsonl al arrancar
+#   - Fix /detalle: escapa HTML en fallback decisions.log (Bug #13 parcial)
+#   - Fix arranque: mensaje "Bug #11" eliminado
+#   - Fix traders: coincidencias filtradas por ciudad+lado+fecha futura
+#
+# v10.4.2:
 #   - Rediseño completo Telegram: 7 botones mejorados + botón /info nuevo
 #   - Fix Bug #13: send_telegram_paged() — paginación automática >4096 chars
 #   - Helpers: _parse_position_label(), _get_portfolio_and_positions()
@@ -223,6 +229,21 @@ known_tokens = {}
 PERFORMANCE_FILE = _data_path("performance.json")
 CYCLE_SUMMARY_FILE = _data_path("cycle_summary.json")
 CYCLES_HISTORY_FILE = _data_path("cycles_history.jsonl")
+
+
+def _load_cycle_count():
+    """
+    Lee cycles_history.jsonl y devuelve el número de ciclos históricos.
+    Así el contador no se reinicia con cada deploy — es acumulativo
+    mientras el volume de Railway persista y la versión sea 10.4.X.
+    """
+    if not os.path.exists(CYCLES_HISTORY_FILE):
+        return 0
+    try:
+        with open(CYCLES_HISTORY_FILE, "r", encoding="utf-8") as f:
+            return sum(1 for line in f if line.strip())
+    except Exception:
+        return 0
 
 
 def parse_city_from_title(title):
@@ -802,7 +823,7 @@ def cmd_estado():
         )
 
     send_telegram(
-        f"📊 <b>Bot v10.4.2 | {modo}</b>\n\n"
+        f"📊 <b>Bot v10.4.3 | {modo}</b>\n\n"
         f"💰 Bankroll: <b>${BANKROLL:.2f}</b> | Edge mín: {MIN_EDGE}%\n"
         f"🔧 SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n\n"
         f"⏱ Estado: {running}\n"
@@ -1062,6 +1083,8 @@ def cmd_logfull():
                             if " | " in clean:
                                 clean = clean.split(" | ", 1)[-1]
                             if clean:
+                                # Escapar caracteres HTML para evitar HTTP 400
+                                clean = clean.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                                 cycle_text += f"{clean}\n"
                         send_telegram_paged(cycle_text, with_menu=True)
                         return
@@ -1228,30 +1251,40 @@ def cmd_traders():
     if quality_names:
         text += f"\n⭐ <b>Calidad:</b> {', '.join(quality_names[:6])}\n"
 
-    # Cruce con posiciones activas
+    # Cruce con posiciones activas — filtra por ciudad + lado + fecha no pasada
     portfolio = _get_portfolio_and_positions()
-    active_cities = set()
+    active_positions = set()  # set de (city_lower, outcome_lower)
     if portfolio:
         for pos in portfolio["active"]:
             city = parse_city_from_title(pos.get("title", ""))
-            if city != "?":
-                active_cities.add(city.lower())
+            outcome = pos.get("outcome", "")
+            if city != "?" and outcome:
+                active_positions.add((city.lower(), outcome.lower()))
 
-    if active_cities and n_signals > 0:
-        text += f"\n<b>🔗 Coincidencias con cartera:</b>\n"
+    today_str = date.today().isoformat()  # "2026-03-28"
+
+    if active_positions and n_signals > 0:
+        text += f"\n<b>🔗 Señales alineadas con cartera:</b>\n"
         found_any = False
         for s in data.get("signals", []):
             if s.get("is_reference"):
                 continue
             city = s.get("city", "")
-            if city.lower() in active_cities:
-                icon = "🤝" if s.get("has_consensus") else "📍"
-                outcome = s.get("outcome", "?")
-                price = s.get("avg_price", 0)
-                text += f"  {icon} {city} {outcome} @ {int(price*100)}¢\n"
-                found_any = True
+            outcome = s.get("outcome", "")
+            sig_date = s.get("date", "")  # formato "2026-03-28" o "Mar28"
+            # Filtrar: ciudad+lado coincide con posición activa
+            if (city.lower(), outcome.lower()) not in active_positions:
+                continue
+            # Filtrar: fecha no pasada (si el formato es ISO)
+            if sig_date and len(sig_date) == 10:
+                if sig_date < today_str:
+                    continue
+            icon = "🤝" if s.get("has_consensus") else "📍"
+            price = s.get("avg_price", 0)
+            text += f"  {icon} {city} {outcome} {sig_date} @ {int(price*100)}¢\n"
+            found_any = True
         if not found_any:
-            text += "  <i>Ninguna señal coincide con posiciones actuales</i>\n"
+            text += "  <i>Ninguna señal de traders coincide con tus posiciones actuales</i>\n"
 
     # Último scan y análisis
     scan_ts = bot_state.get("last_trader_scan")
@@ -2593,7 +2626,7 @@ def main(client):
     effective_bankroll = get_effective_bankroll(client)
 
     log.info("=" * 65)
-    log.info(f"BOT v10.4.2 | {today_str} | {mode_label} | ${effective_bankroll:.2f} (tope ${BANKROLL:.2f})")
+    log.info(f"BOT v10.4.3 | {today_str} | {mode_label} | ${effective_bankroll:.2f} (tope ${BANKROLL:.2f})")
     log.info("=" * 65)
 
     # Decision log: registrar inicio
@@ -3050,7 +3083,7 @@ def main(client):
     # --- v10.4.1: Guardar resumen de ciclo para historial ---
     try:
         cycle_data = {
-            "version": "v10.4.2",
+            "version": "v10.4.3",
             "cycle_number": bot_state["cycle_count"] + 1,
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
             "mode": "DRY_RUN" if DRY_RUN else "REAL",
@@ -3238,9 +3271,13 @@ def run_trader_tasks():
 
 if __name__ == "__main__":
     log.info("=" * 65)
-    log.info(f"POLYMARKET BOT v10.4.2 | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
+    log.info(f"POLYMARKET BOT v10.4.3 | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
     log.info(f"Modo: {'DRY RUN' if DRY_RUN else 'REAL'}")
     log.info("=" * 65)
+
+    # v10.4.2: ciclos acumulativos — no se reinician con cada deploy
+    bot_state["cycle_count"] = _load_cycle_count()
+    log.info(f"Ciclos históricos cargados: {bot_state['cycle_count']}")
 
     clob_client = setup_client()
     if clob_client is None:
@@ -3253,7 +3290,7 @@ if __name__ == "__main__":
     modo = "DRY RUN" if DRY_RUN else "REAL"
     schedule = ", ".join(f"{h:02d}:00" for h in sorted(SCHEDULE_HOURS_UTC))
     send_telegram(
-        f"🤖 <b>Bot v10.4.2 arrancado</b>\n"
+        f"🤖 <b>Bot v10.4.3 arrancado</b>\n"
         f"Modo: {modo} | ${BANKROLL:.2f}\n"
         f"Min edge: {MIN_EDGE}% | Schedule: {schedule} UTC\n"
         f"🔧 Gestión activa: SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n"
@@ -3292,9 +3329,8 @@ if __name__ == "__main__":
                         skip_first_cycle = True
                         log.info(f"Último ciclo hace {age_hours:.1f}h (< {min_cycle_gap_hours}h) — saltando ciclo inicial")
                         send_telegram(
-                            f"🤖 <b>Bot arrancado</b>\n"
-                            f"Último ciclo hace {age_hours:.1f}h — esperando al siguiente programado.\n"
-                            f"(Fix Bug #11: evita ciclo duplicado al deploy)"
+                            f"⏭ <b>Bot arrancado</b>\n"
+                            f"Último ciclo hace {age_hours:.1f}h — esperando al siguiente programado."
                         )
     except Exception as e:
         log.warning(f"Error comprobando último ciclo: {e}")

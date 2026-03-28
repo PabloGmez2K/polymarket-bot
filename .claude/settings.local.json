@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(PYTHONIOENCODING=utf-8 python verify_before_deploy.py 2>&1)",
+      "Bash(git push:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(railway run:*)",
+      "Bash(railway status:*)",
+      "Bash(railway ssh:*)",
+      "Bash(PYTHONIOENCODING=utf-8 python verify_before_deploy.py)"
+    ]
+  }
+}
