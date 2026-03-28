@@ -1424,7 +1424,7 @@ def cmd_info():
         )
 
     text = (
-        f"<b>BOT POLYMARKET v10.4.2</b>\n"
+        f"<b>BOT POLYMARKET v10.4.5</b>\n"
         f"Modo: {modo} | Bankroll: ${BANKROLL:.2f}\n"
         f"Edge mín: {MIN_EDGE}% | SL: {STOP_LOSS_PCT}% | TP: +{TAKE_PROFIT_PCT}%\n"
         f"Exp máx: {int(MAX_EXPOSURE_PCT*100)}% | Min bet: ${MIN_BET:.2f}\n"

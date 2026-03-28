@@ -1,6 +1,6 @@
 # CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 28 de marzo de 2026 (Sesión 19 — v10.4.3)
+**Última actualización:** 28 de marzo de 2026 (Sesión 19 — v10.4.5)
 **Próxima sesión:** Análisis / Coding según necesidad
 
 ---
@@ -31,7 +31,7 @@ Fusionado en sesión 19: backup local (ciclos 1-9) + Volume (ciclos 10-11).
 
 ---
 
-## Qué hace el bot v10.4.3 (paso a paso)
+## Qué hace el bot v10.4.5 (paso a paso)
 
 Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
@@ -53,7 +53,9 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **7. Registro de ciclo (v10.4.1+):** Guarda resumen en cycle_summary.json + append en cycles_history.jsonl.
 
-**Al arrancar (v10.4.3):** Carga ciclos históricos desde cycles_history.jsonl (contador no se reinicia con deploys).
+**Al arrancar (v10.4.3+):** Carga ciclos históricos desde cycles_history.jsonl (contador no se reinicia con deploys).
+
+**Zona horaria por ciudad (v10.4.5):** Ya no usa offsets manuales; usa zonas IANA reales con `ZoneInfo` para que DST cambie automáticamente sin tocar el código en marzo/octubre.
 
 ---
 
@@ -62,13 +64,13 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción:** Railway — Online, EU West Amsterdam, MODO REAL, DRY_RUN=false
-**Versión activa:** v10.4.3
+**Versión activa:** v10.4.5
 
 ### Archivos del proyecto (tras limpieza sesión 19):
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.4.3 |
-| `verify_before_deploy.py` | v5 — 99 tests de comportamiento |
+| `bot.py` | Script principal v10.4.5 |
+| `verify_before_deploy.py` | v6 — 107 tests de comportamiento |
 | `trader_analyzer.py` | Genera signals.json diariamente |
 | `find_traders.py` | Descubrimiento semanal de traders |
 | `CLAUDE.md` | Instrucciones para Claude Code |
@@ -98,7 +100,7 @@ MIN_BET="1.00"
 DATA_DIR="/app/data"
 ```
 
-### Configuración en código (defaults bot.py v10.4.3):
+### Configuración en código (defaults bot.py v10.4.5):
 ```python
 MIN_EDGE = 7.0%
 STOP_LOSS_PCT = -25.0%
@@ -111,7 +113,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 ---
 
-## Telegram — Comandos disponibles (v10.4.3)
+## Telegram — Comandos disponibles (v10.4.5)
 
 | Comando | Qué muestra |
 |---------|-------------|
@@ -166,6 +168,36 @@ Schedule: 08:00, 16:00, 23:00 UTC
 | v10.4.1 | 28 mar | cycles_history.jsonl + cycle_summary.json |
 | v10.4.2 | 28 mar | Rediseño Telegram + Bug #13 + helpers + /info |
 | v10.4.3 | 28 mar | Ciclos persistentes + fixes post-deploy + limpieza repo |
+| v10.4.4 | 28 mar | Ajuste temporal manual de DST |
+| v10.4.5 | 28 mar | `ZoneInfo` + zonas IANA reales + `.claude/` fuera del repo |
+
+---
+
+## Trazabilidad por herramienta
+
+**Objetivo:** este proyecto se trabaja con varias herramientas. A partir de ahora, cada sesión debe dejar anotado qué agente hizo qué, qué detectó, y qué corrigió a otro agente si aplica.
+
+### Convención a seguir en futuras sesiones
+
+- **ChatGPT / Claude.ai:** análisis, estrategia, revisión de contexto, ideas y validación conceptual.
+- **Codex:** cambios de código en local, revisión crítica del repo, corrección de implementaciones previas, validación técnica y tests.
+- **Claude Code:** edición/coding en local cuando se use explícitamente para implementar cambios.
+
+### Regla de documentación
+
+- Cada sesión importante debe añadir una nota breve indicando:
+- `Herramienta usada`
+- `Qué hizo`
+- `Qué problemas detectó`
+- `Qué corrigió de trabajo previo`
+- `Qué quedó pendiente`
+
+### Sesión 19 — Registro multi-herramienta
+
+- **Claude Code:** implementó v10.4.2, v10.4.3 y v10.4.4; rediseño Telegram, paginación, `/info`, persistencia de ciclos, limpieza del repo y un fix manual de DST basado en offsets estáticos.
+- **Codex:** revisó críticamente esa secuencia y detectó dos deudas importantes: el fix de DST seguía siendo frágil por usar offsets manuales, y `.claude/settings.local.json` había quedado versionado por error.
+- **Codex:** corrigió el enfoque de DST en `bot.py` migrando a `ZoneInfo` + `CITY_TIMEZONES` con zonas IANA reales (`v10.4.5`), actualizó `verify_before_deploy.py` a 107 checks y sacó `.claude/settings.local.json` del control de versiones sin borrar la copia local.
+- **Estado final de la sesión 19:** versión activa `v10.4.5`, tests `107/107`, repo limpio, DST robusto para futuros cambios de horario.
 
 ---
 
@@ -228,7 +260,7 @@ Con ~15 trades cerrados no hay suficiente evidencia estadística para cambiar la
 
 ### Fase 1 — ✅ Implementada:
 - Persistencia Railway Volume, cycles_history.jsonl, cycle_summary.json ✅
-- Bugs #3-#14 corregidos, 99 tests ✅
+- Bugs #3-#14 corregidos, 107 tests ✅
 - Claude Code instalado y funcional ✅
 
 ### Fase 1.5 — ✅ Implementada (sesión 19):
@@ -237,6 +269,7 @@ Con ~15 trades cerrados no hay suficiente evidencia estadística para cambiar la
 - Ciclos persistentes entre deploys ✅
 - Limpieza del repo (17 archivos eliminados) ✅
 - performance.json fusionado con historial completo (33 trades) ✅
+- DST robusto con `ZoneInfo` y zonas IANA reales ✅
 
 ### Fase 2 — Cuando haya 30+ trades limpios:
 - Monitor ligero intra-ciclo: revisar posiciones cada 2-4h
@@ -264,6 +297,10 @@ railway ssh "ls /app/data/"         # ver archivos del volume
 ### Claude Code:
 - Instalado en `C:\Projects\polymarket-bot`
 - Para tests: `$env:PYTHONIOENCODING="utf-8"` antes de ejecutar
+
+### Trabajo multi-agente:
+- `CONTEXTO.md` debe mantenerse como bitácora compartida entre ChatGPT, Codex, Claude.ai y Claude Code.
+- Antes de cerrar una sesión relevante, anotar qué herramienta hizo los cambios finales y qué corrigió de sesiones previas.
 
 ### Workflow de deploy:
 ```bash

@@ -19,6 +19,7 @@ import sys
 import os
 import ast
 import re
+import types
 
 passed = 0
 failed = 0
@@ -39,6 +40,14 @@ def test(name, condition, detail=""):
         failed += 1
 
 
+def get_function_source(module_ast, code_lines, name):
+    """Extrae el source exacto de una función definida en bot.py."""
+    for node in module_ast.body:
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return "\n".join(code_lines[node.lineno - 1:node.end_lineno])
+    raise ValueError(f"Función no encontrada: {name}")
+
+
 def run_tests():
     global passed, failed
 
@@ -54,12 +63,14 @@ def run_tests():
     # ---- Test 0: Sintaxis válida ----
     print("\n🔍 Sintaxis")
     try:
-        ast.parse(code)
+        module_ast = ast.parse(code)
         test("Python válido", True)
     except SyntaxError as e:
         test("Python válido", False, str(e))
         print("\n⛔ Sintaxis inválida — no se pueden ejecutar más tests")
         sys.exit(1)
+
+    code_lines = code.splitlines()
 
     # ---- Test 1: Versión ----
     print("\n🔍 Versión")
@@ -277,6 +288,103 @@ def run_tests():
         test("cmd_info avisa de WU vs OMA",   "Weather Underground" in info_body)
     else:
         test("cmd_info encontrada", False, "función no encontrada")
+
+    # ---- Test 19: Tests funcionales reales ----
+    print("\n🔍 Tests funcionales")
+    try:
+        ns = {"re": re}
+        exec(get_function_source(module_ast, code_lines, "parse_city_from_title"), ns)
+        exec(get_function_source(module_ast, code_lines, "_parse_position_label"), ns)
+
+        label_paris = ns["_parse_position_label"](
+            "Will the temperature in Paris be 11°C on March 29?",
+            "NO",
+        )
+        test("parse label: ciudad/temp/fecha/outcome",
+             label_paris == "Paris 11°C Mar29 NO",
+             f"obtenido: {label_paris}")
+
+        pager_calls = []
+        pager_ns = {
+            "send_telegram": lambda text, with_menu=False, custom_keyboard=None: pager_calls.append(
+                {"text": text, "with_menu": with_menu}
+            )
+        }
+        exec(get_function_source(module_ast, code_lines, "send_telegram_paged"), pager_ns)
+        pager_ns["send_telegram_paged"]("L1\nL2\nL3\nL4", with_menu=True, page_size=5)
+        test("paginación: divide mensaje largo", len(pager_calls) >= 2, f"páginas: {len(pager_calls)}")
+        test("paginación: solo último mensaje lleva menú",
+             len(pager_calls) >= 2 and (not pager_calls[0]["with_menu"]) and pager_calls[-1]["with_menu"])
+
+        sent_messages = []
+        cartera_ns = {
+            "re": re,
+            "send_telegram": lambda text, with_menu=False, custom_keyboard=None: sent_messages.append(
+                {"text": text, "with_menu": with_menu}
+            ),
+            "send_telegram_paged": lambda text, with_menu=False, page_size=3800: sent_messages.append(
+                {"text": text, "with_menu": with_menu}
+            ),
+            "_get_portfolio_and_positions": lambda: {
+                "cash": 25.65,
+                "cash_ok": True,
+                "active": [{
+                    "title": "Will the temperature in Miami be 30°C on March 28?",
+                    "outcome": "YES",
+                    "size": 20.0,
+                    "avgPrice": 0.12,
+                    "curPrice": 0.10,
+                    "currentValue": 2.10,
+                    "percentPnl": -12.5,
+                    "cashPnl": -0.30,
+                }],
+                "resolved_won": [{
+                    "title": "Will the temperature in Chicago be 10°C on March 28?",
+                    "outcome": "YES",
+                    "currentValue": 2.50,
+                }],
+                "dead": [{
+                    "initialValue": 2.46,
+                }],
+                "active_value": 2.10,
+                "resolved_value": 2.50,
+                "portfolio_total": 30.25,
+                "api_error": "timeout talking to data api",
+            },
+        }
+        exec(get_function_source(module_ast, code_lines, "parse_city_from_title"), cartera_ns)
+        exec(get_function_source(module_ast, code_lines, "_parse_position_label"), cartera_ns)
+        exec(get_function_source(module_ast, code_lines, "cmd_cartera"), cartera_ns)
+        cartera_ns["cmd_cartera"]()
+        cartera_msg = sent_messages[-1]["text"] if sent_messages else ""
+        test("cartera: muestra error API al usuario", "Error API posiciones" in cartera_msg)
+        test("cartera: formatea posición con centavos", "12¢ → 10¢" in cartera_msg, cartera_msg[:160])
+        test("cartera: incluye vivas/resueltas/muertas",
+             "Posiciones activas" in cartera_msg and "Esperando pago" in cartera_msg and "posiciones sin valor" in cartera_msg)
+
+        info_messages = []
+        info_ns = {
+            "os": os,
+            "json": __import__("json"),
+            "send_telegram_paged": lambda text, with_menu=False, page_size=3800: info_messages.append(text),
+            "DRY_RUN": False,
+            "BANKROLL": 25.0,
+            "MIN_EDGE": 7.0,
+            "STOP_LOSS_PCT": -25.0,
+            "TAKE_PROFIT_PCT": 40.0,
+            "MAX_EXPOSURE_PCT": 0.40,
+            "MIN_BET": 1.0,
+            "SCHEDULE_HOURS_UTC": [8, 16, 23],
+            "bot_state": {"cycle_count": 12, "last_run": None},
+            "CYCLE_SUMMARY_FILE": "__missing__",
+            "get_performance_summary": lambda: None,
+        }
+        exec(get_function_source(module_ast, code_lines, "cmd_info"), info_ns)
+        info_ns["cmd_info"]()
+        info_msg = info_messages[-1] if info_messages else ""
+        test("info: versión visible correcta", "BOT POLYMARKET v10.4.5" in info_msg, info_msg[:120])
+    except Exception as e:
+        test("Tests funcionales ejecutan sin excepción", False, str(e))
 
     # ---- Resultado ----
     print(f"\n{'='*50}")
