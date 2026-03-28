@@ -231,6 +231,7 @@ known_tokens = {}
 PERFORMANCE_FILE = _data_path("performance.json")
 CYCLE_SUMMARY_FILE = _data_path("cycle_summary.json")
 CYCLES_HISTORY_FILE = _data_path("cycles_history.jsonl")
+POSTMORTEM_FILE = _data_path("postmortem.json")
 
 
 def _load_cycle_count():
@@ -384,6 +385,7 @@ def track_trade(action, **kwargs):
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "action": action,
+        "bot_version": "v10.4.5",
     }
     entry.update(kwargs)
 
@@ -403,6 +405,271 @@ def track_trade(action, **kwargs):
             json.dump(history, f, indent=2, ensure_ascii=False)
     except Exception as e:
         log.warning(f"Error guardando performance: {e}")
+
+    try:
+        update_postmortem(action, entry)
+    except Exception as e:
+        log.warning(f"Error actualizando postmortem: {e}")
+
+
+def load_postmortem_data():
+    """Carga postmortems acumulativos de mercados/posiciones."""
+    if os.path.exists(POSTMORTEM_FILE):
+        try:
+            with open(POSTMORTEM_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, list) else []
+        except Exception:
+            pass
+    return []
+
+
+def save_postmortem_data(records):
+    """Guarda postmortems. Conserva histórico reciente y evita crecimiento infinito."""
+    if len(records) > 500:
+        records = records[-500:]
+    try:
+        with open(POSTMORTEM_FILE, "w", encoding="utf-8") as f:
+            json.dump(records, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        log.warning(f"Error guardando postmortem: {e}")
+
+
+def _find_open_postmortem(records, entry):
+    """
+    Busca el postmortem abierto más probable para una entrada.
+    Prioridad: token_id -> question -> city+side+date.
+    """
+    open_statuses = {"open", "pending_exit", "exit_failed"}
+    token_id = entry.get("token_id", "")
+    question = entry.get("question", "")
+    city = entry.get("city", "")
+    side = str(entry.get("side", "")).upper()
+    market_date = entry.get("date", "")
+
+    for record in reversed(records):
+        if record.get("status") not in open_statuses:
+            continue
+        if token_id and record.get("token_id") == token_id:
+            return record
+        if question and record.get("question") == question and record.get("side") == side:
+            return record
+        if city and market_date and record.get("city") == city and record.get("side") == side and record.get("date") == market_date:
+            return record
+    return None
+
+
+def update_postmortem(action, entry):
+    """
+    Mantiene postmortem.json sincronizado con el ciclo de vida de cada posición.
+
+    Estados:
+      - open: una o más compras abiertas
+      - pending_exit: se colocó una venta, pendiente de fill
+      - exit_failed: la salida falló, la posición sigue abierta
+      - closed: posición cerrada por SELL, LOSS_TOTAL o RESOLVED_WIN
+    """
+    if action not in {"BUY", "SELL_PENDING", "SELL", "SELL_FAILED", "LOSS_TOTAL", "RESOLVED_WIN"}:
+        return
+
+    records = load_postmortem_data()
+    record = _find_open_postmortem(records, entry)
+
+    timestamp = (
+        entry.get("fill_confirmed")
+        or entry.get("failed_at")
+        or entry.get("timestamp")
+        or datetime.now(timezone.utc).isoformat()
+    )
+    side = str(entry.get("side", "")).upper()
+    token_id = entry.get("token_id", "")
+    question = entry.get("question", "")
+    city = entry.get("city", "?")
+    market_date = entry.get("date", "")
+    condition = entry.get("condition", "")
+
+    if action == "BUY":
+        if record is None:
+            record = {
+                "id": f"{token_id or city}|{side}|{market_date}|{timestamp}",
+                "status": "open",
+                "token_id": token_id,
+                "question": question,
+                "city": city,
+                "side": side,
+                "date": market_date,
+                "condition": condition,
+                "opened_at": timestamp,
+                "closed_at": None,
+                "buy_count": 0,
+                "total_amount": 0.0,
+                "total_shares": 0.0,
+                "avg_entry_price": None,
+                "trader_confirmed": [],
+                "bot_version_opened": entry.get("bot_version", ""),
+                "buys": [],
+            }
+            records.append(record)
+
+        amount = float(entry.get("amount", 0) or 0)
+        shares = float(entry.get("shares", 0) or 0)
+        price = float(entry.get("price", 0) or 0)
+        record["status"] = "open"
+        record["token_id"] = token_id or record.get("token_id", "")
+        record["question"] = question or record.get("question", "")
+        record["condition"] = condition or record.get("condition", "")
+        record["date"] = market_date or record.get("date", "")
+        record["latest_forecast_max"] = entry.get("forecast_max")
+        record["latest_edge_pct"] = entry.get("edge_pct")
+        record["latest_our_prob"] = entry.get("our_prob")
+        record["latest_mkt_price"] = entry.get("mkt_price")
+        record["last_buy_at"] = timestamp
+        record["buy_count"] = int(record.get("buy_count", 0)) + 1
+        record["total_amount"] = round(float(record.get("total_amount", 0)) + amount, 2)
+        record["total_shares"] = round(float(record.get("total_shares", 0)) + shares, 2)
+        if record["total_shares"] > 0:
+            record["avg_entry_price"] = round(record["total_amount"] / record["total_shares"], 4)
+        traders = set(record.get("trader_confirmed", []))
+        traders.update(entry.get("trader_confirmed", []) or [])
+        record["trader_confirmed"] = sorted(traders)
+        record.setdefault("buys", []).append({
+            "timestamp": timestamp,
+            "amount": amount,
+            "shares": shares,
+            "price": price,
+            "edge_pct": entry.get("edge_pct"),
+            "forecast_max": entry.get("forecast_max"),
+            "our_prob": entry.get("our_prob"),
+            "mkt_price": entry.get("mkt_price"),
+            "bot_version": entry.get("bot_version", ""),
+        })
+
+    elif action == "SELL_PENDING":
+        if record is None:
+            record = {
+                "id": f"{token_id or city}|{side}|{market_date}|{timestamp}",
+                "status": "pending_exit",
+                "token_id": token_id,
+                "question": question,
+                "city": city,
+                "side": side,
+                "date": market_date,
+                "condition": condition,
+                "opened_at": timestamp,
+                "closed_at": None,
+                "buy_count": 0,
+                "total_amount": 0.0,
+                "total_shares": 0.0,
+                "avg_entry_price": entry.get("avg_buy_price"),
+                "trader_confirmed": [],
+                "bot_version_opened": entry.get("bot_version", ""),
+                "buys": [],
+                "orphan_open": True,
+            }
+            records.append(record)
+
+        record["status"] = "pending_exit"
+        record["pending_exit"] = {
+            "timestamp": timestamp,
+            "reason": entry.get("reason"),
+            "price": entry.get("price"),
+            "shares": entry.get("shares"),
+            "return_est": entry.get("return_est"),
+            "pnl_pct": entry.get("pnl_pct"),
+            "pnl_cash": entry.get("pnl_cash"),
+            "order_id": entry.get("order_id"),
+        }
+
+    elif action == "SELL_FAILED":
+        if record is None:
+            record = {
+                "id": f"{token_id or city}|{side}|{market_date}|{timestamp}",
+                "status": "exit_failed",
+                "token_id": token_id,
+                "question": question,
+                "city": city,
+                "side": side,
+                "date": market_date,
+                "condition": condition,
+                "opened_at": timestamp,
+                "closed_at": None,
+                "buy_count": 0,
+                "total_amount": 0.0,
+                "total_shares": 0.0,
+                "avg_entry_price": entry.get("avg_buy_price"),
+                "trader_confirmed": [],
+                "bot_version_opened": entry.get("bot_version", ""),
+                "buys": [],
+                "orphan_open": True,
+            }
+            records.append(record)
+
+        record["status"] = "exit_failed"
+        record.pop("pending_exit", None)
+        record["last_exit_failed"] = {
+            "timestamp": timestamp,
+            "reason": entry.get("fail_reason", entry.get("reason")),
+            "order_id": entry.get("order_id"),
+        }
+
+    else:
+        if record is None:
+            record = {
+                "id": f"{token_id or city}|{side}|{market_date}|{timestamp}",
+                "status": "closed",
+                "token_id": token_id,
+                "question": question,
+                "city": city,
+                "side": side,
+                "date": market_date,
+                "condition": condition,
+                "opened_at": timestamp,
+                "closed_at": None,
+                "buy_count": 0,
+                "total_amount": 0.0,
+                "total_shares": 0.0,
+                "avg_entry_price": entry.get("avg_buy_price"),
+                "trader_confirmed": [],
+                "bot_version_opened": entry.get("bot_version", ""),
+                "buys": [],
+                "orphan_open": True,
+            }
+            records.append(record)
+
+        # Idempotencia para mercados ya cerrados por resolución
+        if action == "RESOLVED_WIN" and record.get("close_action") == "RESOLVED_WIN":
+            return
+
+        payout_est = entry.get("payout_est", entry.get("return_est"))
+        initial_value = float(entry.get("initial_value", record.get("total_amount", 0)) or 0)
+        if action == "RESOLVED_WIN" and payout_est is None:
+            payout_est = float(entry.get("shares", record.get("total_shares", 0)) or 0)
+
+        pnl_cash = entry.get("pnl_cash")
+        if pnl_cash is None and payout_est is not None:
+            pnl_cash = round(float(payout_est) - initial_value, 2)
+        elif pnl_cash is None:
+            pnl_cash = entry.get("loss")
+
+        pnl_pct = entry.get("pnl_pct")
+        if pnl_pct is None and initial_value > 0 and payout_est is not None:
+            pnl_pct = round((float(payout_est) / initial_value - 1.0) * 100, 1)
+
+        record["status"] = "closed"
+        record["closed_at"] = timestamp
+        record["close_action"] = action
+        record["close_reason"] = entry.get("reason", "market_resolved_yes" if action == "RESOLVED_WIN" else "")
+        record["close_subtype"] = entry.get("reason")
+        record["close_price"] = entry.get("price", entry.get("cur_price"))
+        record["close_shares"] = entry.get("shares", record.get("total_shares"))
+        record["return_est"] = payout_est if payout_est is not None else entry.get("current_value")
+        record["pnl_cash"] = pnl_cash
+        record["pnl_pct"] = pnl_pct
+        record["order_id"] = entry.get("order_id", record.get("order_id"))
+        record["bot_version_closed"] = entry.get("bot_version", "")
+        record.pop("pending_exit", None)
+
+    save_postmortem_data(records)
 
 
 def get_performance_summary():
@@ -1814,16 +2081,23 @@ def _mark_micro_as_loss_total(position, dl):
     _loss_total_tracked.add(asset_id)
 
     outcome = position.get("outcome", "?")
-    title = position.get("title", "?")[:50]
+    title_full = position.get("title", "?")
+    title = title_full[:50]
     city = parse_city_from_title(title)
     initial_value = float(position.get("initialValue", 0))
     current_value = float(position.get("currentValue", 0))
+    parsed = parse_temperature_question(title_full)
+    market_date = date_text_to_iso(parsed["date_str"]) if parsed and parsed.get("date_str") else ""
 
     dl.append(f"    💀 LOSS_TOTAL: {outcome} {city} | invertido ${initial_value:.2f} → vale ${current_value:.3f}")
 
     track_trade("LOSS_TOTAL",
         city=city,
         side=outcome,
+        date=market_date,
+        question=title_full,
+        token_id=asset_id,
+        condition=parsed.get("condition", "") if parsed else "",
         initial_value=initial_value,
         current_value=current_value,
         loss=round(-initial_value, 2),
@@ -1927,6 +2201,25 @@ def manage_positions(client, dl):
         # El orderbook ya no existe — intentar vender da error.
         # Dejar que resuelva: si ganamos, paga $1.00 por share automáticamente.
         if cur_price >= 0.98:
+            parsed = parse_temperature_question(title_full)
+            market_date = date_text_to_iso(parsed["date_str"]) if parsed and parsed.get("date_str") else ""
+            try:
+                update_postmortem("RESOLVED_WIN", {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "city": parse_city_from_title(title_full),
+                    "side": outcome,
+                    "date": market_date,
+                    "question": title_full,
+                    "token_id": asset_id,
+                    "condition": parsed.get("condition", "") if parsed else "",
+                    "shares": size,
+                    "initial_value": initial_value,
+                    "payout_est": round(size, 2),
+                    "cur_price": cur_price,
+                    "bot_version": "v10.4.5",
+                })
+            except Exception as e:
+                log.warning(f"Error actualizando postmortem resolved_win: {e}")
             dl.append(f"  🏁 RESUELTO ({outcome} @ {cur_price:.2f}) | {title} | Esperando pago")
             # v10.4 Fix Bug #12: NO añadir a keeping — son resueltas, no mantenidas
             n_resolved += 1
@@ -2045,8 +2338,11 @@ def manage_positions(client, dl):
         outcome = p.get("outcome", "?")
         size = float(p.get("size", 0))
         cur_price = float(p.get("curPrice", 0))
-        title = p.get("title", "?")[:50]
+        title_full = p.get("title", "?")
+        title = title_full[:50]
         city = parse_city_from_title(title)
+        parsed_sell = parse_temperature_question(title_full)
+        market_date = date_text_to_iso(parsed_sell["date_str"]) if parsed_sell and parsed_sell.get("date_str") else ""
 
         # Precio agresivo: ligeramente por debajo del mercado para asegurar fill
         sell_price = round(max(0.01, cur_price - SELL_AGGRESSION), 2)
@@ -2116,6 +2412,10 @@ def manage_positions(client, dl):
                 reason=sell_type,
                 city=city,
                 side=outcome,
+                date=market_date,
+                question=title_full,
+                token_id=asset_id,
+                condition=parsed_sell.get("condition", "") if parsed_sell else "",
                 price=sell_price,
                 shares=shares_to_sell,
                 return_est=estimated_return,
@@ -2268,6 +2568,7 @@ def _confirm_sell_fills_in_performance(filled, expired, dl):
     expired_ids = set(s.get("order_id", "") for s in expired)
 
     updated = 0
+    updated_entries = []
     for entry in history:
         if entry.get("action") != "SELL_PENDING":
             continue
@@ -2276,17 +2577,24 @@ def _confirm_sell_fills_in_performance(filled, expired, dl):
             entry["action"] = "SELL"
             entry["fill_confirmed"] = datetime.now(timezone.utc).isoformat()
             updated += 1
+            updated_entries.append(dict(entry))
         elif oid in expired_ids:
             entry["action"] = "SELL_FAILED"
             entry["fail_reason"] = "expired_no_fill_24h"
             entry["failed_at"] = datetime.now(timezone.utc).isoformat()
             updated += 1
+            updated_entries.append(dict(entry))
 
     if updated > 0:
         try:
             with open(PERFORMANCE_FILE, "w", encoding="utf-8") as f:
                 json.dump(history, f, indent=2, ensure_ascii=False)
             dl.append(f"  📝 performance.json: {updated} entradas actualizadas")
+            for entry in updated_entries:
+                try:
+                    update_postmortem(entry.get("action", ""), entry)
+                except Exception as e:
+                    log.warning(f"Error sincronizando postmortem con performance: {e}")
         except Exception as e:
             log.warning(f"Error actualizando performance.json: {e}")
 
@@ -3022,6 +3330,8 @@ def main(client):
                     city=trade["city"],
                     side=trade["side"],
                     date=trade["date"],
+                    question=trade["question"],
+                    token_id=trade["token_id"],
                     days_ahead=trade["days_ahead"],
                     price=trade["position"].get("aggressive_price", 0),
                     shares=trade["position"]["shares"],

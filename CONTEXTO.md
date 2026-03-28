@@ -49,13 +49,15 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **1-5. Buscar oportunidades:** Escanea ~330 mercados, consulta previsiones, calcula edge, cruza con señales de traders, dimensiona con Half-Kelly, respeta exposición máxima 40%.
 
-**6. Ejecución:** Órdenes GTC limit, registra en performance.json, notifica por Telegram.
+**6. Ejecución:** Órdenes GTC limit, registra en `performance.json`, sincroniza `postmortem.json` y notifica por Telegram.
 
 **7. Registro de ciclo (v10.4.1+):** Guarda resumen en cycle_summary.json + append en cycles_history.jsonl.
 
 **Al arrancar (v10.4.3+):** Carga ciclos históricos desde cycles_history.jsonl (contador no se reinicia con deploys).
 
 **Zona horaria por ciudad (v10.4.5):** Ya no usa offsets manuales; usa zonas IANA reales con `ZoneInfo` para que DST cambie automáticamente sin tocar el código en marzo/octubre.
+
+**Postmortem base (v10.4.5):** Mantiene `postmortem.json` sincronizado con `BUY`, `SELL_PENDING → SELL/SELL_FAILED`, `LOSS_TOTAL` y `RESOLVED_WIN` para poder analizar cierres y resoluciones con datos estructurados.
 
 ---
 
@@ -70,7 +72,7 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 | Archivo | Función |
 |---------|---------|
 | `bot.py` | Script principal v10.4.5 |
-| `verify_before_deploy.py` | v6 — 107 tests de comportamiento |
+| `verify_before_deploy.py` | v6 — 128 tests de comportamiento |
 | `trader_analyzer.py` | Genera signals.json diariamente |
 | `find_traders.py` | Descubrimiento semanal de traders |
 | `CLAUDE.md` | Instrucciones para Claude Code |
@@ -85,6 +87,7 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 | Archivo | Función |
 |---------|---------|
 | `performance.json` | 33 trades (BUY/SELL/LOSS_TOTAL desde 25 mar) |
+| `postmortem.json` | Postmortems estructurados de apertura/cierre por mercado |
 | `cycle_summary.json` | Último ciclo (se sobreescribe) |
 | `cycles_history.jsonl` | Historial acumulativo de todos los ciclos |
 | `audit.json` | Ventas pendientes + forecast vs real |
@@ -169,7 +172,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 | v10.4.2 | 28 mar | Rediseño Telegram + Bug #13 + helpers + /info |
 | v10.4.3 | 28 mar | Ciclos persistentes + fixes post-deploy + limpieza repo |
 | v10.4.4 | 28 mar | Ajuste temporal manual de DST |
-| v10.4.5 | 28 mar | `ZoneInfo` + zonas IANA reales + `.claude/` fuera del repo |
+| v10.4.5 | 28 mar | `ZoneInfo` + zonas IANA reales + `.claude/` fuera del repo + `postmortem.json` base |
 
 ---
 
@@ -192,12 +195,57 @@ Schedule: 08:00, 16:00, 23:00 UTC
 - `Qué corrigió de trabajo previo`
 - `Qué quedó pendiente`
 
+### Plantilla fija — Registro de sesión
+
+Usar esta plantilla al cerrar cada sesión relevante:
+
+```md
+### Sesión XX — Registro multi-herramienta
+
+- **Fecha:** YYYY-MM-DD
+- **Versión activa al cerrar:** v10.X.X
+- **Objetivo de la sesión:** ...
+
+- **ChatGPT / Claude.ai:**
+  Análisis / estrategia / contexto aportado:
+  ...
+
+- **Claude Code:**
+  Cambios implementados:
+  ...
+
+- **Codex:**
+  Revisión crítica / cambios / validaciones:
+  ...
+
+- **Problemas detectados en trabajo previo:**
+  ...
+
+- **Correcciones aplicadas en esta sesión:**
+  ...
+
+- **Tests / verificaciones ejecutadas:**
+  ...
+
+- **Pendientes para la próxima sesión:**
+  ...
+
+- **Estado final:**
+  versión ..., tests ..., deploy sí/no, observaciones ...
+```
+
+### Regla práctica de uso
+
+- Si solo participa una herramienta, se rellena solo su bloque y se dejan las demás como `No usado en esta sesión`.
+- Si una herramienta corrige o valida trabajo de otra, dejarlo explícito en `Problemas detectados en trabajo previo` y `Correcciones aplicadas en esta sesión`.
+- Si hay cambios en Railway, Volume, Telegram o datos históricos, anotarlo también en el bloque `Estado final`.
+
 ### Sesión 19 — Registro multi-herramienta
 
 - **Claude Code:** implementó v10.4.2, v10.4.3 y v10.4.4; rediseño Telegram, paginación, `/info`, persistencia de ciclos, limpieza del repo y un fix manual de DST basado en offsets estáticos.
 - **Codex:** revisó críticamente esa secuencia y detectó dos deudas importantes: el fix de DST seguía siendo frágil por usar offsets manuales, y `.claude/settings.local.json` había quedado versionado por error.
-- **Codex:** corrigió el enfoque de DST en `bot.py` migrando a `ZoneInfo` + `CITY_TIMEZONES` con zonas IANA reales (`v10.4.5`), actualizó `verify_before_deploy.py` a 107 checks y sacó `.claude/settings.local.json` del control de versiones sin borrar la copia local.
-- **Estado final de la sesión 19:** versión activa `v10.4.5`, tests `107/107`, repo limpio, DST robusto para futuros cambios de horario.
+- **Codex:** corrigió el enfoque de DST en `bot.py` migrando a `ZoneInfo` + `CITY_TIMEZONES` con zonas IANA reales (`v10.4.5`), actualizó `verify_before_deploy.py`, sacó `.claude/settings.local.json` del control de versiones sin borrar la copia local, reparó manualmente una entrada truncada en `performance.json` de Railway e implementó la capa base de `postmortem.json`.
+- **Estado final de la sesión 19:** versión activa `v10.4.5`, tests `128/128`, repo limpio, DST robusto para futuros cambios de horario y observabilidad base de postmortem lista para crecer.
 
 ---
 
@@ -260,7 +308,7 @@ Con ~15 trades cerrados no hay suficiente evidencia estadística para cambiar la
 
 ### Fase 1 — ✅ Implementada:
 - Persistencia Railway Volume, cycles_history.jsonl, cycle_summary.json ✅
-- Bugs #3-#14 corregidos, 107 tests ✅
+- Bugs #3-#14 corregidos, 128 tests ✅
 - Claude Code instalado y funcional ✅
 
 ### Fase 1.5 — ✅ Implementada (sesión 19):
@@ -270,10 +318,11 @@ Con ~15 trades cerrados no hay suficiente evidencia estadística para cambiar la
 - Limpieza del repo (17 archivos eliminados) ✅
 - performance.json fusionado con historial completo (33 trades) ✅
 - DST robusto con `ZoneInfo` y zonas IANA reales ✅
+- `postmortem.json` base implementado ✅
 
 ### Fase 2 — Cuando haya 30+ trades limpios:
 - Monitor ligero intra-ciclo: revisar posiciones cada 2-4h
-- postmortem.json: análisis automático al resolver cada mercado
+- Ampliar `postmortem.json` con análisis más rico al resolver cada mercado
 
 ### Fase 3 — Cuando escale:
 - Dashboard web (Streamlit o HTML estático)

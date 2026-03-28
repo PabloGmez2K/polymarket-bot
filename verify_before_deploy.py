@@ -20,6 +20,9 @@ import os
 import ast
 import re
 import types
+import json
+import tempfile
+from datetime import datetime, timezone
 
 passed = 0
 failed = 0
@@ -161,6 +164,8 @@ def run_tests():
     test("_data_path función definida", "def _data_path(filename):" in code)
     test("PERFORMANCE_FILE usa _data_path",
          'PERFORMANCE_FILE = _data_path("performance.json")' in code)
+    test("POSTMORTEM_FILE usa _data_path",
+         'POSTMORTEM_FILE = _data_path("postmortem.json")' in code)
     test("AUDIT_FILE usa _data_path",
          'AUDIT_FILE = _data_path("audit.json")' in code)
     test("trades.log usa _data_path",
@@ -385,6 +390,114 @@ def run_tests():
         test("info: versión visible correcta", "BOT POLYMARKET v10.4.5" in info_msg, info_msg[:120])
     except Exception as e:
         test("Tests funcionales ejecutan sin excepción", False, str(e))
+
+    # ---- Test 20: postmortem.json ----
+    print("\n🔍 Postmortem")
+    test("POSTMORTEM_FILE definido", "POSTMORTEM_FILE" in code)
+    test("load_postmortem_data definida", "def load_postmortem_data(" in code)
+    test("save_postmortem_data definida", "def save_postmortem_data(" in code)
+    test("update_postmortem definida", "def update_postmortem(" in code)
+    test("track_trade sincroniza postmortem", "update_postmortem(action, entry)" in code)
+    test("SELL/SELL_FAILED sincronizan postmortem desde performance",
+         'update_postmortem(entry.get("action", ""), entry)' in code)
+    test("manage_positions marca RESOLVED_WIN en postmortem", 'update_postmortem("RESOLVED_WIN"' in code)
+    test("BUY guarda question/token_id para postmortem",
+         'question=trade["question"]' in code and 'token_id=trade["token_id"]' in code)
+
+    try:
+        fd, tmp_postmortem = tempfile.mkstemp(
+            dir=os.path.dirname(__file__),
+            prefix="_tmp_postmortem_test_",
+            suffix=".json",
+        )
+        os.close(fd)
+        if os.path.exists(tmp_postmortem):
+            try:
+                os.remove(tmp_postmortem)
+            except PermissionError:
+                pass
+
+        pm_ns = {
+            "os": os,
+            "json": json,
+            "datetime": datetime,
+            "timezone": timezone,
+            "POSTMORTEM_FILE": tmp_postmortem,
+            "log": types.SimpleNamespace(warning=lambda *args, **kwargs: None),
+        }
+        for fn_name in [
+            "load_postmortem_data",
+            "save_postmortem_data",
+            "_find_open_postmortem",
+            "update_postmortem",
+        ]:
+            exec(get_function_source(module_ast, code_lines, fn_name), pm_ns)
+
+        buy_entry = {
+            "timestamp": "2026-03-28T08:00:00+00:00",
+            "bot_version": "v10.4.5",
+            "city": "Dallas",
+            "side": "YES",
+            "date": "2026-03-28",
+            "question": "Will the temperature in Dallas be 18°C on March 28?",
+            "token_id": "tok-dallas-yes",
+            "condition": "exact",
+            "amount": 2.50,
+            "shares": 10.0,
+            "price": 0.25,
+            "edge_pct": 18.0,
+            "forecast_max": 18.2,
+            "our_prob": 48.0,
+            "mkt_price": 21.0,
+            "trader_confirmed": ["Trader A"],
+        }
+        buy_entry_2 = dict(buy_entry)
+        buy_entry_2["timestamp"] = "2026-03-28T09:00:00+00:00"
+        buy_entry_2["amount"] = 1.25
+        buy_entry_2["shares"] = 5.0
+        buy_entry_2["price"] = 0.25
+
+        sell_pending = {
+            "timestamp": "2026-03-28T16:00:00+00:00",
+            "bot_version": "v10.4.5",
+            "city": "Dallas",
+            "side": "Yes",
+            "date": "2026-03-28",
+            "question": "Will the temperature in Dallas be 18°C on March 28?",
+            "token_id": "tok-dallas-yes",
+            "reason": "reeval",
+            "price": 0.30,
+            "shares": 15.0,
+            "return_est": 4.50,
+            "pnl_pct": 20.0,
+            "pnl_cash": 0.75,
+            "order_id": "oid-1",
+        }
+        sell_filled = dict(sell_pending)
+        sell_filled["fill_confirmed"] = "2026-03-28T16:00:10+00:00"
+
+        pm_ns["update_postmortem"]("BUY", buy_entry)
+        pm_ns["update_postmortem"]("BUY", buy_entry_2)
+        pm_ns["update_postmortem"]("SELL_PENDING", sell_pending)
+        pm_ns["update_postmortem"]("SELL", sell_filled)
+
+        records = pm_ns["load_postmortem_data"]()
+        rec = records[-1] if records else {}
+
+        test("postmortem funcional: un registro agregado", len(records) == 1, f"registros: {len(records)}")
+        test("postmortem funcional: buy_count agregado", rec.get("buy_count") == 2, str(rec))
+        test("postmortem funcional: total_amount agregado", abs(rec.get("total_amount", 0) - 3.75) < 0.001, str(rec))
+        test("postmortem funcional: cierre SELL", rec.get("status") == "closed" and rec.get("close_action") == "SELL", str(rec))
+        test("postmortem funcional: reason y order_id preservados",
+             rec.get("close_reason") == "reeval" and rec.get("order_id") == "oid-1", str(rec))
+
+        if os.path.exists(tmp_postmortem):
+            try:
+                os.remove(tmp_postmortem)
+            except OSError:
+                pass
+    except Exception as e:
+        test("Postmortem funcional ejecuta sin excepción", False, str(e))
 
     # ---- Resultado ----
     print(f"\n{'='*50}")
