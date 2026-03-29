@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="{{ dashboard.refresh_sec }}">
+  <title>{{ dashboard.title }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Polymarket Bot Dashboard</p>
+        <h1>{{ dashboard.title }}</h1>
+        <p class="hero-copy">
+          Monitor visual del sistema, progreso de bankroll y rivalidad constructiva entre agentes.
+        </p>
+      </div>
+      <div class="hero-meta">
+        <span class="badge badge-{{ 'good' if dashboard.mode == 'REAL' else 'warn' }}">{{ dashboard.mode }}</span>
+        <span class="badge badge-accent">{{ dashboard.version }}</span>
+        <span class="badge badge-muted">Serie v{{ dashboard.logic_series }}</span>
+        <span class="badge badge-muted">Actualizado {{ dashboard.generated_at }}</span>
+      </div>
+    </header>
+
+    {% if not dashboard.auth_enabled %}
+    <section class="notice notice-warn">
+      <strong>Autenticación desactivada.</strong>
+      Configura <code>DASHBOARD_USER</code> y <code>DASHBOARD_PASSWORD</code> en Railway antes de usar este panel como endpoint público.
+    </section>
+    {% endif %}
+
+    <section class="grid cards-4">
+      <article class="card stat-card">
+        <span class="stat-label">Nivel actual</span>
+        <strong class="stat-value">Level {{ dashboard.promotion.levels.current_level }}</strong>
+        <span class="stat-sub">${{ '%.0f'|format(dashboard.promotion.levels.current_target) }}</span>
+      </article>
+
+      <article class="card stat-card">
+        <span class="stat-label">Siguiente nivel</span>
+        <strong class="stat-value">
+          {% if dashboard.promotion.levels.next_target %}
+            ${{ '%.0f'|format(dashboard.promotion.levels.next_target) }}
+          {% else %}
+            MAX
+          {% endif %}
+        </strong>
+        <span class="stat-sub">{{ dashboard.promotion.decision_label }}</span>
+      </article>
+
+      <article class="card stat-card">
+        <span class="stat-label">Ciclos</span>
+        <strong class="stat-value">{{ dashboard.cycle_total }}</strong>
+        <span class="stat-sub">{{ dashboard.cycle_series }} en serie v{{ dashboard.logic_series }}</span>
+      </article>
+
+      <article class="card stat-card">
+        <span class="stat-label">Trades limpios</span>
+        <strong class="stat-value">{{ dashboard.clean_stats.count }}</strong>
+        <span class="stat-sub">SELL {{ dashboard.clean_stats.sell }} · LOSS_TOTAL {{ dashboard.clean_stats.loss_total }} · WIN {{ dashboard.clean_stats.resolved_win }}</span>
+      </article>
+    </section>
+
+    <section class="grid layout-main">
+      <article class="card card-promotion">
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Checklist</p>
+            <h2>Subida de bankroll</h2>
+          </div>
+          <span class="badge badge-{{ 'good' if dashboard.promotion.decision == 'READY' else 'warn' if dashboard.promotion.decision == 'NEARLY' else 'bad' }}">
+            {{ dashboard.promotion.decision_label }}
+          </span>
+        </div>
+
+        <div class="progress-block">
+          <div class="progress-copy">
+            <span>{{ dashboard.promotion.passed }} / {{ dashboard.promotion.total }} checks cumplidos</span>
+            <strong>{{ dashboard.promotion.progress_pct }}%</strong>
+          </div>
+          <div class="progress-bar">
+            <div class="progress-fill" style="width: {{ dashboard.promotion.progress_pct }}%"></div>
+          </div>
+        </div>
+
+        <div class="checklist">
+          {% for item in dashboard.promotion.checks %}
+          <div class="check-item">
+            <div class="check-status {{ 'good' if item.passed else 'bad' }}"></div>
+            <div class="check-body">
+              <strong>{{ item.label }}</strong>
+              <span>{{ item.value }}</span>
+            </div>
+            <span class="check-tag">{{ 'OK' if item.passed else 'Pendiente' }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Sistema</p>
+            <h2>Estado operativo</h2>
+          </div>
+        </div>
+
+        <dl class="metric-list">
+          <div><dt>Versión</dt><dd>{{ dashboard.version }}</dd></div>
+          <div><dt>Serie lógica</dt><dd>v{{ dashboard.logic_series }}</dd></div>
+          <div><dt>Próximo ciclo</dt><dd>{{ dashboard.next_run }}</dd></div>
+          <div><dt>Último ciclo</dt><dd>{{ dashboard.last_cycle_label }}</dd></div>
+          <div><dt>Intra-SL</dt><dd>{{ dashboard.intra_label }}</dd></div>
+          <div><dt>Signals</dt><dd>{{ dashboard.alerts.signals.status }}</dd></div>
+        </dl>
+
+        {% if dashboard.portfolio %}
+        <div class="system-snapshot">
+          <div class="pill">
+            <span>Cash</span>
+            <strong>${{ '%.2f'|format(dashboard.portfolio.cash) if dashboard.portfolio.cash is not none else 'n/d' }}</strong>
+          </div>
+          <div class="pill">
+            <span>Posiciones vivas</span>
+            <strong>${{ '%.2f'|format(dashboard.portfolio.active_value) }}</strong>
+          </div>
+          <div class="pill">
+            <span>Total cartera</span>
+            <strong>${{ '%.2f'|format(dashboard.portfolio.portfolio_total) }}</strong>
+          </div>
+        </div>
+        {% endif %}
+
+        {% if dashboard.alerts.active_items %}
+        <div class="alert-stack">
+          {% for alert in dashboard.alerts.active_items %}
+          <div class="alert-card alert-{{ alert.level }}">
+            <strong>{{ alert.title }}</strong>
+            <span>{{ alert.detail }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="notice notice-good">Sin alertas activas relevantes en este momento.</div>
+        {% endif %}
+      </article>
+    </section>
+
+    <section class="grid cards-4">
+      <article class="card mini-card">
+        <span class="stat-label">PnL serie v{{ dashboard.logic_series }}</span>
+        <strong class="stat-value">${{ '%+.2f'|format(dashboard.series_stats.pnl) }}</strong>
+      </article>
+      <article class="card mini-card">
+        <span class="stat-label">Win rate serie</span>
+        <strong class="stat-value">{{ dashboard.series_stats.win_rate }}%</strong>
+      </article>
+      <article class="card mini-card">
+        <span class="stat-label">Cierres serie</span>
+        <strong class="stat-value">{{ dashboard.series_stats.closed_count }}</strong>
+      </article>
+      <article class="card mini-card">
+        <span class="stat-label">Drawdown reciente</span>
+        <strong class="stat-value">${{ '%+.2f'|format(dashboard.series_stats.recent_drawdown) }}</strong>
+      </article>
+    </section>
+
+    <section class="grid layout-main">
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Ciclos</p>
+            <h2>Últimos ciclos</h2>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Hora UTC</th>
+                <th>Total</th>
+                <th>Serie</th>
+                <th>Compras</th>
+                <th>Ventas</th>
+                <th>Exp.</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for cycle in dashboard.cycle_history %}
+              <tr>
+                <td>{{ cycle.timestamp_utc[:16] if cycle.timestamp_utc else '?' }}</td>
+                <td>#{{ cycle.cycle_number }}</td>
+                <td>#{{ cycle.logic_cycle_number if cycle.logic_cycle_number is not none else '?' }}</td>
+                <td>{{ cycle.buys|length if cycle.buys else 0 }}</td>
+                <td>{{ cycle.management.n_sold if cycle.management else 0 }}</td>
+                <td>${{ '%.2f'|format(cycle.exposure_after) if cycle.exposure_after is not none else '0.00' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Cartera</p>
+            <h2>Posiciones abiertas</h2>
+          </div>
+        </div>
+        {% if dashboard.open_positions %}
+        <div class="list-stack">
+          {% for pos in dashboard.open_positions %}
+          <div class="list-row">
+            <div>
+              <strong>{{ pos.label }}</strong>
+              <span>${{ '%.2f'|format(pos.current_value) }}</span>
+            </div>
+            <div class="pnl {{ 'good' if pos.cash_pnl >= 0 else 'bad' }}">
+              {{ '%+.2f'|format(pos.cash_pnl) }} · {{ pos.percent_pnl }}%
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="notice notice-muted">Sin posiciones activas o cartera no disponible.</div>
+        {% endif %}
+      </article>
+    </section>
+
+    <section class="grid layout-main">
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Agentes</p>
+            <h2>Scoreboard</h2>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Agente</th>
+                <th>Puntos</th>
+                <th>Bugs</th>
+                <th>Fixes</th>
+                <th>Validadas</th>
+                <th>Correcciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in dashboard.agent_scoreboard %}
+              <tr>
+                <td>{{ row.agent }}</td>
+                <td><strong>{{ row.points }}</strong></td>
+                <td>{{ row.bugs_detected }}</td>
+                <td>{{ row.fixes }}</td>
+                <td>{{ row.validated }}</td>
+                <td>{{ row.corrections }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Rivalidad</p>
+            <h2>Quién corrige a quién</h2>
+          </div>
+        </div>
+        {% if dashboard.rivalry %}
+        <div class="list-stack">
+          {% for row in dashboard.rivalry %}
+          <div class="list-row">
+            <div>
+              <strong>{{ row.source }}</strong>
+              <span>corrigió/revisó a {{ row.target }}</span>
+            </div>
+            <span class="badge badge-muted">{{ row.count }} eventos</span>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="notice notice-muted">Aún no hay suficientes eventos estructurados para rivalidad.</div>
+        {% endif %}
+      </article>
+    </section>
+
+    <section class="grid layout-main">
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Accuracy</p>
+            <h2>Ciudades clave</h2>
+          </div>
+        </div>
+        {% if dashboard.top_cities %}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Ciudad</th>
+                <th>Trades</th>
+                <th>WR</th>
+                <th>PnL</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for city in dashboard.top_cities %}
+              <tr>
+                <td>{{ city.city }}</td>
+                <td>{{ city.trades }}</td>
+                <td>{{ city.win_rate }}%</td>
+                <td class="{{ 'good' if city.pnl >= 0 else 'bad' }}">${{ '%+.2f'|format(city.pnl) }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="notice notice-muted">Todavía no hay suficiente histórico por ciudad.</div>
+        {% endif %}
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Eventos</p>
+            <h2>Últimos movimientos de agentes</h2>
+          </div>
+        </div>
+        {% if dashboard.agent_events %}
+        <div class="list-stack compact">
+          {% for event in dashboard.agent_events %}
+          <div class="list-row">
+            <div>
+              <strong>{{ event.agent }}</strong>
+              <span>{{ event.title or event.type }}</span>
+            </div>
+            <span class="badge badge-{{ 'good' if event.validated else 'muted' }}">+{{ event.points or 0 }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="notice notice-muted">No hay eventos de agentes todavía.</div>
+        {% endif %}
+      </article>
+    </section>
+  </div>
+</body>
+</html>

@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 29 de marzo de 2026 (Sesión 22 — v10.5.4)
-**Próxima sesión:** Verificar por Telegram que `/estado` y `/info` muestran correctamente `ciclos totales` y `serie v10.5`, y decidir si `v10.5.0` queda estable o experimental
+**Última actualización:** 29 de marzo de 2026 (Sesión 23 — v10.5.5)
+**Próxima sesión:** Abrir el dashboard web en Railway, configurar autenticación básica y validar visualmente el checklist de bankroll y el scoreboard de agentes
 
 ---
 
@@ -29,7 +29,7 @@ Para estado exacto: usar `/info` + `/cartera` + `/rendimiento` + `/accuracy` en 
 
 ---
 
-## Qué hace el bot v10.5.4 (paso a paso)
+## Qué hace el bot v10.5.5 (paso a paso)
 
 Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
@@ -54,6 +54,8 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Al arrancar (v10.4.3+):** Carga ciclos históricos desde `cycles_history.jsonl` (contador total no se reinicia con deploys).
 
 **Contador dual de ciclos (v10.5.4):** Mantiene `cycle_count` como histórico total y añade `cycle_count_series` para la serie lógica actual (`LOGIC_SERIES`). Cada ciclo nuevo guarda `logic_series` y `logic_cycle_number`. `/estado` y `/info` muestran ambos para comparar estrategia nueva sin perder continuidad operativa.
+
+**Dashboard web + scorecard de agentes (v10.5.5):** Levanta un panel HTML separado de Telegram en el mismo servicio Railway, accesible por navegador en `PORT`. Muestra checklist de subida de bankroll (`$25 -> $35`), salud del sistema, métricas de la serie `v10.5`, últimos ciclos, cartera abierta y un scoreboard de agentes basado en `agent_events.jsonl`.
 
 **Zona horaria por ciudad (v10.4.5):** Ya no usa offsets manuales; usa zonas IANA reales con `ZoneInfo` para que DST cambie automáticamente sin tocar el código en marzo/octubre.
 
@@ -80,19 +82,22 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción:** Railway — Online, EU West Amsterdam, MODO REAL, DRY_RUN=false
-**Versión activa:** v10.5.4
+**Versión activa:** v10.5.5
 
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.5.4 |
-| `verify_before_deploy.py` | v9 — 251 tests de comportamiento |
+| `bot.py` | Script principal v10.5.5 |
+| `verify_before_deploy.py` | v9 — 279 tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |
 | `CONTEXTO.md` | Estado del proyecto (este archivo) |
 | `HISTORIAL_SESIONES.md` | Bitácora append-only de sesiones e hitos reconstruidos desde Git |
 | `OBSERVABILIDAD_Y_APRENDIZAJE.md` | Plan de fases futuras |
+| `templates/dashboard.html` | Plantilla principal del dashboard web |
+| `static/dashboard.css` | Estilos del dashboard web |
+| `agent_events.jsonl` | Eventos semilla para el scoreboard de agentes |
 | `signals.json` | Copia bootstrap local; producción usa la copia persistente del Volume |
 | `traders_db.json` | Copia bootstrap local; producción usa la copia persistente del Volume |
 | `requirements.txt` | Dependencias Railway |
@@ -104,6 +109,7 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 | `performance.json` | 38+ trades (BUY/SELL/LOSS_TOTAL desde 25 mar) |
 | `postmortem.json` | Postmortems estructurados de apertura/cierre por mercado |
 | `alerts_state.json` | Estado persistente de alertas para evitar avisos duplicados |
+| `agent_events.jsonl` | Eventos persistentes del scoreboard de agentes (si existe en Volume) |
 | `signals.json` | Señales de traders activas usadas por el bot en producción |
 | `traders_db.json` | Base de datos persistente de traders descubiertos/calificados |
 | `trader_history.json` | Historial auxiliar del pipeline de traders |
@@ -122,7 +128,7 @@ MIN_BET="1.00"
 DATA_DIR="/app/data"
 ```
 
-### Configuración en código (defaults bot.py v10.5.4):
+### Configuración en código (defaults bot.py v10.5.5):
 ```python
 MIN_EDGE = 7.0%
 MIN_EDGE_EXACT = 15.0%          # v10.5.0: filtro más estricto para apuestas exactas
@@ -131,6 +137,9 @@ TAKE_PROFIT_PCT = +40.0%
 MAX_EXPOSURE_PCT = 40%
 MIN_BET = $1.00
 BLOCKED_CITIES = ["London"]
+BANKROLL_LEVELS = [25, 35, 50, 75, 100]  # v10.5.5: niveles gamificados del dashboard
+DASHBOARD_PORT = $PORT                    # v10.5.5: panel web separado de Telegram
+DASHBOARD_REFRESH_SEC = 60               # auto-refresh del dashboard
 INTRA_SL_INTERVAL = 90          # v10.5.1: minutos entre checks intra-ciclo (0=desactivar)
 CITY_MIN_TRADES_FOR_BLOCK = 3   # v10.5.2: mínimo trades para evaluar accuracy
 CITY_BLOCK_WIN_RATE = 25.0%     # v10.5.2: umbral de alerta
@@ -140,7 +149,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 ---
 
-## Telegram — Comandos disponibles (v10.5.4)
+## Telegram — Comandos disponibles (v10.5.5)
 
 | Comando | Qué muestra |
 |---------|-------------|
@@ -158,6 +167,22 @@ Schedule: 08:00, 16:00, 23:00 UTC
 | `/modo` | Cambia DRY RUN ↔ REAL |
 
 **Para iniciar una sesión de análisis en claude.ai:** pegar `/info` + `/cartera` + `/rendimiento`.
+
+## Dashboard web (v10.5.5)
+
+- **Ruta principal:** `/`
+- **Healthcheck:** `/healthz`
+- **API JSON:** `/api/dashboard.json`
+- **Autenticación:** básica opcional con `DASHBOARD_USER` y `DASHBOARD_PASSWORD`
+- **Objetivo:** separar monitorización visual de Telegram para revisar el sistema en navegador
+
+### Qué muestra
+- nivel actual y siguiente bankroll objetivo
+- checklist de promoción `$25 -> $35`
+- salud operativa del sistema
+- métricas de la serie `v10.5`
+- últimos ciclos y posiciones abiertas
+- scoreboard de agentes y rivalidad constructiva
 
 ---
 
@@ -208,6 +233,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 | v10.5.2 | 29 mar | city accuracy tracker, `/accuracy`, win rate en `/rendimiento`, alertas por ciudad, 234 tests |
 | v10.5.3 | 29 mar | `/accuracy` integrado en menú + menú persistente + `/estado` muestra intra-SL + trazabilidad corregida, 242 tests |
 | v10.5.4 | 29 mar | contador dual de ciclos (histórico total + serie lógica), `logic_series`/`logic_cycle_number` en historial, `/estado` y `/info` separan total vs serie, 251 tests |
+| v10.5.5 | 29 mar | dashboard web HTML separado de Telegram + checklist de bankroll + scoreboard de agentes + `agent_events.jsonl`, 279 tests |
 
 ---
 
@@ -350,6 +376,30 @@ Usar esta plantilla al cerrar cada sesión relevante:
 
 - **Estado final:**
   v10.5.4, 251/251 tests, histórico total preservado y serie `v10.5` visible por separado en Telegram
+
+### Sesión 23 — Registro multi-herramienta
+
+- **Fecha:** 2026-03-29
+- **Versión activa al cerrar:** v10.5.5
+- **Objetivo de la sesión:** Crear un dashboard web separado de Telegram para visualizar el sistema, el checklist de bankroll y la rivalidad de agentes
+
+- **Claude Code (Opus):**
+  - No usado directamente en esta sesión
+
+- **Codex:**
+  - Diseñó e implementó un dashboard web HTML servido desde el mismo servicio Railway
+  - Añadió checklist de promoción de bankroll (`$25 -> $35`) calculado desde métricas reales del sistema
+  - Añadió scoreboard de agentes y rivalidad constructiva a partir de `agent_events.jsonl`
+  - Creó `templates/dashboard.html` y `static/dashboard.css`
+  - Añadió configuración de dashboard (`DASHBOARD_*`, `BANKROLL_LEVELS`) y arranque HTTP en paralelo al bot
+  - Amplió `verify_before_deploy.py` hasta `279/279` para cubrir backend, checklist, scorecard y archivos del dashboard
+
+- **Problemas detectados en trabajo previo:**
+  - La observabilidad seguía demasiado concentrada en Telegram para revisar sistema, niveles y progreso
+  - No existía una métrica estructurada para comparar aportaciones de Opus vs Codex
+
+- **Estado final:**
+  v10.5.5, 279/279 tests, dashboard web listo para abrir en navegador, Telegram queda separado de la capa visual principal
 
 ### Sesión 19 — Registro multi-herramienta
 

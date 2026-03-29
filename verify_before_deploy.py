@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-verify_before_deploy.py v9 — Tests de comportamiento para bot.py v10.5.4
+verify_before_deploy.py v9 — Tests de comportamiento para bot.py v10.5.5
 
 Ejecutar ANTES de cada deploy:
   python verify_before_deploy.py
@@ -21,6 +21,7 @@ import ast
 import re
 import types
 import json
+import base64
 import tempfile
 from datetime import date, datetime, timezone
 
@@ -65,14 +66,22 @@ def run_tests():
 
     trader_analyzer_path = os.path.join(os.path.dirname(__file__), "trader_analyzer.py")
     find_traders_path = os.path.join(os.path.dirname(__file__), "find_traders.py")
+    requirements_path = os.path.join(os.path.dirname(__file__), "requirements.txt")
+    dashboard_template_path = os.path.join(os.path.dirname(__file__), "templates", "dashboard.html")
+    dashboard_css_path = os.path.join(os.path.dirname(__file__), "static", "dashboard.css")
+    agent_events_path = os.path.join(os.path.dirname(__file__), "agent_events.jsonl")
     trader_code = ""
     finder_code = ""
+    requirements_code = ""
     if os.path.exists(trader_analyzer_path):
         with open(trader_analyzer_path, "r", encoding="utf-8") as f:
             trader_code = f.read()
     if os.path.exists(find_traders_path):
         with open(find_traders_path, "r", encoding="utf-8") as f:
             finder_code = f.read()
+    if os.path.exists(requirements_path):
+        with open(requirements_path, "r", encoding="utf-8") as f:
+            requirements_code = f.read()
 
     # ---- Test 0: Sintaxis válida ----
     print("\n🔍 Sintaxis")
@@ -247,13 +256,38 @@ def run_tests():
     except SyntaxError as e:
         test("Scripts trader sintaxis válida", False, str(e))
 
+    print("\n🔍 Dashboard web")
+    test("DASHBOARD_ENABLED definido", "DASHBOARD_ENABLED" in code)
+    test("DASHBOARD_PORT definido", "DASHBOARD_PORT" in code and 'os.getenv("PORT"' in code)
+    test("BANKROLL_LEVELS definido", "BANKROLL_LEVELS" in code)
+    test("AGENT_EVENTS_FILE usa _seed_data_file", 'AGENT_EVENTS_FILE = _seed_data_file("agent_events.jsonl")' in code)
+    test("load_agent_events definida", "def load_agent_events(" in code)
+    test("compute_agent_scorecard definida", "def compute_agent_scorecard(" in code)
+    test("build_promotion_checklist definida", "def build_promotion_checklist(" in code)
+    test("build_dashboard_snapshot definida", "def build_dashboard_snapshot(" in code)
+    test("create_dashboard_app definida", "def create_dashboard_app(" in code)
+    test("start_dashboard_server definida", "def start_dashboard_server(" in code)
+    test("dashboard arranca en __main__", "start_dashboard_server()" in code)
+    test("requirements incluye Flask", "Flask==" in requirements_code)
+    test("requirements incluye waitress", "waitress==" in requirements_code)
+    test("template dashboard existe", os.path.exists(dashboard_template_path))
+    test("css dashboard existe", os.path.exists(dashboard_css_path))
+    test("agent_events.jsonl existe", os.path.exists(agent_events_path))
+    if os.path.exists(agent_events_path):
+        try:
+            with open(agent_events_path, "r", encoding="utf-8") as f:
+                events_count = sum(1 for line in f if line.strip())
+            test("agent_events.jsonl tiene eventos semilla", events_count >= 5, f"eventos={events_count}")
+        except Exception as e:
+            test("agent_events.jsonl legible", False, str(e))
+
     # ---- Test 13: Nuevas funcionalidades v10.4.1 ----
     print("\n🔍 Nuevas funcionalidades v10.4.1")
     test("CYCLE_SUMMARY_FILE definido", "CYCLE_SUMMARY_FILE" in code)
     test("CYCLES_HISTORY_FILE definido", "CYCLES_HISTORY_FILE" in code)
     test("cycles_history.jsonl append-only", "cycles_history.jsonl" in code)
     test("cycle_summary se guarda en main()", "cycle_data" in code and "CYCLE_SUMMARY_FILE" in code)
-    test("cycle_data incluye version v10.5.4", '"version"' in code and "v10.5.4" in code)
+    test("cycle_data incluye version v10.5.5", '"version"' in code and "v10.5.5" in code)
     test("cycle_data incluye logic_series", '"logic_series": LOGIC_SERIES' in code)
     test("cycle_data incluye logic_cycle_number", '"logic_cycle_number"' in code)
 
@@ -274,7 +308,7 @@ def run_tests():
     test("Bug #13: send_telegram_paged en cmd_log", "send_telegram_paged" in code and "cmd_log" in code)
     test("Bug #13: send_telegram_paged en cmd_cartera", "send_telegram_paged" in code)
     test("_parse_position_label usa centavos (¢)", "¢" in code)
-    test("cmd_estado versión correcta", "Bot v10.5.4" in code or "v10.5.4" in code)
+    test("cmd_estado versión correcta", "Bot v10.5.5" in code or "v10.5.5" in code)
 
     # ---- Test 14c: Zonas horarias reales v10.4.5 ----
     print("\n🔍 Zonas horarias reales")
@@ -411,6 +445,82 @@ def run_tests():
             except PermissionError:
                 pass
 
+        dashboard_ns = {
+            "BANKROLL": 25.0,
+            "BANKROLL_LEVELS": [25.0, 35.0, 50.0],
+        }
+        exec(get_function_source(module_ast, code_lines, "get_bankroll_level_context"), dashboard_ns)
+        level_ctx = dashboard_ns["get_bankroll_level_context"]()
+        test("dashboard: nivel actual bankroll correcto", level_ctx["current_level"] == 1, level_ctx)
+        test("dashboard: siguiente bankroll correcto", level_ctx["next_target"] == 35.0, level_ctx)
+
+        auth_ns = {
+            "base64": base64,
+            "DASHBOARD_USER": "admin",
+            "DASHBOARD_PASSWORD": "secret",
+        }
+        exec(get_function_source(module_ast, code_lines, "_dashboard_auth_ok"), auth_ns)
+        good_auth = "Basic " + base64.b64encode(b"admin:secret").decode("ascii")
+        bad_auth = "Basic " + base64.b64encode(b"admin:wrong").decode("ascii")
+        test("dashboard auth: credenciales válidas", auth_ns["_dashboard_auth_ok"](types.SimpleNamespace(headers={"Authorization": good_auth})))
+        test("dashboard auth: credenciales inválidas", not auth_ns["_dashboard_auth_ok"](types.SimpleNamespace(headers={"Authorization": bad_auth})))
+
+        score_ns = {}
+        exec(get_function_source(module_ast, code_lines, "compute_agent_scorecard"), score_ns)
+        sample_scores = score_ns["compute_agent_scorecard"]([
+            {"agent": "Codex", "type": "bug_detected", "points": 3, "validated": True, "impact": "high", "timestamp": "2026-03-29T10:00:00+00:00", "target_agent": "Claude Code (Opus)"},
+            {"agent": "Codex", "type": "fix_implemented", "points": 4, "validated": True, "impact": "high", "timestamp": "2026-03-29T11:00:00+00:00"},
+            {"agent": "Claude Code (Opus)", "type": "feature_shipped", "points": 5, "validated": True, "impact": "critical", "timestamp": "2026-03-29T09:00:00+00:00"},
+        ])
+        test("scorecard: ordena por puntos", sample_scores[0]["agent"] == "Codex", sample_scores)
+        test("scorecard: cuenta bugs detectados", sample_scores[0]["bugs_detected"] == 1, sample_scores[0])
+        test("scorecard: cuenta correcciones a otro agente", sample_scores[0]["corrections"] == 1, sample_scores[0])
+
+        checklist_ns = {
+            "LOGIC_SERIES": "10.5",
+            "REVIEW_READY_CLEAN_TRADES": 30,
+            "PROMOTION_MIN_SERIES_CYCLES": 10,
+            "PROMOTION_MIN_SERIES_WIN_RATE": 40.0,
+            "PROMOTION_MIN_SERIES_PNL": 0.0,
+            "DRAWDOWN_WINDOW": 5,
+            "DRAWDOWN_THRESHOLD": -3.0,
+            "PENDING_EXIT_ALERT_HOURS": 12.0,
+            "get_bankroll_level_context": lambda: {"current_level": 1, "current_target": 25.0, "next_target": 35.0, "is_max_level": False},
+            "get_clean_closed_trade_stats": lambda: {"count": 32, "sell": 20, "loss_total": 8, "resolved_win": 4},
+            "get_logic_series_stats": lambda: {"pnl": 1.5, "win_rate": 50.0, "closed_count": 12, "recent_window_size": 5, "recent_drawdown": -1.2},
+            "get_dashboard_alert_summary": lambda: {"signals": {"status": "ok"}, "pending_stuck": [], "flagged_cities": []},
+            "_load_cycle_counts": lambda: (18, 12),
+        }
+        exec(get_function_source(module_ast, code_lines, "build_promotion_checklist"), checklist_ns)
+        checklist = checklist_ns["build_promotion_checklist"]()
+        test("checklist: decision READY cuando todo pasa", checklist["decision"] == "READY", checklist)
+        test("checklist: progreso 100 cuando todo pasa", checklist["progress_pct"] == 100.0, checklist)
+
+        fd, tmp_agent_events = tempfile.mkstemp(
+            dir=tempfile.gettempdir(),
+            prefix="_tmp_agent_events_test_",
+            suffix=".jsonl",
+        )
+        os.close(fd)
+        with open(tmp_agent_events, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"agent": "Codex", "points": 3, "timestamp": "2026-03-29T12:00:00+00:00"}) + "\n")
+            f.write(json.dumps({"agent": "Claude Code (Opus)", "points": 5, "timestamp": "2026-03-29T11:00:00+00:00"}) + "\n")
+        events_ns = {
+            "os": os,
+            "json": json,
+            "AGENT_EVENTS_FILE": tmp_agent_events,
+            "log": types.SimpleNamespace(warning=lambda *args, **kwargs: None),
+        }
+        exec(get_function_source(module_ast, code_lines, "load_agent_events"), events_ns)
+        loaded_events = events_ns["load_agent_events"]()
+        test("load_agent_events: lee dos eventos", len(loaded_events) == 2, loaded_events)
+        test("load_agent_events: ordena por timestamp desc", loaded_events[0]["agent"] == "Codex", loaded_events)
+        if os.path.exists(tmp_agent_events):
+            try:
+                os.remove(tmp_agent_events)
+            except PermissionError:
+                pass
+
         pager_calls = []
         pager_ns = {
             "send_telegram": lambda text, with_menu=False, custom_keyboard=None: pager_calls.append(
@@ -478,7 +588,7 @@ def run_tests():
         os.close(fd)
         with open(tmp_cycle_summary, "w", encoding="utf-8") as f:
             json.dump({
-                "version": "v10.5.4",
+                "version": "v10.5.5",
                 "cycle_number": 12,
                 "timestamp_utc": "2026-03-28T16:00:33.073674+00:00",
                 "management": {"n_kept": 0, "n_sold": 1, "n_resolved": 0},
@@ -490,7 +600,7 @@ def run_tests():
             "json": __import__("json"),
             "datetime": datetime,
             "send_telegram_paged": lambda text, with_menu=False, page_size=3800: info_messages.append(text),
-            "BOT_VERSION": "v10.5.4",
+            "BOT_VERSION": "v10.5.5",
             "LOGIC_SERIES": "10.5",
             "_extract_logic_series": cycle_ns["_extract_logic_series"],
             "DRY_RUN": False,
@@ -510,7 +620,7 @@ def run_tests():
         exec(get_function_source(module_ast, code_lines, "cmd_info"), info_ns)
         info_ns["cmd_info"]()
         info_msg = info_messages[-1] if info_messages else ""
-        test("info: versión visible correcta", "BOT POLYMARKET v10.5.4" in info_msg, info_msg[:120])
+        test("info: versión visible correcta", "BOT POLYMARKET v10.5.5" in info_msg, info_msg[:120])
         test("info: usa cycle_summary como fallback de último", "Último: 2026-03-28 16:00 UTC" in info_msg, info_msg[:220])
         test("info: muestra doble contador", "Ciclos completados: 12 total | 3 serie v10.5" in info_msg, info_msg[:240])
         test("info: muestra ciclo total y de serie", "Ciclo total #12 | serie v10.5 #3" in info_msg, info_msg[:260])
@@ -1097,7 +1207,7 @@ def run_tests():
     test("/accuracy en MENU_KEYBOARD", '"callback_data": "accuracy"' in code)
     test("cmd_accuracy vuelve con menú", 'send_telegram("Sin datos de accuracy todavía.", with_menu=True)' in code and 'send_telegram_paged("\\n".join(lines), with_menu=True)' in code)
     test("Win rate en rendimiento", "WR:" in code)
-    test("Version v10.5.4", "v10.5.4" in code)
+    test("Version v10.5.5", "v10.5.5" in code)
 
     # ---- Resultado ----
     print(f"\n{'='*50}")

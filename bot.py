@@ -1,6 +1,7 @@
 import urllib.request
 import urllib.parse
 import json
+import base64
 import re
 import math
 import os
@@ -14,15 +15,17 @@ from datetime import date, datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
+from flask import Flask, Response, jsonify, render_template, request
 from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import OrderArgs, OrderType, BalanceAllowanceParams, AssetType
 from py_clob_client.order_builder.constants import BUY, SELL
+from waitress import serve
 
 load_dotenv()
 
 # =============================================================
-# bot.py v10.5.4 — doble contador de ciclos (histórico + serie lógica)
-# Sesión 22: separar observabilidad total de la evaluación de la serie v10.5
+# bot.py v10.5.5 — dashboard web de monitorización + scorecard de agentes
+# Sesión 23: observabilidad visual separada de Telegram
 # =============================================================
 #
 # Nuevo en v10.4.3:
@@ -76,6 +79,10 @@ load_dotenv()
 #   - Contador dual de ciclos: histórico total + serie lógica actual
 #   - cycle_summary/cycles_history guardan logic_series y logic_cycle_number
 #   - /estado y /info muestran ambos contadores para comparar estrategias
+# v10.5.5:
+#   - Dashboard web HTML en navegador (separado de Telegram)
+#   - Checklist de promoción de bankroll con semáforos y progreso
+#   - Scoreboard de agentes con rivalidad constructiva y eventos validados
 # =============================================================
 
 
@@ -94,7 +101,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.5.4"
+BOT_VERSION = "v10.5.5"
 LOGIC_SERIES = "10.5"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -110,6 +117,23 @@ WIN_RATE_HIGH = float(os.getenv("WIN_RATE_HIGH", "50.0"))
 # v10.5.2: City accuracy tracker
 CITY_MIN_TRADES_FOR_BLOCK = int(os.getenv("CITY_MIN_TRADES_FOR_BLOCK", "3"))
 CITY_BLOCK_WIN_RATE = float(os.getenv("CITY_BLOCK_WIN_RATE", "25.0"))
+
+# v10.5.5: Dashboard web
+DASHBOARD_ENABLED = os.getenv("DASHBOARD_ENABLED", "true").lower() == "true"
+DASHBOARD_HOST = os.getenv("DASHBOARD_HOST", "0.0.0.0")
+DASHBOARD_PORT = int(os.getenv("PORT", os.getenv("DASHBOARD_PORT", "8080")))
+DASHBOARD_TITLE = os.getenv("DASHBOARD_TITLE", "Polymarket Bot Control Center")
+DASHBOARD_REFRESH_SEC = int(os.getenv("DASHBOARD_REFRESH_SEC", "60"))
+DASHBOARD_USER = os.getenv("DASHBOARD_USER", "")
+DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
+BANKROLL_LEVELS = [
+    float(v.strip())
+    for v in os.getenv("BANKROLL_LEVELS", "25,35,50,75,100").split(",")
+    if v.strip()
+]
+PROMOTION_MIN_SERIES_CYCLES = int(os.getenv("PROMOTION_MIN_SERIES_CYCLES", "10"))
+PROMOTION_MIN_SERIES_WIN_RATE = float(os.getenv("PROMOTION_MIN_SERIES_WIN_RATE", "40.0"))
+PROMOTION_MIN_SERIES_PNL = float(os.getenv("PROMOTION_MIN_SERIES_PNL", "0.0"))
 
 BLOCKED_CITIES = {
     city.strip().lower()
@@ -293,6 +317,7 @@ CYCLE_SUMMARY_FILE = _data_path("cycle_summary.json")
 CYCLES_HISTORY_FILE = _data_path("cycles_history.jsonl")
 POSTMORTEM_FILE = _data_path("postmortem.json")
 ALERTS_FILE = _data_path("alerts_state.json")
+AGENT_EVENTS_FILE = _seed_data_file("agent_events.jsonl")
 SIGNALS_FILE = _seed_data_file("signals.json")
 TRADERS_DB_FILE = _seed_data_file("traders_db.json")
 
@@ -1321,6 +1346,510 @@ def get_performance_summary():
         "unconfirmed_count": len(unconfirmed_sells),
         "unconfirmed_pnl": sum(s.get("pnl_cash", 0) for s in unconfirmed_sells),
     }
+
+
+# =============================================================
+# DASHBOARD WEB (v10.5.5)
+# =============================================================
+
+def load_cycle_history(limit=None):
+    """Carga el historial de ciclos desde cycles_history.jsonl."""
+    records = []
+    if not os.path.exists(CYCLES_HISTORY_FILE):
+        return records
+    try:
+        with open(CYCLES_HISTORY_FILE, "r", encoding="utf-8") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    item = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(item, dict):
+                    records.append(item)
+    except Exception as e:
+        log.warning(f"Error cargando cycles_history: {e}")
+        return []
+
+    if limit is not None:
+        records = records[-limit:]
+    return records
+
+
+def get_logic_series_records(logic_series=None):
+    """Devuelve postmortems asociados a una serie lógica concreta."""
+    target = logic_series or LOGIC_SERIES
+    records = load_postmortem_data()
+    matched = []
+    for rec in records:
+        opened = _extract_logic_series(rec.get("bot_version_opened"))
+        closed = _extract_logic_series(rec.get("bot_version_closed"))
+        if opened == target or (opened is None and closed == target):
+            matched.append(rec)
+    return matched
+
+
+def get_logic_series_stats(logic_series=None):
+    """Resumen de performance para la serie lógica actual."""
+    series_records = get_logic_series_records(logic_series)
+    closed = [
+        r for r in series_records
+        if r.get("status") == "closed"
+        and r.get("close_action") in {"SELL", "LOSS_TOTAL", "RESOLVED_WIN"}
+        and r.get("pnl_cash") is not None
+    ]
+    openish = [r for r in series_records if r.get("status") in {"open", "pending_exit", "exit_failed"}]
+
+    pnl = round(sum(float(r.get("pnl_cash", 0) or 0) for r in closed), 2)
+    wins = sum(1 for r in closed if float(r.get("pnl_cash", 0) or 0) > 0)
+    count = len(closed)
+    win_rate = round((wins / count) * 100, 1) if count else 0.0
+    last_window = closed[-DRAWDOWN_WINDOW:] if count else []
+    recent_drawdown = round(sum(float(r.get("pnl_cash", 0) or 0) for r in last_window), 2) if last_window else 0.0
+
+    return {
+        "logic_series": logic_series or LOGIC_SERIES,
+        "closed_count": count,
+        "open_count": len(openish),
+        "wins": wins,
+        "losses": count - wins,
+        "win_rate": win_rate,
+        "pnl": pnl,
+        "take_profits": sum(1 for r in closed if r.get("close_reason") == "take_profit"),
+        "stop_losses": sum(1 for r in closed if r.get("close_reason") in {"stop_loss", "stop_loss_intra"}),
+        "reevals": sum(1 for r in closed if r.get("close_reason") == "reeval"),
+        "loss_total": sum(1 for r in closed if r.get("close_action") == "LOSS_TOTAL"),
+        "resolved_win": sum(1 for r in closed if r.get("close_action") == "RESOLVED_WIN"),
+        "recent_drawdown": recent_drawdown,
+        "recent_window_size": len(last_window),
+    }
+
+
+def get_bankroll_level_context():
+    """Calcula el nivel actual y el siguiente escalón de bankroll."""
+    levels = sorted({float(v) for v in BANKROLL_LEVELS})
+    current_level_index = -1
+    for i, level_value in enumerate(levels):
+        if BANKROLL >= level_value:
+            current_level_index = i
+
+    if current_level_index < 0:
+        current_level_index = 0
+
+    current_target = levels[current_level_index]
+    next_target = levels[current_level_index + 1] if current_level_index + 1 < len(levels) else None
+
+    return {
+        "levels": levels,
+        "current_level": current_level_index + 1,
+        "current_target": current_target,
+        "next_target": next_target,
+        "is_max_level": next_target is None,
+    }
+
+
+def load_agent_events(limit=None):
+    """Carga eventos estructurados del scoreboard de agentes."""
+    events = []
+    if not os.path.exists(AGENT_EVENTS_FILE):
+        return events
+    try:
+        with open(AGENT_EVENTS_FILE, "r", encoding="utf-8") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    item = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(item, dict):
+                    events.append(item)
+    except Exception as e:
+        log.warning(f"Error cargando agent_events: {e}")
+        return []
+
+    events.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
+    if limit is not None:
+        events = events[:limit]
+    return events
+
+
+def compute_agent_scorecard(events):
+    """Agrega eventos en un ranking simple y útil para comparar agentes."""
+    scorecard = {}
+    for event in events:
+        agent = event.get("agent", "Unknown")
+        row = scorecard.setdefault(agent, {
+            "agent": agent,
+            "points": 0,
+            "events": 0,
+            "bugs_detected": 0,
+            "fixes": 0,
+            "validated": 0,
+            "corrections": 0,
+            "major_changes": 0,
+            "last_event": "",
+        })
+        row["events"] += 1
+        row["points"] += int(event.get("points", 0) or 0)
+        row["last_event"] = max(row["last_event"], event.get("timestamp", ""))
+
+        event_type = event.get("type", "")
+        if event_type == "bug_detected":
+            row["bugs_detected"] += 1
+        if event_type in {"fix_implemented", "review_correction", "feature_shipped", "validated_improvement"}:
+            row["fixes"] += 1
+        if event.get("validated"):
+            row["validated"] += 1
+        if event.get("target_agent") and event.get("target_agent") != agent:
+            row["corrections"] += 1
+        if event.get("impact") in {"high", "critical"}:
+            row["major_changes"] += 1
+
+    ranking = sorted(
+        scorecard.values(),
+        key=lambda row: (-row["points"], -row["validated"], -row["bugs_detected"], row["agent"]),
+    )
+    return ranking
+
+
+def build_agent_rivalry(events):
+    """Construye un resumen simple de quién corrige/detecta problemas a quién."""
+    rivalry = {}
+    for event in events:
+        source = event.get("agent")
+        target = event.get("target_agent")
+        if not source or not target or source == target:
+            continue
+        key = (source, target)
+        rivalry[key] = rivalry.get(key, 0) + 1
+
+    rows = []
+    for (source, target), count in sorted(rivalry.items(), key=lambda item: -item[1]):
+        rows.append({
+            "source": source,
+            "target": target,
+            "count": count,
+        })
+    return rows
+
+
+def get_dashboard_alert_summary():
+    """Resume alertas y riesgos operativos visibles para el panel."""
+    signals = inspect_signals_file_health()
+    issue = signals.get("status", "unknown")
+    audit = load_audit_data()
+    pending = audit.get("pending_sells", [])
+    now = datetime.now(timezone.utc)
+
+    pending_stuck = []
+    for sell in pending:
+        try:
+            placed_at = datetime.fromisoformat(sell.get("timestamp", ""))
+        except Exception:
+            continue
+        age_hours = (now - placed_at).total_seconds() / 3600
+        if age_hours >= PENDING_EXIT_ALERT_HOURS:
+            pending_stuck.append({
+                "city": sell.get("city", "?"),
+                "side": sell.get("side", "?"),
+                "age_hours": round(age_hours, 1),
+                "price": float(sell.get("price", 0) or 0),
+            })
+
+    city_accuracy = get_city_accuracy()
+    flagged_cities = [
+        {
+            "city": city,
+            "win_rate": data["win_rate"],
+            "trades": data["trades"],
+            "pnl": round(data["pnl"], 2),
+        }
+        for city, data in city_accuracy.items()
+        if data["trades"] >= CITY_MIN_TRADES_FOR_BLOCK and data["win_rate"] <= CITY_BLOCK_WIN_RATE
+    ]
+    flagged_cities.sort(key=lambda item: (item["win_rate"], -item["trades"], item["city"]))
+
+    active_items = []
+    if issue != "ok":
+        active_items.append({
+            "level": "critical" if issue in {"missing", "error"} else "warn",
+            "title": "Señales de traders",
+            "detail": f"{issue} | accionables={signals.get('actionable', 0)}",
+        })
+    if pending_stuck:
+        active_items.append({
+            "level": "warn",
+            "title": "Pending exits atascadas",
+            "detail": f"{len(pending_stuck)} órdenes > {PENDING_EXIT_ALERT_HOURS:.0f}h",
+        })
+    if flagged_cities:
+        active_items.append({
+            "level": "warn",
+            "title": "Ciudades con accuracy baja",
+            "detail": ", ".join(f"{item['city']} ({item['win_rate']}%)" for item in flagged_cities[:4]),
+        })
+
+    return {
+        "signals": signals,
+        "pending_stuck": pending_stuck,
+        "flagged_cities": flagged_cities,
+        "active_items": active_items,
+    }
+
+
+def build_promotion_checklist():
+    """Checklist gamificado para decidir si el bankroll puede subir de nivel."""
+    levels = get_bankroll_level_context()
+    clean_stats = get_clean_closed_trade_stats()
+    series_stats = get_logic_series_stats()
+    alerts = get_dashboard_alert_summary()
+    cycle_total, cycle_series = _load_cycle_counts()
+    _ = cycle_total
+
+    checks = [
+        {
+            "label": "Trades limpios cerrados",
+            "value": f"{clean_stats['count']} / {REVIEW_READY_CLEAN_TRADES}",
+            "passed": clean_stats["count"] >= REVIEW_READY_CLEAN_TRADES,
+            "blocking": True,
+        },
+        {
+            "label": f"Ciclos estables serie v{LOGIC_SERIES}",
+            "value": f"{cycle_series} / {PROMOTION_MIN_SERIES_CYCLES}",
+            "passed": cycle_series >= PROMOTION_MIN_SERIES_CYCLES,
+            "blocking": True,
+        },
+        {
+            "label": f"PnL serie v{LOGIC_SERIES}",
+            "value": f"${series_stats['pnl']:+.2f}",
+            "passed": series_stats["pnl"] >= PROMOTION_MIN_SERIES_PNL,
+            "blocking": True,
+        },
+        {
+            "label": f"Win rate serie v{LOGIC_SERIES}",
+            "value": f"{series_stats['win_rate']}% / {PROMOTION_MIN_SERIES_WIN_RATE:.1f}%",
+            "passed": series_stats["win_rate"] >= PROMOTION_MIN_SERIES_WIN_RATE and series_stats["closed_count"] > 0,
+            "blocking": True,
+        },
+        {
+            "label": f"Drawdown últimos {DRAWDOWN_WINDOW} cierres",
+            "value": f"${series_stats['recent_drawdown']:+.2f} / umbral ${DRAWDOWN_THRESHOLD:.2f}",
+            "passed": series_stats["recent_window_size"] < DRAWDOWN_WINDOW or series_stats["recent_drawdown"] > DRAWDOWN_THRESHOLD,
+            "blocking": True,
+        },
+        {
+            "label": "Signals operativas",
+            "value": alerts["signals"]["status"],
+            "passed": alerts["signals"]["status"] == "ok",
+            "blocking": True,
+        },
+        {
+            "label": "Pending exits atascadas",
+            "value": str(len(alerts["pending_stuck"])),
+            "passed": len(alerts["pending_stuck"]) == 0,
+            "blocking": True,
+        },
+        {
+            "label": "Ciudades flaggeadas críticas",
+            "value": str(len(alerts["flagged_cities"])),
+            "passed": len(alerts["flagged_cities"]) == 0,
+            "blocking": False,
+        },
+    ]
+
+    passed = sum(1 for item in checks if item["passed"])
+    blocking_failed = sum(1 for item in checks if item["blocking"] and not item["passed"])
+    total = len(checks)
+
+    if levels["is_max_level"]:
+        decision = "MAX_LEVEL"
+        decision_label = "Nivel máximo alcanzado"
+    elif blocking_failed == 0 and passed == total:
+        decision = "READY"
+        decision_label = f"Listo para evaluar subida a ${levels['next_target']:.0f}"
+    elif blocking_failed <= 1 and passed >= total - 2:
+        decision = "NEARLY"
+        decision_label = "Casi listo, conviene observar algunos ciclos más"
+    else:
+        decision = "HOLD"
+        decision_label = "Aún no listo para subir bankroll"
+
+    return {
+        "levels": levels,
+        "checks": checks,
+        "passed": passed,
+        "total": total,
+        "progress_pct": round((passed / total) * 100, 1) if total else 0.0,
+        "blocking_failed": blocking_failed,
+        "decision": decision,
+        "decision_label": decision_label,
+    }
+
+
+def load_cycle_summary_data():
+    """Carga el último resumen de ciclo."""
+    if not os.path.exists(CYCLE_SUMMARY_FILE):
+        return {}
+    try:
+        with open(CYCLE_SUMMARY_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def build_dashboard_snapshot():
+    """Construye el snapshot completo que renderiza el dashboard web."""
+    cycle_total, cycle_series = _load_cycle_counts()
+    cycle_summary = load_cycle_summary_data()
+    cycle_history = load_cycle_history(limit=8)
+    clean_stats = get_clean_closed_trade_stats()
+    perf = get_performance_summary() or {}
+    series_stats = get_logic_series_stats()
+    alerts = get_dashboard_alert_summary()
+    promotion = build_promotion_checklist()
+    portfolio = _get_portfolio_and_positions()
+    city_accuracy = get_city_accuracy()
+    agent_events = load_agent_events(limit=30)
+    agent_scoreboard = compute_agent_scorecard(agent_events)
+    rivalry = build_agent_rivalry(agent_events)
+
+    open_positions = []
+    if portfolio and isinstance(portfolio.get("active"), list):
+        for pos in portfolio["active"][:8]:
+            open_positions.append({
+                "label": _parse_position_label(pos.get("title", ""), pos.get("outcome", "")),
+                "current_value": round(float(pos.get("currentValue", 0) or 0), 2),
+                "cash_pnl": round(float(pos.get("cashPnl", 0) or 0), 2),
+                "percent_pnl": round(float(pos.get("percentPnl", 0) or 0), 1),
+            })
+
+    top_cities = sorted(
+        (
+            {
+                "city": city,
+                "trades": data["trades"],
+                "win_rate": data["win_rate"],
+                "pnl": round(data["pnl"], 2),
+            }
+            for city, data in city_accuracy.items()
+        ),
+        key=lambda item: (-item["trades"], item["city"]),
+    )[:8]
+
+    last_cycle_label = "Sin ciclos aún"
+    if cycle_summary:
+        last_cycle_label = (
+            f"Total #{cycle_summary.get('cycle_number', '?')} | "
+            f"Serie v{cycle_summary.get('logic_series', LOGIC_SERIES)} "
+            f"#{cycle_summary.get('logic_cycle_number', '?')}"
+        )
+
+    auth_enabled = bool(DASHBOARD_USER and DASHBOARD_PASSWORD)
+
+    return {
+        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "title": DASHBOARD_TITLE,
+        "version": BOT_VERSION,
+        "logic_series": LOGIC_SERIES,
+        "mode": "REAL" if not DRY_RUN else "DRY RUN",
+        "auth_enabled": auth_enabled,
+        "next_run": bot_state["next_run"].strftime("%Y-%m-%d %H:%M UTC") if bot_state.get("next_run") else "No programado",
+        "last_run": bot_state["last_run"].strftime("%Y-%m-%d %H:%M UTC") if bot_state.get("last_run") else "",
+        "cycle_total": cycle_total,
+        "cycle_series": cycle_series,
+        "last_cycle_label": last_cycle_label,
+        "cycle_summary": cycle_summary,
+        "cycle_history": list(reversed(cycle_history)),
+        "promotion": promotion,
+        "clean_stats": clean_stats,
+        "series_stats": series_stats,
+        "performance": perf,
+        "alerts": alerts,
+        "portfolio": portfolio,
+        "open_positions": open_positions,
+        "top_cities": top_cities,
+        "agent_scoreboard": agent_scoreboard,
+        "agent_events": agent_events[:12],
+        "rivalry": rivalry[:8],
+        "refresh_sec": DASHBOARD_REFRESH_SEC,
+        "intra_label": f"{INTRA_SL_INTERVAL} min" if INTRA_SL_INTERVAL > 0 else "desactivado",
+    }
+
+
+def _dashboard_auth_ok(req):
+    """Autenticación básica opcional para el dashboard."""
+    if not DASHBOARD_USER or not DASHBOARD_PASSWORD:
+        return True
+    auth_header = req.headers.get("Authorization", "")
+    if not auth_header.startswith("Basic "):
+        return False
+    try:
+        decoded = base64.b64decode(auth_header.split(" ", 1)[1]).decode("utf-8")
+    except Exception:
+        return False
+    user, _, password = decoded.partition(":")
+    return user == DASHBOARD_USER and password == DASHBOARD_PASSWORD
+
+
+def create_dashboard_app():
+    """Crea la app web del dashboard."""
+    app = Flask(__name__, template_folder="templates", static_folder="static")
+
+    @app.route("/healthz")
+    def dashboard_healthz():
+        return jsonify({
+            "ok": True,
+            "version": BOT_VERSION,
+            "logic_series": LOGIC_SERIES,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+    @app.route("/api/dashboard.json")
+    def dashboard_api():
+        if not _dashboard_auth_ok(request):
+            return Response(
+                "Dashboard auth required",
+                401,
+                {"WWW-Authenticate": 'Basic realm="Polymarket Dashboard"'},
+            )
+        return jsonify(build_dashboard_snapshot())
+
+    @app.route("/")
+    def dashboard_home():
+        if not _dashboard_auth_ok(request):
+            return Response(
+                "Dashboard auth required",
+                401,
+                {"WWW-Authenticate": 'Basic realm="Polymarket Dashboard"'},
+            )
+        return render_template("dashboard.html", dashboard=build_dashboard_snapshot())
+
+    return app
+
+
+def start_dashboard_server():
+    """Levanta el dashboard web en un thread independiente."""
+    if not DASHBOARD_ENABLED:
+        log.info("Dashboard web: desactivado por configuración")
+        return None
+
+    app = create_dashboard_app()
+
+    def _serve_dashboard():
+        try:
+            serve(app, host=DASHBOARD_HOST, port=DASHBOARD_PORT, threads=6)
+        except Exception as e:
+            log.warning(f"Dashboard web error: {e}")
+
+    thread = threading.Thread(target=_serve_dashboard, daemon=True, name="DashboardHTTP")
+    thread.start()
+    log.info(f"Dashboard web: http://{DASHBOARD_HOST}:{DASHBOARD_PORT}")
+    return thread
 
 
 # =============================================================
@@ -4511,6 +5040,8 @@ if __name__ == "__main__":
         f"Ciclos históricos cargados: {bot_state['cycle_count']} total | "
         f"{bot_state['cycle_count_series']} serie v{LOGIC_SERIES}"
     )
+
+    start_dashboard_server()
 
     clob_client = setup_client()
     if clob_client is None:

@@ -213,6 +213,21 @@ Comandos útiles:
 
 **Resultado:** `v10.5.4`, 251/251 tests, histórico total preservado y serie `v10.5` visible por separado para análisis comparativo.
 
+## Sesión 23 — 29 marzo 2026
+
+**Herramienta:** Codex
+**Versión:** v10.5.5
+**Tests:** 279
+
+**Cambios realizados:**
+- implementación de un dashboard web HTML servido desde el mismo servicio Railway, separado de Telegram;
+- checklist gamificado de promoción de bankroll (`$25 -> $35`) calculado con métricas del sistema;
+- scoreboard de agentes y rivalidad constructiva basados en `agent_events.jsonl`;
+- nueva plantilla `templates/dashboard.html`, estilos en `static/dashboard.css` y arranque HTTP paralelo con `Flask` + `waitress`;
+- ampliación de `verify_before_deploy.py` para cubrir backend, scorecard, checklist y assets del dashboard.
+
+**Resultado:** `v10.5.5`, 279/279 tests, dashboard listo para validación visual en navegador y nueva base para comparar utilidad real de Opus/Codex.
+
 ---
 
 ## Sesiones aún no reconstruidas con certeza
