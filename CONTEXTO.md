@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 29 de marzo de 2026 (Sesión 29 — v10.5.12)
-**Próxima sesión:** Analizar patrón dominante de pérdidas (SL vs LOSS_TOTAL vs reeval) con datos reales de Railway
+**Última actualización:** 29 de marzo de 2026 (Sesión 30 — v10.6.0)
+**Próxima sesión:** Monitorizar rendimiento con sigma original restaurada. Integrar Weather Underground si IBM Trial se desbloquea.
 
 ---
 
@@ -11,25 +11,25 @@ Un bot automatizado de arbitraje meteorológico en Polymarket. El bot detecta me
 
 **Cómo gana dinero:** Consulta la previsión meteorológica profesional (Open-Meteo, coordenadas exactas del aeropuerto), calcula la probabilidad real con un modelo matemático (distribución normal + redondeo a °C enteros), y cuando detecta que el precio del mercado está equivocado por más de 7%, apuesta en la dirección correcta.
 
-**Bankroll configurado:** $25.00 en Railway.
+**Bankroll configurado:** $25.00 en Railway. Cartera real: ~$18.89 (29 mar).
 
 **IMPORTANTE — Fuente de resolución:** Polymarket NO usa Open-Meteo — usa Weather Underground (wunderground.com). Esto ha causado pérdidas en London (2 veces). No apostar en London hasta resolver.
 
 ---
 
-## Estado financiero (fin sesión 20 — pendiente reconciliar)
+## Estado financiero (fin sesión 30 — 29 mar 2026)
 
-- **Posiciones activas (auditoría SSH sesión 19):** Chicago YES, London NO, Wellington NO, Singapore NO
-- **NOTA:** Dallas y Miami fueron vendidas SL en ciclo v10.4.6. CONTEXTO anterior era incorrecto.
-- **Cash / Portfolio / P&L:** pendiente verificar con `/info` + `/cartera` al inicio de próxima sesión
+- **Cartera Polymarket:** ~$18.89 (-$9.52 último día, -50.4%)
+- **Disponible para operar:** ~$13.63
+- **P&L all-time:** ~-$21.84
+- **Causa principal de pérdidas:** Open-Meteo vs Weather Underground discrepancia + sigma ampliada de v10.5 que vendía posiciones ganadoras + intra-cycle monitor que disparaba SL ante fluctuaciones normales
+- **Acción tomada:** v10.6.0 revierte lógica de trading a v10.3 (sigma original, sin intra-cycle, sin MIN_EDGE_EXACT)
 
 Para estado exacto: usar `/info` + `/cartera` + `/rendimiento` + `/accuracy` en Telegram.
 
-**Historial de trades: 38+ entradas en Railway Volume `/app/data/performance.json`.**
-
 ---
 
-## Qué hace el bot v10.5.10 (paso a paso)
+## Qué hace el bot v10.6.0 (paso a paso)
 
 Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
@@ -71,9 +71,11 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Refinamiento Telegram (v10.4.8):** `/traders` alinea la cartera por `ciudad + lado + fecha exacta`, `/postmortem` deja de mostrar etiquetas legacy tipo `? YES`, y `/detalle` enseña el último ciclo completo del log en vez de cortar a 40 líneas.
 
-**Sigma widening + exact edge filter + smart alerts (v10.5.0):** Recalibración tras -$8.57 en 17 trades cerrados. Sigma ampliada (Día 0: 2.0 → Día 6+: 4.5), filtro MIN_EDGE_EXACT 15% para apuestas exactas, alertas de drawdown/scaling/win rate.
+**Sigma widening + exact edge filter + smart alerts (v10.5.0):** Recalibración tras -$8.57 en 17 trades cerrados. Sigma ampliada (Día 0: 2.0 → Día 6+: 4.5), filtro MIN_EDGE_EXACT 15% para apuestas exactas, alertas de drawdown/scaling/win rate. **REVERTIDO en v10.6.0** — la sigma ampliada vendía posiciones ganadoras en re-eval y bloqueaba entradas.
 
-**Intra-cycle SL/TP monitor (v10.5.1):** Thread daemon cada 90 minutos revisa posiciones y ejecuta SL/TP sin esperar al ciclo de 8h. Configurable con `INTRA_SL_INTERVAL` (0=desactivar). Lock para evitar conflicto con ciclo principal.
+**Intra-cycle SL/TP monitor (v10.5.1):** Thread daemon cada 90 minutos revisa posiciones y ejecuta SL/TP sin esperar al ciclo de 8h. Configurable con `INTRA_SL_INTERVAL` (0=desactivar). Lock para evitar conflicto con ciclo principal. **DESACTIVADO en v10.6.0** — disparaba SL ante fluctuaciones normales en mercados diarios.
+
+**Revert trading logic (v10.6.0):** Sigma restaurada a v10.3 (1.2/1.5/2.0/2.5/3.0), intra-cycle desactivado (default 0), MIN_EDGE_EXACT eliminado (usa MIN_EDGE=7% para todo). Se mantiene toda la observabilidad (postmortem, accuracy, alerts, dashboard, ciudades bloqueadas). El problema real es la fuente de datos, no la confianza del modelo.
 
 **City accuracy tracker (v10.5.2):** Calcula win rate por ciudad desde postmortem. Alerta por Telegram si una ciudad baja de 25% win rate con 3+ trades. Nuevo comando `/accuracy`. Win rate visible en `/rendimiento`.
 
@@ -86,13 +88,13 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción:** Railway — Online, EU West Amsterdam, MODO REAL, DRY_RUN=false
-**Versión activa:** v10.5.10
+**Versión activa:** v10.6.0
 
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.5.12 |
-| `verify_before_deploy.py` | v10 — 338 tests de comportamiento |
+| `bot.py` | Script principal v10.6.0 |
+| `verify_before_deploy.py` | v10 — 335 tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |
@@ -132,40 +134,39 @@ MIN_BET="1.00"
 DATA_DIR="/app/data"
 ```
 
-### Configuración en código (defaults bot.py v10.5.10):
+### Configuración en código (defaults bot.py v10.6.0):
 ```python
 MIN_EDGE = 7.0%
-MIN_EDGE_EXACT = 15.0%          # v10.5.0: filtro más estricto para apuestas exactas
 STOP_LOSS_PCT = -25.0%
 TAKE_PROFIT_PCT = +40.0%
 MAX_EXPOSURE_PCT = 40%
 MIN_BET = $1.00
-BLOCKED_CITIES = ["London","Miami","Seattle","Paris","Tel Aviv","Wellington","Toronto","Madrid","Singapore","Ankara"]  # v10.5.12
-BANKROLL_LEVELS = [25, 35, 50, 75, 100]  # v10.5.5+: niveles gamificados del dashboard
-DASHBOARD_PORT = $PORT                    # v10.5.5+: panel web separado de Telegram
-DASHBOARD_REFRESH_SEC = 60               # auto-refresh del dashboard
-PROMOTION_CITY_COVERAGE_TARGET = 3       # v10.5.9+: ciudades con muestra suficiente para fiarse del accuracy
-INTRA_SL_INTERVAL = 90          # v10.5.1: minutos entre checks intra-ciclo (0=desactivar)
-CITY_MIN_TRADES_FOR_BLOCK = 3   # v10.5.2: mínimo trades para evaluar accuracy
-CITY_BLOCK_WIN_RATE = 25.0%     # v10.5.2: umbral de alerta
-Sigma: Día 0: 2.0 | Día 1: 2.5 | Día 2: 3.0 | Día 3: 3.5 | Día 4-5: 4.0 | Día 6+: 4.5
+BLOCKED_CITIES = ["London","Miami","Seattle","Paris","Tel Aviv","Wellington","Toronto","Madrid","Singapore","Ankara"]
+BANKROLL_LEVELS = [25, 35, 50, 75, 100]
+DASHBOARD_PORT = $PORT
+DASHBOARD_REFRESH_SEC = 60
+PROMOTION_CITY_COVERAGE_TARGET = 3
+INTRA_SL_INTERVAL = 0           # v10.6.0: desactivado (v10.5 usaba 90)
+CITY_MIN_TRADES_FOR_BLOCK = 3
+CITY_BLOCK_WIN_RATE = 25.0%
+Sigma: Día 0: 1.2 | Día 1: 1.5 | Día 2: 2.0 | Día 3: 2.5 | Día 4-5: 3.0  # v10.6.0: restaurada de v10.3
 Schedule: 08:00, 16:00, 23:00 UTC
 ```
 
 ---
 
-## Telegram — Comandos disponibles (v10.5.10)
+## Telegram — Comandos disponibles (v10.6.0)
 
 | Comando | Qué muestra |
 |---------|-------------|
-| `/estado` | Versión, modo, bankroll, SL/TP, intervalo intra-SL, próximo ciclo, último ciclo y contadores `total`/`serie v10.5` |
+| `/estado` | Versión, modo, bankroll, SL/TP, intervalo intra-SL, próximo ciclo, último ciclo y contadores `total`/`serie v10.6` |
 | `/cartera` | Cash, posiciones vivas (ciudad+temp+fecha, precios en ¢), resueltas, muertas |
 | `/log` | Resumen del último ciclo desde cycle_summary.json |
 | `/detalle` | Último ciclo completo del `decisions.log`, paginado y sin corte fijo de 40 líneas |
 | `/rendimiento` | Portfolio real + historial trades (TP/SL/reeval, por ciudad con win rate) |
 | `/ordenes` | Órdenes GTC pendientes con etiquetas legibles |
 | `/traders` | Señales activas + coincidencias filtradas por ciudad, lado y fecha exacta del mercado |
-| `/info` | Bloque resumen completo para pegar en Claude/ChatGPT, incluyendo contadores `total`/`serie v10.5` |
+| `/info` | Bloque resumen completo para pegar en Claude/ChatGPT, incluyendo contadores `total`/`serie v10.6` |
 | `/postmortem` | Resumen rápido de abiertas/cierres desde `postmortem.json` |
 | `/accuracy` | Win rate por ciudad desde postmortem, con iconos de bloqueada/flaggeada y botón visible en el menú |
 | `/forzar` | Ejecuta ciclo inmediatamente |
@@ -221,8 +222,9 @@ Schedule: 08:00, 16:00, 23:00 UTC
 ## Versionado — sistema establecido
 
 - **v10.4.X** = misma lógica de trading, mejoras UI/Telegram/observabilidad
-- **v10.5.0** = recalibración de lógica de entrada (sigma, exact filter)
+- **v10.5.0** = recalibración de lógica de entrada (sigma, exact filter) — REVERTIDO en v10.6.0
 - **v10.5.X** (X>0) = mejoras operativas sin cambiar lógica de entrada
+- **v10.6.0** = revert trading logic a v10.3 + toda la observabilidad de v10.5.X
 - Ciclos y datos son continuos y acumulativos entre versiones; desde `v10.5.4` se muestra además contador por serie lógica actual
 - Cada registro incluye la versión del bot que lo generó
 
@@ -250,6 +252,9 @@ Schedule: 08:00, 16:00, 23:00 UTC
 | v10.5.8 | 29 mar | checklist con estado visual neutral `Esperando muestra` para serie sin datos, 300 tests |
 | v10.5.9 | 29 mar | dashboard añade `Progreso`, `Trofeos` y `Desbloqueos`, más cobertura de tests funcionales de snapshot y readiness, 325 tests |
 | v10.5.10 | 29 mar | dashboard añade `Balance por tipo de cierre` y `Liquidación`, separando TP/SL/Reeval/LOSS_TOTAL/RESOLVED_WIN de `pending_exit` y `pendiente pago`, 334 tests |
+| v10.5.11 | 29 mar | fix drawdown checklist + sync agent_events Railway, 337 tests |
+| v10.5.12 | 29 mar | bloqueo 10 ciudades 0% WR + fix posiciones fantasma, 338 tests |
+| **v10.6.0** | **29 mar** | **revert sigma a v10.3, intra-cycle off, MIN_EDGE_EXACT eliminado. Mantiene toda observabilidad. 335 tests** |
 
 ---
 
@@ -382,7 +387,7 @@ Usar esta plantilla al cerrar cada sesión relevante:
   - Implementó `_load_cycle_counts()` para cargar `total` y `serie lógica` desde `cycles_history.jsonl`
   - Mantuvo `cycle_count` como histórico total para no romper continuidad operativa
   - Añadió `cycle_count_series`, `logic_series` y `logic_cycle_number`
-  - Actualizó `/estado` y `/info` para mostrar `total | serie v10.5`
+  - Actualizó `/estado` y `/info` para mostrar `total | serie v10.6`
   - Amplió `verify_before_deploy.py` con tests estructurales y funcionales del recuento mixto `v10.4`/`v10.5`
   - Movió los temporales del verificador al directorio temporal del sistema para no ensuciar el repo
 
@@ -428,7 +433,7 @@ Usar esta plantilla al cerrar cada sesión relevante:
 
 - **Codex:**
   - Detectó que el checklist del dashboard mezclaba `trades limpios` históricos con métricas de la serie `v10.5`, lo que hacía menos fiable la decisión de subir bankroll
-  - Cambió el checklist para separar explícitamente `histórico` vs `serie v10.5`
+  - Cambió el checklist para separar explícitamente `histórico` vs `serie v10.6`
   - Añadió `get_logic_series_clean_closed_trade_stats()` para medir cierres limpios de la serie lógica actual
   - Refinó el scoreboard de agentes para mostrar estados `proposed / implemented / validated`
   - Hizo que los ciclos legacy se muestren como `legacy v10.X` en vez de `#?`
