@@ -101,7 +101,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.5.6"
+BOT_VERSION = "v10.5.7"
 LOGIC_SERIES = "10.5"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -1656,6 +1656,8 @@ def build_promotion_checklist():
     alerts = get_dashboard_alert_summary()
     cycle_total, cycle_series = _load_cycle_counts()
     _ = cycle_total
+    has_series_closures = series_stats["closed_count"] > 0
+    has_drawdown_window = series_stats["recent_window_size"] > 0
 
     checks = [
         {
@@ -1681,23 +1683,34 @@ def build_promotion_checklist():
         },
         {
             "label": f"PnL serie v{LOGIC_SERIES}",
-            "value": f"${series_stats['pnl']:+.2f}",
+            "value": f"${series_stats['pnl']:+.2f}" if has_series_closures else "sin cierres",
             "scope": f"Serie v{LOGIC_SERIES}",
-            "passed": series_stats["pnl"] >= PROMOTION_MIN_SERIES_PNL,
+            "passed": has_series_closures and series_stats["pnl"] >= PROMOTION_MIN_SERIES_PNL,
             "blocking": True,
         },
         {
             "label": f"Win rate serie v{LOGIC_SERIES}",
-            "value": f"{series_stats['win_rate']}% / {PROMOTION_MIN_SERIES_WIN_RATE:.1f}%",
+            "value": (
+                f"{series_stats['win_rate']}% / {PROMOTION_MIN_SERIES_WIN_RATE:.1f}%"
+                if has_series_closures
+                else f"sin cierres / {PROMOTION_MIN_SERIES_WIN_RATE:.1f}%"
+            ),
             "scope": f"Serie v{LOGIC_SERIES}",
-            "passed": series_stats["win_rate"] >= PROMOTION_MIN_SERIES_WIN_RATE and series_stats["closed_count"] > 0,
+            "passed": has_series_closures and series_stats["win_rate"] >= PROMOTION_MIN_SERIES_WIN_RATE,
             "blocking": True,
         },
         {
             "label": f"Drawdown últimos {DRAWDOWN_WINDOW} cierres",
-            "value": f"${series_stats['recent_drawdown']:+.2f} / umbral ${DRAWDOWN_THRESHOLD:.2f}",
+            "value": (
+                f"${series_stats['recent_drawdown']:+.2f} / umbral ${DRAWDOWN_THRESHOLD:.2f}"
+                if has_drawdown_window
+                else f"sin cierres / umbral ${DRAWDOWN_THRESHOLD:.2f}"
+            ),
             "scope": f"Serie v{LOGIC_SERIES}",
-            "passed": series_stats["recent_window_size"] < DRAWDOWN_WINDOW or series_stats["recent_drawdown"] > DRAWDOWN_THRESHOLD,
+            "passed": has_drawdown_window and (
+                series_stats["recent_window_size"] < DRAWDOWN_WINDOW
+                or series_stats["recent_drawdown"] > DRAWDOWN_THRESHOLD
+            ),
             "blocking": True,
         },
         {
@@ -1874,6 +1887,14 @@ def build_dashboard_snapshot():
             last_cycle_label = f"Total #{cycle_summary.get('cycle_number', '?')} | legacy"
 
     auth_enabled = bool(DASHBOARD_USER and DASHBOARD_PASSWORD)
+    series_metrics = dict(series_stats)
+    series_metrics["has_closed_count"] = series_stats["closed_count"] > 0
+    series_metrics["has_drawdown_data"] = series_stats["recent_window_size"] > 0
+    series_metrics["pnl_display"] = f"${series_stats['pnl']:+.2f}" if series_metrics["has_closed_count"] else "n/d"
+    series_metrics["win_rate_display"] = f"{series_stats['win_rate']}%" if series_metrics["has_closed_count"] else "n/d"
+    series_metrics["drawdown_display"] = (
+        f"${series_stats['recent_drawdown']:+.2f}" if series_metrics["has_drawdown_data"] else "n/d"
+    )
 
     return {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
@@ -1892,7 +1913,7 @@ def build_dashboard_snapshot():
         "promotion": promotion,
         "clean_stats": clean_stats,
         "series_clean_stats": series_clean_stats,
-        "series_stats": series_stats,
+        "series_stats": series_metrics,
         "performance": perf,
         "alerts": alerts,
         "portfolio": portfolio,

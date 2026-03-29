@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 29 de marzo de 2026 (Sesión 24 — v10.5.6)
-**Próxima sesión:** Validar visualmente en Railway el dashboard oscuro, revisar el scorecard por stages y decidir si el checklist de promoción necesita más señales de riesgo
+**Última actualización:** 29 de marzo de 2026 (Sesión 25 — v10.5.7)
+**Próxima sesión:** Seguir afinando el dashboard con datos reales y decidir si el scoreboard debe medir estados terminales o progreso acumulativo por fases
 
 ---
 
@@ -29,7 +29,7 @@ Para estado exacto: usar `/info` + `/cartera` + `/rendimiento` + `/accuracy` en 
 
 ---
 
-## Qué hace el bot v10.5.6 (paso a paso)
+## Qué hace el bot v10.5.7 (paso a paso)
 
 Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
@@ -55,7 +55,7 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Contador dual de ciclos (v10.5.4):** Mantiene `cycle_count` como histórico total y añade `cycle_count_series` para la serie lógica actual (`LOGIC_SERIES`). Cada ciclo nuevo guarda `logic_series` y `logic_cycle_number`. `/estado` y `/info` muestran ambos para comparar estrategia nueva sin perder continuidad operativa.
 
-**Dashboard web + scorecard de agentes (v10.5.6):** Levanta un panel HTML separado de Telegram en el mismo servicio Railway, accesible por navegador en `PORT`. Ahora usa modo oscuro, separa checklist histórico vs serie `v10.5`, muestra ciclos legacy con etiquetas legibles y enseña el scoreboard por stages (`proposed / implemented / validated`) a partir de `agent_events.jsonl`.
+**Dashboard web + scorecard de agentes (v10.5.7):** Levanta un panel HTML separado de Telegram en el mismo servicio Railway, accesible por navegador en `PORT`. Usa modo oscuro, separa checklist histórico vs serie `v10.5`, muestra ciclos legacy con etiquetas legibles, enseña el scoreboard por stages (`proposed / implemented / validated`) a partir de `agent_events.jsonl` y ahora evita mostrar métricas de serie como `0.0%` o `+$0.00` cuando todavía no hay cierres: en ese caso muestra `n/d` o `sin cierres`.
 
 **Zona horaria por ciudad (v10.4.5):** Ya no usa offsets manuales; usa zonas IANA reales con `ZoneInfo` para que DST cambie automáticamente sin tocar el código en marzo/octubre.
 
@@ -82,13 +82,13 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción:** Railway — Online, EU West Amsterdam, MODO REAL, DRY_RUN=false
-**Versión activa:** v10.5.6
+**Versión activa:** v10.5.7
 
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.5.6 |
-| `verify_before_deploy.py` | v9 — 290 tests de comportamiento |
+| `bot.py` | Script principal v10.5.7 |
+| `verify_before_deploy.py` | v9 — 294 tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |
@@ -128,7 +128,7 @@ MIN_BET="1.00"
 DATA_DIR="/app/data"
 ```
 
-### Configuración en código (defaults bot.py v10.5.6):
+### Configuración en código (defaults bot.py v10.5.7):
 ```python
 MIN_EDGE = 7.0%
 MIN_EDGE_EXACT = 15.0%          # v10.5.0: filtro más estricto para apuestas exactas
@@ -149,7 +149,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 ---
 
-## Telegram — Comandos disponibles (v10.5.6)
+## Telegram — Comandos disponibles (v10.5.7)
 
 | Comando | Qué muestra |
 |---------|-------------|
@@ -168,7 +168,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 **Para iniciar una sesión de análisis en claude.ai:** pegar `/info` + `/cartera` + `/rendimiento`.
 
-## Dashboard web (v10.5.6)
+## Dashboard web (v10.5.7)
 
 - **Ruta principal:** `/`
 - **Healthcheck:** `/healthz`
@@ -184,6 +184,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 - últimos ciclos y posiciones abiertas
 - scoreboard de agentes y rivalidad constructiva por stages (`proposed / implemented / validated`)
 - modo oscuro por defecto para revisión en navegador
+- cuando la serie aún no tiene cierres, muestra `n/d` / `sin cierres` en lugar de métricas aparentes
 
 ---
 
@@ -236,6 +237,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 | v10.5.4 | 29 mar | contador dual de ciclos (histórico total + serie lógica), `logic_series`/`logic_cycle_number` en historial, `/estado` y `/info` separan total vs serie, 251 tests |
 | v10.5.5 | 29 mar | dashboard web HTML separado de Telegram + checklist de bankroll + scoreboard de agentes + `agent_events.jsonl`, 279 tests |
 | v10.5.6 | 29 mar | dashboard oscuro + checklist histórico/serie separado + scorecard por stages + ciclos legacy legibles, 290 tests |
+| v10.5.7 | 29 mar | dashboard evita métricas falsas sin muestra (`n/d` / `sin cierres`) en serie nueva, 294 tests |
 
 ---
 
@@ -429,6 +431,27 @@ Usar esta plantilla al cerrar cada sesión relevante:
 
 - **Estado final:**
   v10.5.6, 290/290 tests, dashboard oscuro y más honesto para evaluar la serie `v10.5` sin perder contexto histórico
+
+### Sesión 25 — Registro multi-herramienta
+
+- **Fecha:** 2026-03-29
+- **Versión activa al cerrar:** v10.5.7
+- **Objetivo de la sesión:** Hacer una pasada rápida de UX para que el dashboard no muestre métricas engañosas cuando la serie `v10.5` aún no tiene cierres
+
+- **Claude Code (Opus):**
+  - No usado directamente en esta sesión
+
+- **Codex:**
+  - Detectó que `PnL serie`, `Win rate serie` y `Drawdown reciente` seguían mostrándose como `+$0.00` / `0.0%` con `0` cierres, lo que parecía un dato real cuando en realidad faltaba muestra
+  - Ajustó el checklist para que `PnL`, `Win rate` y `Drawdown` queden en `sin cierres` hasta que exista información válida
+  - Cambió los cards del dashboard para mostrar `n/d` y subtítulos como `Sin cierres todavía` o `Esperando muestra`
+  - Amplió `verify_before_deploy.py` con casos funcionales para asegurar que estas métricas no vuelvan a mostrarse como si fueran reales sin haber cierres
+
+- **Problemas detectados en trabajo previo:**
+  - El panel era ya coherente en estructura, pero todavía podía inducir a interpretar como “OK” una serie sin muestra
+
+- **Estado final:**
+  v10.5.7, 294/294 tests, dashboard semánticamente más claro para analizar una serie nueva sin sobreinterpretar ceros iniciales
 
 ### Sesión 19 — Registro multi-herramienta
 

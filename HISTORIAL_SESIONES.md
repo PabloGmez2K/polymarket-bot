@@ -42,6 +42,7 @@ Comandos útiles:
 | 2026-03-24 | Inferida | Iteración v10.3 | `bef71e3` | Cinco bugs corregidos y `verify_before_deploy.py` consolidado. |
 | 2026-03-28 | Explícita | Sesión 19 | `a24fde2` `cd12121` `56aeb5a` `185f018` `374d6a8` `3c4b5f1` `19adfdd` `d382f47` `695f405` | v10.4 a v10.4.8: persistencia, rediseño Telegram, ciclos persistentes, DST robusto, trazabilidad multi-agente, tests funcionales, base de `postmortem.json`, alertas de observabilidad, bloqueo operativo de London y refinamiento final de botones Telegram. |
 | 2026-03-29 | Explícita | Sesión 24 | `—` | Refinamiento del dashboard: modo oscuro, checklist histórico/serie separado, scorecard por stages y ciclos legacy legibles. |
+| 2026-03-29 | Explícita | Sesión 25 | `—` | Pasada rápida de UX: `n/d` y `sin cierres` cuando la serie nueva todavía no tiene muestra real. |
 
 ---
 
@@ -245,6 +246,20 @@ Comandos útiles:
 - `verify_before_deploy.py` ampliado para cubrir dark mode, stages y checklist separado.
 
 **Resultado:** `v10.5.6`, 290/290 tests, dashboard más honesto para medir la serie `v10.5` y más cómodo de usar en escritorio.
+
+## Sesión 25 — 29 marzo 2026
+
+**Herramienta:** Codex
+**Versión:** v10.5.7
+**Tests:** 294
+
+**Cambios realizados:**
+- ajuste semántico del dashboard para no mostrar métricas “cero” como si ya existiera muestra válida;
+- `PnL serie`, `Win rate serie` y `Drawdown reciente` pasan a mostrar `n/d` o `sin cierres` cuando todavía no hay cierres en la serie `v10.5`;
+- el checklist deja de marcar esas métricas como `OK` si la serie aún no tiene cierres;
+- ampliación del verificador con casos funcionales específicos para esta situación.
+
+**Resultado:** `v10.5.7`, 294/294 tests, dashboard más claro en las primeras fases de una serie lógica nueva.
 
 ---
 

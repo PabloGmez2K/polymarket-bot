@@ -152,11 +152,17 @@
     <section class="grid cards-4">
       <article class="card mini-card">
         <span class="stat-label">PnL serie v{{ dashboard.logic_series }}</span>
-        <strong class="stat-value">${{ '%+.2f'|format(dashboard.series_stats.pnl) }}</strong>
+        <strong class="stat-value">{{ dashboard.series_stats.pnl_display }}</strong>
+        {% if not dashboard.series_stats.has_closed_count %}
+        <span class="stat-sub">Sin cierres todavía</span>
+        {% endif %}
       </article>
       <article class="card mini-card">
         <span class="stat-label">Win rate serie</span>
-        <strong class="stat-value">{{ dashboard.series_stats.win_rate }}%</strong>
+        <strong class="stat-value">{{ dashboard.series_stats.win_rate_display }}</strong>
+        {% if not dashboard.series_stats.has_closed_count %}
+        <span class="stat-sub">Esperando muestra</span>
+        {% endif %}
       </article>
       <article class="card mini-card">
         <span class="stat-label">Cierres serie</span>
@@ -164,7 +170,10 @@
       </article>
       <article class="card mini-card">
         <span class="stat-label">Drawdown reciente</span>
-        <strong class="stat-value">${{ '%+.2f'|format(dashboard.series_stats.recent_drawdown) }}</strong>
+        <strong class="stat-value">{{ dashboard.series_stats.drawdown_display }}</strong>
+        {% if not dashboard.series_stats.has_drawdown_data %}
+        <span class="stat-sub">Sin cierres todavía</span>
+        {% endif %}
       </article>
     </section>
 
