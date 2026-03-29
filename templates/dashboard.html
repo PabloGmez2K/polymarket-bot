@@ -221,6 +221,80 @@
       </article>
     </section>
 
+    <section class="grid layout-main">
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Salidas</p>
+            <h2>Balance por tipo de cierre</h2>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Tipo</th>
+                <th>Ops</th>
+                <th>Balance</th>
+                <th>Media</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in dashboard.exit_breakdown.validated_rows %}
+              <tr>
+                <td>
+                  <strong>{{ row.label }}</strong>
+                  <span class="table-note">{{ row.note }}</span>
+                </td>
+                <td>{{ row.count }}</td>
+                <td class="{{ row.balance_class }}">{{ row.balance_display }}</td>
+                <td class="{{ row.avg_class }}">{{ row.avg_display }}</td>
+                <td><span class="badge badge-{{ 'good' if row.status == 'good' else 'warn' if row.status == 'blocked' else 'accent' if row.status == 'waiting' else 'bad' }}">{{ row.tag }}</span></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Liquidación</p>
+            <h2>Serie v{{ dashboard.logic_series }} y cobros</h2>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Estado</th>
+                <th>Ops</th>
+                <th>Balance</th>
+                <th>Media</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in dashboard.exit_breakdown.series_rows %}
+              <tr>
+                <td>
+                  <strong>{{ row.label }}</strong>
+                  <span class="table-note">{{ row.note }}</span>
+                </td>
+                <td>{{ row.count }}</td>
+                <td class="{{ row.balance_class }}">{{ row.balance_display }}</td>
+                <td class="{{ row.avg_class }}">{{ row.avg_display }}</td>
+                <td><span class="badge badge-{{ 'good' if row.status == 'good' else 'warn' if row.status == 'blocked' else 'accent' if row.status == 'waiting' else 'bad' }}">{{ row.tag }}</span></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+
     <section class="grid">
       <article class="card">
         <div class="card-head">

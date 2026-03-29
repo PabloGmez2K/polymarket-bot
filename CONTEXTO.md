@@ -1,6 +1,6 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 29 de marzo de 2026 (Sesión 27 — v10.5.9)
+**Última actualización:** 29 de marzo de 2026 (Sesión 28 — v10.5.10)
 **Próxima sesión:** Revisión integral con Claude Code Sonnet de las sesiones recientes de dashboard, scorecard y checklist
 
 ---
@@ -29,7 +29,7 @@ Para estado exacto: usar `/info` + `/cartera` + `/rendimiento` + `/accuracy` en 
 
 ---
 
-## Qué hace el bot v10.5.9 (paso a paso)
+## Qué hace el bot v10.5.10 (paso a paso)
 
 Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
@@ -55,7 +55,7 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Contador dual de ciclos (v10.5.4):** Mantiene `cycle_count` como histórico total y añade `cycle_count_series` para la serie lógica actual (`LOGIC_SERIES`). Cada ciclo nuevo guarda `logic_series` y `logic_cycle_number`. `/estado` y `/info` muestran ambos para comparar estrategia nueva sin perder continuidad operativa.
 
-**Dashboard web + scorecard de agentes (v10.5.9):** Levanta un panel HTML separado de Telegram en el mismo servicio Railway, accesible por navegador en `PORT`. Usa modo oscuro, separa checklist histórico vs serie `v10.5`, muestra ciclos legacy con etiquetas legibles, enseña el scoreboard por stages (`proposed / implemented / validated`) a partir de `agent_events.jsonl`, evita mostrar métricas de serie como `0.0%` o `+$0.00` cuando todavía no hay cierres, distingue visualmente entre `fallo real` y `esperando muestra` en el checklist y añade tres bloques nuevos: `Progreso`, `Trofeos` y `Desbloqueos` para saber qué evidencia falta antes de sacar conclusiones o evaluar subir bankroll.
+**Dashboard web + scorecard de agentes (v10.5.10):** Levanta un panel HTML separado de Telegram en el mismo servicio Railway, accesible por navegador en `PORT`. Usa modo oscuro, separa checklist histórico vs serie `v10.5`, muestra ciclos legacy con etiquetas legibles, enseña el scoreboard por stages (`proposed / implemented / validated`) a partir de `agent_events.jsonl`, evita mostrar métricas de serie como `0.0%` o `+$0.00` cuando todavía no hay cierres, distingue visualmente entre `fallo real` y `esperando muestra` en el checklist y añade cuatro bloques nuevos: `Progreso`, `Trofeos`, `Desbloqueos` y `Balance por tipo de cierre / liquidación`, para saber no solo qué evidencia falta sino también si el bot está cortando ganancias demasiado pronto, acumulando `stop_loss`, dejando `pending_exit` sin reconciliar o generando valor pendiente de canjear.
 
 **Zona horaria por ciudad (v10.4.5):** Ya no usa offsets manuales; usa zonas IANA reales con `ZoneInfo` para que DST cambie automáticamente sin tocar el código en marzo/octubre.
 
@@ -82,12 +82,12 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción:** Railway — Online, EU West Amsterdam, MODO REAL, DRY_RUN=false
-**Versión activa:** v10.5.9
+**Versión activa:** v10.5.10
 
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.5.9 |
+| `bot.py` | Script principal v10.5.10 |
 | `verify_before_deploy.py` | v9 — 325 tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
@@ -128,7 +128,7 @@ MIN_BET="1.00"
 DATA_DIR="/app/data"
 ```
 
-### Configuración en código (defaults bot.py v10.5.9):
+### Configuración en código (defaults bot.py v10.5.10):
 ```python
 MIN_EDGE = 7.0%
 MIN_EDGE_EXACT = 15.0%          # v10.5.0: filtro más estricto para apuestas exactas
@@ -140,7 +140,7 @@ BLOCKED_CITIES = ["London"]
 BANKROLL_LEVELS = [25, 35, 50, 75, 100]  # v10.5.5+: niveles gamificados del dashboard
 DASHBOARD_PORT = $PORT                    # v10.5.5+: panel web separado de Telegram
 DASHBOARD_REFRESH_SEC = 60               # auto-refresh del dashboard
-PROMOTION_CITY_COVERAGE_TARGET = 3       # v10.5.9: ciudades con muestra suficiente para fiarse del accuracy
+PROMOTION_CITY_COVERAGE_TARGET = 3       # v10.5.9+: ciudades con muestra suficiente para fiarse del accuracy
 INTRA_SL_INTERVAL = 90          # v10.5.1: minutos entre checks intra-ciclo (0=desactivar)
 CITY_MIN_TRADES_FOR_BLOCK = 3   # v10.5.2: mínimo trades para evaluar accuracy
 CITY_BLOCK_WIN_RATE = 25.0%     # v10.5.2: umbral de alerta
@@ -150,7 +150,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 ---
 
-## Telegram — Comandos disponibles (v10.5.9)
+## Telegram — Comandos disponibles (v10.5.10)
 
 | Comando | Qué muestra |
 |---------|-------------|
@@ -169,7 +169,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 **Para iniciar una sesión de análisis en claude.ai:** pegar `/info` + `/cartera` + `/rendimiento`.
 
-## Dashboard web (v10.5.9)
+## Dashboard web (v10.5.10)
 
 - **Ruta principal:** `/`
 - **Healthcheck:** `/healthz`
@@ -245,6 +245,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 | v10.5.7 | 29 mar | dashboard evita métricas falsas sin muestra (`n/d` / `sin cierres`) en serie nueva, 294 tests |
 | v10.5.8 | 29 mar | checklist con estado visual neutral `Esperando muestra` para serie sin datos, 300 tests |
 | v10.5.9 | 29 mar | dashboard añade `Progreso`, `Trofeos` y `Desbloqueos`, más cobertura de tests funcionales de snapshot y readiness, 325 tests |
+| v10.5.10 | 29 mar | dashboard añade `Balance por tipo de cierre` y `Liquidación`, separando TP/SL/Reeval/LOSS_TOTAL/RESOLVED_WIN de `pending_exit` y `pendiente pago`, 334 tests |
 
 ---
 
@@ -504,6 +505,29 @@ Usar esta plantilla al cerrar cada sesión relevante:
 
 - **Estado final:**
   v10.5.9, 325/325 tests, dashboard más útil para readiness operativa y más preparado para una revisión global con Claude Code Sonnet
+
+### Sesión 28 — Registro multi-herramienta
+
+- **Fecha:** 2026-03-29
+- **Versión activa al cerrar:** v10.5.10
+- **Objetivo de la sesión:** Hacer medible en el dashboard si el bot corta ganancias demasiado pronto frente a pérdidas demasiado grandes, separando cierres validados, salidas pendientes y cobros pendientes
+
+- **Claude Code (Opus / Sonnet):**
+  - No usado directamente en esta sesión; queda como siguiente revisor de toda la iteración reciente del dashboard
+
+- **Codex:**
+  - Añadió `build_dashboard_exit_breakdown()` al backend para resumir balance por tipo de cierre usando solo datos ya existentes (`postmortem.json`, serie lógica actual y cartera viva)
+  - Separó explícitamente `Take-profit`, `Stop-loss`, `Re-evaluación`, `LOSS_TOTAL`, `Ganadas por resolución`, `Ganadas validadas` y `Perdidas validadas`
+  - Añadió una tarjeta de `Liquidación` para distinguir `cierres validados`, `pending_exit`, `abiertas`, `exit_failed` y `pendiente pago / canjear`
+  - Dejó claro en el dashboard cuándo el balance ya es validado y cuándo sigue siendo solo estimado por fill pendiente
+  - Amplió `verify_before_deploy.py` hasta `334/334` con tests estructurales y funcionales del bloque nuevo, incluyendo `pending_exit` y `canjear`
+
+- **Problemas detectados en trabajo previo:**
+  - El dashboard ya explicaba progreso y readiness, pero seguía faltando una vista directa del balance por tipo de salida para responder si el sistema está cortando beneficios antes de tiempo
+  - La diferencia entre `vendido en mercado`, `cerrado y auditado` y `pendiente de canjear` no estaba suficientemente visible para interpretación operativa
+
+- **Estado final:**
+  v10.5.10, 334/334 tests, dashboard más útil para diagnosticar por qué baja el bankroll y para diferenciar cierres validados de fills/cobros aún pendientes
 
 ### Sesión 19 — Registro multi-herramienta
 

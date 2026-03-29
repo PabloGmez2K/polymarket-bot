@@ -101,7 +101,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.5.9"
+BOT_VERSION = "v10.5.10"
 LOGIC_SERIES = "10.5"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -1867,6 +1867,173 @@ def build_dashboard_unlocks(
     ]
 
 
+def build_dashboard_exit_breakdown(closed_records=None, series_records=None, portfolio=None, logic_series=None):
+    """Resume balance por tipo de salida y estado de liquidación/cobro."""
+    logic_series = logic_series or LOGIC_SERIES
+    if closed_records is None:
+        closed_records = get_validated_closed_postmortems()
+    if series_records is None:
+        series_records = get_logic_series_records(logic_series)
+    if portfolio is None:
+        portfolio = _get_portfolio_and_positions()
+
+    def _safe_float(value):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _sum_pnl(records, pending=False):
+        values = []
+        for record in records:
+            if pending:
+                value = _safe_float((record.get("pending_exit") or {}).get("pnl_cash"))
+            else:
+                value = _safe_float(record.get("pnl_cash"))
+            if value is not None:
+                values.append(value)
+        if not values:
+            return None
+        return round(sum(values), 2)
+
+    def _fmt_money(value, signed=True):
+        if value is None:
+            return "n/d"
+        if signed:
+            return f"${value:+.2f}"
+        return f"${value:.2f}"
+
+    def _status_tag(status):
+        return {
+            "good": "OK",
+            "bad": "Atención",
+            "waiting": "Sin muestra",
+            "blocked": "Pendiente",
+        }.get(status, "Pendiente")
+
+    def _make_row(label, count, note, balance=None, avg=None, status="waiting", signed=True):
+        balance_display = _fmt_money(balance, signed=signed)
+        avg_display = _fmt_money(avg, signed=signed)
+        return {
+            "label": label,
+            "count": count,
+            "note": note,
+            "status": status,
+            "tag": _status_tag(status),
+            "balance_display": balance_display,
+            "balance_class": "good" if isinstance(balance, (int, float)) and balance > 0 else "bad" if isinstance(balance, (int, float)) and balance < 0 else "",
+            "avg_display": avg_display,
+            "avg_class": "good" if isinstance(avg, (int, float)) and avg > 0 else "bad" if isinstance(avg, (int, float)) and avg < 0 else "",
+        }
+
+    def _make_closed_row(label, records, note):
+        count = len(records)
+        balance = _sum_pnl(records)
+        avg = round(balance / count, 2) if count and balance is not None else None
+        if count == 0:
+            status = "waiting"
+        elif balance is not None and balance >= 0:
+            status = "good"
+        else:
+            status = "bad"
+        return _make_row(label, count, note, balance=balance, avg=avg, status=status, signed=True)
+
+    take_profit_records = [
+        r for r in closed_records
+        if r.get("close_reason") in {"take_profit", "take_profit_intra"}
+    ]
+    stop_loss_records = [
+        r for r in closed_records
+        if r.get("close_reason") in {"stop_loss", "stop_loss_intra"}
+    ]
+    reeval_records = [r for r in closed_records if r.get("close_reason") == "reeval"]
+    loss_total_records = [r for r in closed_records if r.get("close_action") == "LOSS_TOTAL"]
+    resolved_win_records = [r for r in closed_records if r.get("close_action") == "RESOLVED_WIN"]
+    won_records = [
+        r for r in closed_records
+        if (_safe_float(r.get("pnl_cash")) or 0) > 0 or r.get("close_action") == "RESOLVED_WIN"
+    ]
+    lost_records = [
+        r for r in closed_records
+        if (_safe_float(r.get("pnl_cash")) or 0) < 0 or r.get("close_action") == "LOSS_TOTAL"
+    ]
+
+    validated_rows = [
+        _make_closed_row("Take-profit", take_profit_records, "cierres por take_profit o take_profit_intra"),
+        _make_closed_row("Stop-loss", stop_loss_records, "cierres por stop_loss o stop_loss_intra"),
+        _make_closed_row("Re-evaluación", reeval_records, "cierres por pérdida de edge frente al mercado"),
+        _make_closed_row("LOSS_TOTAL", loss_total_records, "posiciones no vendibles o muertas antes de cobrar"),
+        _make_closed_row("Ganadas por resolución", resolved_win_records, "mercados que llegaron a resolución favorable ($1/share)"),
+        _make_closed_row("Ganadas validadas", won_records, "cierres con pnl positivo o resolución ganada"),
+        _make_closed_row("Perdidas validadas", lost_records, "cierres con pnl negativo o pérdida total"),
+    ]
+
+    series_closed = [
+        r for r in series_records
+        if r.get("status") == "closed"
+        and r.get("close_action") in {"SELL", "LOSS_TOTAL", "RESOLVED_WIN"}
+        and r.get("pnl_cash") is not None
+    ]
+    series_pending = [r for r in series_records if r.get("status") == "pending_exit"]
+    series_open = [r for r in series_records if r.get("status") == "open"]
+    series_failed = [r for r in series_records if r.get("status") == "exit_failed"]
+    pending_balance = _sum_pnl(series_pending, pending=True)
+    pending_avg = round(pending_balance / len(series_pending), 2) if series_pending and pending_balance is not None else None
+
+    resolved_won = portfolio.get("resolved_won", []) if isinstance(portfolio, dict) else []
+    resolved_value = round(float((portfolio or {}).get("resolved_value", 0) or 0), 2) if portfolio else 0.0
+    resolved_avg = round(resolved_value / len(resolved_won), 2) if resolved_won else None
+
+    series_rows = [
+        _make_closed_row(
+            f"Cierres validados serie v{logic_series}",
+            series_closed,
+            "solo cuentan SELL / LOSS_TOTAL / RESOLVED_WIN ya reconciliados",
+        ),
+        _make_row(
+            f"Pending exit serie v{logic_series}",
+            len(series_pending),
+            "ventas colocadas; balance aún estimado hasta que auditoría confirme el fill",
+            balance=pending_balance,
+            avg=pending_avg,
+            status="blocked" if series_pending else "good",
+            signed=True,
+        ),
+        _make_row(
+            f"Abiertas serie v{logic_series}",
+            len(series_open),
+            "posiciones todavía sin salida; no cuentan como cierre limpio",
+            balance=None,
+            avg=None,
+            status="waiting" if series_open else "good",
+            signed=True,
+        ),
+        _make_row(
+            f"Exit failed serie v{logic_series}",
+            len(series_failed),
+            "salidas fallidas: conviene revisar si siguen abiertas o han sido reintentadas",
+            balance=None,
+            avg=None,
+            status="bad" if series_failed else "good",
+            signed=True,
+        ),
+        _make_row(
+            "Pendiente pago / canjear",
+            len(resolved_won),
+            "valor resuelto favorable pendiente de convertirse en cash operativo",
+            balance=resolved_value,
+            avg=resolved_avg,
+            status="blocked" if resolved_won else "good",
+            signed=False,
+        ),
+    ]
+
+    return {
+        "validated_rows": validated_rows,
+        "series_rows": series_rows,
+    }
+
+
 def get_bankroll_level_context():
     """Calcula el nivel actual y el siguiente escalón de bankroll."""
     levels = sorted({float(v) for v in BANKROLL_LEVELS})
@@ -2258,6 +2425,11 @@ def build_dashboard_snapshot():
     )
     portfolio = _get_portfolio_and_positions()
     trophies = build_dashboard_trophies(closed_records=validated_closed, city_accuracy=city_accuracy)
+    exit_breakdown = build_dashboard_exit_breakdown(
+        closed_records=validated_closed,
+        portfolio=portfolio,
+        logic_series=LOGIC_SERIES,
+    )
     agent_events = []
     stage_labels = {
         "proposed": "Propuesta",
@@ -2377,6 +2549,7 @@ def build_dashboard_snapshot():
         "cycle_history": cycle_history_display,
         "promotion": promotion,
         "progress": progress,
+        "exit_breakdown": exit_breakdown,
         "trophies": trophies,
         "unlocks": unlocks,
         "clean_stats": clean_stats,

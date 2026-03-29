@@ -465,6 +465,14 @@ th {
   letter-spacing: 0.06em;
 }
 
+.table-note {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
 .good {
   color: var(--good);
 }

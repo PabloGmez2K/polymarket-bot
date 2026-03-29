@@ -45,6 +45,7 @@ Comandos útiles:
 | 2026-03-29 | Explícita | Sesión 25 | `—` | Pasada rápida de UX: `n/d` y `sin cierres` cuando la serie nueva todavía no tiene muestra real. |
 | 2026-03-29 | Explícita | Sesión 26 | `—` | Último pulido UX: estado neutral `Esperando muestra` en el checklist del dashboard. |
 | 2026-03-29 | Explícita | Sesión 27 | `—` | Nueva capa del dashboard: progreso operativo, trofeos validados y desbloqueos para saber qué evidencia falta antes de revisar lógica o subir bankroll. |
+| 2026-03-29 | Explícita | Sesión 28 | `—` | Dashboard añade balance por tipo de cierre y liquidación para distinguir TP/SL/Reeval/LOSS_TOTAL/RESOLVED_WIN de `pending_exit` y valor pendiente de canjear. |
 
 ---
 
@@ -291,6 +292,33 @@ Comandos útiles:
 - ampliación de `verify_before_deploy.py` con tests funcionales y estructurales específicos de esta capa nueva.
 
 **Resultado:** `v10.5.9`, 325/325 tests, dashboard más accionable para interpretar evidencia y tomar decisiones de siguiente nivel sin mezclarlo con Telegram.
+
+## Sesión 28 — 29 marzo 2026
+
+**Tipo:** Explícita  
+**Versión:** v10.5.10  
+**Objetivo:** añadir al dashboard una capa explícita de balance por tipo de salida para entender si el sistema corta ganancias demasiado pronto, deja pérdidas crecer o simplemente todavía no ha reconciliado fills/cobros.
+
+**Herramientas utilizadas:**
+- `Codex`: implementación completa de backend + HTML/CSS + tests + actualización de docs.
+- `Claude Code`: no usado en esta sesión; se deja como siguiente revisor crítico de toda la iteración reciente del dashboard.
+
+**Cambios clave:**
+- nuevo helper `build_dashboard_exit_breakdown()` en `bot.py`;
+- nueva sección `Balance por tipo de cierre` con filas para `Take-profit`, `Stop-loss`, `Re-evaluación`, `LOSS_TOTAL`, `Ganadas por resolución`, `Ganadas validadas` y `Perdidas validadas`;
+- nueva sección `Liquidación` para separar `cierres validados de la serie`, `pending_exit`, `abiertas`, `exit_failed` y `pendiente pago / canjear`;
+- snapshot del dashboard ampliado con `exit_breakdown`;
+- plantilla y CSS ampliados para mostrar estas dos tarjetas nuevas;
+- tests de verificación ampliados a `334/334`.
+
+**Valor de la sesión:**
+- el dashboard ya no solo dice “cuántos trades faltan”, sino también **cómo se están cerrando** y **dónde se queda el dinero atascado**;
+- deja visible la diferencia entre:
+  - cierre validado con PnL real,
+  - venta pendiente de fill/auditoría,
+  - valor pendiente de cobro/canje.
+
+**Resultado:** `v10.5.10`, 334/334 tests, base mejor preparada para que Claude Code revise por qué el bankroll sigue cayendo y si el patrón dominante es `stop_loss`, `LOSS_TOTAL`, `reeval` o falta de resoluciones favorables a $1.
 
 ---
 
