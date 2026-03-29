@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-verify_before_deploy.py v7 — Tests de comportamiento para bot.py v10.4.8
+verify_before_deploy.py v8 — Tests de comportamiento para bot.py v10.5.0
 
 Ejecutar ANTES de cada deploy:
   python verify_before_deploy.py
@@ -88,9 +88,9 @@ def run_tests():
 
     # ---- Test 1: Versión ----
     print("\n🔍 Versión")
-    test("Header dice v10.4", "bot.py v10.4" in code)
-    test("Log arranque dice v10.4", 'POLYMARKET BOT {BOT_VERSION}' in code or 'BOT v10.4' in code)
-    test("Telegram arranque dice v10.4", 'Bot {BOT_VERSION} arrancado' in code or 'Bot v10.4' in code)
+    test("Header dice v10.5", "bot.py v10.5" in code)
+    test("Log arranque dice v10.5", 'POLYMARKET BOT {BOT_VERSION}' in code or 'BOT v10.5' in code)
+    test("Telegram arranque dice v10.5", 'Bot {BOT_VERSION} arrancado' in code or 'Bot v10.5' in code)
 
     # ---- Test 2: Bug #10 — MIN_BET default ----
     print("\n🔍 Bug #10: MIN_BET default")
@@ -253,7 +253,7 @@ def run_tests():
     test("CYCLES_HISTORY_FILE definido", "CYCLES_HISTORY_FILE" in code)
     test("cycles_history.jsonl append-only", "cycles_history.jsonl" in code)
     test("cycle_summary se guarda en main()", "cycle_data" in code and "CYCLE_SUMMARY_FILE" in code)
-    test("cycle_data incluye version v10.4.8", '"version"' in code and "v10.4.8" in code)
+    test("cycle_data incluye version v10.5.0", '"version"' in code and "v10.5.0" in code)
 
     # ---- Test 14: Rediseño Telegram v10.4.2 ----
     print("\n🔍 Rediseño Telegram v10.4.2")
@@ -269,7 +269,7 @@ def run_tests():
     test("Bug #13: send_telegram_paged en cmd_log", "send_telegram_paged" in code and "cmd_log" in code)
     test("Bug #13: send_telegram_paged en cmd_cartera", "send_telegram_paged" in code)
     test("_parse_position_label usa centavos (¢)", "¢" in code)
-    test("cmd_estado versión correcta", "Bot v10.4.8" in code or "v10.4.8" in code)
+    test("cmd_estado versión correcta", "Bot v10.5.0" in code or "v10.5.0" in code)
 
     # ---- Test 14c: Zonas horarias reales v10.4.5 ----
     print("\n🔍 Zonas horarias reales")
@@ -451,10 +451,11 @@ def run_tests():
             "json": __import__("json"),
             "datetime": datetime,
             "send_telegram_paged": lambda text, with_menu=False, page_size=3800: info_messages.append(text),
-            "BOT_VERSION": "v10.4.8",
+            "BOT_VERSION": "v10.5.0",
             "DRY_RUN": False,
             "BANKROLL": 25.0,
             "MIN_EDGE": 7.0,
+            "MIN_EDGE_EXACT": 15.0,
             "STOP_LOSS_PCT": -25.0,
             "TAKE_PROFIT_PCT": 40.0,
             "MAX_EXPOSURE_PCT": 0.40,
@@ -467,7 +468,7 @@ def run_tests():
         exec(get_function_source(module_ast, code_lines, "cmd_info"), info_ns)
         info_ns["cmd_info"]()
         info_msg = info_messages[-1] if info_messages else ""
-        test("info: versión visible correcta", "BOT POLYMARKET v10.4.8" in info_msg, info_msg[:120])
+        test("info: versión visible correcta", "BOT POLYMARKET v10.5.0" in info_msg, info_msg[:120])
         test("info: usa cycle_summary como fallback de último", "Último: 2026-03-28 16:00 UTC" in info_msg, info_msg[:220])
 
         pm_messages = []
@@ -643,7 +644,7 @@ def run_tests():
 
         buy_entry = {
             "timestamp": "2026-03-28T08:00:00+00:00",
-            "bot_version": "v10.4.8",
+            "bot_version": "v10.5.0",
             "city": "Dallas",
             "side": "YES",
             "date": "2026-03-28",
@@ -667,7 +668,7 @@ def run_tests():
 
         sell_pending = {
             "timestamp": "2026-03-28T16:00:00+00:00",
-            "bot_version": "v10.4.8",
+            "bot_version": "v10.5.0",
             "city": "Dallas",
             "side": "Yes",
             "date": "2026-03-28",
@@ -815,18 +816,32 @@ def run_tests():
             "datetime": datetime,
             "timezone": timezone,
             "REVIEW_READY_CLEAN_TRADES": 30,
-            "LOGIC_SERIES": "10.4",
+            "LOGIC_SERIES": "10.5",
             "PENDING_EXIT_ALERT_HOURS": 12.0,
+            "DRAWDOWN_WINDOW": 5,
+            "DRAWDOWN_THRESHOLD": -3.0,
+            "SCALING_TIERS": [25, 35, 50, 75, 100],
+            "SCALING_WINDOW": 20,
+            "WIN_RATE_WINDOW": 15,
+            "WIN_RATE_LOW": 30.0,
+            "WIN_RATE_HIGH": 50.0,
+            "BANKROLL": 25.0,
             "load_alerts_state": lambda: {
-                "logic_series": "10.4",
+                "logic_series": "10.5",
                 "milestones": {},
                 "signals_health": {"last_issue": None},
                 "pending_exit_notified": {},
+                "drawdown_alerted": False,
+                "scaling_alerted_tier": None,
+                "scaling_negative_alerted": False,
+                "win_rate_low_alerted": False,
+                "win_rate_high_alerted": False,
             },
             "save_alerts_state": lambda state: saved_review_state.update(state),
             "get_clean_closed_trade_stats": lambda: {"count": 30, "sell": 20, "loss_total": 6, "resolved_win": 4},
             "inspect_signals_file_health": lambda: {"status": "ok", "age_hours": 1.0, "actionable": 12},
             "load_audit_data": lambda: {"pending_sells": []},
+            "_get_recent_closed_trades": lambda n=None: [],
             "send_telegram": lambda text, with_menu=False, custom_keyboard=None: review_messages.append(text),
         }
         exec(get_function_source(module_ast, code_lines, "run_observability_alerts"), review_ns)
@@ -840,18 +855,26 @@ def run_tests():
             "datetime": datetime,
             "timezone": timezone,
             "REVIEW_READY_CLEAN_TRADES": 30,
-            "LOGIC_SERIES": "10.4",
+            "LOGIC_SERIES": "10.5",
             "PENDING_EXIT_ALERT_HOURS": 12.0,
+            "DRAWDOWN_WINDOW": 5, "DRAWDOWN_THRESHOLD": -3.0,
+            "SCALING_TIERS": [25, 35, 50, 75, 100], "SCALING_WINDOW": 20,
+            "WIN_RATE_WINDOW": 15, "WIN_RATE_LOW": 30.0, "WIN_RATE_HIGH": 50.0,
+            "BANKROLL": 25.0,
             "load_alerts_state": lambda: {
-                "logic_series": "10.4",
+                "logic_series": "10.5",
                 "milestones": {},
                 "signals_health": {"last_issue": None},
                 "pending_exit_notified": {},
+                "drawdown_alerted": False, "scaling_alerted_tier": None,
+                "scaling_negative_alerted": False,
+                "win_rate_low_alerted": False, "win_rate_high_alerted": False,
             },
             "save_alerts_state": lambda state: None,
             "get_clean_closed_trade_stats": lambda: {"count": 5, "sell": 4, "loss_total": 1, "resolved_win": 0},
             "inspect_signals_file_health": lambda: {"status": "stale", "age_hours": 30.5, "actionable": 3},
             "load_audit_data": lambda: {"pending_sells": []},
+            "_get_recent_closed_trades": lambda n=None: [],
             "send_telegram": lambda text, with_menu=False, custom_keyboard=None: signal_messages.append(text),
         }
         exec(get_function_source(module_ast, code_lines, "run_observability_alerts"), signal_ns)
@@ -865,17 +888,25 @@ def run_tests():
             "datetime": datetime,
             "timezone": timezone,
             "REVIEW_READY_CLEAN_TRADES": 30,
-            "LOGIC_SERIES": "10.4",
+            "LOGIC_SERIES": "10.5",
             "PENDING_EXIT_ALERT_HOURS": 12.0,
+            "DRAWDOWN_WINDOW": 5, "DRAWDOWN_THRESHOLD": -3.0,
+            "SCALING_TIERS": [25, 35, 50, 75, 100], "SCALING_WINDOW": 20,
+            "WIN_RATE_WINDOW": 15, "WIN_RATE_LOW": 30.0, "WIN_RATE_HIGH": 50.0,
+            "BANKROLL": 25.0,
             "load_alerts_state": lambda: {
-                "logic_series": "10.4",
+                "logic_series": "10.5",
                 "milestones": {},
                 "signals_health": {"last_issue": None},
                 "pending_exit_notified": {},
+                "drawdown_alerted": False, "scaling_alerted_tier": None,
+                "scaling_negative_alerted": False,
+                "win_rate_low_alerted": False, "win_rate_high_alerted": False,
             },
             "save_alerts_state": lambda state: saved_pending_state.update(state),
             "get_clean_closed_trade_stats": lambda: {"count": 2, "sell": 2, "loss_total": 0, "resolved_win": 0},
             "inspect_signals_file_health": lambda: {"status": "ok", "age_hours": 1.0, "actionable": 10},
+            "_get_recent_closed_trades": lambda n=None: [],
             "load_audit_data": lambda: {
                 "pending_sells": [{
                     "order_id": "oid-stuck",
@@ -896,6 +927,87 @@ def run_tests():
              str(saved_pending_state))
     except Exception as e:
         test("Alertas funcionales ejecutan sin excepción", False, str(e))
+
+    # ---- Test v10.5.0: Sigma widening ----
+    print("\n🔍 v10.5.0: Sigma widening")
+    try:
+        sigma_ns = {"math": __import__("math")}
+        exec(get_function_source(module_ast, code_lines, "get_uncertainty"), sigma_ns)
+        gu = sigma_ns["get_uncertainty"]
+        test("sigma day 0 = 2.0", gu(0) == 2.0, f"got {gu(0)}")
+        test("sigma day 1 = 2.5", gu(1) == 2.5, f"got {gu(1)}")
+        test("sigma day 2 = 3.0", gu(2) == 3.0, f"got {gu(2)}")
+        test("sigma day 3 = 3.5", gu(3) == 3.5, f"got {gu(3)}")
+        test("sigma day 4 = 4.0", gu(4) == 4.0, f"got {gu(4)}")
+        test("sigma day 5 = 4.0", gu(5) == 4.0, f"got {gu(5)}")
+        test("sigma day 6+ = 4.5", gu(7) == 4.5, f"got {gu(7)}")
+    except Exception as e:
+        test("sigma funcional ejecuta sin excepción", False, str(e))
+
+    # ---- Test v10.5.0: Exact bet edge filter ----
+    print("\n🔍 v10.5.0: Exact edge filter")
+    test("MIN_EDGE_EXACT definido", "MIN_EDGE_EXACT" in code)
+    match_exact = re.search(r'MIN_EDGE_EXACT\s*=\s*float\(os\.getenv\("MIN_EDGE_EXACT",\s*"([^"]+)"\)', code)
+    test("MIN_EDGE_EXACT default es 15.0", match_exact and match_exact.group(1) == "15.0")
+    test("effective_min_edge se calcula", "effective_min_edge" in code)
+    test("Edge check usa condition == exact", 'c["condition"] == "exact"' in code)
+    test("MIN_EDGE_EXACT en cmd_estado", "MIN_EDGE_EXACT" in code and "exact:" in code)
+    test("LOGIC_SERIES es 10.5", 'LOGIC_SERIES = "10.5"' in code)
+
+    # ---- Test v10.5.0: Smart alerts ----
+    print("\n🔍 v10.5.0: Smart alerts")
+    test("DRAWDOWN_WINDOW definido", "DRAWDOWN_WINDOW" in code)
+    test("DRAWDOWN_THRESHOLD definido", "DRAWDOWN_THRESHOLD" in code)
+    test("SCALING_TIERS definido", "SCALING_TIERS" in code)
+    test("SCALING_WINDOW definido", "SCALING_WINDOW" in code)
+    test("WIN_RATE_WINDOW definido", "WIN_RATE_WINDOW" in code)
+    test("WIN_RATE_LOW definido", "WIN_RATE_LOW" in code)
+    test("WIN_RATE_HIGH definido", "WIN_RATE_HIGH" in code)
+    test("_get_recent_closed_trades definida", "def _get_recent_closed_trades(" in code)
+    test("drawdown_alerted en alerts default", "drawdown_alerted" in code)
+    test("scaling_alerted_tier en alerts default", "scaling_alerted_tier" in code)
+    test("win_rate_low_alerted en alerts default", "win_rate_low_alerted" in code)
+    test("win_rate_high_alerted en alerts default", "win_rate_high_alerted" in code)
+    test("Drawdown Alert en run_observability", "Drawdown Alert" in code)
+    test("Scaling Readiness en run_observability", "Scaling Readiness" in code)
+    test("Scaling Warning en run_observability", "Scaling Warning" in code)
+    test("Strategy Review en run_observability", "Strategy Review" in code)
+    test("Strategy Signal en run_observability", "Strategy Signal" in code)
+
+    # ---- Test v10.5.0: _get_recent_closed_trades funcional ----
+    print("\n🔍 v10.5.0: _get_recent_closed_trades funcional")
+    try:
+        grc_ns = {}
+        exec(get_function_source(module_ast, code_lines, "load_postmortem_data"), grc_ns)
+        exec(get_function_source(module_ast, code_lines, "_get_recent_closed_trades"), grc_ns)
+
+        mock_pm_file = os.path.join(tempfile.gettempdir(), "test_pm_recent.json")
+        mock_records = [
+            {"status": "closed", "close_action": "SELL", "pnl_cash": -1.5, "closed_at": "2026-03-28T10:00:00"},
+            {"status": "closed", "close_action": "LOSS_TOTAL", "pnl_cash": -2.0, "closed_at": "2026-03-28T08:00:00"},
+            {"status": "closed", "close_action": "SELL", "pnl_cash": 3.0, "closed_at": "2026-03-28T12:00:00"},
+            {"status": "open", "close_action": None, "pnl_cash": None, "closed_at": None},
+            {"status": "closed", "close_action": "RESOLVED_WIN", "pnl_cash": 1.0, "closed_at": "2026-03-28T14:00:00"},
+        ]
+        with open(mock_pm_file, "w") as f:
+            json.dump(mock_records, f)
+
+        grc_ns["POSTMORTEM_FILE"] = mock_pm_file
+        grc_ns["os"] = os
+        grc_ns["json"] = json
+        grc_ns["log"] = type("L", (), {"warning": lambda *a: None})()
+
+        result = grc_ns["_get_recent_closed_trades"](3)
+        test("recent_closed: devuelve 3 de 4 cerrados", len(result) == 3, f"got {len(result)}")
+        test("recent_closed: más reciente primero", result[0]["pnl_cash"] == 1.0, f"first pnl={result[0].get('pnl_cash')}")
+        test("recent_closed: excluye open", all(r["status"] == "closed" for r in result))
+
+        result_all = grc_ns["_get_recent_closed_trades"]()
+        test("recent_closed sin N: devuelve todos", len(result_all) == 4)
+
+        os.remove(mock_pm_file)
+    except Exception as e:
+        test("_get_recent_closed_trades funcional ejecuta", False, str(e))
 
     # ---- Resultado ----
     print(f"\n{'='*50}")

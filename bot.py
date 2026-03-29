@@ -21,8 +21,8 @@ from py_clob_client.order_builder.constants import BUY, SELL
 load_dotenv()
 
 # =============================================================
-# bot.py v10.4.8 — refinamiento Telegram + bloqueo operativo London
-# Sesión 19: Fase 1.5 — rediseño Telegram + fixes post-deploy
+# bot.py v10.5.0 — sigma widening + exact edge filter + smart alerts
+# Sesión 20: recalibración tras -$8.57 en 17 trades cerrados
 # =============================================================
 #
 # Nuevo en v10.4.3:
@@ -83,16 +83,26 @@ DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
 BANKROLL = float(os.getenv("BANKROLL", "15.00"))
 
 MIN_EDGE = float(os.getenv("MIN_EDGE", "7.0"))
+MIN_EDGE_EXACT = float(os.getenv("MIN_EDGE_EXACT", "15.0"))  # v10.5: exact bets necesitan más edge (20% win rate histórico)
 MIN_BET = float(os.getenv("MIN_BET", "1.00"))           # v10.4: default alineado con Railway
 MAX_BET_PCT = float(os.getenv("MAX_BET_PCT", "0.10"))   # v9: subido de 0.05 a 0.10 (10%)
 MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.4.8"
-LOGIC_SERIES = "10.4"
+BOT_VERSION = "v10.5.0"
+LOGIC_SERIES = "10.5"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
+
+# v10.5: Smart alerts — drawdown, scaling, win rate
+DRAWDOWN_WINDOW = int(os.getenv("DRAWDOWN_WINDOW", "5"))
+DRAWDOWN_THRESHOLD = float(os.getenv("DRAWDOWN_THRESHOLD", "-3.0"))
+SCALING_TIERS = [25, 35, 50, 75, 100]
+SCALING_WINDOW = int(os.getenv("SCALING_WINDOW", "20"))
+WIN_RATE_WINDOW = int(os.getenv("WIN_RATE_WINDOW", "15"))
+WIN_RATE_LOW = float(os.getenv("WIN_RATE_LOW", "30.0"))
+WIN_RATE_HIGH = float(os.getenv("WIN_RATE_HIGH", "50.0"))
 BLOCKED_CITIES = {
     city.strip().lower()
     for city in os.getenv("BLOCKED_CITIES", "London").split(",")
@@ -295,6 +305,12 @@ def load_alerts_state():
         "milestones": {},
         "signals_health": {"last_issue": None},
         "pending_exit_notified": {},
+        # v10.5: smart alerts state
+        "drawdown_alerted": False,
+        "scaling_alerted_tier": None,
+        "scaling_negative_alerted": False,
+        "win_rate_low_alerted": False,
+        "win_rate_high_alerted": False,
     }
     if not os.path.exists(ALERTS_FILE):
         return default
@@ -310,6 +326,12 @@ def load_alerts_state():
         state["milestones"] = data.get("milestones", {}) if isinstance(data.get("milestones"), dict) else {}
         state["signals_health"] = data.get("signals_health", {}) if isinstance(data.get("signals_health"), dict) else {"last_issue": None}
         state["pending_exit_notified"] = data.get("pending_exit_notified", {}) if isinstance(data.get("pending_exit_notified"), dict) else {}
+        # v10.5: smart alerts — reconstruct with defaults
+        state.setdefault("drawdown_alerted", False)
+        state.setdefault("scaling_alerted_tier", None)
+        state.setdefault("scaling_negative_alerted", False)
+        state.setdefault("win_rate_low_alerted", False)
+        state.setdefault("win_rate_high_alerted", False)
         return state
     except Exception:
         return default
@@ -934,6 +956,21 @@ def get_clean_closed_trade_stats():
     }
 
 
+def _get_recent_closed_trades(n=None):
+    """Devuelve los últimos N trades cerrados de postmortem.json, más reciente primero."""
+    records = load_postmortem_data()
+    closed = [
+        r for r in records
+        if r.get("status") == "closed"
+        and r.get("close_action") in {"SELL", "LOSS_TOTAL", "RESOLVED_WIN"}
+        and r.get("pnl_cash") is not None
+    ]
+    closed.sort(key=lambda r: r.get("closed_at", ""), reverse=True)
+    if n is not None:
+        closed = closed[:n]
+    return closed
+
+
 def run_observability_alerts():
     """
     Alertas one-shot de observabilidad y review readiness.
@@ -1044,6 +1081,87 @@ def run_observability_alerts():
             notified.pop(order_id, None)
             changed = True
     state["pending_exit_notified"] = notified
+
+    # --- v10.5: Drawdown alert ---
+    recent_dd = _get_recent_closed_trades(DRAWDOWN_WINDOW)
+    if len(recent_dd) >= DRAWDOWN_WINDOW:
+        window_pnl = sum(r.get("pnl_cash", 0) for r in recent_dd)
+        if window_pnl <= DRAWDOWN_THRESHOLD and not state.get("drawdown_alerted"):
+            send_telegram(
+                f"📉 <b>Drawdown Alert</b>\n"
+                f"Los últimos {DRAWDOWN_WINDOW} trades cerrados tienen PnL neto de <b>${window_pnl:+.2f}</b>.\n"
+                f"Umbral: ${DRAWDOWN_THRESHOLD:.2f}\n\n"
+                f"Considerar sesión de revisión en Claude Code."
+            )
+            state["drawdown_alerted"] = True
+            changed = True
+        elif window_pnl > DRAWDOWN_THRESHOLD and state.get("drawdown_alerted"):
+            state["drawdown_alerted"] = False
+            changed = True
+
+    # --- v10.5: Scaling readiness ---
+    recent_sc = _get_recent_closed_trades(SCALING_WINDOW)
+    if len(recent_sc) >= SCALING_WINDOW:
+        scaling_pnl = sum(r.get("pnl_cash", 0) for r in recent_sc)
+        next_tier = None
+        for tier in SCALING_TIERS:
+            if tier > BANKROLL:
+                next_tier = tier
+                break
+
+        if scaling_pnl > 0 and next_tier and state.get("scaling_alerted_tier") != next_tier:
+            if BANKROLL + scaling_pnl >= next_tier:
+                send_telegram(
+                    f"📈 <b>Scaling Readiness</b>\n"
+                    f"PnL acumulado de últimos {SCALING_WINDOW} trades: <b>${scaling_pnl:+.2f}</b>.\n"
+                    f"Considerar subir bankroll de ${BANKROLL:.0f} a ${next_tier:.0f}."
+                )
+                state["scaling_alerted_tier"] = next_tier
+                changed = True
+
+        if scaling_pnl < 0 and not state.get("scaling_negative_alerted"):
+            send_telegram(
+                f"⚠️ <b>Scaling Warning</b>\n"
+                f"PnL acumulado de últimos {SCALING_WINDOW} trades: <b>${scaling_pnl:+.2f}</b>.\n"
+                f"No subir de escalón hasta recuperar."
+            )
+            state["scaling_negative_alerted"] = True
+            changed = True
+        elif scaling_pnl >= 0 and state.get("scaling_negative_alerted"):
+            state["scaling_negative_alerted"] = False
+            changed = True
+
+    # --- v10.5: Win rate rolling check ---
+    recent_wr = _get_recent_closed_trades(WIN_RATE_WINDOW)
+    if len(recent_wr) >= WIN_RATE_WINDOW:
+        wins = sum(1 for r in recent_wr if (r.get("pnl_cash") or 0) > 0)
+        win_rate = (wins / len(recent_wr)) * 100
+
+        if win_rate < WIN_RATE_LOW and not state.get("win_rate_low_alerted"):
+            send_telegram(
+                f"🔴 <b>Strategy Review</b>\n"
+                f"Win rate últimos {WIN_RATE_WINDOW} trades: <b>{win_rate:.0f}%</b> (umbral: {WIN_RATE_LOW:.0f}%).\n"
+                f"Revisar lógica de entrada y sigma."
+            )
+            state["win_rate_low_alerted"] = True
+            state["win_rate_high_alerted"] = False
+            changed = True
+        elif win_rate >= WIN_RATE_LOW and state.get("win_rate_low_alerted"):
+            state["win_rate_low_alerted"] = False
+            changed = True
+
+        if win_rate >= WIN_RATE_HIGH and not state.get("win_rate_high_alerted"):
+            send_telegram(
+                f"🟢 <b>Strategy Signal</b>\n"
+                f"Win rate últimos {WIN_RATE_WINDOW} trades: <b>{win_rate:.0f}%</b>.\n"
+                f"Rendimiento positivo sostenido."
+            )
+            state["win_rate_high_alerted"] = True
+            state["win_rate_low_alerted"] = False
+            changed = True
+        elif win_rate < WIN_RATE_HIGH and state.get("win_rate_high_alerted"):
+            state["win_rate_high_alerted"] = False
+            changed = True
 
     if changed:
         save_alerts_state(state)
@@ -1473,7 +1591,7 @@ def cmd_estado():
 
     send_telegram(
         f"📊 <b>Bot {BOT_VERSION} | {modo}</b>\n\n"
-        f"💰 Bankroll: <b>${BANKROLL:.2f}</b> | Edge mín: {MIN_EDGE}%\n"
+        f"💰 Bankroll: <b>${BANKROLL:.2f}</b> | Edge mín: {MIN_EDGE}% (exact: {MIN_EDGE_EXACT}%)\n"
         f"🔧 SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n\n"
         f"⏱ Estado: {running}\n"
         f"📅 Último: {last_str}\n"
@@ -2183,7 +2301,7 @@ def cmd_info():
     text = (
         f"<b>BOT POLYMARKET {BOT_VERSION}</b>\n"
         f"Modo: {modo} | Bankroll: ${BANKROLL:.2f}\n"
-        f"Edge mín: {MIN_EDGE}% | SL: {STOP_LOSS_PCT}% | TP: +{TAKE_PROFIT_PCT}%\n"
+        f"Edge mín: {MIN_EDGE}% (exact: {MIN_EDGE_EXACT}%) | SL: {STOP_LOSS_PCT}% | TP: +{TAKE_PROFIT_PCT}%\n"
         f"Exp máx: {int(MAX_EXPOSURE_PCT*100)}% | Min bet: ${MIN_BET:.2f}\n"
         f"Schedule: {schedule} UTC\n"
         f"Ciclos completados: {bot_state['cycle_count']}\n"
@@ -3305,10 +3423,10 @@ def normal_cdf(x, mu, sigma):
 
 
 def get_uncertainty(days_ahead):
-    # v10: sigma más alta = modelo más humilde
-    # v9 (0.8/1.0/1.4/1.8) sobreconfiaba: 0/5 en mercados resueltos
-    # Ahora: reconocemos que Open-Meteo tiene error típico de 1-2°C
-    return {0: 1.2, 1: 1.5, 2: 2.0, 3: 2.5}.get(days_ahead, 3.0 if days_ahead <= 5 else 3.5)
+    # v10.5: sigma ampliada — v10.4 sobreconfiaba (win rate 29%, PnL -$8.57)
+    # Evidencia: exact bets 20% win rate, modelo asignaba 70-85% a outcomes que perdían
+    # Sigma más alta → probabilidades más moderadas → menos trades pero con edge real
+    return {0: 2.0, 1: 2.5, 2: 3.0, 3: 3.5}.get(days_ahead, 4.0 if days_ahead <= 5 else 4.5)
 
 
 def estimate_prob(forecast_max, threshold_c, condition, days_ahead, threshold_high_c=None):
@@ -3425,7 +3543,7 @@ def main(client):
     dl = []  # Lista de líneas para el log de decisiones
     dl.append(f"{'='*50}")
     dl.append(f"CICLO {bot_state['cycle_count']+1} | {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} | {mode_label}")
-    dl.append(f"BANKROLL: ${effective_bankroll:.2f} (tope ${BANKROLL:.2f}) | MIN_EDGE={MIN_EDGE}%")
+    dl.append(f"BANKROLL: ${effective_bankroll:.2f} (tope ${BANKROLL:.2f}) | MIN_EDGE={MIN_EDGE}% (exact: {MIN_EDGE_EXACT}%)")
     dl.append(f"{'='*50}")
 
     if client is None:
@@ -3687,8 +3805,10 @@ def main(client):
 
         edge_pct = edge * 100
 
-        if edge_pct < MIN_EDGE:
-            edge_analysis.append(f"  ✗ {city} {side} {temp_label} {c['date_iso']} | forecast={forecast_max:.1f}°C | nuestro={our_prob*100:.1f}% mercado={mkt_price*100:.1f}% | edge={edge_pct:.1f}% → BAJO (min {MIN_EDGE}%)")
+        # v10.5: exact bets requieren MIN_EDGE_EXACT (15%) por win rate histórico bajo
+        effective_min_edge = MIN_EDGE_EXACT if c["condition"] == "exact" else MIN_EDGE
+        if edge_pct < effective_min_edge:
+            edge_analysis.append(f"  ✗ {city} {side} {temp_label} {c['date_iso']} | forecast={forecast_max:.1f}°C | nuestro={our_prob*100:.1f}% mercado={mkt_price*100:.1f}% | edge={edge_pct:.1f}% → BAJO (min {effective_min_edge}%)")
             continue
 
         if token_id in open_token_ids:
@@ -4097,7 +4217,7 @@ if __name__ == "__main__":
     send_telegram(
         f"🤖 <b>Bot {BOT_VERSION} arrancado</b>\n"
         f"Modo: {modo} | ${BANKROLL:.2f}\n"
-        f"Min edge: {MIN_EDGE}% | Schedule: {schedule} UTC\n"
+        f"Min edge: {MIN_EDGE}% (exact: {MIN_EDGE_EXACT}%) | Schedule: {schedule} UTC\n"
         f"🔧 Gestión activa: SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n"
         f"🌏 Zona horaria per-city activa\n"
         f"🔍 Traders: auto-análisis diario, descubrimiento lunes",
