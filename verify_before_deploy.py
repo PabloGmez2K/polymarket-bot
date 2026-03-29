@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-verify_before_deploy.py v10 — Tests de comportamiento para bot.py v10.6.0
+verify_before_deploy.py v10 — Tests de comportamiento para bot.py v10.6.1
 
 Ejecutar ANTES de cada deploy:
   python verify_before_deploy.py
@@ -327,7 +327,7 @@ def run_tests():
     test("CYCLES_HISTORY_FILE definido", "CYCLES_HISTORY_FILE" in code)
     test("cycles_history.jsonl append-only", "cycles_history.jsonl" in code)
     test("cycle_summary se guarda en main()", "cycle_data" in code and "CYCLE_SUMMARY_FILE" in code)
-    test("cycle_data incluye version v10.6.0", '"version"' in code and "v10.6.0" in code)
+    test("cycle_data incluye version v10.6.1", '"version"' in code and "v10.6.1" in code)
     test("cycle_data incluye logic_series", '"logic_series": LOGIC_SERIES' in code)
     test("cycle_data incluye logic_cycle_number", '"logic_cycle_number"' in code)
 
@@ -348,7 +348,7 @@ def run_tests():
     test("Bug #13: send_telegram_paged en cmd_log", "send_telegram_paged" in code and "cmd_log" in code)
     test("Bug #13: send_telegram_paged en cmd_cartera", "send_telegram_paged" in code)
     test("_parse_position_label usa centavos (¢)", "¢" in code)
-    test("cmd_estado versión correcta", "Bot v10.6.0" in code or "v10.6.0" in code)
+    test("cmd_estado versión correcta", "Bot v10.6.1" in code or "v10.6.1" in code)
 
     # ---- Test 14c: Zonas horarias reales v10.4.5 ----
     print("\n🔍 Zonas horarias reales")
@@ -468,8 +468,8 @@ def run_tests():
         with open(tmp_cycles, "w", encoding="utf-8") as f:
             f.write(json.dumps({"version": "v10.4.8", "cycle_number": 1}, ensure_ascii=False) + "\n")
             f.write(json.dumps({"version": "v10.5.1", "cycle_number": 2}, ensure_ascii=False) + "\n")
-            f.write(json.dumps({"logic_series": "10.6", "version": "v10.6.0", "cycle_number": 3}, ensure_ascii=False) + "\n")
-            f.write(json.dumps({"logic_series": "10.6", "version": "v10.6.0", "cycle_number": 4}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"logic_series": "10.6", "version": "v10.6.1", "cycle_number": 3}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"logic_series": "10.6", "version": "v10.6.1", "cycle_number": 4}, ensure_ascii=False) + "\n")
         cycle_ns = {
             "os": os,
             "json": json,
@@ -536,7 +536,7 @@ def run_tests():
             "get_clean_closed_trade_stats": lambda: {"count": 32, "sell": 20, "loss_total": 8, "resolved_win": 4},
             "get_logic_series_clean_closed_trade_stats": lambda: {"count": 30, "sell": 18, "loss_total": 8, "resolved_win": 4},
             "get_logic_series_stats": lambda: {"pnl": 1.5, "win_rate": 50.0, "closed_count": 12, "recent_window_size": 5, "recent_drawdown": -1.2},
-            "get_dashboard_alert_summary": lambda: {"signals": {"status": "ok"}, "pending_stuck": [], "flagged_cities": []},
+            "get_dashboard_alert_summary": lambda: {"signals": {"status": "ok"}, "pending_stuck": [], "flagged_cities": [], "active_items": [], "low_bankroll": False, "portfolio_total": 14.75},
             "_load_cycle_counts": lambda: (18, 12),
         }
         exec(get_function_source(module_ast, code_lines, "build_promotion_checklist"), checklist_ns)
@@ -560,7 +560,7 @@ def run_tests():
             "get_clean_closed_trade_stats": lambda: {"count": 18, "sell": 12, "loss_total": 6, "resolved_win": 0},
             "get_logic_series_clean_closed_trade_stats": lambda: {"count": 0, "sell": 0, "loss_total": 0, "resolved_win": 0},
             "get_logic_series_stats": lambda: {"pnl": 0.0, "win_rate": 0.0, "closed_count": 0, "recent_window_size": 0, "recent_drawdown": 0.0},
-            "get_dashboard_alert_summary": lambda: {"signals": {"status": "ok"}, "pending_stuck": [], "flagged_cities": []},
+            "get_dashboard_alert_summary": lambda: {"signals": {"status": "ok"}, "pending_stuck": [], "flagged_cities": [], "active_items": [], "low_bankroll": False, "portfolio_total": 14.75},
             "_load_cycle_counts": lambda: (5, 1),
         }
         exec(get_function_source(module_ast, code_lines, "build_promotion_checklist"), checklist_empty_ns)
@@ -652,11 +652,9 @@ def run_tests():
         activate_item = next(item for item in unlock_items if item["label"] == "Activar win rate y drawdown de serie")
         alerts_item = next(item for item in unlock_items if item["label"] == "Sin alertas críticas operativas")
         accuracy_item = next(item for item in unlock_items if item["label"] == "Accuracy con muestra suficiente por ciudad")
-        trust_item = next(item for item in unlock_items if item["label"] == "Confiar en métricas de serie")
         test("unlocks: sin cierres usa Esperando muestra", activate_item["status"] == "waiting" and activate_item["tag"] == "Esperando muestra", activate_item)
         test("unlocks: alertas críticas bloquean subida", alerts_item["status"] == "blocked" and alerts_item["tag"] == "Bloqueado", alerts_item)
         test("unlocks: accuracy explica cuánto falta por ciudad", "faltan 1 cierres en Miami" in accuracy_item["value"], accuracy_item)
-        test("unlocks: métricas serie no son confiables sin cierres", trust_item["status"] == "waiting" and "todavía no hay cierres validados" in trust_item["value"], trust_item)
 
         trophies_ns = {
             "datetime": datetime,
@@ -811,20 +809,20 @@ def run_tests():
             "datetime": datetime,
             "timezone": timezone,
             "_load_cycle_counts": lambda: (5, 1),
-            "load_cycle_summary_data": lambda: {"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.6.0"},
-            "load_cycle_history": lambda limit=None: [{"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.6.0", "timestamp_utc": "2026-03-29T11:08:00+00:00", "buys": [], "management": {"n_sold": 1}, "exposure_after": 2.94}],
+            "load_cycle_summary_data": lambda: {"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.6.1"},
+            "load_cycle_history": lambda limit=None: [{"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.6.1", "timestamp_utc": "2026-03-29T11:08:00+00:00", "buys": [], "management": {"n_sold": 1}, "exposure_after": 2.94}],
             "get_clean_closed_trade_stats": lambda: {"count": 18, "sell": 12, "loss_total": 6, "resolved_win": 0},
             "get_logic_series_clean_closed_trade_stats": lambda: {"count": 0, "sell": 0, "loss_total": 0, "resolved_win": 0},
             "get_validated_closed_postmortems": lambda: [],
             "get_performance_summary": lambda: {},
             "get_logic_series_stats": lambda: {"pnl": 0.0, "win_rate": 0.0, "closed_count": 0, "recent_window_size": 0, "recent_drawdown": 0.0},
-            "get_dashboard_alert_summary": lambda: {"signals": {"status": "ok"}, "pending_stuck": [], "flagged_cities": [], "active_items": []},
+            "get_dashboard_alert_summary": lambda: {"signals": {"status": "ok"}, "pending_stuck": [], "flagged_cities": [], "active_items": [], "low_bankroll": False, "portfolio_total": 14.75},
             "build_promotion_checklist": lambda: {"levels": {"next_target": 35.0, "is_max_level": False}, "passed": 3, "total": 9, "blocking_failed": 3, "decision": "HOLD", "decision_label": "Aún no listo", "trade_target": 30, "checks": []},
             "get_city_accuracy": lambda: {},
             "build_dashboard_progress": lambda **kwargs: [{"label": "Muestra", "status": "bad"}],
             "build_dashboard_exit_breakdown": lambda **kwargs: {"validated_rows": [{"label": "Take-profit", "balance_display": "$+1.00"}], "series_rows": [{"label": "Pending exit serie v10.6", "balance_display": "$-0.50"}]},
             "build_dashboard_trophies": lambda **kwargs: [{"label": "Mejor operación", "value": "n/d"}],
-            "build_dashboard_unlocks": lambda **kwargs: [{"label": "Confiar en métricas", "status": "waiting"}],
+            "build_dashboard_unlocks": lambda **kwargs: [{"label": "Activar win rate", "status": "waiting"}],
             "_get_portfolio_and_positions": lambda: None,
             "_parse_position_label": lambda title, outcome: "Mock",
             "load_agent_events": lambda limit=None: [],
@@ -832,7 +830,7 @@ def run_tests():
             "compute_agent_scorecard": lambda events: [],
             "build_agent_rivalry": lambda events: [],
             "_extract_logic_series": lambda value: "10.5" if "10.5" in str(value) else "10.4" if "10.4" in str(value) else None,
-            "BOT_VERSION": "v10.6.0",
+            "BOT_VERSION": "v10.6.1",
             "LOGIC_SERIES": "10.6",
             "DRY_RUN": False,
             "DASHBOARD_USER": "pablo",
@@ -847,7 +845,7 @@ def run_tests():
         test("snapshot: incluye progress", "progress" in snapshot and snapshot["progress"][0]["label"] == "Muestra", snapshot)
         test("snapshot: incluye exit_breakdown", "exit_breakdown" in snapshot and snapshot["exit_breakdown"]["validated_rows"][0]["label"] == "Take-profit", snapshot)
         test("snapshot: incluye trophies", "trophies" in snapshot and snapshot["trophies"][0]["label"] == "Mejor operación", snapshot)
-        test("snapshot: incluye unlocks", "unlocks" in snapshot and snapshot["unlocks"][0]["label"] == "Confiar en métricas", snapshot)
+        test("snapshot: incluye unlocks", "unlocks" in snapshot and snapshot["unlocks"][0]["label"] == "Activar win rate", snapshot)
 
         fd, tmp_agent_events = tempfile.mkstemp(
             dir=tempfile.gettempdir(),
@@ -941,7 +939,7 @@ def run_tests():
         os.close(fd)
         with open(tmp_cycle_summary, "w", encoding="utf-8") as f:
             json.dump({
-                "version": "v10.6.0",
+                "version": "v10.6.1",
                 "cycle_number": 12,
                 "timestamp_utc": "2026-03-28T16:00:33.073674+00:00",
                 "management": {"n_kept": 0, "n_sold": 1, "n_resolved": 0},
@@ -953,7 +951,7 @@ def run_tests():
             "json": __import__("json"),
             "datetime": datetime,
             "send_telegram_paged": lambda text, with_menu=False, page_size=3800: info_messages.append(text),
-            "BOT_VERSION": "v10.6.0",
+            "BOT_VERSION": "v10.6.1",
             "LOGIC_SERIES": "10.6",
             "_extract_logic_series": cycle_ns["_extract_logic_series"],
             "DRY_RUN": False,
@@ -972,7 +970,7 @@ def run_tests():
         exec(get_function_source(module_ast, code_lines, "cmd_info"), info_ns)
         info_ns["cmd_info"]()
         info_msg = info_messages[-1] if info_messages else ""
-        test("info: versión visible correcta", "BOT POLYMARKET v10.6.0" in info_msg, info_msg[:120])
+        test("info: versión visible correcta", "BOT POLYMARKET v10.6.1" in info_msg, info_msg[:120])
         test("info: usa cycle_summary como fallback de último", "Último: 2026-03-28 16:00 UTC" in info_msg, info_msg[:220])
         test("info: muestra doble contador", "Ciclos completados: 12 total | 3 serie v10.6" in info_msg, info_msg[:240])
         test("info: muestra ciclo total y de serie", "Ciclo total #12 | serie v10.6 #3" in info_msg, info_msg[:260])
@@ -1354,10 +1352,12 @@ def run_tests():
             "is_city_blocked": lambda city: False,
             "CITY_MIN_TRADES_FOR_BLOCK": 3,
             "CITY_BLOCK_WIN_RATE": 25.0,
+            "LOW_BANKROLL_THRESHOLD": 5.0,
             "get_clean_closed_trade_stats": lambda: {"count": 30, "sell": 20, "loss_total": 6, "resolved_win": 4},
             "inspect_signals_file_health": lambda: {"status": "ok", "age_hours": 1.0, "actionable": 12},
             "load_audit_data": lambda: {"pending_sells": []},
             "_get_recent_closed_trades": lambda n=None: [],
+            "_get_portfolio_and_positions": lambda: {"cash": 13.0, "portfolio_total": 14.75},
             "send_telegram": lambda text, with_menu=False, custom_keyboard=None: review_messages.append(text),
         }
         exec(get_function_source(module_ast, code_lines, "run_observability_alerts"), review_ns)
@@ -1396,6 +1396,8 @@ def run_tests():
             "inspect_signals_file_health": lambda: {"status": "stale", "age_hours": 30.5, "actionable": 3},
             "load_audit_data": lambda: {"pending_sells": []},
             "_get_recent_closed_trades": lambda n=None: [],
+            "_get_portfolio_and_positions": lambda: {"cash": 13.0, "portfolio_total": 14.75},
+            "LOW_BANKROLL_THRESHOLD": 5.0,
             "send_telegram": lambda text, with_menu=False, custom_keyboard=None: signal_messages.append(text),
         }
         exec(get_function_source(module_ast, code_lines, "run_observability_alerts"), signal_ns)
@@ -1433,6 +1435,8 @@ def run_tests():
             "get_clean_closed_trade_stats": lambda: {"count": 2, "sell": 2, "loss_total": 0, "resolved_win": 0},
             "inspect_signals_file_health": lambda: {"status": "ok", "age_hours": 1.0, "actionable": 10},
             "_get_recent_closed_trades": lambda n=None: [],
+            "_get_portfolio_and_positions": lambda: {"cash": 13.0, "portfolio_total": 14.75},
+            "LOW_BANKROLL_THRESHOLD": 5.0,
             "load_audit_data": lambda: {
                 "pending_sells": [{
                     "order_id": "oid-stuck",
@@ -1470,11 +1474,15 @@ def run_tests():
     except Exception as e:
         test("sigma funcional ejecuta sin excepción", False, str(e))
 
-    # ---- Test v10.6.0: Revert trading logic ----
-    print("\n🔍 v10.6.0: Revert trading logic")
+    # ---- Test v10.6: Revert trading logic + fixes ----
+    print("\n🔍 v10.6: Revert trading logic + fixes")
     test("MIN_EDGE_EXACT eliminado", "MIN_EDGE_EXACT" not in code or "sin MIN_EDGE_EXACT" in code)
     test("Edge check usa MIN_EDGE directo", "edge_pct < MIN_EDGE" in code)
     test("LOGIC_SERIES es 10.6", 'LOGIC_SERIES = "10.6"' in code)
+    test("LOW_BANKROLL_THRESHOLD definido", "LOW_BANKROLL_THRESHOLD" in code)
+    test("low_bankroll_alerted en alerts state", "low_bankroll_alerted" in code)
+    test("Alerta bankroll bajo en Telegram", "Bankroll bajo" in code and "recargar" in code)
+    test("Drawdown ordena por fecha", "closed_sorted" in code and "closed_at" in code)
 
     # ---- Test v10.5.0: Smart alerts ----
     print("\n🔍 v10.5.0: Smart alerts")
@@ -1555,7 +1563,7 @@ def run_tests():
     test("/accuracy en MENU_KEYBOARD", '"callback_data": "accuracy"' in code)
     test("cmd_accuracy vuelve con menú", 'send_telegram("Sin datos de accuracy todavía.", with_menu=True)' in code and 'send_telegram_paged("\\n".join(lines), with_menu=True)' in code)
     test("Win rate en rendimiento", "WR:" in code)
-    test("Version v10.6.0", "v10.6.0" in code)
+    test("Version v10.6.1", "v10.6.1" in code)
 
     # ---- Resultado ----
     print(f"\n{'='*50}")

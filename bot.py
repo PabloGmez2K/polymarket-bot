@@ -100,7 +100,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.0"
+BOT_VERSION = "v10.6.1"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -113,6 +113,7 @@ SCALING_WINDOW = int(os.getenv("SCALING_WINDOW", "20"))
 WIN_RATE_WINDOW = int(os.getenv("WIN_RATE_WINDOW", "15"))
 WIN_RATE_LOW = float(os.getenv("WIN_RATE_LOW", "30.0"))
 WIN_RATE_HIGH = float(os.getenv("WIN_RATE_HIGH", "50.0"))
+LOW_BANKROLL_THRESHOLD = float(os.getenv("LOW_BANKROLL_THRESHOLD", "5.0"))  # v10.6: alerta para recargar
 # v10.5.2: City accuracy tracker
 CITY_MIN_TRADES_FOR_BLOCK = int(os.getenv("CITY_MIN_TRADES_FOR_BLOCK", "3"))
 CITY_BLOCK_WIN_RATE = float(os.getenv("CITY_BLOCK_WIN_RATE", "25.0"))
@@ -416,6 +417,8 @@ def load_alerts_state():
         "win_rate_high_alerted": False,
         # v10.5.2: city accuracy tracker
         "city_accuracy_flagged": {},
+        # v10.6: alerta de bankroll bajo
+        "low_bankroll_alerted": False,
     }
     if not os.path.exists(ALERTS_FILE):
         return default
@@ -438,6 +441,7 @@ def load_alerts_state():
         state.setdefault("win_rate_low_alerted", False)
         state.setdefault("win_rate_high_alerted", False)
         state.setdefault("city_accuracy_flagged", {})
+        state.setdefault("low_bankroll_alerted", False)
         return state
     except Exception:
         return default
@@ -1368,6 +1372,24 @@ def run_observability_alerts():
                 state[flagged_key][city] = {"sent_at": now_iso, **data}
                 changed = True
 
+    # ---- v10.6: Low bankroll alert ----
+    portfolio = _get_portfolio_and_positions()
+    if portfolio and portfolio.get("cash") is not None:
+        total = portfolio.get("portfolio_total", portfolio["cash"])
+        if total <= LOW_BANKROLL_THRESHOLD and not state.get("low_bankroll_alerted"):
+            send_telegram(
+                f"🚨 <b>Bankroll bajo — recargar</b>\n"
+                f"Cash: ${portfolio['cash']:.2f} | Total cartera: ${total:.2f}\n"
+                f"Umbral: ${LOW_BANKROLL_THRESHOLD:.2f}\n\n"
+                f"El bot necesita fondos para seguir operando y generando datos.\n"
+                f"Considerar depositar $25 USDC."
+            )
+            state["low_bankroll_alerted"] = True
+            changed = True
+        elif total > LOW_BANKROLL_THRESHOLD * 2 and state.get("low_bankroll_alerted"):
+            state["low_bankroll_alerted"] = False
+            changed = True
+
     if changed:
         save_alerts_state(state)
 
@@ -1490,7 +1512,9 @@ def get_logic_series_stats(logic_series=None):
     wins = sum(1 for r in closed if float(r.get("pnl_cash", 0) or 0) > 0)
     count = len(closed)
     win_rate = round((wins / count) * 100, 1) if count else 0.0
-    last_window = closed[-DRAWDOWN_WINDOW:] if count else []
+    # v10.6: ordenar por fecha antes de tomar ventana de drawdown
+    closed_sorted = sorted(closed, key=lambda r: r.get("closed_at", ""), reverse=False)
+    last_window = closed_sorted[-DRAWDOWN_WINDOW:] if count else []
     recent_drawdown = round(sum(float(r.get("pnl_cash", 0) or 0) for r in last_window), 2) if last_window else 0.0
 
     return {
@@ -1920,16 +1944,6 @@ def build_dashboard_unlocks(
             "las alertas de observabilidad bloquean decisiones de subida si siguen activas",
             "good" if not critical_operational else "blocked",
         ),
-        _dashboard_status_item(
-            "Confiar en métricas de serie",
-            (
-                f"{series_closed_count} cierres validados disponibles"
-                if series_closed_count > 0
-                else "todavía no hay cierres validados en la serie"
-            ),
-            "sin cierres validados, PnL/WR/drawdown de la serie son solo placeholders",
-            "good" if series_closed_count > 0 else "waiting",
-        ),
     ]
 
 
@@ -2295,11 +2309,27 @@ def get_dashboard_alert_summary():
             "detail": ", ".join(f"{item['city']} ({item['win_rate']}%)" for item in flagged_cities[:4]),
         })
 
+    # v10.6: alerta de bankroll bajo en dashboard
+    portfolio = _get_portfolio_and_positions()
+    low_bankroll = False
+    portfolio_total = None
+    if portfolio and portfolio.get("cash") is not None:
+        portfolio_total = portfolio.get("portfolio_total", portfolio["cash"])
+        if portfolio_total <= LOW_BANKROLL_THRESHOLD:
+            low_bankroll = True
+            active_items.insert(0, {
+                "level": "critical",
+                "title": "Bankroll bajo — recargar $25 USDC",
+                "detail": f"Total cartera: ${portfolio_total:.2f} (umbral: ${LOW_BANKROLL_THRESHOLD:.2f})",
+            })
+
     return {
         "signals": signals,
         "pending_stuck": pending_stuck,
         "flagged_cities": flagged_cities,
         "active_items": active_items,
+        "low_bankroll": low_bankroll,
+        "portfolio_total": portfolio_total,
     }
 
 
