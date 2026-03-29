@@ -21,8 +21,8 @@ from py_clob_client.order_builder.constants import BUY, SELL
 load_dotenv()
 
 # =============================================================
-# bot.py v10.5.0 — sigma widening + exact edge filter + smart alerts
-# Sesión 20: recalibración tras -$8.57 en 17 trades cerrados
+# bot.py v10.5.1 — intra-cycle SL monitor
+# Sesión 20: recalibración + protección entre ciclos
 # =============================================================
 #
 # Nuevo en v10.4.3:
@@ -90,7 +90,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.5.0"
+BOT_VERSION = "v10.5.1"
 LOGIC_SERIES = "10.5"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -181,6 +181,7 @@ def get_min_days_for_city(city):
 STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", "-25.0"))     # vender si PnL% < -25%
 TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", "40.0"))  # vender si PnL% > +40%
 SELL_AGGRESSION = 0.02  # cuánto bajar el precio para asegurar venta rápida
+INTRA_SL_INTERVAL = int(os.getenv("INTRA_SL_INTERVAL", "90"))  # minutos entre checks, 0=desactivar
 
 MIN_PRICE = 0.08
 MAX_PRICE = 0.92
@@ -270,6 +271,7 @@ bot_state = {
 }
 
 force_event = threading.Event()
+sell_lock = threading.Lock()  # v10.5.1: protege ventas concurrentes (ciclo principal vs intra-SL)
 clob_client = None
 
 # Cache de token_id → info del mercado.
@@ -2298,11 +2300,13 @@ def cmd_info():
             f"TP: {stats['take_profits']} | SL: {stats['stop_losses']} | Reeval: {stats['reevals']}\n"
         )
 
+    intra_info = f"Intra-SL: cada {INTRA_SL_INTERVAL}min\n" if INTRA_SL_INTERVAL > 0 else ""
     text = (
         f"<b>BOT POLYMARKET {BOT_VERSION}</b>\n"
         f"Modo: {modo} | Bankroll: ${BANKROLL:.2f}\n"
         f"Edge mín: {MIN_EDGE}% (exact: {MIN_EDGE_EXACT}%) | SL: {STOP_LOSS_PCT}% | TP: +{TAKE_PROFIT_PCT}%\n"
         f"Exp máx: {int(MAX_EXPOSURE_PCT*100)}% | Min bet: ${MIN_BET:.2f}\n"
+        f"{intra_info}"
         f"Schedule: {schedule} UTC\n"
         f"Ciclos completados: {bot_state['cycle_count']}\n"
         f"Último: {last_str}\n"
@@ -3057,6 +3061,152 @@ def manage_positions(client, dl):
     }
 
 
+# ---- v10.5.1: INTRA-CYCLE SL/TP MONITOR ----
+
+def intra_cycle_sl_check(client):
+    """Check SL/TP entre ciclos — solo protección, no compras ni re-evaluación."""
+    if not sell_lock.acquire(timeout=5):
+        log.info("[INTRA-SL] Ciclo principal activo, saltando")
+        return
+
+    try:
+        funder = os.getenv("FUNDER", "")
+        if not funder:
+            return
+
+        # Fetch posiciones (mismo endpoint que manage_positions)
+        params = urllib.parse.urlencode({
+            "user": funder.lower(),
+            "sizeThreshold": "0",
+            "limit": "50",
+            "sortBy": "CURRENT",
+            "sortDirection": "DESC",
+        })
+        url = f"{DATA_API_URL}/positions?{params}"
+        req = urllib.request.Request(url)
+        req.add_header("User-Agent", "polymarket-bot/0.10")
+        resp = urllib.request.urlopen(req, timeout=15)
+        positions = json.loads(resp.read())
+
+        n_checked = 0
+        n_sold = 0
+
+        for p in positions:
+            title_full = p.get("title", "")
+            if not re.search(r"temperature", title_full, re.IGNORECASE):
+                continue
+            current_value = float(p.get("currentValue", 0))
+            cur_price = float(p.get("curPrice", 0))
+            if current_value < 0.10 or cur_price >= 0.98:
+                continue
+
+            asset_id = p.get("asset", "")
+            if not asset_id:
+                continue
+
+            pct_pnl = float(p.get("percentPnl", 0))
+            n_checked += 1
+
+            # Determinar si hay que vender
+            sell_type = None
+            if pct_pnl <= STOP_LOSS_PCT:
+                sell_type = "stop_loss_intra"
+                icon, type_label = "🔻", "Stop-loss"
+            elif pct_pnl >= TAKE_PROFIT_PCT:
+                sell_type = "take_profit_intra"
+                icon, type_label = "💰", "Take-profit"
+
+            if not sell_type:
+                continue
+
+            outcome = p.get("outcome", "?")
+            size = float(p.get("size", 0))
+            title = title_full[:50]
+            city = parse_city_from_title(title)
+            parsed = parse_temperature_question(title_full)
+            market_date = date_text_to_iso(parsed["date_str"]) if parsed and parsed.get("date_str") else ""
+
+            sell_price = round(max(0.01, cur_price - SELL_AGGRESSION), 2)
+            shares_to_sell = round(size, 2)
+            if shares_to_sell < 0.1:
+                continue
+            estimated_return = round(shares_to_sell * sell_price, 2)
+            if estimated_return < 0.10:
+                continue
+
+            log.info(f"[INTRA-SL] {sell_type}: {outcome} {city} {pct_pnl:+.1f}%")
+
+            if DRY_RUN:
+                log.info(f"[INTRA-SL] [DRY] SELL {outcome} {shares_to_sell}sh × ${sell_price:.2f}")
+                n_sold += 1
+                continue
+
+            try:
+                order_args = OrderArgs(
+                    token_id=asset_id,
+                    price=sell_price,
+                    size=shares_to_sell,
+                    side=SELL,
+                )
+                signed = client.create_order(order_args)
+                resp_order = client.post_order(signed, OrderType.GTC)
+                oid = resp_order.get("orderID", resp_order.get("id", "?"))
+                n_sold += 1
+
+                send_telegram(
+                    f"{icon} <b>[INTRA-SL] {type_label}</b>\n"
+                    f"{outcome} {city}\n"
+                    f"Venta: {shares_to_sell}sh × ${sell_price:.2f}\n"
+                    f"PnL: {pct_pnl:+.1f}% (${float(p.get('cashPnl', 0)):+.2f})\n"
+                    f"<i>Entre ciclos — próximo ciclo confirmará fill</i>"
+                )
+
+                pct = float(p.get("percentPnl", 0))
+                track_trade("SELL_PENDING",
+                    reason=sell_type,
+                    city=city,
+                    side=outcome,
+                    date=market_date,
+                    question=title_full,
+                    token_id=asset_id,
+                    condition=parsed.get("condition", "") if parsed else "",
+                    price=sell_price,
+                    shares=shares_to_sell,
+                    return_est=estimated_return,
+                    avg_buy_price=float(p.get("avgPrice", 0)),
+                    pnl_pct=pct,
+                    pnl_cash=float(p.get("cashPnl", 0)),
+                    order_id=oid,
+                )
+
+                audit_register_pending_sell(
+                    order_id=oid, city=city,
+                    side=outcome, price=sell_price, shares=shares_to_sell,
+                    return_est=estimated_return, reason=sell_type,
+                )
+
+            except Exception as e:
+                log.error(f"[INTRA-SL] Error vendiendo {outcome} {city}: {e}")
+
+        log.info(f"[INTRA-SL] Check: {n_checked} posiciones, {n_sold} vendidas")
+
+    except Exception as e:
+        log.warning(f"[INTRA-SL] Error: {e}")
+    finally:
+        sell_lock.release()
+
+
+def intra_sl_loop(client):
+    """Thread daemon: revisa SL/TP cada INTRA_SL_INTERVAL minutos."""
+    log.info(f"[INTRA-SL] Monitor iniciado (cada {INTRA_SL_INTERVAL}min)")
+    while True:
+        time.sleep(INTRA_SL_INTERVAL * 60)
+        try:
+            intra_cycle_sl_check(client)
+        except Exception as e:
+            log.warning(f"[INTRA-SL] Error en loop: {e}")
+
+
 AUDIT_FILE = _data_path("audit.json")
 
 def load_audit_data():
@@ -3608,7 +3758,8 @@ def main(client):
     # Esto libera capital y corta pérdidas (como hacen Entire-Hood y Thrifty)
     mgmt = {"n_sold": 0, "capital_freed": 0, "kept": 0, "resolved": 0, "sells": [], "sold_token_ids": set()}
     try:
-        mgmt = manage_positions(client, dl)
+        with sell_lock:  # v10.5.1: evitar conflicto con intra-SL thread
+            mgmt = manage_positions(client, dl)
         bot_state["last_sells_placed"] = mgmt["n_sold"]  # v10.4: para /estado
         if mgmt["n_sold"] > 0:
             dl.append(f"GESTIÓN: {mgmt['n_sold']} posiciones cerradas, ~${mgmt['capital_freed']:.2f} liberados")
@@ -4212,13 +4363,20 @@ if __name__ == "__main__":
         threading.Thread(target=telegram_polling_loop, daemon=True, name="TelegramPoller").start()
         log.info("Telegram polling: OK")
 
+    # v10.5.1: Intra-cycle SL monitor
+    if INTRA_SL_INTERVAL > 0 and clob_client is not None:
+        threading.Thread(target=intra_sl_loop, args=(clob_client,), daemon=True, name="IntraSL").start()
+        log.info(f"[INTRA-SL] Monitor cada {INTRA_SL_INTERVAL}min: OK")
+
     modo = "DRY RUN" if DRY_RUN else "REAL"
     schedule = ", ".join(f"{h:02d}:00" for h in sorted(SCHEDULE_HOURS_UTC))
+    intra_label = f"cada {INTRA_SL_INTERVAL}min" if INTRA_SL_INTERVAL > 0 else "desactivado"
     send_telegram(
         f"🤖 <b>Bot {BOT_VERSION} arrancado</b>\n"
         f"Modo: {modo} | ${BANKROLL:.2f}\n"
         f"Min edge: {MIN_EDGE}% (exact: {MIN_EDGE_EXACT}%) | Schedule: {schedule} UTC\n"
         f"🔧 Gestión activa: SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n"
+        f"⏱ Intra-SL: {intra_label}\n"
         f"🌏 Zona horaria per-city activa\n"
         f"🔍 Traders: auto-análisis diario, descubrimiento lunes",
         with_menu=True,

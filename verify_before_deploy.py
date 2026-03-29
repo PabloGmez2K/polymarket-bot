@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-verify_before_deploy.py v8 — Tests de comportamiento para bot.py v10.5.0
+verify_before_deploy.py v9 — Tests de comportamiento para bot.py v10.5.1
 
 Ejecutar ANTES de cada deploy:
   python verify_before_deploy.py
@@ -253,7 +253,7 @@ def run_tests():
     test("CYCLES_HISTORY_FILE definido", "CYCLES_HISTORY_FILE" in code)
     test("cycles_history.jsonl append-only", "cycles_history.jsonl" in code)
     test("cycle_summary se guarda en main()", "cycle_data" in code and "CYCLE_SUMMARY_FILE" in code)
-    test("cycle_data incluye version v10.5.0", '"version"' in code and "v10.5.0" in code)
+    test("cycle_data incluye version v10.5.1", '"version"' in code and "v10.5.1" in code)
 
     # ---- Test 14: Rediseño Telegram v10.4.2 ----
     print("\n🔍 Rediseño Telegram v10.4.2")
@@ -269,7 +269,7 @@ def run_tests():
     test("Bug #13: send_telegram_paged en cmd_log", "send_telegram_paged" in code and "cmd_log" in code)
     test("Bug #13: send_telegram_paged en cmd_cartera", "send_telegram_paged" in code)
     test("_parse_position_label usa centavos (¢)", "¢" in code)
-    test("cmd_estado versión correcta", "Bot v10.5.0" in code or "v10.5.0" in code)
+    test("cmd_estado versión correcta", "Bot v10.5.1" in code or "v10.5.1" in code)
 
     # ---- Test 14c: Zonas horarias reales v10.4.5 ----
     print("\n🔍 Zonas horarias reales")
@@ -451,7 +451,7 @@ def run_tests():
             "json": __import__("json"),
             "datetime": datetime,
             "send_telegram_paged": lambda text, with_menu=False, page_size=3800: info_messages.append(text),
-            "BOT_VERSION": "v10.5.0",
+            "BOT_VERSION": "v10.5.1",
             "DRY_RUN": False,
             "BANKROLL": 25.0,
             "MIN_EDGE": 7.0,
@@ -460,6 +460,7 @@ def run_tests():
             "TAKE_PROFIT_PCT": 40.0,
             "MAX_EXPOSURE_PCT": 0.40,
             "MIN_BET": 1.0,
+            "INTRA_SL_INTERVAL": 90,
             "SCHEDULE_HOURS_UTC": [8, 16, 23],
             "bot_state": {"cycle_count": 12, "last_run": None},
             "CYCLE_SUMMARY_FILE": tmp_cycle_summary,
@@ -468,7 +469,7 @@ def run_tests():
         exec(get_function_source(module_ast, code_lines, "cmd_info"), info_ns)
         info_ns["cmd_info"]()
         info_msg = info_messages[-1] if info_messages else ""
-        test("info: versión visible correcta", "BOT POLYMARKET v10.5.0" in info_msg, info_msg[:120])
+        test("info: versión visible correcta", "BOT POLYMARKET v10.5.1" in info_msg, info_msg[:120])
         test("info: usa cycle_summary como fallback de último", "Último: 2026-03-28 16:00 UTC" in info_msg, info_msg[:220])
 
         pm_messages = []
@@ -644,7 +645,7 @@ def run_tests():
 
         buy_entry = {
             "timestamp": "2026-03-28T08:00:00+00:00",
-            "bot_version": "v10.5.0",
+            "bot_version": "v10.5.1",
             "city": "Dallas",
             "side": "YES",
             "date": "2026-03-28",
@@ -668,7 +669,7 @@ def run_tests():
 
         sell_pending = {
             "timestamp": "2026-03-28T16:00:00+00:00",
-            "bot_version": "v10.5.0",
+            "bot_version": "v10.5.1",
             "city": "Dallas",
             "side": "Yes",
             "date": "2026-03-28",
@@ -1008,6 +1009,19 @@ def run_tests():
         os.remove(mock_pm_file)
     except Exception as e:
         test("_get_recent_closed_trades funcional ejecuta", False, str(e))
+
+    # ---- Test v10.5.1: Intra-cycle SL monitor ----
+    print("\n🔍 v10.5.1: Intra-cycle SL monitor")
+    test("INTRA_SL_INTERVAL definido", "INTRA_SL_INTERVAL" in code)
+    test("INTRA_SL_INTERVAL default 90", '"INTRA_SL_INTERVAL", "90"' in code or "INTRA_SL_INTERVAL, 90" in code)
+    test("sell_lock definido", "sell_lock" in code and "threading.Lock()" in code)
+    test("intra_cycle_sl_check definida", "def intra_cycle_sl_check(" in code)
+    test("intra_sl_loop definida", "def intra_sl_loop(" in code)
+    test("reason stop_loss_intra", '"stop_loss_intra"' in code)
+    test("reason take_profit_intra", '"take_profit_intra"' in code)
+    test("sell_lock protege manage_positions", "with sell_lock:" in code)
+    test("startup incluye Intra-SL", "Intra-SL" in code)
+    test("IntraSL thread en __main__", 'name="IntraSL"' in code)
 
     # ---- Resultado ----
     print(f"\n{'='*50}")
