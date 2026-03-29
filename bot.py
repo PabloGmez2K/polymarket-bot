@@ -101,7 +101,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.5.10"
+BOT_VERSION = "v10.5.11"
 LOGIC_SERIES = "10.5"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -258,6 +258,67 @@ def _seed_data_file(filename):
             pass
     return target
 
+
+def _sync_agent_events_seed():
+    """
+    Combina agent_events.jsonl local (semilla del repo) con el del Volume (producción).
+    - Si el Volume aún no tiene el archivo, copia la semilla completa.
+    - Si ya existe, añade solo los eventos del repo local que no están en el Volume,
+      identificados por (timestamp, agent, title). Nunca borra eventos ya persistidos.
+    Necesario para que nuevas sesiones añadidas al repo aparezcan en el scoreboard
+    sin esperar a que se elimine el archivo del Volume manualmente.
+    """
+    target = _data_path("agent_events.jsonl")
+    source = "agent_events.jsonl"
+
+    if not os.path.exists(source):
+        return target
+
+    if DATA_DIR and not os.path.exists(target):
+        try:
+            shutil.copy2(source, target)
+        except Exception:
+            pass
+        return target
+
+    if not DATA_DIR:
+        return target
+
+    try:
+        def _load_jsonl_events(path):
+            events = []
+            with open(path, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line:
+                        try:
+                            events.append(json.loads(line))
+                        except Exception:
+                            pass
+            return events
+
+        target_events = _load_jsonl_events(target)
+        source_events = _load_jsonl_events(source)
+
+        existing_keys = {
+            (e.get("timestamp", ""), e.get("agent", ""), e.get("title", ""))
+            for e in target_events
+        }
+        new_events = [
+            e for e in source_events
+            if (e.get("timestamp", ""), e.get("agent", ""), e.get("title", ""))
+            not in existing_keys
+        ]
+
+        if new_events:
+            with open(target, "a", encoding="utf-8") as fh:
+                for e in new_events:
+                    fh.write(json.dumps(e, ensure_ascii=False) + "\n")
+    except Exception as exc:
+        pass  # No bloquear el arranque del bot por un fallo de sync del scoreboard
+
+    return target
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)-8s | %(message)s",
@@ -318,7 +379,7 @@ CYCLE_SUMMARY_FILE = _data_path("cycle_summary.json")
 CYCLES_HISTORY_FILE = _data_path("cycles_history.jsonl")
 POSTMORTEM_FILE = _data_path("postmortem.json")
 ALERTS_FILE = _data_path("alerts_state.json")
-AGENT_EVENTS_FILE = _seed_data_file("agent_events.jsonl")
+AGENT_EVENTS_FILE = _sync_agent_events_seed()
 SIGNALS_FILE = _seed_data_file("signals.json")
 TRADERS_DB_FILE = _seed_data_file("traders_db.json")
 
@@ -2269,6 +2330,7 @@ def build_promotion_checklist():
     _ = cycle_total
     has_series_closures = series_stats["closed_count"] > 0
     has_drawdown_window = series_stats["recent_window_size"] > 0
+    has_full_drawdown_window = series_stats["recent_window_size"] >= DRAWDOWN_WINDOW
 
     checks = [
         _check(
@@ -2316,16 +2378,15 @@ def build_promotion_checklist():
             f"Drawdown últimos {DRAWDOWN_WINDOW} cierres",
             (
                 f"${series_stats['recent_drawdown']:+.2f} / umbral ${DRAWDOWN_THRESHOLD:.2f}"
+                if has_full_drawdown_window
+                else f"{series_stats['recent_window_size']}/{DRAWDOWN_WINDOW} cierres"
                 if has_drawdown_window
                 else f"sin cierres / umbral ${DRAWDOWN_THRESHOLD:.2f}"
             ),
             f"Serie v{LOGIC_SERIES}",
-            has_drawdown_window and (
-                series_stats["recent_window_size"] < DRAWDOWN_WINDOW
-                or series_stats["recent_drawdown"] > DRAWDOWN_THRESHOLD
-            ),
+            has_full_drawdown_window and series_stats["recent_drawdown"] > DRAWDOWN_THRESHOLD,
             True,
-            waiting=not has_drawdown_window,
+            waiting=not has_full_drawdown_window,
         ),
         _check(
             "Signals operativas",

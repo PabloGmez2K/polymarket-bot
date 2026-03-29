@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-verify_before_deploy.py v9 — Tests de comportamiento para bot.py v10.5.10
+verify_before_deploy.py v10 — Tests de comportamiento para bot.py v10.5.11
 
 Ejecutar ANTES de cada deploy:
   python verify_before_deploy.py
@@ -278,7 +278,8 @@ def run_tests():
     test("DASHBOARD_ENABLED definido", "DASHBOARD_ENABLED" in code)
     test("DASHBOARD_PORT definido", "DASHBOARD_PORT" in code and 'os.getenv("PORT"' in code)
     test("BANKROLL_LEVELS definido", "BANKROLL_LEVELS" in code)
-    test("AGENT_EVENTS_FILE usa _seed_data_file", 'AGENT_EVENTS_FILE = _seed_data_file("agent_events.jsonl")' in code)
+    test("AGENT_EVENTS_FILE usa _sync_agent_events_seed", 'AGENT_EVENTS_FILE = _sync_agent_events_seed()' in code)
+    test("_sync_agent_events_seed definida", "def _sync_agent_events_seed(" in code)
     test("load_agent_events definida", "def load_agent_events(" in code)
     test("_normalize_agent_event_stage definida", "def _normalize_agent_event_stage(" in code)
     test("compute_agent_scorecard definida", "def compute_agent_scorecard(" in code)
@@ -326,7 +327,7 @@ def run_tests():
     test("CYCLES_HISTORY_FILE definido", "CYCLES_HISTORY_FILE" in code)
     test("cycles_history.jsonl append-only", "cycles_history.jsonl" in code)
     test("cycle_summary se guarda en main()", "cycle_data" in code and "CYCLE_SUMMARY_FILE" in code)
-    test("cycle_data incluye version v10.5.10", '"version"' in code and "v10.5.10" in code)
+    test("cycle_data incluye version v10.5.11", '"version"' in code and "v10.5.11" in code)
     test("cycle_data incluye logic_series", '"logic_series": LOGIC_SERIES' in code)
     test("cycle_data incluye logic_cycle_number", '"logic_cycle_number"' in code)
 
@@ -347,7 +348,7 @@ def run_tests():
     test("Bug #13: send_telegram_paged en cmd_log", "send_telegram_paged" in code and "cmd_log" in code)
     test("Bug #13: send_telegram_paged en cmd_cartera", "send_telegram_paged" in code)
     test("_parse_position_label usa centavos (¢)", "¢" in code)
-    test("cmd_estado versión correcta", "Bot v10.5.10" in code or "v10.5.10" in code)
+    test("cmd_estado versión correcta", "Bot v10.5.11" in code or "v10.5.11" in code)
 
     # ---- Test 14c: Zonas horarias reales v10.4.5 ----
     print("\n🔍 Zonas horarias reales")
@@ -571,6 +572,24 @@ def run_tests():
         test("checklist vacío: win rate usa estado waiting", wr_item["status"] == "waiting" and wr_item["tag"] == "Esperando muestra", wr_item)
         test("checklist vacío: drawdown usa estado waiting", dd_item["status"] == "waiting" and dd_item["tag"] == "Esperando muestra", dd_item)
 
+        # Ventana parcial (2 de 5 cierres requeridos): drawdown debe mostrar "Esperando muestra"
+        # Bug pre-fix: con 1-4 cierres, el check pasaba como OK porque recent_window_size < DRAWDOWN_WINDOW = True
+        checklist_partial_dd_ns = dict(checklist_empty_ns)
+        checklist_partial_dd_ns["get_logic_series_stats"] = lambda: {
+            "pnl": -2.0, "win_rate": 25.0, "closed_count": 2,
+            "recent_window_size": 2, "recent_drawdown": -2.0,
+        }
+        checklist_partial_dd_ns["get_logic_series_clean_closed_trade_stats"] = lambda: {
+            "count": 2, "sell": 1, "loss_total": 1, "resolved_win": 0,
+        }
+        exec(get_function_source(module_ast, code_lines, "build_promotion_checklist"), checklist_partial_dd_ns)
+        checklist_partial_dd = checklist_partial_dd_ns["build_promotion_checklist"]()
+        dd_partial_item = next(item for item in checklist_partial_dd["checks"] if "Drawdown" in item["label"])
+        test("checklist parcial: drawdown con muestra incompleta usa estado waiting",
+             dd_partial_item["status"] == "waiting" and dd_partial_item["tag"] == "Esperando muestra", dd_partial_item)
+        test("checklist parcial: drawdown muestra contador de cierres disponibles",
+             "2/5" in dd_partial_item["value"], dd_partial_item)
+
         progress_ns = {
             "LOGIC_SERIES": "10.5",
             "REVIEW_READY_CLEAN_TRADES": 30,
@@ -789,8 +808,8 @@ def run_tests():
             "datetime": datetime,
             "timezone": timezone,
             "_load_cycle_counts": lambda: (5, 1),
-            "load_cycle_summary_data": lambda: {"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.5.10"},
-            "load_cycle_history": lambda limit=None: [{"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.5.10", "timestamp_utc": "2026-03-29T11:08:00+00:00", "buys": [], "management": {"n_sold": 1}, "exposure_after": 2.94}],
+            "load_cycle_summary_data": lambda: {"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.5.11"},
+            "load_cycle_history": lambda limit=None: [{"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.5.11", "timestamp_utc": "2026-03-29T11:08:00+00:00", "buys": [], "management": {"n_sold": 1}, "exposure_after": 2.94}],
             "get_clean_closed_trade_stats": lambda: {"count": 18, "sell": 12, "loss_total": 6, "resolved_win": 0},
             "get_logic_series_clean_closed_trade_stats": lambda: {"count": 0, "sell": 0, "loss_total": 0, "resolved_win": 0},
             "get_validated_closed_postmortems": lambda: [],
@@ -810,7 +829,7 @@ def run_tests():
             "compute_agent_scorecard": lambda events: [],
             "build_agent_rivalry": lambda events: [],
             "_extract_logic_series": lambda value: "10.5" if "10.5" in str(value) else "10.4" if "10.4" in str(value) else None,
-            "BOT_VERSION": "v10.5.10",
+            "BOT_VERSION": "v10.5.11",
             "LOGIC_SERIES": "10.5",
             "DRY_RUN": False,
             "DASHBOARD_USER": "pablo",
@@ -919,7 +938,7 @@ def run_tests():
         os.close(fd)
         with open(tmp_cycle_summary, "w", encoding="utf-8") as f:
             json.dump({
-                "version": "v10.5.10",
+                "version": "v10.5.11",
                 "cycle_number": 12,
                 "timestamp_utc": "2026-03-28T16:00:33.073674+00:00",
                 "management": {"n_kept": 0, "n_sold": 1, "n_resolved": 0},
@@ -931,7 +950,7 @@ def run_tests():
             "json": __import__("json"),
             "datetime": datetime,
             "send_telegram_paged": lambda text, with_menu=False, page_size=3800: info_messages.append(text),
-            "BOT_VERSION": "v10.5.10",
+            "BOT_VERSION": "v10.5.11",
             "LOGIC_SERIES": "10.5",
             "_extract_logic_series": cycle_ns["_extract_logic_series"],
             "DRY_RUN": False,
@@ -951,7 +970,7 @@ def run_tests():
         exec(get_function_source(module_ast, code_lines, "cmd_info"), info_ns)
         info_ns["cmd_info"]()
         info_msg = info_messages[-1] if info_messages else ""
-        test("info: versión visible correcta", "BOT POLYMARKET v10.5.10" in info_msg, info_msg[:120])
+        test("info: versión visible correcta", "BOT POLYMARKET v10.5.11" in info_msg, info_msg[:120])
         test("info: usa cycle_summary como fallback de último", "Último: 2026-03-28 16:00 UTC" in info_msg, info_msg[:220])
         test("info: muestra doble contador", "Ciclos completados: 12 total | 3 serie v10.5" in info_msg, info_msg[:240])
         test("info: muestra ciclo total y de serie", "Ciclo total #12 | serie v10.5 #3" in info_msg, info_msg[:260])
@@ -1538,7 +1557,7 @@ def run_tests():
     test("/accuracy en MENU_KEYBOARD", '"callback_data": "accuracy"' in code)
     test("cmd_accuracy vuelve con menú", 'send_telegram("Sin datos de accuracy todavía.", with_menu=True)' in code and 'send_telegram_paged("\\n".join(lines), with_menu=True)' in code)
     test("Win rate en rendimiento", "WR:" in code)
-    test("Version v10.5.10", "v10.5.10" in code)
+    test("Version v10.5.11", "v10.5.11" in code)
 
     # ---- Resultado ----
     print(f"\n{'='*50}")
