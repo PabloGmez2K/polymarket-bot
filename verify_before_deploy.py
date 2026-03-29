@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-verify_before_deploy.py v9 — Tests de comportamiento para bot.py v10.5.7
+verify_before_deploy.py v9 — Tests de comportamiento para bot.py v10.5.8
 
 Ejecutar ANTES de cada deploy:
   python verify_before_deploy.py
@@ -295,8 +295,10 @@ def run_tests():
     test("agent_events.jsonl existe", os.path.exists(agent_events_path))
     test("template dashboard usa cycle.series_display", "cycle.series_display" in dashboard_template_code)
     test("template dashboard muestra stages de eventos", "event.stage_label" in dashboard_template_code and "Prop." in dashboard_template_code)
+    test("template dashboard usa estado waiting en checklist", "check-item-{{ item.status }}" in dashboard_template_code and "check-tag-{{ item.status }}" in dashboard_template_code)
     test("template dashboard muestra n/d sin cierres", "pnl_display" in dashboard_template_code and "win_rate_display" in dashboard_template_code and "drawdown_display" in dashboard_template_code)
     test("css dashboard en modo oscuro", "--bg: #071018;" in dashboard_css_code and "--card: rgba(12, 20, 29, 0.9);" in dashboard_css_code)
+    test("css dashboard define estado waiting", ".check-status.waiting" in dashboard_css_code and ".check-tag-waiting" in dashboard_css_code)
     if os.path.exists(agent_events_path):
         try:
             with open(agent_events_path, "r", encoding="utf-8") as f:
@@ -312,7 +314,7 @@ def run_tests():
     test("CYCLES_HISTORY_FILE definido", "CYCLES_HISTORY_FILE" in code)
     test("cycles_history.jsonl append-only", "cycles_history.jsonl" in code)
     test("cycle_summary se guarda en main()", "cycle_data" in code and "CYCLE_SUMMARY_FILE" in code)
-    test("cycle_data incluye version v10.5.7", '"version"' in code and "v10.5.7" in code)
+    test("cycle_data incluye version v10.5.8", '"version"' in code and "v10.5.8" in code)
     test("cycle_data incluye logic_series", '"logic_series": LOGIC_SERIES' in code)
     test("cycle_data incluye logic_cycle_number", '"logic_cycle_number"' in code)
 
@@ -333,7 +335,7 @@ def run_tests():
     test("Bug #13: send_telegram_paged en cmd_log", "send_telegram_paged" in code and "cmd_log" in code)
     test("Bug #13: send_telegram_paged en cmd_cartera", "send_telegram_paged" in code)
     test("_parse_position_label usa centavos (¢)", "¢" in code)
-    test("cmd_estado versión correcta", "Bot v10.5.7" in code or "v10.5.7" in code)
+    test("cmd_estado versión correcta", "Bot v10.5.8" in code or "v10.5.8" in code)
 
     # ---- Test 14c: Zonas horarias reales v10.4.5 ----
     print("\n🔍 Zonas horarias reales")
@@ -527,6 +529,7 @@ def run_tests():
         test("checklist: progreso 100 cuando todo pasa", checklist["progress_pct"] == 100.0, checklist)
         test("checklist: separa histórico y serie", any(item["label"] == "Trades limpios históricos" for item in checklist["checks"]) and any(item["label"] == "Trades limpios serie v10.5" for item in checklist["checks"]))
         test("checklist: histórico no bloquea promoción", any(item["label"] == "Trades limpios históricos" and not item["blocking"] for item in checklist["checks"]))
+        test("checklist: estados good presentes", all(item["status"] == "good" and item["tag"] == "OK" for item in checklist["checks"]), checklist["checks"])
 
         checklist_empty_ns = {
             "LOGIC_SERIES": "10.5",
@@ -552,6 +555,9 @@ def run_tests():
         test("checklist vacío: pnl sin cierres", pnl_item["value"] == "sin cierres" and not pnl_item["passed"], pnl_item)
         test("checklist vacío: win rate sin cierres", "sin cierres" in wr_item["value"] and not wr_item["passed"], wr_item)
         test("checklist vacío: drawdown sin cierres", "sin cierres" in dd_item["value"] and not dd_item["passed"], dd_item)
+        test("checklist vacío: usa estado waiting", pnl_item["status"] == "waiting" and pnl_item["tag"] == "Esperando muestra", pnl_item)
+        test("checklist vacío: win rate usa estado waiting", wr_item["status"] == "waiting" and wr_item["tag"] == "Esperando muestra", wr_item)
+        test("checklist vacío: drawdown usa estado waiting", dd_item["status"] == "waiting" and dd_item["tag"] == "Esperando muestra", dd_item)
 
         fd, tmp_agent_events = tempfile.mkstemp(
             dir=tempfile.gettempdir(),
@@ -645,7 +651,7 @@ def run_tests():
         os.close(fd)
         with open(tmp_cycle_summary, "w", encoding="utf-8") as f:
             json.dump({
-                "version": "v10.5.7",
+                "version": "v10.5.8",
                 "cycle_number": 12,
                 "timestamp_utc": "2026-03-28T16:00:33.073674+00:00",
                 "management": {"n_kept": 0, "n_sold": 1, "n_resolved": 0},
@@ -657,7 +663,7 @@ def run_tests():
             "json": __import__("json"),
             "datetime": datetime,
             "send_telegram_paged": lambda text, with_menu=False, page_size=3800: info_messages.append(text),
-            "BOT_VERSION": "v10.5.7",
+            "BOT_VERSION": "v10.5.8",
             "LOGIC_SERIES": "10.5",
             "_extract_logic_series": cycle_ns["_extract_logic_series"],
             "DRY_RUN": False,
@@ -677,7 +683,7 @@ def run_tests():
         exec(get_function_source(module_ast, code_lines, "cmd_info"), info_ns)
         info_ns["cmd_info"]()
         info_msg = info_messages[-1] if info_messages else ""
-        test("info: versión visible correcta", "BOT POLYMARKET v10.5.7" in info_msg, info_msg[:120])
+        test("info: versión visible correcta", "BOT POLYMARKET v10.5.8" in info_msg, info_msg[:120])
         test("info: usa cycle_summary como fallback de último", "Último: 2026-03-28 16:00 UTC" in info_msg, info_msg[:220])
         test("info: muestra doble contador", "Ciclos completados: 12 total | 3 serie v10.5" in info_msg, info_msg[:240])
         test("info: muestra ciclo total y de serie", "Ciclo total #12 | serie v10.5 #3" in info_msg, info_msg[:260])
@@ -1264,7 +1270,7 @@ def run_tests():
     test("/accuracy en MENU_KEYBOARD", '"callback_data": "accuracy"' in code)
     test("cmd_accuracy vuelve con menú", 'send_telegram("Sin datos de accuracy todavía.", with_menu=True)' in code and 'send_telegram_paged("\\n".join(lines), with_menu=True)' in code)
     test("Win rate en rendimiento", "WR:" in code)
-    test("Version v10.5.7", "v10.5.7" in code)
+    test("Version v10.5.8", "v10.5.8" in code)
 
     # ---- Resultado ----
     print(f"\n{'='*50}")

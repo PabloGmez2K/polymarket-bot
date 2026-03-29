@@ -101,7 +101,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.5.7"
+BOT_VERSION = "v10.5.8"
 LOGIC_SERIES = "10.5"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -1649,6 +1649,27 @@ def get_dashboard_alert_summary():
 
 def build_promotion_checklist():
     """Checklist gamificado para decidir si el bankroll puede subir de nivel."""
+    def _check(label, value, scope, passed, blocking, waiting=False):
+        if waiting:
+            status = "waiting"
+            tag = "Esperando muestra"
+        elif passed:
+            status = "good"
+            tag = "OK"
+        else:
+            status = "bad"
+            tag = "Pendiente"
+        return {
+            "label": label,
+            "value": value,
+            "scope": scope,
+            "passed": passed,
+            "blocking": blocking,
+            "waiting": waiting,
+            "status": status,
+            "tag": tag,
+        }
+
     levels = get_bankroll_level_context()
     clean_stats = get_clean_closed_trade_stats()
     series_clean_stats = get_logic_series_clean_closed_trade_stats()
@@ -1660,80 +1681,83 @@ def build_promotion_checklist():
     has_drawdown_window = series_stats["recent_window_size"] > 0
 
     checks = [
-        {
-            "label": "Trades limpios históricos",
-            "value": f"{clean_stats['count']} / {REVIEW_READY_CLEAN_TRADES}",
-            "scope": "Histórico",
-            "passed": clean_stats["count"] >= REVIEW_READY_CLEAN_TRADES,
-            "blocking": False,
-        },
-        {
-            "label": f"Trades limpios serie v{LOGIC_SERIES}",
-            "value": f"{series_clean_stats['count']} / {REVIEW_READY_CLEAN_TRADES}",
-            "scope": f"Serie v{LOGIC_SERIES}",
-            "passed": series_clean_stats["count"] >= REVIEW_READY_CLEAN_TRADES,
-            "blocking": True,
-        },
-        {
-            "label": f"Ciclos estables serie v{LOGIC_SERIES}",
-            "value": f"{cycle_series} / {PROMOTION_MIN_SERIES_CYCLES}",
-            "scope": f"Serie v{LOGIC_SERIES}",
-            "passed": cycle_series >= PROMOTION_MIN_SERIES_CYCLES,
-            "blocking": True,
-        },
-        {
-            "label": f"PnL serie v{LOGIC_SERIES}",
-            "value": f"${series_stats['pnl']:+.2f}" if has_series_closures else "sin cierres",
-            "scope": f"Serie v{LOGIC_SERIES}",
-            "passed": has_series_closures and series_stats["pnl"] >= PROMOTION_MIN_SERIES_PNL,
-            "blocking": True,
-        },
-        {
-            "label": f"Win rate serie v{LOGIC_SERIES}",
-            "value": (
+        _check(
+            "Trades limpios históricos",
+            f"{clean_stats['count']} / {REVIEW_READY_CLEAN_TRADES}",
+            "Histórico",
+            clean_stats["count"] >= REVIEW_READY_CLEAN_TRADES,
+            False,
+        ),
+        _check(
+            f"Trades limpios serie v{LOGIC_SERIES}",
+            f"{series_clean_stats['count']} / {REVIEW_READY_CLEAN_TRADES}",
+            f"Serie v{LOGIC_SERIES}",
+            series_clean_stats["count"] >= REVIEW_READY_CLEAN_TRADES,
+            True,
+        ),
+        _check(
+            f"Ciclos estables serie v{LOGIC_SERIES}",
+            f"{cycle_series} / {PROMOTION_MIN_SERIES_CYCLES}",
+            f"Serie v{LOGIC_SERIES}",
+            cycle_series >= PROMOTION_MIN_SERIES_CYCLES,
+            True,
+        ),
+        _check(
+            f"PnL serie v{LOGIC_SERIES}",
+            f"${series_stats['pnl']:+.2f}" if has_series_closures else "sin cierres",
+            f"Serie v{LOGIC_SERIES}",
+            has_series_closures and series_stats["pnl"] >= PROMOTION_MIN_SERIES_PNL,
+            True,
+            waiting=not has_series_closures,
+        ),
+        _check(
+            f"Win rate serie v{LOGIC_SERIES}",
+            (
                 f"{series_stats['win_rate']}% / {PROMOTION_MIN_SERIES_WIN_RATE:.1f}%"
                 if has_series_closures
                 else f"sin cierres / {PROMOTION_MIN_SERIES_WIN_RATE:.1f}%"
             ),
-            "scope": f"Serie v{LOGIC_SERIES}",
-            "passed": has_series_closures and series_stats["win_rate"] >= PROMOTION_MIN_SERIES_WIN_RATE,
-            "blocking": True,
-        },
-        {
-            "label": f"Drawdown últimos {DRAWDOWN_WINDOW} cierres",
-            "value": (
+            f"Serie v{LOGIC_SERIES}",
+            has_series_closures and series_stats["win_rate"] >= PROMOTION_MIN_SERIES_WIN_RATE,
+            True,
+            waiting=not has_series_closures,
+        ),
+        _check(
+            f"Drawdown últimos {DRAWDOWN_WINDOW} cierres",
+            (
                 f"${series_stats['recent_drawdown']:+.2f} / umbral ${DRAWDOWN_THRESHOLD:.2f}"
                 if has_drawdown_window
                 else f"sin cierres / umbral ${DRAWDOWN_THRESHOLD:.2f}"
             ),
-            "scope": f"Serie v{LOGIC_SERIES}",
-            "passed": has_drawdown_window and (
+            f"Serie v{LOGIC_SERIES}",
+            has_drawdown_window and (
                 series_stats["recent_window_size"] < DRAWDOWN_WINDOW
                 or series_stats["recent_drawdown"] > DRAWDOWN_THRESHOLD
             ),
-            "blocking": True,
-        },
-        {
-            "label": "Signals operativas",
-            "value": alerts["signals"]["status"],
-            "scope": "Operativa",
-            "passed": alerts["signals"]["status"] == "ok",
-            "blocking": True,
-        },
-        {
-            "label": "Pending exits atascadas",
-            "value": str(len(alerts["pending_stuck"])),
-            "scope": "Operativa",
-            "passed": len(alerts["pending_stuck"]) == 0,
-            "blocking": True,
-        },
-        {
-            "label": "Ciudades flaggeadas críticas",
-            "value": str(len(alerts["flagged_cities"])),
-            "scope": "Riesgo",
-            "passed": len(alerts["flagged_cities"]) == 0,
-            "blocking": False,
-        },
+            True,
+            waiting=not has_drawdown_window,
+        ),
+        _check(
+            "Signals operativas",
+            alerts["signals"]["status"],
+            "Operativa",
+            alerts["signals"]["status"] == "ok",
+            True,
+        ),
+        _check(
+            "Pending exits atascadas",
+            str(len(alerts["pending_stuck"])),
+            "Operativa",
+            len(alerts["pending_stuck"]) == 0,
+            True,
+        ),
+        _check(
+            "Ciudades flaggeadas críticas",
+            str(len(alerts["flagged_cities"])),
+            "Riesgo",
+            len(alerts["flagged_cities"]) == 0,
+            False,
+        ),
     ]
 
     passed = sum(1 for item in checks if item["passed"])

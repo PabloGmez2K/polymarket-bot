@@ -43,6 +43,7 @@ Comandos útiles:
 | 2026-03-28 | Explícita | Sesión 19 | `a24fde2` `cd12121` `56aeb5a` `185f018` `374d6a8` `3c4b5f1` `19adfdd` `d382f47` `695f405` | v10.4 a v10.4.8: persistencia, rediseño Telegram, ciclos persistentes, DST robusto, trazabilidad multi-agente, tests funcionales, base de `postmortem.json`, alertas de observabilidad, bloqueo operativo de London y refinamiento final de botones Telegram. |
 | 2026-03-29 | Explícita | Sesión 24 | `—` | Refinamiento del dashboard: modo oscuro, checklist histórico/serie separado, scorecard por stages y ciclos legacy legibles. |
 | 2026-03-29 | Explícita | Sesión 25 | `—` | Pasada rápida de UX: `n/d` y `sin cierres` cuando la serie nueva todavía no tiene muestra real. |
+| 2026-03-29 | Explícita | Sesión 26 | `—` | Último pulido UX: estado neutral `Esperando muestra` en el checklist del dashboard. |
 
 ---
 
@@ -260,6 +261,20 @@ Comandos útiles:
 - ampliación del verificador con casos funcionales específicos para esta situación.
 
 **Resultado:** `v10.5.7`, 294/294 tests, dashboard más claro en las primeras fases de una serie lógica nueva.
+
+## Sesión 26 — 29 marzo 2026
+
+**Herramienta:** Codex
+**Versión:** v10.5.8
+**Tests:** 300
+
+**Cambios realizados:**
+- incorporación de un tercer estado visual en el checklist del dashboard: `Esperando muestra`;
+- separación visual entre `fallo real` y `métrica aún sin datos suficientes`;
+- actualización de la plantilla y estilos para que ese estado no se vea rojo;
+- ampliación del verificador con cobertura específica de `status`/`tag` en checklist.
+
+**Resultado:** `v10.5.8`, 300/300 tests, checklist más intuitivo para operar y revisar series nuevas.
 
 ---
 

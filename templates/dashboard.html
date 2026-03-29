@@ -88,13 +88,13 @@
 
         <div class="checklist">
           {% for item in dashboard.promotion.checks %}
-          <div class="check-item">
-            <div class="check-status {{ 'good' if item.passed else 'bad' }}"></div>
+          <div class="check-item check-item-{{ item.status }}">
+            <div class="check-status {{ item.status }}"></div>
             <div class="check-body">
               <strong>{{ item.label }}</strong>
               <span>{{ item.scope }} · {{ item.value }}</span>
             </div>
-            <span class="check-tag">{{ 'OK' if item.passed else 'Pendiente' }}</span>
+            <span class="check-tag check-tag-{{ item.status }}">{{ item.tag }}</span>
           </div>
           {% endfor %}
         </div>

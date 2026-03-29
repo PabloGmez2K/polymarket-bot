@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 29 de marzo de 2026 (Sesión 25 — v10.5.7)
-**Próxima sesión:** Seguir afinando el dashboard con datos reales y decidir si el scoreboard debe medir estados terminales o progreso acumulativo por fases
+**Última actualización:** 29 de marzo de 2026 (Sesión 26 — v10.5.8)
+**Próxima sesión:** Revisión integral con Claude Code Sonnet de las sesiones recientes de dashboard, scorecard y checklist
 
 ---
 
@@ -29,7 +29,7 @@ Para estado exacto: usar `/info` + `/cartera` + `/rendimiento` + `/accuracy` en 
 
 ---
 
-## Qué hace el bot v10.5.7 (paso a paso)
+## Qué hace el bot v10.5.8 (paso a paso)
 
 Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
@@ -55,7 +55,7 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Contador dual de ciclos (v10.5.4):** Mantiene `cycle_count` como histórico total y añade `cycle_count_series` para la serie lógica actual (`LOGIC_SERIES`). Cada ciclo nuevo guarda `logic_series` y `logic_cycle_number`. `/estado` y `/info` muestran ambos para comparar estrategia nueva sin perder continuidad operativa.
 
-**Dashboard web + scorecard de agentes (v10.5.7):** Levanta un panel HTML separado de Telegram en el mismo servicio Railway, accesible por navegador en `PORT`. Usa modo oscuro, separa checklist histórico vs serie `v10.5`, muestra ciclos legacy con etiquetas legibles, enseña el scoreboard por stages (`proposed / implemented / validated`) a partir de `agent_events.jsonl` y ahora evita mostrar métricas de serie como `0.0%` o `+$0.00` cuando todavía no hay cierres: en ese caso muestra `n/d` o `sin cierres`.
+**Dashboard web + scorecard de agentes (v10.5.8):** Levanta un panel HTML separado de Telegram en el mismo servicio Railway, accesible por navegador en `PORT`. Usa modo oscuro, separa checklist histórico vs serie `v10.5`, muestra ciclos legacy con etiquetas legibles, enseña el scoreboard por stages (`proposed / implemented / validated`) a partir de `agent_events.jsonl`, evita mostrar métricas de serie como `0.0%` o `+$0.00` cuando todavía no hay cierres y ahora distingue visualmente entre `fallo real` y `esperando muestra` en el checklist.
 
 **Zona horaria por ciudad (v10.4.5):** Ya no usa offsets manuales; usa zonas IANA reales con `ZoneInfo` para que DST cambie automáticamente sin tocar el código en marzo/octubre.
 
@@ -82,13 +82,13 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción:** Railway — Online, EU West Amsterdam, MODO REAL, DRY_RUN=false
-**Versión activa:** v10.5.7
+**Versión activa:** v10.5.8
 
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.5.7 |
-| `verify_before_deploy.py` | v9 — 294 tests de comportamiento |
+| `bot.py` | Script principal v10.5.8 |
+| `verify_before_deploy.py` | v9 — 300 tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |
@@ -128,7 +128,7 @@ MIN_BET="1.00"
 DATA_DIR="/app/data"
 ```
 
-### Configuración en código (defaults bot.py v10.5.7):
+### Configuración en código (defaults bot.py v10.5.8):
 ```python
 MIN_EDGE = 7.0%
 MIN_EDGE_EXACT = 15.0%          # v10.5.0: filtro más estricto para apuestas exactas
@@ -149,7 +149,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 ---
 
-## Telegram — Comandos disponibles (v10.5.7)
+## Telegram — Comandos disponibles (v10.5.8)
 
 | Comando | Qué muestra |
 |---------|-------------|
@@ -168,7 +168,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 **Para iniciar una sesión de análisis en claude.ai:** pegar `/info` + `/cartera` + `/rendimiento`.
 
-## Dashboard web (v10.5.7)
+## Dashboard web (v10.5.8)
 
 - **Ruta principal:** `/`
 - **Healthcheck:** `/healthz`
@@ -185,6 +185,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 - scoreboard de agentes y rivalidad constructiva por stages (`proposed / implemented / validated`)
 - modo oscuro por defecto para revisión en navegador
 - cuando la serie aún no tiene cierres, muestra `n/d` / `sin cierres` en lugar de métricas aparentes
+- el checklist distingue visualmente entre `Pendiente` y `Esperando muestra`
 
 ---
 
@@ -238,6 +239,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 | v10.5.5 | 29 mar | dashboard web HTML separado de Telegram + checklist de bankroll + scoreboard de agentes + `agent_events.jsonl`, 279 tests |
 | v10.5.6 | 29 mar | dashboard oscuro + checklist histórico/serie separado + scorecard por stages + ciclos legacy legibles, 290 tests |
 | v10.5.7 | 29 mar | dashboard evita métricas falsas sin muestra (`n/d` / `sin cierres`) en serie nueva, 294 tests |
+| v10.5.8 | 29 mar | checklist con estado visual neutral `Esperando muestra` para serie sin datos, 300 tests |
 
 ---
 
@@ -452,6 +454,28 @@ Usar esta plantilla al cerrar cada sesión relevante:
 
 - **Estado final:**
   v10.5.7, 294/294 tests, dashboard semánticamente más claro para analizar una serie nueva sin sobreinterpretar ceros iniciales
+
+### Sesión 26 — Registro multi-herramienta
+
+- **Fecha:** 2026-03-29
+- **Versión activa al cerrar:** v10.5.8
+- **Objetivo de la sesión:** Último pulido visual del checklist para distinguir entre una condición fallida y una métrica que todavía está esperando muestra
+
+- **Claude Code (Opus / Sonnet):**
+  - No usado directamente en esta sesión
+
+- **Codex:**
+  - Añadió un tercer estado al checklist del dashboard: `Esperando muestra`
+  - Mantuvo intacta la lógica de promoción, pero separó visualmente `fallo` vs `todavía sin datos`
+  - Ajustó la plantilla y los estilos para que ese estado se vea neutro y no rojo
+  - Amplió `verify_before_deploy.py` para cubrir `status` y `tag` de los checks cuando no hay cierres en la serie
+  - Dejó contexto e historial actualizados para que la siguiente revisión con Claude Code Sonnet tenga trazabilidad clara
+
+- **Problemas detectados en trabajo previo:**
+  - Aunque `v10.5.7` ya evitaba métricas engañosas, el checklist seguía pintando esos casos como `Pendiente` rojo, lo que mezclaba falta de muestra con fallo real
+
+- **Estado final:**
+  v10.5.8, 300/300 tests, dashboard visualmente más fino y más fácil de interpretar en fases tempranas de una serie nueva
 
 ### Sesión 19 — Registro multi-herramienta
 

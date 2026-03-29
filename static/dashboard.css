@@ -268,6 +268,10 @@ body {
   background: var(--bad);
 }
 
+.check-status.waiting {
+  background: var(--accent);
+}
+
 .check-body {
   flex: 1;
   display: grid;
@@ -286,6 +290,18 @@ body {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+}
+
+.check-tag-good {
+  color: var(--good);
+}
+
+.check-tag-bad {
+  color: var(--muted);
+}
+
+.check-tag-waiting {
+  color: var(--accent);
 }
 
 .metric-list {
