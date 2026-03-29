@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 29 de marzo de 2026 (Sesión 30 — v10.6.0)
-**Próxima sesión:** Monitorizar rendimiento con sigma original restaurada. Integrar Weather Underground si IBM Trial se desbloquea.
+**Última actualización:** 29 de marzo de 2026 (Sesión 31 — v10.6.2 local)
+**Próxima sesión:** Hacer push/deploy de `v10.6.2` y monitorizar en Railway que la alerta de bankroll no dé falsos positivos por fallo de API. Integrar Weather Underground si IBM Trial se desbloquea.
 
 ---
 
@@ -29,7 +29,7 @@ Para estado exacto: usar `/info` + `/cartera` + `/rendimiento` + `/accuracy` en 
 
 ---
 
-## Qué hace el bot v10.6.0 (paso a paso)
+## Qué hace el bot v10.6.2 (paso a paso)
 
 Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
@@ -77,6 +77,8 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Revert trading logic (v10.6.0):** Sigma restaurada a v10.3 (1.2/1.5/2.0/2.5/3.0), intra-cycle desactivado (default 0), MIN_EDGE_EXACT eliminado (usa MIN_EDGE=7% para todo). Se mantiene toda la observabilidad (postmortem, accuracy, alerts, dashboard, ciudades bloqueadas). El problema real es la fuente de datos, no la confianza del modelo.
 
+**Hardening alerta bankroll (v10.6.2):** La alerta de bankroll bajo ahora solo se activa con señal fiable de cartera (`cash_ok` y sin `api_error`) tanto en Telegram como en dashboard, evitando falsos “recargar” cuando falla la API. Añade `LOW_BANKROLL_RESET_MARGIN=1.0` para rearmar la alerta al salir de la zona roja sin exigir recuperar hasta 2x el umbral.
+
 **City accuracy tracker (v10.5.2):** Calcula win rate por ciudad desde postmortem. Alerta por Telegram si una ciudad baja de 25% win rate con 3+ trades. Nuevo comando `/accuracy`. Win rate visible en `/rendimiento`.
 
 **Integración `/accuracy` + revisión crítica (v10.5.3):** `/accuracy` queda visible en el menú, responde siempre con menú, `/estado` muestra explícitamente el intervalo intra-SL y la trazabilidad de sesión 20 queda corregida para reflejar mejor lo que realmente introdujeron los commits de la mañana.
@@ -87,14 +89,14 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
-**Producción:** Railway — Online, EU West Amsterdam, MODO REAL, DRY_RUN=false
-**Versión activa:** v10.6.1
+**Producción:** Railway — Online, EU West Amsterdam, MODO REAL, DRY_RUN=false (último deploy: `v10.6.1`)
+**Versión local lista para deploy:** v10.6.2
 
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.6.1 |
-| `verify_before_deploy.py` | v10 — 338 tests de comportamiento |
+| `bot.py` | Script principal v10.6.2 |
+| `verify_before_deploy.py` | v10 — 348 tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |
@@ -134,7 +136,7 @@ MIN_BET="1.00"
 DATA_DIR="/app/data"
 ```
 
-### Configuración en código (defaults bot.py v10.6.0):
+### Configuración en código (defaults bot.py v10.6.2):
 ```python
 MIN_EDGE = 7.0%
 STOP_LOSS_PCT = -25.0%
@@ -149,13 +151,15 @@ PROMOTION_CITY_COVERAGE_TARGET = 3
 INTRA_SL_INTERVAL = 0           # v10.6.0: desactivado (v10.5 usaba 90)
 CITY_MIN_TRADES_FOR_BLOCK = 3
 CITY_BLOCK_WIN_RATE = 25.0%
-Sigma: Día 0: 1.2 | Día 1: 1.5 | Día 2: 2.0 | Día 3: 2.5 | Día 4-5: 3.0  # v10.6.0: restaurada de v10.3
+LOW_BANKROLL_THRESHOLD = $5.00
+LOW_BANKROLL_RESET_MARGIN = $1.00
+Sigma: Día 0: 1.2 | Día 1: 1.5 | Día 2: 2.0 | Día 3: 2.5 | Día 4-5: 3.0  # v10.6.x: restaurada de v10.3
 Schedule: 08:00, 16:00, 23:00 UTC
 ```
 
 ---
 
-## Telegram — Comandos disponibles (v10.6.0)
+## Telegram — Comandos disponibles (v10.6.2)
 
 | Comando | Qué muestra |
 |---------|-------------|
@@ -174,7 +178,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 **Para iniciar una sesión de análisis en claude.ai:** pegar `/info` + `/cartera` + `/rendimiento`.
 
-## Dashboard web (v10.5.10)
+## Dashboard web (v10.6.2)
 
 - **Ruta principal:** `/`
 - **Healthcheck:** `/healthz`
@@ -184,14 +188,15 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 ### Qué muestra
 - nivel actual y siguiente bankroll objetivo
-- checklist de promoción `$25 -> $35` separando histórico vs serie `v10.5`
+- checklist de promoción `$25 -> $35` separando histórico vs serie `v10.6`
 - salud operativa del sistema
-- métricas de la serie `v10.5`
+- métricas de la serie `v10.6`
 - últimos ciclos y posiciones abiertas
 - scoreboard de agentes y rivalidad constructiva por stages (`proposed / implemented / validated`)
 - modo oscuro por defecto para revisión en navegador
 - cuando la serie aún no tiene cierres, muestra `n/d` / `sin cierres` en lugar de métricas aparentes
 - el checklist distingue visualmente entre `Pendiente` y `Esperando muestra`
+- alerta crítica de bankroll bajo cuando la cartera cae bajo `$5`, pero solo con señal fiable (`cash_ok` y sin `api_error`)
 - bloque `Progreso` con `faltan X para Y` sobre muestra, estabilidad, cierres útiles, readiness de nivel y cobertura de ciudades
 - bloque `Trofeos` con hitos del bot calculados solo desde cierres validados (`mejor operación`, `mayor edge ejecutado`, `ciudad más rentable`, etc.)
 - bloque `Desbloqueos` con evidencias/confirmaciones pendientes antes de revisar lógica o evaluar subir bankroll
@@ -256,6 +261,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 | v10.5.12 | 29 mar | bloqueo 10 ciudades 0% WR + fix posiciones fantasma, 338 tests |
 | **v10.6.0** | **29 mar** | **revert sigma a v10.3, intra-cycle off, MIN_EDGE_EXACT eliminado. Mantiene toda observabilidad. 335 tests** |
 | v10.6.1 | 29 mar | fix drawdown sort, alerta bankroll bajo ($5), unlock redundante eliminado, scoreboard sesión 30. 338 tests |
+| v10.6.2 | 29 mar | hardening alerta bankroll: exige `cash_ok` y ausencia de `api_error`, añade `LOW_BANKROLL_RESET_MARGIN`, tests funcionales dashboard/Telegram/reset. 348 tests |
 
 ---
 
@@ -545,6 +551,30 @@ Usar esta plantilla al cerrar cada sesión relevante:
 - **Codex:** revisó críticamente esa secuencia y detectó dos deudas importantes: el fix de DST seguía siendo frágil por usar offsets manuales, y `.claude/settings.local.json` había quedado versionado por error.
 - **Codex:** corrigió el enfoque de DST en `bot.py` migrando a `ZoneInfo` + `CITY_TIMEZONES` con zonas IANA reales (`v10.4.5`), actualizó `verify_before_deploy.py`, sacó `.claude/settings.local.json` del control de versiones sin borrar la copia local, reparó manualmente una entrada truncada en `performance.json` de Railway, implementó la capa base de `postmortem.json`, movió `signals.json` / `traders_db.json` / `trader_history.json` al flujo persistente de Volume con bootstrap automático, añadió `/postmortem` para inspección rápida desde Telegram, preparó `v10.4.6` con backfill automático de postmortem y alertas de observabilidad persistentes, cerró `v10.4.7` bloqueando London en código para que no vuelva a comprarse por error, y remató `v10.4.8` afinando Telegram para que `traders` cruce por fecha exacta, `postmortem` no degrade etiquetas legacy y `detalle` muestre el último ciclo completo.
 - **Estado final de la sesión 19:** versión activa `v10.4.8`, tests `182/182`, repo listo para deploy, DST robusto para futuros cambios de horario, observabilidad base de postmortem lista para crecer, pipeline de traders persistente en Volume, botón visible de `/postmortem`, alertas automáticas listas para avisar cuando haya suficiente muestra para revisar la lógica, London bloqueada operativamente en código y botones de Telegram principales ya refinados tras revisión manual.
+
+### Sesión 31 — Registro multi-herramienta
+
+- **Fecha:** 2026-03-29
+- **Versión activa al cerrar:** v10.6.2 (local, pendiente de deploy)
+- **Objetivo de la sesión:** Blindar la alerta de bankroll bajo introducida en `v10.6.1`, evitar falsos positivos por fallo de API y dejar código/tests/docs alineados
+
+- **Claude Code (Opus):**
+  - No usado directamente en esta sesión
+  - El cambio parte de una revisión crítica del trabajo previo firmado con Claude en `v10.6.1`
+
+- **Codex:**
+  - Revisó `v10.6.1` y detectó que la alerta de bankroll podía dispararse con `cash=0` por fallo de API aunque la cartera real no hubiera caído
+  - Endureció `run_observability_alerts()` y `get_dashboard_alert_summary()` para exigir `cash_ok` y ausencia de `api_error`
+  - Añadió `LOW_BANKROLL_RESET_MARGIN = $1.00` para rearmar la alerta al salir de la zona roja sin exigir recuperar hasta `2x` el umbral
+  - Amplió `verify_before_deploy.py` hasta `348/348` con casos funcionales de trigger real, no-trigger por API incierta, reset con margen y visibilidad correcta en dashboard
+  - Actualizó `agent_events.jsonl`, `CONTEXTO.md` e `HISTORIAL_SESIONES.md` para empaquetar el cambio como `v10.6.2`
+
+- **Problemas detectados en trabajo previo:**
+  - La alerta de bankroll bajo de `v10.6.1` mezclaba caída real de fondos con fallos temporales de API
+  - El reset de la alerta solo ocurría al superar `LOW_BANKROLL_THRESHOLD * 2`, dejando la alerta demasiado “pegada” y sin rearmarse en recuperaciones parciales razonables
+
+- **Estado final:**
+  v10.6.2 local, 348/348 tests, alerta de bankroll más fiable en Telegram/dashboard y repo listo para push/deploy
 
 ---
 

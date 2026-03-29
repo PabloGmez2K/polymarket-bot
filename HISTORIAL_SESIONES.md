@@ -46,6 +46,7 @@ Comandos útiles:
 | 2026-03-29 | Explícita | Sesión 26 | `—` | Último pulido UX: estado neutral `Esperando muestra` en el checklist del dashboard. |
 | 2026-03-29 | Explícita | Sesión 27 | `—` | Nueva capa del dashboard: progreso operativo, trofeos validados y desbloqueos para saber qué evidencia falta antes de revisar lógica o subir bankroll. |
 | 2026-03-29 | Explícita | Sesión 28 | `—` | Dashboard añade balance por tipo de cierre y liquidación para distinguir TP/SL/Reeval/LOSS_TOTAL/RESOLVED_WIN de `pending_exit` y valor pendiente de canjear. |
+| 2026-03-29 | Explícita | Sesión 31 | `—` | Hardening local de `v10.6.2`: alerta de bankroll fiable, rearme con margen, scorecard actualizado y docs/tests alineados. |
 
 ---
 
@@ -418,6 +419,37 @@ Investigación completa de trades, commits y lógica de trading desde v10.3 hast
 - 338/338 tests
 
 **Nota de proceso:** Se detectó que `replace_all=true` en actualizaciones de CONTEXTO.md modificaba entradas históricas (ej: "serie v10.5" en descripción de lo que hizo Codex en v10.5.6 se cambió a "serie v10.6"). Corregido. Regla: nunca usar replace_all para versiones en docs — editar solo las líneas específicas.
+
+---
+
+## Sesión 31 — v10.6.2 (29 mar 2026, local)
+
+**Disparador:** revisión crítica posterior de `v10.6.1` detecta que la alerta de bankroll bajo puede dispararse por un fallo temporal de API y no solo por caída real de fondos.
+
+**Diagnóstico (Codex):**
+
+1. **Falso positivo por API incierta.** `_get_portfolio_and_positions()` puede devolver `cash=0.0`, `cash_ok=False` y `api_error` cuando falla la lectura de balance o posiciones. La alerta de `v10.6.1` usaba igualmente ese `0.0` y podía pedir “recargar” sin que la cartera real hubiera cambiado.
+
+2. **Rearme demasiado rígido.** La flag `low_bankroll_alerted` solo se limpiaba cuando la cartera superaba `LOW_BANKROLL_THRESHOLD * 2`, así que una recuperación parcial razonable (`$4.8 -> $6.3`, por ejemplo) no rearmaba la alerta para una caída posterior real.
+
+3. **Cobertura insuficiente.** `verify_before_deploy.py` comprobaba la presencia de strings y algo de wiring, pero no validaba funcionalmente el trigger real, el no-trigger por API incierta ni el reset con margen.
+
+**Cambios realizados:**
+- `BOT_VERSION` actualizado a `v10.6.2`;
+- nueva constante `LOW_BANKROLL_RESET_MARGIN=1.0`;
+- `run_observability_alerts()` exige `cash_ok` y ausencia de `api_error` antes de disparar la alerta de bankroll bajo;
+- `get_dashboard_alert_summary()` solo muestra la alerta crítica de bankroll cuando la señal de cartera es fiable;
+- el reset pasa a usar `LOW_BANKROLL_THRESHOLD + LOW_BANKROLL_RESET_MARGIN` en lugar de `2x` el umbral;
+- `agent_events.jsonl` añade evento de sesión 31 para el scoreboard;
+- `verify_before_deploy.py` sube a `348/348` con casos funcionales nuevos:
+  - dashboard muestra alerta con datos fiables;
+  - dashboard oculta alerta con API incierta;
+  - Telegram dispara al cruzar umbral real;
+  - no persiste flag con API incierta;
+  - rearma la alerta al salir de zona roja con margen;
+- `CONTEXTO.md` y este historial quedan alineados con `v10.6.2`.
+
+**Resultado:** `v10.6.2` listo en local, `348/348` tests, sin deploy todavía. Railway sigue en `v10.6.1` hasta hacer push.
 
 ---
 

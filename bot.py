@@ -24,8 +24,8 @@ from waitress import serve
 load_dotenv()
 
 # =============================================================
-# bot.py v10.6.0 — revert trading logic a v10.3 + mantener observabilidad
-# Sesión 24: sigma original, sin intra-cycle, sin MIN_EDGE_EXACT
+# bot.py v10.6.2 — revert trading logic a v10.3 + observabilidad reforzada
+# Sesión 31: alerta de bankroll endurecida, sin falsos positivos por API
 # =============================================================
 #
 # Nuevo en v10.4.3:
@@ -100,7 +100,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.1"
+BOT_VERSION = "v10.6.2"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -114,6 +114,7 @@ WIN_RATE_WINDOW = int(os.getenv("WIN_RATE_WINDOW", "15"))
 WIN_RATE_LOW = float(os.getenv("WIN_RATE_LOW", "30.0"))
 WIN_RATE_HIGH = float(os.getenv("WIN_RATE_HIGH", "50.0"))
 LOW_BANKROLL_THRESHOLD = float(os.getenv("LOW_BANKROLL_THRESHOLD", "5.0"))  # v10.6: alerta para recargar
+LOW_BANKROLL_RESET_MARGIN = float(os.getenv("LOW_BANKROLL_RESET_MARGIN", "1.0"))  # v10.6: salir de zona roja con margen
 # v10.5.2: City accuracy tracker
 CITY_MIN_TRADES_FOR_BLOCK = int(os.getenv("CITY_MIN_TRADES_FOR_BLOCK", "3"))
 CITY_BLOCK_WIN_RATE = float(os.getenv("CITY_BLOCK_WIN_RATE", "25.0"))
@@ -1374,8 +1375,15 @@ def run_observability_alerts():
 
     # ---- v10.6: Low bankroll alert ----
     portfolio = _get_portfolio_and_positions()
-    if portfolio and portfolio.get("cash") is not None:
+    bankroll_signal_reliable = (
+        portfolio
+        and portfolio.get("cash") is not None
+        and portfolio.get("cash_ok")
+        and not portfolio.get("api_error")
+    )
+    if bankroll_signal_reliable:
         total = portfolio.get("portfolio_total", portfolio["cash"])
+        reset_threshold = LOW_BANKROLL_THRESHOLD + LOW_BANKROLL_RESET_MARGIN
         if total <= LOW_BANKROLL_THRESHOLD and not state.get("low_bankroll_alerted"):
             send_telegram(
                 f"🚨 <b>Bankroll bajo — recargar</b>\n"
@@ -1386,7 +1394,7 @@ def run_observability_alerts():
             )
             state["low_bankroll_alerted"] = True
             changed = True
-        elif total > LOW_BANKROLL_THRESHOLD * 2 and state.get("low_bankroll_alerted"):
+        elif total > reset_threshold and state.get("low_bankroll_alerted"):
             state["low_bankroll_alerted"] = False
             changed = True
 
@@ -2315,7 +2323,8 @@ def get_dashboard_alert_summary():
     portfolio_total = None
     if portfolio and portfolio.get("cash") is not None:
         portfolio_total = portfolio.get("portfolio_total", portfolio["cash"])
-        if portfolio_total <= LOW_BANKROLL_THRESHOLD:
+        bankroll_signal_reliable = portfolio.get("cash_ok") and not portfolio.get("api_error")
+        if bankroll_signal_reliable and portfolio_total <= LOW_BANKROLL_THRESHOLD:
             low_bankroll = True
             active_items.insert(0, {
                 "level": "critical",
