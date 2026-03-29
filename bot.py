@@ -21,8 +21,8 @@ from py_clob_client.order_builder.constants import BUY, SELL
 load_dotenv()
 
 # =============================================================
-# bot.py v10.5.2 — city accuracy tracker
-# Sesión 20: recalibración + protección entre ciclos + detección WU divergencia
+# bot.py v10.5.3 — integración accuracy en Telegram + revisión crítica
+# Sesión 21: cierre de UX/menú tras revisión de v10.5.x
 # =============================================================
 #
 # Nuevo en v10.4.3:
@@ -90,7 +90,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.5.2"
+BOT_VERSION = "v10.5.3"
 LOGIC_SERIES = "10.5"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -1498,6 +1498,9 @@ MENU_KEYBOARD = {
         ],
         [
             {"text": "📚 Postmortem", "callback_data": "postmortem"},
+            {"text": "📍 Accuracy", "callback_data": "accuracy"},
+        ],
+        [
             {"text": "🚀 Forzar ciclo", "callback_data": "forzar"},
             {"text": "⚡ Modo", "callback_data": "modo"},
         ],
@@ -1640,10 +1643,13 @@ def cmd_estado():
             f"  Compras: {bot_state['last_orders_placed']} | Ventas: {bot_state.get('last_sells_placed', 0)}"
         )
 
+    intra_label = f"cada {INTRA_SL_INTERVAL}min" if INTRA_SL_INTERVAL > 0 else "desactivado"
+
     send_telegram(
         f"📊 <b>Bot {BOT_VERSION} | {modo}</b>\n\n"
         f"💰 Bankroll: <b>${BANKROLL:.2f}</b> | Edge mín: {MIN_EDGE}% (exact: {MIN_EDGE_EXACT}%)\n"
-        f"🔧 SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n\n"
+        f"🔧 SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n"
+        f"🛡 Intra-SL: {intra_label}\n\n"
         f"⏱ Estado: {running}\n"
         f"📅 Último: {last_str}\n"
         f"⏰ Próximo: {next_str}\n"
@@ -2382,7 +2388,7 @@ def cmd_accuracy():
     """Muestra accuracy (win rate) por ciudad desde postmortem."""
     city_stats = get_city_accuracy()
     if not city_stats:
-        send_telegram("Sin datos de accuracy todavía.")
+        send_telegram("Sin datos de accuracy todavía.", with_menu=True)
         return
 
     sorted_cities = sorted(city_stats.items(), key=lambda x: -x[1]["trades"])
@@ -2397,7 +2403,7 @@ def cmd_accuracy():
             f"${data['pnl']:+.2f}"
         )
 
-    send_telegram_paged("\n".join(lines))
+    send_telegram_paged("\n".join(lines), with_menu=True)
 
 
 COMMANDS = {

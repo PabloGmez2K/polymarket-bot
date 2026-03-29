@@ -176,12 +176,26 @@ Comandos útiles:
 **Tests:** 216 → 226 → 234
 
 **Cambios realizados:**
-- v10.5.1: Completados tests del intra-cycle SL/TP monitor (código ya existía de sesión previa con Codex). Thread daemon cada 90min revisa posiciones, ejecuta SL/TP entre ciclos. `sell_lock` para evitar conflicto con ciclo principal.
+- v10.5.1: Intra-cycle SL/TP monitor cada 90min con `sell_lock`, thread daemon y cobertura ampliada hasta 226 tests.
 - v10.5.2: City accuracy tracker — `get_city_accuracy()` analiza win rate por ciudad desde postmortem.json. Alerta Telegram si una ciudad baja de 25% win rate con 3+ trades. Nuevo comando `/accuracy`. Win rate visible en `/rendimiento`.
 - Investigación WU API: API muerta desde 2019 (IBM compró). IBM Trial no viable (Pablo no pudo verificar identidad). Opciones documentadas: PWS key (~$30-50 estación), o seguir con accuracy tracker como proxy.
 - CONTEXTO.md actualizado a v10.5.2 con estado real de posiciones (corregido desde auditoría SSH sesión 19).
 
 **Lección operativa:** Esta sesión consumió demasiado uso de Opus. Tareas delegables a Codex: investigación WU (web search + resumen), escritura de tests de comportamiento, actualizaciones de docs. Opus debe reservarse para diseño de arquitectura y coding de lógica crítica.
+
+## Sesión 21 — 29 marzo 2026
+
+**Herramienta:** Codex
+**Versión:** v10.5.3
+**Tests:** 242
+
+**Cambios realizados:**
+- revisión crítica de los commits de la mañana (`v10.5.0`, `v10.5.1`, `v10.5.2`) contrastando Git, código y docs;
+- integración real de `/accuracy` en el menú de Telegram;
+- `cmd_accuracy` vuelve con menú y `/estado` muestra el intervalo intra-SL como ya decía el contexto;
+- corrección de la trazabilidad de sesión 20 para que no simplifique en exceso lo que realmente añadió `v10.5.1`.
+
+**Resultado:** repo alineado a nivel código, tests y documentación; queda pendiente decidir si desplegar `v10.5.3` o seguir observando `v10.5.2` primero.
 
 ---
 
@@ -208,4 +222,3 @@ Regla recomendada:
 - cuando una sesión cierre, añadir una entrada nueva aquí;
 - si una sesión antigua se reconstruye mejor desde Git, marcarla como `reconstruida` o `corregida`, sin borrar la entrada original.
 - antes de cada push relevante, revisar si también hay que actualizar `CONTEXTO.md` para la foto actual y este archivo para la memoria histórica.
-

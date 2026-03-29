@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 29 de marzo de 2026 (Sesión 20 — v10.5.2)
-**Próxima sesión:** Codex — actualizar CONTEXTO.md financiero + posiciones, observar comportamiento v10.5.x
+**Última actualización:** 29 de marzo de 2026 (Sesión 21 — v10.5.3)
+**Próxima sesión:** Verificar por Telegram/SSH el comportamiento real de `v10.5.3` y decidir si `v10.5.0` queda estable o experimental
 
 ---
 
@@ -29,7 +29,7 @@ Para estado exacto: usar `/info` + `/cartera` + `/rendimiento` + `/accuracy` en 
 
 ---
 
-## Qué hace el bot v10.5.2 (paso a paso)
+## Qué hace el bot v10.5.3 (paso a paso)
 
 Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
@@ -69,6 +69,8 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **City accuracy tracker (v10.5.2):** Calcula win rate por ciudad desde postmortem. Alerta por Telegram si una ciudad baja de 25% win rate con 3+ trades. Nuevo comando `/accuracy`. Win rate visible en `/rendimiento`.
 
+**Integración `/accuracy` + revisión crítica (v10.5.3):** `/accuracy` queda visible en el menú, responde siempre con menú, `/estado` muestra explícitamente el intervalo intra-SL y la trazabilidad de sesión 20 queda corregida para reflejar mejor lo que realmente introdujeron los commits de la mañana.
+
 ---
 
 ## Estado actual del código
@@ -76,13 +78,13 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción:** Railway — Online, EU West Amsterdam, MODO REAL, DRY_RUN=false
-**Versión activa:** v10.5.2
+**Versión activa:** v10.5.3
 
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.5.2 |
-| `verify_before_deploy.py` | v9 — 234 tests de comportamiento |
+| `bot.py` | Script principal v10.5.3 |
+| `verify_before_deploy.py` | v9 — 242 tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |
@@ -118,7 +120,7 @@ MIN_BET="1.00"
 DATA_DIR="/app/data"
 ```
 
-### Configuración en código (defaults bot.py v10.5.2):
+### Configuración en código (defaults bot.py v10.5.3):
 ```python
 MIN_EDGE = 7.0%
 MIN_EDGE_EXACT = 15.0%          # v10.5.0: filtro más estricto para apuestas exactas
@@ -136,11 +138,11 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 ---
 
-## Telegram — Comandos disponibles (v10.5.2)
+## Telegram — Comandos disponibles (v10.5.3)
 
 | Comando | Qué muestra |
 |---------|-------------|
-| `/estado` | Versión, modo, bankroll, SL/TP, intra-SL interval, próximo ciclo, último ciclo |
+| `/estado` | Versión, modo, bankroll, SL/TP, intervalo intra-SL, próximo ciclo, último ciclo |
 | `/cartera` | Cash, posiciones vivas (ciudad+temp+fecha, precios en ¢), resueltas, muertas |
 | `/log` | Resumen del último ciclo desde cycle_summary.json |
 | `/detalle` | Último ciclo completo del `decisions.log`, paginado y sin corte fijo de 40 líneas |
@@ -149,7 +151,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 | `/traders` | Señales activas + coincidencias filtradas por ciudad, lado y fecha exacta del mercado |
 | `/info` | Bloque resumen completo para pegar en Claude/ChatGPT |
 | `/postmortem` | Resumen rápido de abiertas/cierres desde `postmortem.json` |
-| `/accuracy` | Win rate por ciudad desde postmortem, con iconos de bloqueada/flaggeada |
+| `/accuracy` | Win rate por ciudad desde postmortem, con iconos de bloqueada/flaggeada y botón visible en el menú |
 | `/forzar` | Ejecuta ciclo inmediatamente |
 | `/modo` | Cambia DRY RUN ↔ REAL |
 
@@ -202,6 +204,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 | v10.5.0 | 29 mar | sigma widening (2.0→4.5), MIN_EDGE_EXACT 15%, smart alerts (drawdown/scaling/win rate), 216 tests |
 | v10.5.1 | 29 mar | intra-cycle SL/TP monitor cada 90min, threading.Lock, 226 tests |
 | v10.5.2 | 29 mar | city accuracy tracker, `/accuracy`, win rate en `/rendimiento`, alertas por ciudad, 234 tests |
+| v10.5.3 | 29 mar | `/accuracy` integrado en menú + menú persistente + `/estado` muestra intra-SL + trazabilidad corregida, 242 tests |
 
 ---
 
@@ -277,7 +280,7 @@ Usar esta plantilla al cerrar cada sesión relevante:
 - **Objetivo de la sesión:** Completar v10.5.1 (intra-cycle SL) + implementar city accuracy tracker (v10.5.2) + investigar WU API
 
 - **Claude Code (Opus):**
-  - Completó tests de v10.5.1 (intra-cycle SL monitor) — código ya existía, faltaban tests → 226/226
+  - Implementó y cerró v10.5.1: intra-cycle SL/TP monitor cada 90min con `sell_lock`, thread daemon y cobertura ampliada hasta 226/226
   - Investigó Weather Underground API: API muerta desde 2019, IBM Trial no viable para Pablo (verificación fallida), opciones: PWS key o accuracy tracker
   - Diseñó e implementó v10.5.2: city accuracy tracker con `get_city_accuracy()`, alertas automáticas por ciudad, comando `/accuracy`, win rate en `/rendimiento` → 234/234 tests
   - Actualizó CONTEXTO.md y HISTORIAL_SESIONES.md
@@ -293,6 +296,32 @@ Usar esta plantilla al cerrar cada sesión relevante:
 
 - **Estado final:**
   v10.5.2, 234/234 tests, deploy hecho, v10.5.0+v10.5.1+v10.5.2 en producción, CONTEXTO.md actualizado
+
+### Sesión 21 — Registro multi-herramienta
+
+- **Fecha:** 2026-03-29
+- **Versión activa al cerrar:** v10.5.3
+- **Objetivo de la sesión:** Revisar críticamente los cambios de la mañana, cerrar huecos de Telegram y corregir la trazabilidad del proyecto
+
+- **Claude Code (Opus):**
+  - No usado directamente en esta sesión de revisión
+
+- **Codex:**
+  - Revisó commits `v10.5.0`, `v10.5.1` y `v10.5.2` contra Git y código real
+  - Detectó que `/accuracy` existía como comando pero no estaba integrado en el menú de Telegram y tampoco volvía con menú
+  - Detectó que `/estado` no mostraba el intervalo intra-SL aunque el contexto sí lo documentaba
+  - Señaló que la narrativa de sesión 20 decía “solo tests” para `v10.5.1`, pero el commit real había introducido bastante código en `bot.py`
+  - Integró `/accuracy` en `MENU_KEYBOARD`, añadió menú persistente y visibilidad del intervalo intra-SL en `/estado`
+  - Amplió `verify_before_deploy.py` hasta `242/242` para cubrir estas integraciones
+  - Actualizó `CONTEXTO.md` e `HISTORIAL_SESIONES.md` para mantener la memoria del proyecto alineada con Git
+
+- **Problemas detectados en trabajo previo:**
+  - `/accuracy` incompleto a nivel UX
+  - ligera desalineación docs-código en `/estado`
+  - trazabilidad de sesión 20 demasiado simplificada
+
+- **Estado final:**
+  v10.5.3, 242/242 tests, repo alineado a nivel código/tests/docs, listo para decidir si hacer deploy
 
 ### Sesión 19 — Registro multi-herramienta
 
@@ -421,7 +450,7 @@ railway ssh "ls /app/data/"         # ver archivos del volume
 
 ### Workflow de deploy:
 ```bash
-python verify_before_deploy.py   # 234/234 deben pasar
+python verify_before_deploy.py   # 242/242 deben pasar
 # actualizar CONTEXTO.md si cambió el estado actual
 # actualizar HISTORIAL_SESIONES.md si hubo una sesión/hito nuevo
 git add .
@@ -441,5 +470,3 @@ git push
 4. **Enriquecer `/postmortem`:** filtros por ciudad/estado/últimos N cierres
 5. **Ampliar `postmortem.json`** con más campos de forecast y comparación resolución vs decisión
 6. **Aumentar frecuencia ciclos:** [8,16,23] → [6,10,14,18,22]
-
-

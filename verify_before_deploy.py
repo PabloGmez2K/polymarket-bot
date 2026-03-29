@@ -253,7 +253,7 @@ def run_tests():
     test("CYCLES_HISTORY_FILE definido", "CYCLES_HISTORY_FILE" in code)
     test("cycles_history.jsonl append-only", "cycles_history.jsonl" in code)
     test("cycle_summary se guarda en main()", "cycle_data" in code and "CYCLE_SUMMARY_FILE" in code)
-    test("cycle_data incluye version v10.5.2", '"version"' in code and "v10.5.2" in code)
+    test("cycle_data incluye version v10.5.3", '"version"' in code and "v10.5.3" in code)
 
     # ---- Test 14: Rediseño Telegram v10.4.2 ----
     print("\n🔍 Rediseño Telegram v10.4.2")
@@ -262,14 +262,17 @@ def run_tests():
     test("_get_portfolio_and_positions definida", "def _get_portfolio_and_positions(" in code)
     test("cmd_info definida", "def cmd_info(" in code)
     test("cmd_postmortem definida", "def cmd_postmortem(" in code)
+    test("cmd_accuracy definida", "def cmd_accuracy(" in code)
     test("/info en COMMANDS", '"info": cmd_info' in code)
     test("/postmortem en COMMANDS", '"postmortem": cmd_postmortem' in code)
+    test("/accuracy en COMMANDS", '"accuracy": cmd_accuracy' in code)
     test("/info en MENU_KEYBOARD", '"callback_data": "info"' in code)
     test("/postmortem en MENU_KEYBOARD", '"callback_data": "postmortem"' in code)
+    test("/accuracy en MENU_KEYBOARD", '"callback_data": "accuracy"' in code)
     test("Bug #13: send_telegram_paged en cmd_log", "send_telegram_paged" in code and "cmd_log" in code)
     test("Bug #13: send_telegram_paged en cmd_cartera", "send_telegram_paged" in code)
     test("_parse_position_label usa centavos (¢)", "¢" in code)
-    test("cmd_estado versión correcta", "Bot v10.5.2" in code or "v10.5.2" in code)
+    test("cmd_estado versión correcta", "Bot v10.5.3" in code or "v10.5.3" in code)
 
     # ---- Test 14c: Zonas horarias reales v10.4.5 ----
     print("\n🔍 Zonas horarias reales")
@@ -298,6 +301,7 @@ def run_tests():
          "matching_dates" in code and "sig_date_iso not in matching_dates" in code)
     test("Fix traders: línea Scan/Análisis sin separador huérfano",
          "timing_bits = []" in code and "' | '.join(timing_bits)" in code)
+    test("cmd_estado muestra Intra-SL", "🛡 Intra-SL:" in code or "Intra-SL:" in code)
 
     print("\n🔍 Bloqueo London")
     test("main filtra ciudades bloqueadas", "blocked_city_skip" in code and "Ciudades bloqueadas operativamente" in code)
@@ -306,14 +310,14 @@ def run_tests():
     # ---- Test 15: Integridad de COMMANDS (todos los botones siguen presentes) ----
     print("\n🔍 Integridad de COMMANDS")
     for cmd in ["estado", "cartera", "ordenes", "log", "logfull",
-                "forzar", "modo", "traders", "rendimiento", "info", "postmortem",
+                "forzar", "modo", "traders", "rendimiento", "info", "postmortem", "accuracy",
                 "confirmar_real", "confirmar_dry", "cancelar_modo"]:
         test(f'COMMANDS tiene "{cmd}"', f'"{cmd}"' in code)
 
     # ---- Test 16: send_telegram_paged en todos los comandos de respuesta larga ----
     print("\n🔍 send_telegram_paged en comandos relevantes")
     for cmd_name in ["cmd_cartera", "cmd_ordenes", "cmd_log", "cmd_logfull",
-                     "cmd_traders", "cmd_rendimiento", "cmd_info", "cmd_postmortem"]:
+                     "cmd_traders", "cmd_rendimiento", "cmd_info", "cmd_postmortem", "cmd_accuracy"]:
         # Buscar la función y verificar que usa send_telegram_paged
         fn_match = re.search(
             rf"def {cmd_name}\(.*?(?=\ndef |\Z)", code, re.DOTALL
@@ -451,7 +455,7 @@ def run_tests():
             "json": __import__("json"),
             "datetime": datetime,
             "send_telegram_paged": lambda text, with_menu=False, page_size=3800: info_messages.append(text),
-            "BOT_VERSION": "v10.5.2",
+            "BOT_VERSION": "v10.5.3",
             "DRY_RUN": False,
             "BANKROLL": 25.0,
             "MIN_EDGE": 7.0,
@@ -469,7 +473,7 @@ def run_tests():
         exec(get_function_source(module_ast, code_lines, "cmd_info"), info_ns)
         info_ns["cmd_info"]()
         info_msg = info_messages[-1] if info_messages else ""
-        test("info: versión visible correcta", "BOT POLYMARKET v10.5.2" in info_msg, info_msg[:120])
+        test("info: versión visible correcta", "BOT POLYMARKET v10.5.3" in info_msg, info_msg[:120])
         test("info: usa cycle_summary como fallback de último", "Último: 2026-03-28 16:00 UTC" in info_msg, info_msg[:220])
 
         pm_messages = []
@@ -645,7 +649,7 @@ def run_tests():
 
         buy_entry = {
             "timestamp": "2026-03-28T08:00:00+00:00",
-            "bot_version": "v10.5.2",
+            "bot_version": "v10.5.3",
             "city": "Dallas",
             "side": "YES",
             "date": "2026-03-28",
@@ -669,7 +673,7 @@ def run_tests():
 
         sell_pending = {
             "timestamp": "2026-03-28T16:00:00+00:00",
-            "bot_version": "v10.5.2",
+            "bot_version": "v10.5.3",
             "city": "Dallas",
             "side": "Yes",
             "date": "2026-03-28",
@@ -1025,8 +1029,8 @@ def run_tests():
     except Exception as e:
         test("_get_recent_closed_trades funcional ejecuta", False, str(e))
 
-    # ---- Test v10.5.2: Intra-cycle SL monitor ----
-    print("\n🔍 v10.5.2: Intra-cycle SL monitor")
+    # ---- Test v10.5.1: Intra-cycle SL monitor ----
+    print("\n🔍 v10.5.1: Intra-cycle SL monitor")
     test("INTRA_SL_INTERVAL definido", "INTRA_SL_INTERVAL" in code)
     test("INTRA_SL_INTERVAL default 90", '"INTRA_SL_INTERVAL", "90"' in code or "INTRA_SL_INTERVAL, 90" in code)
     test("sell_lock definido", "sell_lock" in code and "threading.Lock()" in code)
@@ -1046,8 +1050,10 @@ def run_tests():
     test("cmd_accuracy definida", "def cmd_accuracy(" in code)
     test("city_accuracy_flagged en alerts default", '"city_accuracy_flagged"' in code)
     test("/accuracy en COMMANDS", '"accuracy": cmd_accuracy' in code)
+    test("/accuracy en MENU_KEYBOARD", '"callback_data": "accuracy"' in code)
+    test("cmd_accuracy vuelve con menú", 'send_telegram("Sin datos de accuracy todavía.", with_menu=True)' in code and 'send_telegram_paged("\\n".join(lines), with_menu=True)' in code)
     test("Win rate en rendimiento", "WR:" in code)
-    test("Version v10.5.2", "v10.5.2" in code)
+    test("Version v10.5.3", "v10.5.3" in code)
 
     # ---- Resultado ----
     print(f"\n{'='*50}")
