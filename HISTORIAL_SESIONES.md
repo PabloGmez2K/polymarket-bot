@@ -169,6 +169,22 @@ Comandos útiles:
 
 ---
 
+## Sesión 20 — 29 marzo 2026
+
+**Herramienta:** Claude Code (Opus)
+**Versiones:** v10.5.0 → v10.5.1 → v10.5.2
+**Tests:** 216 → 226 → 234
+
+**Cambios realizados:**
+- v10.5.1: Completados tests del intra-cycle SL/TP monitor (código ya existía de sesión previa con Codex). Thread daemon cada 90min revisa posiciones, ejecuta SL/TP entre ciclos. `sell_lock` para evitar conflicto con ciclo principal.
+- v10.5.2: City accuracy tracker — `get_city_accuracy()` analiza win rate por ciudad desde postmortem.json. Alerta Telegram si una ciudad baja de 25% win rate con 3+ trades. Nuevo comando `/accuracy`. Win rate visible en `/rendimiento`.
+- Investigación WU API: API muerta desde 2019 (IBM compró). IBM Trial no viable (Pablo no pudo verificar identidad). Opciones documentadas: PWS key (~$30-50 estación), o seguir con accuracy tracker como proxy.
+- CONTEXTO.md actualizado a v10.5.2 con estado real de posiciones (corregido desde auditoría SSH sesión 19).
+
+**Lección operativa:** Esta sesión consumió demasiado uso de Opus. Tareas delegables a Codex: investigación WU (web search + resumen), escritura de tests de comportamiento, actualizaciones de docs. Opus debe reservarse para diseño de arquitectura y coding de lógica crítica.
+
+---
+
 ## Sesiones aún no reconstruidas con certeza
 
 Las sesiones 4 a 8, y las 10 a 18, no aparecen nombradas explícitamente en los commits que tenemos a mano. El trabajo de esas sesiones sí existe, pero hoy está representado como:

@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 28 de marzo de 2026 (Sesión 19 — v10.4.8)
-**Próxima sesión:** Análisis / Coding según necesidad
+**Última actualización:** 29 de marzo de 2026 (Sesión 20 — v10.5.2)
+**Próxima sesión:** Codex — actualizar CONTEXTO.md financiero + posiciones, observar comportamiento v10.5.x
 
 ---
 
@@ -17,21 +17,19 @@ Un bot automatizado de arbitraje meteorológico en Polymarket. El bot detecta me
 
 ---
 
-## Estado financiero (fin sesión 19, ~18:00 UTC 28 mar)
+## Estado financiero (fin sesión 20 — pendiente reconciliar)
 
-- **Posiciones activas:** Dallas YES, Chicago YES, Miami YES (~$6.37 valor actual)
-- **Cash disponible:** ~$25.65
-- **Portfolio total:** ~$32.03
-- **All-time P&L:** ~-$0.49 (estimado, referencia: dashboard Polymarket)
+- **Posiciones activas (auditoría SSH sesión 19):** Chicago YES, London NO, Wellington NO, Singapore NO
+- **NOTA:** Dallas y Miami fueron vendidas SL en ciclo v10.4.6. CONTEXTO anterior era incorrecto.
+- **Cash / Portfolio / P&L:** pendiente verificar con `/info` + `/cartera` al inicio de próxima sesión
 
-Para estado exacto: usar `/info` + `/cartera` + `/rendimiento` en Telegram al inicio de cada sesión.
+Para estado exacto: usar `/info` + `/cartera` + `/rendimiento` + `/accuracy` en Telegram.
 
-**Historial de trades completo (33 entradas) en Railway Volume `/app/data/performance.json`.**
-Fusionado en sesión 19: backup local (ciclos 1-9) + Volume (ciclos 10-11).
+**Historial de trades: 38+ entradas en Railway Volume `/app/data/performance.json`.**
 
 ---
 
-## Qué hace el bot v10.4.8 (paso a paso)
+## Qué hace el bot v10.5.2 (paso a paso)
 
 Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
@@ -65,6 +63,12 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Refinamiento Telegram (v10.4.8):** `/traders` alinea la cartera por `ciudad + lado + fecha exacta`, `/postmortem` deja de mostrar etiquetas legacy tipo `? YES`, y `/detalle` enseña el último ciclo completo del log en vez de cortar a 40 líneas.
 
+**Sigma widening + exact edge filter + smart alerts (v10.5.0):** Recalibración tras -$8.57 en 17 trades cerrados. Sigma ampliada (Día 0: 2.0 → Día 6+: 4.5), filtro MIN_EDGE_EXACT 15% para apuestas exactas, alertas de drawdown/scaling/win rate.
+
+**Intra-cycle SL/TP monitor (v10.5.1):** Thread daemon cada 90 minutos revisa posiciones y ejecuta SL/TP sin esperar al ciclo de 8h. Configurable con `INTRA_SL_INTERVAL` (0=desactivar). Lock para evitar conflicto con ciclo principal.
+
+**City accuracy tracker (v10.5.2):** Calcula win rate por ciudad desde postmortem. Alerta por Telegram si una ciudad baja de 25% win rate con 3+ trades. Nuevo comando `/accuracy`. Win rate visible en `/rendimiento`.
+
 ---
 
 ## Estado actual del código
@@ -72,13 +76,13 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción:** Railway — Online, EU West Amsterdam, MODO REAL, DRY_RUN=false
-**Versión activa:** v10.4.8
+**Versión activa:** v10.5.2
 
-### Archivos del proyecto (tras limpieza sesión 19):
+### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.4.8 |
-| `verify_before_deploy.py` | v7 — 182 tests de comportamiento |
+| `bot.py` | Script principal v10.5.2 |
+| `verify_before_deploy.py` | v9 — 234 tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |
@@ -93,7 +97,7 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 ### Datos persistentes (Railway Volume `/app/data`):
 | Archivo | Función |
 |---------|---------|
-| `performance.json` | 33 trades (BUY/SELL/LOSS_TOTAL desde 25 mar) |
+| `performance.json` | 38+ trades (BUY/SELL/LOSS_TOTAL desde 25 mar) |
 | `postmortem.json` | Postmortems estructurados de apertura/cierre por mercado |
 | `alerts_state.json` | Estado persistente de alertas para evitar avisos duplicados |
 | `signals.json` | Señales de traders activas usadas por el bot en producción |
@@ -114,33 +118,38 @@ MIN_BET="1.00"
 DATA_DIR="/app/data"
 ```
 
-### Configuración en código (defaults bot.py v10.4.8):
+### Configuración en código (defaults bot.py v10.5.2):
 ```python
 MIN_EDGE = 7.0%
+MIN_EDGE_EXACT = 15.0%          # v10.5.0: filtro más estricto para apuestas exactas
 STOP_LOSS_PCT = -25.0%
 TAKE_PROFIT_PCT = +40.0%
 MAX_EXPOSURE_PCT = 40%
 MIN_BET = $1.00
 BLOCKED_CITIES = ["London"]
-Sigma: Día 0: 1.2 | Día 1: 1.5 | Día 2: 2.0 | Día 3: 2.5 | Día 4-5: 3.0
+INTRA_SL_INTERVAL = 90          # v10.5.1: minutos entre checks intra-ciclo (0=desactivar)
+CITY_MIN_TRADES_FOR_BLOCK = 3   # v10.5.2: mínimo trades para evaluar accuracy
+CITY_BLOCK_WIN_RATE = 25.0%     # v10.5.2: umbral de alerta
+Sigma: Día 0: 2.0 | Día 1: 2.5 | Día 2: 3.0 | Día 3: 3.5 | Día 4-5: 4.0 | Día 6+: 4.5
 Schedule: 08:00, 16:00, 23:00 UTC
 ```
 
 ---
 
-## Telegram — Comandos disponibles (v10.4.8)
+## Telegram — Comandos disponibles (v10.5.2)
 
 | Comando | Qué muestra |
 |---------|-------------|
-| `/estado` | Versión, modo, bankroll, SL/TP, próximo ciclo, último ciclo |
+| `/estado` | Versión, modo, bankroll, SL/TP, intra-SL interval, próximo ciclo, último ciclo |
 | `/cartera` | Cash, posiciones vivas (ciudad+temp+fecha, precios en ¢), resueltas, muertas |
 | `/log` | Resumen del último ciclo desde cycle_summary.json |
 | `/detalle` | Último ciclo completo del `decisions.log`, paginado y sin corte fijo de 40 líneas |
-| `/rendimiento` | Portfolio real + historial trades (TP/SL/reeval, por ciudad) |
+| `/rendimiento` | Portfolio real + historial trades (TP/SL/reeval, por ciudad con win rate) |
 | `/ordenes` | Órdenes GTC pendientes con etiquetas legibles |
 | `/traders` | Señales activas + coincidencias filtradas por ciudad, lado y fecha exacta del mercado |
 | `/info` | Bloque resumen completo para pegar en Claude/ChatGPT |
-| `/postmortem` | Resumen rápido de abiertas/cierres desde `postmortem.json`, con fallback legible para históricos legacy |
+| `/postmortem` | Resumen rápido de abiertas/cierres desde `postmortem.json` |
+| `/accuracy` | Win rate por ciudad desde postmortem, con iconos de bloqueada/flaggeada |
 | `/forzar` | Ejecuta ciclo inmediatamente |
 | `/modo` | Cambia DRY RUN ↔ REAL |
 
@@ -165,15 +174,16 @@ Schedule: 08:00, 16:00, 23:00 UTC
 - **#14** ✅ Precio límite vs fill clarificado en Telegram
 
 ### Pendientes:
-- **Weather Underground vs Open-Meteo:** Polymarket resuelve con WU, no Open-Meteo. Ha causado pérdidas en London. London queda bloqueada en código desde `v10.4.7` hasta nueva orden.
+- **Weather Underground vs Open-Meteo:** Polymarket resuelve con WU, no Open-Meteo. Ha causado pérdidas en London. London bloqueada en código desde `v10.4.7`. IBM Trial no accesible (problema de verificación). Desde `v10.5.2`, el bot detecta ciudades con baja accuracy por win rate y alerta por Telegram.
 
 ---
 
 ## Versionado — sistema establecido
 
 - **v10.4.X** = misma lógica de trading, mejoras UI/Telegram/observabilidad
-- **v10.5** = cambio en cómo el bot decide comprar/vender (lógica de trading)
-- Ciclos y datos son continuos y acumulativos entre versiones 10.4.X
+- **v10.5.0** = recalibración de lógica de entrada (sigma, exact filter)
+- **v10.5.X** (X>0) = mejoras operativas sin cambiar lógica de entrada
+- Ciclos y datos son continuos y acumulativos entre versiones
 - Cada registro incluye la versión del bot que lo generó
 
 ### Historial de versiones:
@@ -189,6 +199,9 @@ Schedule: 08:00, 16:00, 23:00 UTC
 | v10.4.6 | 28 mar | backfill automático de `postmortem.json` + `alerts_state.json` + alertas Telegram de observabilidad |
 | v10.4.7 | 28 mar | bloqueo operativo de London en código + tests para evitar regresión |
 | v10.4.8 | 28 mar | refinamiento Telegram: `traders` por fecha exacta, `postmortem` legacy legible y `detalle` sin corte fijo |
+| v10.5.0 | 29 mar | sigma widening (2.0→4.5), MIN_EDGE_EXACT 15%, smart alerts (drawdown/scaling/win rate), 216 tests |
+| v10.5.1 | 29 mar | intra-cycle SL/TP monitor cada 90min, threading.Lock, 226 tests |
+| v10.5.2 | 29 mar | city accuracy tracker, `/accuracy`, win rate en `/rendimiento`, alertas por ciudad, 234 tests |
 
 ---
 
@@ -256,6 +269,30 @@ Usar esta plantilla al cerrar cada sesión relevante:
 - Si una herramienta corrige o valida trabajo de otra, dejarlo explícito en `Problemas detectados en trabajo previo` y `Correcciones aplicadas en esta sesión`.
 - Si hay cambios en Railway, Volume, Telegram o datos históricos, anotarlo también en el bloque `Estado final`.
 - Antes de cada push relevante, actualizar `CONTEXTO.md` y `HISTORIAL_SESIONES.md` si la sesión cambió estado, arquitectura, datos persistentes, comandos Telegram, workflow o trazabilidad multi-agente.
+
+### Sesión 20 — Registro multi-herramienta
+
+- **Fecha:** 2026-03-29
+- **Versión activa al cerrar:** v10.5.2
+- **Objetivo de la sesión:** Completar v10.5.1 (intra-cycle SL) + implementar city accuracy tracker (v10.5.2) + investigar WU API
+
+- **Claude Code (Opus):**
+  - Completó tests de v10.5.1 (intra-cycle SL monitor) — código ya existía, faltaban tests → 226/226
+  - Investigó Weather Underground API: API muerta desde 2019, IBM Trial no viable para Pablo (verificación fallida), opciones: PWS key o accuracy tracker
+  - Diseñó e implementó v10.5.2: city accuracy tracker con `get_city_accuracy()`, alertas automáticas por ciudad, comando `/accuracy`, win rate en `/rendimiento` → 234/234 tests
+  - Actualizó CONTEXTO.md y HISTORIAL_SESIONES.md
+
+- **Codex:** No usado en esta sesión.
+- **ChatGPT / Claude.ai:** No usado en esta sesión.
+
+- **Problemas detectados en trabajo previo:**
+  - CONTEXTO.md seguía diciendo v10.4.8, posiciones incorrectas (Dallas/Miami como activas cuando ya habían sido vendidas SL)
+
+- **Lección de gestión de uso:**
+  - Sesión consumió mucho uso de Opus. Tareas como investigación WU, escritura de tests, y actualizaciones de docs podrían haberse delegado a Codex para preservar el budget de Opus para decisiones de diseño y coding crítico.
+
+- **Estado final:**
+  v10.5.2, 234/234 tests, deploy hecho, v10.5.0+v10.5.1+v10.5.2 en producción, CONTEXTO.md actualizado
 
 ### Sesión 19 — Registro multi-herramienta
 
@@ -343,9 +380,14 @@ Con ~15 trades cerrados no hay suficiente evidencia estadística para cambiar la
 - London bloqueada operativamente en código ✅
 - Refinamiento Telegram tras revisión manual de botones (`/traders`, `/postmortem`, `/detalle`) ✅
 
-### Fase 2 — Cuando haya 30+ trades limpios:
-- Monitor ligero intra-ciclo: revisar posiciones cada 2-4h
-- La alerta Telegram de `v10.4.6` avisará automáticamente cuando la muestra esté lista
+### Fase 2 — ✅ Implementada (sesión 20):
+- Monitor intra-ciclo SL/TP cada 90min (v10.5.1) ✅
+- City accuracy tracker con alertas automáticas (v10.5.2) ✅
+- Sigma recalibrada tras análisis de 17 trades cerrados (v10.5.0) ✅
+- Smart alerts: drawdown, scaling readiness, win rate (v10.5.0) ✅
+
+### Fase 2.5 — Próxima:
+- Resolver acceso a Weather Underground API (IBM Trial falló, buscar alternativas)
 - Ampliar `postmortem.json` con análisis más rico al resolver cada mercado
 
 ### Fase 3 — Cuando escale:
@@ -379,7 +421,7 @@ railway ssh "ls /app/data/"         # ver archivos del volume
 
 ### Workflow de deploy:
 ```bash
-python verify_before_deploy.py   # 182/182 deben pasar
+python verify_before_deploy.py   # 234/234 deben pasar
 # actualizar CONTEXTO.md si cambió el estado actual
 # actualizar HISTORIAL_SESIONES.md si hubo una sesión/hito nuevo
 git add .
@@ -393,9 +435,9 @@ git push
 
 ## Ideas pendientes (no implementar hasta validar)
 
-1. **Monitor ligero intra-ciclo:** cada 2-4h revisar posiciones vivas
-2. **Weather Underground:** sustituir o complementar Open-Meteo
-3. **Dashboard web:** Fase 3 cuando haya 30+ trades
+1. ~~**Monitor ligero intra-ciclo:**~~ ✅ Implementado en v10.5.1
+2. **Weather Underground:** IBM Trial no accesible. Opciones: PWS key ($30-50 estación), scraping (frágil), o seguir con accuracy tracker
+3. **Dashboard web:** Fase 3 cuando haya 50+ trades
 4. **Enriquecer `/postmortem`:** filtros por ciudad/estado/últimos N cierres
 5. **Ampliar `postmortem.json`** con más campos de forecast y comparación resolución vs decisión
 6. **Aumentar frecuencia ciclos:** [8,16,23] → [6,10,14,18,22]
