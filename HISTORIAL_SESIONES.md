@@ -400,6 +400,25 @@ Investigación completa de trades, commits y lógica de trading desde v10.3 hast
 
 **Pendiente:** Pablo investigando IBM Trial para integrar Weather Underground como fuente de datos. El upgrade real es cambiar la fuente, no ajustar la confianza del modelo.
 
+### Sesión 30 (continuación) — v10.6.1
+
+**Verificación completa del Dashboard** (Claude Code — Opus):
+
+- Aritmética de "Balance por tipo de cierre": verificada correcta (TP $+9.03/4, SL $-14.21/10, etc.)
+- Scoreboard: conteo de puntos verificado evento por evento contra agent_events.jsonl — correcto
+- Posible issue: "Ganadas por resolución = 0" cuando Wellington ganó por resolución — a verificar en producción
+- Bug encontrado: `get_logic_series_stats()` no ordenaba `closed` por `closed_at` antes de tomar ventana de drawdown
+- Redundancia: unlock "Confiar en métricas de serie" era idéntico a "Activar win rate y drawdown"
+
+**Cambios realizados:**
+- Fix drawdown: ordena por `closed_at` antes de `[-DRAWDOWN_WINDOW:]`
+- Alerta bankroll bajo: Telegram + dashboard alertan cuando cartera cae bajo $5
+- Unlock redundante eliminado (de 6 a 5 items)
+- Scoreboard: 3 eventos nuevos de sesión 30
+- 338/338 tests
+
+**Nota de proceso:** Se detectó que `replace_all=true` en actualizaciones de CONTEXTO.md modificaba entradas históricas (ej: "serie v10.5" en descripción de lo que hizo Codex en v10.5.6 se cambió a "serie v10.6"). Corregido. Regla: nunca usar replace_all para versiones en docs — editar solo las líneas específicas.
+
 ---
 
 ## Sesiones aún no reconstruidas con certeza

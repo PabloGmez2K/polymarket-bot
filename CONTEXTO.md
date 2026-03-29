@@ -88,13 +88,13 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción:** Railway — Online, EU West Amsterdam, MODO REAL, DRY_RUN=false
-**Versión activa:** v10.6.0
+**Versión activa:** v10.6.1
 
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.6.0 |
-| `verify_before_deploy.py` | v10 — 335 tests de comportamiento |
+| `bot.py` | Script principal v10.6.1 |
+| `verify_before_deploy.py` | v10 — 338 tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |
@@ -255,6 +255,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 | v10.5.11 | 29 mar | fix drawdown checklist + sync agent_events Railway, 337 tests |
 | v10.5.12 | 29 mar | bloqueo 10 ciudades 0% WR + fix posiciones fantasma, 338 tests |
 | **v10.6.0** | **29 mar** | **revert sigma a v10.3, intra-cycle off, MIN_EDGE_EXACT eliminado. Mantiene toda observabilidad. 335 tests** |
+| v10.6.1 | 29 mar | fix drawdown sort, alerta bankroll bajo ($5), unlock redundante eliminado, scoreboard sesión 30. 338 tests |
 
 ---
 
@@ -387,7 +388,7 @@ Usar esta plantilla al cerrar cada sesión relevante:
   - Implementó `_load_cycle_counts()` para cargar `total` y `serie lógica` desde `cycles_history.jsonl`
   - Mantuvo `cycle_count` como histórico total para no romper continuidad operativa
   - Añadió `cycle_count_series`, `logic_series` y `logic_cycle_number`
-  - Actualizó `/estado` y `/info` para mostrar `total | serie v10.6`
+  - Actualizó `/estado` y `/info` para mostrar `total | serie v10.5`
   - Amplió `verify_before_deploy.py` con tests estructurales y funcionales del recuento mixto `v10.4`/`v10.5`
   - Movió los temporales del verificador al directorio temporal del sistema para no ensuciar el repo
 
@@ -433,7 +434,7 @@ Usar esta plantilla al cerrar cada sesión relevante:
 
 - **Codex:**
   - Detectó que el checklist del dashboard mezclaba `trades limpios` históricos con métricas de la serie `v10.5`, lo que hacía menos fiable la decisión de subir bankroll
-  - Cambió el checklist para separar explícitamente `histórico` vs `serie v10.6`
+  - Cambió el checklist para separar explícitamente `histórico` vs `serie v10.5`
   - Añadió `get_logic_series_clean_closed_trade_stats()` para medir cierres limpios de la serie lógica actual
   - Refinó el scoreboard de agentes para mostrar estados `proposed / implemented / validated`
   - Hizo que los ciclos legacy se muestren como `legacy v10.X` en vez de `#?`
