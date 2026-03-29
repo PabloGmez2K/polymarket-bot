@@ -1,6 +1,6 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 29 de marzo de 2026 (Sesión 29 — v10.5.11)
+**Última actualización:** 29 de marzo de 2026 (Sesión 29 — v10.5.12)
 **Próxima sesión:** Analizar patrón dominante de pérdidas (SL vs LOSS_TOTAL vs reeval) con datos reales de Railway
 
 ---
@@ -55,6 +55,8 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Contador dual de ciclos (v10.5.4):** Mantiene `cycle_count` como histórico total y añade `cycle_count_series` para la serie lógica actual (`LOGIC_SERIES`). Cada ciclo nuevo guarda `logic_series` y `logic_cycle_number`. `/estado` y `/info` muestran ambos para comparar estrategia nueva sin perder continuidad operativa.
 
+**Bloqueo ciudades perdedoras + fix posiciones fantasma (v10.5.12):** `BLOCKED_CITIES` ampliado a 10 ciudades (London, Miami, Seattle, Paris, Tel Aviv, Wellington, Toronto, Madrid, Singapore, Ankara) tras análisis de accuracy real: todas con 0% WR y pérdidas confirmadas en producción. Solo quedan activas Chicago, Atlanta, Buenos Aires y Dallas. Fix de observabilidad: posiciones con `currentValue < 0.01` ahora se registran también como `LOSS_TOTAL` en vez de ignorarse silenciosamente; antes quedaban en postmortem como "open" para siempre ocultando la pérdida real.
+
 **Fixes dashboard + scorecard (v10.5.11):** Corrección de bug en el checklist del dashboard: el check `Drawdown últimos N cierres` ahora muestra `Esperando muestra` hasta tener `DRAWDOWN_WINDOW` cierres completos (antes mostraba `OK` con solo 1-4 trades, porque `recent_window_size < DRAWDOWN_WINDOW` evaluaba siempre como verdadero). Nuevo helper `_sync_agent_events_seed()` que fusiona la semilla local de `agent_events.jsonl` con el Volume en cada arranque, añadiendo solo los eventos nuevos que no estén ya persistidos; resuelve el problema de que las sesiones 27-28 del scoreboard no aparecían en Railway porque `_seed_data_file()` no sobrescribía un archivo ya existente.
 
 **Dashboard web + scorecard de agentes (v10.5.10):** Levanta un panel HTML separado de Telegram en el mismo servicio Railway, accesible por navegador en `PORT`. Usa modo oscuro, separa checklist histórico vs serie `v10.5`, muestra ciclos legacy con etiquetas legibles, enseña el scoreboard por stages (`proposed / implemented / validated`) a partir de `agent_events.jsonl`, evita mostrar métricas de serie como `0.0%` o `+$0.00` cuando todavía no hay cierres, distingue visualmente entre `fallo real` y `esperando muestra` en el checklist y añade cuatro bloques nuevos: `Progreso`, `Trofeos`, `Desbloqueos` y `Balance por tipo de cierre / liquidación`, para saber no solo qué evidencia falta sino también si el bot está cortando ganancias demasiado pronto, acumulando `stop_loss`, dejando `pending_exit` sin reconciliar o generando valor pendiente de canjear.
@@ -89,8 +91,8 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.5.11 |
-| `verify_before_deploy.py` | v10 — 337 tests de comportamiento |
+| `bot.py` | Script principal v10.5.12 |
+| `verify_before_deploy.py` | v10 — 338 tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |
@@ -138,7 +140,7 @@ STOP_LOSS_PCT = -25.0%
 TAKE_PROFIT_PCT = +40.0%
 MAX_EXPOSURE_PCT = 40%
 MIN_BET = $1.00
-BLOCKED_CITIES = ["London"]
+BLOCKED_CITIES = ["London","Miami","Seattle","Paris","Tel Aviv","Wellington","Toronto","Madrid","Singapore","Ankara"]  # v10.5.12
 BANKROLL_LEVELS = [25, 35, 50, 75, 100]  # v10.5.5+: niveles gamificados del dashboard
 DASHBOARD_PORT = $PORT                    # v10.5.5+: panel web separado de Telegram
 DASHBOARD_REFRESH_SEC = 60               # auto-refresh del dashboard

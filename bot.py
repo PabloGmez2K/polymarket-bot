@@ -101,7 +101,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.5.11"
+BOT_VERSION = "v10.5.12"
 LOGIC_SERIES = "10.5"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -138,7 +138,13 @@ PROMOTION_CITY_COVERAGE_TARGET = int(os.getenv("PROMOTION_CITY_COVERAGE_TARGET",
 
 BLOCKED_CITIES = {
     city.strip().lower()
-    for city in os.getenv("BLOCKED_CITIES", "London").split(",")
+    for city in os.getenv(
+        "BLOCKED_CITIES",
+        # Ciudades bloqueadas por default (WU vs Open-Meteo discrepancia confirmada con datos reales).
+        # Chicago, Atlanta, Buenos Aires, Dallas: siguen activas (accuracy positiva o neutra con muestra pequeña).
+        # El resto: 0% WR con 1-2+ trades reales → no entrar hasta resolver fuente de datos.
+        "London,Miami,Seattle,Paris,Tel Aviv,Wellington,Toronto,Madrid,Singapore,Ankara"
+    ).split(",")
     if city.strip()
 }
 
@@ -4293,7 +4299,11 @@ def manage_positions(client, dl):
             continue
         current_value = float(p.get("currentValue", 0))
         if current_value < 0.01:
-            continue  # Ya resuelta a $0, nada que hacer
+            # v10.5.12: Registrar pérdida aunque la posición ya no tenga valor vendible.
+            # Antes estas posiciones se ignoraban con "continue" y el postmortem quedaba
+            # en "open" para siempre, ocultando la pérdida real del balance.
+            _mark_micro_as_loss_total(p, dl)
+            continue
 
         # v10.3 Fix Bug #8: Posiciones micro (<$0.10) no se pueden vender
         # Polymarket rechaza órdenes tan pequeñas. En vez de intentar ciclo

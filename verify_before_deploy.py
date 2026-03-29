@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-verify_before_deploy.py v10 — Tests de comportamiento para bot.py v10.5.11
+verify_before_deploy.py v10 — Tests de comportamiento para bot.py v10.5.12
 
 Ejecutar ANTES de cada deploy:
   python verify_before_deploy.py
@@ -252,7 +252,7 @@ def run_tests():
     test("MAX_EXPOSURE_PCT es 0.40", '"0.40"' in code)
     test("MIN_EDGE default es 7.0", '"7.0"' in code)
     test("SCHEDULE_HOURS_UTC configurable", 'SCHEDULE_HOURS_UTC' in code)
-    test("BLOCKED_CITIES default incluye London", 'os.getenv("BLOCKED_CITIES", "London")' in code)
+    test("BLOCKED_CITIES default incluye ciudades perdedoras", '"London,Miami,Seattle,Paris,Tel Aviv,Wellington,Toronto,Madrid,Singapore,Ankara"' in code)
     test("is_city_blocked definida", "def is_city_blocked(" in code)
     test("parse_market_date_iso definida", "def parse_market_date_iso(" in code)
     test("format_postmortem_label definida", "def format_postmortem_label(" in code)
@@ -327,7 +327,7 @@ def run_tests():
     test("CYCLES_HISTORY_FILE definido", "CYCLES_HISTORY_FILE" in code)
     test("cycles_history.jsonl append-only", "cycles_history.jsonl" in code)
     test("cycle_summary se guarda en main()", "cycle_data" in code and "CYCLE_SUMMARY_FILE" in code)
-    test("cycle_data incluye version v10.5.11", '"version"' in code and "v10.5.11" in code)
+    test("cycle_data incluye version v10.5.12", '"version"' in code and "v10.5.12" in code)
     test("cycle_data incluye logic_series", '"logic_series": LOGIC_SERIES' in code)
     test("cycle_data incluye logic_cycle_number", '"logic_cycle_number"' in code)
 
@@ -348,7 +348,7 @@ def run_tests():
     test("Bug #13: send_telegram_paged en cmd_log", "send_telegram_paged" in code and "cmd_log" in code)
     test("Bug #13: send_telegram_paged en cmd_cartera", "send_telegram_paged" in code)
     test("_parse_position_label usa centavos (¢)", "¢" in code)
-    test("cmd_estado versión correcta", "Bot v10.5.11" in code or "v10.5.11" in code)
+    test("cmd_estado versión correcta", "Bot v10.5.12" in code or "v10.5.12" in code)
 
     # ---- Test 14c: Zonas horarias reales v10.4.5 ----
     print("\n🔍 Zonas horarias reales")
@@ -437,7 +437,7 @@ def run_tests():
         exec(get_function_source(module_ast, code_lines, "parse_market_date_iso"), ns)
         exec(get_function_source(module_ast, code_lines, "format_market_date_short"), ns)
         exec(get_function_source(module_ast, code_lines, "format_postmortem_label"), ns)
-        helper_ns = {"BLOCKED_CITIES": {"london"}}
+        helper_ns = {"BLOCKED_CITIES": {"london", "paris", "miami", "seattle", "tel aviv", "wellington", "toronto", "madrid", "singapore", "ankara"}}
         exec(get_function_source(module_ast, code_lines, "is_city_blocked"), helper_ns)
 
         label_paris = ns["_parse_position_label"](
@@ -454,8 +454,10 @@ def run_tests():
 
         test("blocked city helper: London bloqueada",
              helper_ns["is_city_blocked"]("London") and helper_ns["is_city_blocked"]("london"))
-        test("blocked city helper: Paris permitida",
-             not helper_ns["is_city_blocked"]("Paris"))
+        test("blocked city helper: Paris bloqueada",
+             helper_ns["is_city_blocked"]("Paris"))
+        test("blocked city helper: Chicago permitida",
+             not helper_ns["is_city_blocked"]("Chicago"))
 
         fd, tmp_cycles = tempfile.mkstemp(
             dir=tempfile.gettempdir(),
@@ -808,8 +810,8 @@ def run_tests():
             "datetime": datetime,
             "timezone": timezone,
             "_load_cycle_counts": lambda: (5, 1),
-            "load_cycle_summary_data": lambda: {"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.5.11"},
-            "load_cycle_history": lambda limit=None: [{"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.5.11", "timestamp_utc": "2026-03-29T11:08:00+00:00", "buys": [], "management": {"n_sold": 1}, "exposure_after": 2.94}],
+            "load_cycle_summary_data": lambda: {"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.5.12"},
+            "load_cycle_history": lambda limit=None: [{"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.5.12", "timestamp_utc": "2026-03-29T11:08:00+00:00", "buys": [], "management": {"n_sold": 1}, "exposure_after": 2.94}],
             "get_clean_closed_trade_stats": lambda: {"count": 18, "sell": 12, "loss_total": 6, "resolved_win": 0},
             "get_logic_series_clean_closed_trade_stats": lambda: {"count": 0, "sell": 0, "loss_total": 0, "resolved_win": 0},
             "get_validated_closed_postmortems": lambda: [],
@@ -829,7 +831,7 @@ def run_tests():
             "compute_agent_scorecard": lambda events: [],
             "build_agent_rivalry": lambda events: [],
             "_extract_logic_series": lambda value: "10.5" if "10.5" in str(value) else "10.4" if "10.4" in str(value) else None,
-            "BOT_VERSION": "v10.5.11",
+            "BOT_VERSION": "v10.5.12",
             "LOGIC_SERIES": "10.5",
             "DRY_RUN": False,
             "DASHBOARD_USER": "pablo",
@@ -938,7 +940,7 @@ def run_tests():
         os.close(fd)
         with open(tmp_cycle_summary, "w", encoding="utf-8") as f:
             json.dump({
-                "version": "v10.5.11",
+                "version": "v10.5.12",
                 "cycle_number": 12,
                 "timestamp_utc": "2026-03-28T16:00:33.073674+00:00",
                 "management": {"n_kept": 0, "n_sold": 1, "n_resolved": 0},
@@ -950,7 +952,7 @@ def run_tests():
             "json": __import__("json"),
             "datetime": datetime,
             "send_telegram_paged": lambda text, with_menu=False, page_size=3800: info_messages.append(text),
-            "BOT_VERSION": "v10.5.11",
+            "BOT_VERSION": "v10.5.12",
             "LOGIC_SERIES": "10.5",
             "_extract_logic_series": cycle_ns["_extract_logic_series"],
             "DRY_RUN": False,
@@ -970,7 +972,7 @@ def run_tests():
         exec(get_function_source(module_ast, code_lines, "cmd_info"), info_ns)
         info_ns["cmd_info"]()
         info_msg = info_messages[-1] if info_messages else ""
-        test("info: versión visible correcta", "BOT POLYMARKET v10.5.11" in info_msg, info_msg[:120])
+        test("info: versión visible correcta", "BOT POLYMARKET v10.5.12" in info_msg, info_msg[:120])
         test("info: usa cycle_summary como fallback de último", "Último: 2026-03-28 16:00 UTC" in info_msg, info_msg[:220])
         test("info: muestra doble contador", "Ciclos completados: 12 total | 3 serie v10.5" in info_msg, info_msg[:240])
         test("info: muestra ciclo total y de serie", "Ciclo total #12 | serie v10.5 #3" in info_msg, info_msg[:260])
@@ -1557,7 +1559,7 @@ def run_tests():
     test("/accuracy en MENU_KEYBOARD", '"callback_data": "accuracy"' in code)
     test("cmd_accuracy vuelve con menú", 'send_telegram("Sin datos de accuracy todavía.", with_menu=True)' in code and 'send_telegram_paged("\\n".join(lines), with_menu=True)' in code)
     test("Win rate en rendimiento", "WR:" in code)
-    test("Version v10.5.11", "v10.5.11" in code)
+    test("Version v10.5.12", "v10.5.12" in code)
 
     # ---- Resultado ----
     print(f"\n{'='*50}")
