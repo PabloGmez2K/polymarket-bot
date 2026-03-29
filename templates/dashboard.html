@@ -58,9 +58,9 @@
       </article>
 
       <article class="card stat-card">
-        <span class="stat-label">Trades limpios</span>
-        <strong class="stat-value">{{ dashboard.clean_stats.count }}</strong>
-        <span class="stat-sub">SELL {{ dashboard.clean_stats.sell }} · LOSS_TOTAL {{ dashboard.clean_stats.loss_total }} · WIN {{ dashboard.clean_stats.resolved_win }}</span>
+        <span class="stat-label">Trades limpios serie</span>
+        <strong class="stat-value">{{ dashboard.series_clean_stats.count }}</strong>
+        <span class="stat-sub">Histórico {{ dashboard.clean_stats.count }} · meta {{ dashboard.promotion.trade_target }}</span>
       </article>
     </section>
 
@@ -92,7 +92,7 @@
             <div class="check-status {{ 'good' if item.passed else 'bad' }}"></div>
             <div class="check-body">
               <strong>{{ item.label }}</strong>
-              <span>{{ item.value }}</span>
+              <span>{{ item.scope }} · {{ item.value }}</span>
             </div>
             <span class="check-tag">{{ 'OK' if item.passed else 'Pendiente' }}</span>
           </div>
@@ -193,7 +193,7 @@
               <tr>
                 <td>{{ cycle.timestamp_utc[:16] if cycle.timestamp_utc else '?' }}</td>
                 <td>#{{ cycle.cycle_number }}</td>
-                <td>#{{ cycle.logic_cycle_number if cycle.logic_cycle_number is not none else '?' }}</td>
+                <td>{{ cycle.series_display }}</td>
                 <td>{{ cycle.buys|length if cycle.buys else 0 }}</td>
                 <td>{{ cycle.management.n_sold if cycle.management else 0 }}</td>
                 <td>${{ '%.2f'|format(cycle.exposure_after) if cycle.exposure_after is not none else '0.00' }}</td>
@@ -246,8 +246,9 @@
                 <th>Agente</th>
                 <th>Puntos</th>
                 <th>Bugs</th>
-                <th>Fixes</th>
-                <th>Validadas</th>
+                <th>Prop.</th>
+                <th>Impl.</th>
+                <th>Val.</th>
                 <th>Correcciones</th>
               </tr>
             </thead>
@@ -257,7 +258,8 @@
                 <td>{{ row.agent }}</td>
                 <td><strong>{{ row.points }}</strong></td>
                 <td>{{ row.bugs_detected }}</td>
-                <td>{{ row.fixes }}</td>
+                <td>{{ row.proposed }}</td>
+                <td>{{ row.implemented }}</td>
                 <td>{{ row.validated }}</td>
                 <td>{{ row.corrections }}</td>
               </tr>
@@ -306,6 +308,7 @@
             <thead>
               <tr>
                 <th>Ciudad</th>
+                <th>Riesgo</th>
                 <th>Trades</th>
                 <th>WR</th>
                 <th>PnL</th>
@@ -315,6 +318,7 @@
               {% for city in dashboard.top_cities %}
               <tr>
                 <td>{{ city.city }}</td>
+                <td><span class="badge badge-{{ 'bad' if city.risk_level == 'critical' else 'warn' if city.risk_level == 'watch' else 'good' }}">{{ city.risk_label }}</span></td>
                 <td>{{ city.trades }}</td>
                 <td>{{ city.win_rate }}%</td>
                 <td class="{{ 'good' if city.pnl >= 0 else 'bad' }}">${{ '%+.2f'|format(city.pnl) }}</td>
@@ -343,7 +347,10 @@
               <strong>{{ event.agent }}</strong>
               <span>{{ event.title or event.type }}</span>
             </div>
-            <span class="badge badge-{{ 'good' if event.validated else 'muted' }}">+{{ event.points or 0 }}</span>
+            <div class="event-meta">
+              <span class="badge badge-{{ event.stage_badge }}">{{ event.stage_label }}</span>
+              <span class="badge badge-muted">+{{ event.points or 0 }}</span>
+            </div>
           </div>
           {% endfor %}
         </div>

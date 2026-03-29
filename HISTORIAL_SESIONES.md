@@ -41,6 +41,7 @@ Comandos útiles:
 | 2026-03-22 a 2026-03-23 | Inferida | Iteración v10-v10.2 | `d2ae676` `ce0684e` `931158e` `0ae32c9` `deb50b3` `3c408f3` `d01b4b9` | Exposición acumulativa, sigma calibrada, gestión activa, auditoría, bankroll real, performance tracker, cash balance y mejoras Telegram. |
 | 2026-03-24 | Inferida | Iteración v10.3 | `bef71e3` | Cinco bugs corregidos y `verify_before_deploy.py` consolidado. |
 | 2026-03-28 | Explícita | Sesión 19 | `a24fde2` `cd12121` `56aeb5a` `185f018` `374d6a8` `3c4b5f1` `19adfdd` `d382f47` `695f405` | v10.4 a v10.4.8: persistencia, rediseño Telegram, ciclos persistentes, DST robusto, trazabilidad multi-agente, tests funcionales, base de `postmortem.json`, alertas de observabilidad, bloqueo operativo de London y refinamiento final de botones Telegram. |
+| 2026-03-29 | Explícita | Sesión 24 | `—` | Refinamiento del dashboard: modo oscuro, checklist histórico/serie separado, scorecard por stages y ciclos legacy legibles. |
 
 ---
 
@@ -227,6 +228,23 @@ Comandos útiles:
 - ampliación de `verify_before_deploy.py` para cubrir backend, scorecard, checklist y assets del dashboard.
 
 **Resultado:** `v10.5.5`, 279/279 tests, dashboard listo para validación visual en navegador y nueva base para comparar utilidad real de Opus/Codex.
+
+## Sesión 24 — 29 marzo 2026
+
+**Herramienta:** Codex
+**Versión:** v10.5.6
+**Tests:** 290
+
+**Cambios realizados:**
+- refinamiento del dashboard tras revisión visual real en Railway;
+- cambio a modo oscuro por defecto para revisión en navegador;
+- checklist separado entre `trades limpios históricos` y `trades limpios serie v10.5`;
+- scorecard de agentes extendido con stages `proposed / implemented / validated`;
+- ciclos legacy pasan a mostrarse como `legacy v10.X` en vez de marcadores ambiguos;
+- ciudades clave reordenadas por riesgo operativo en lugar de volumen puro;
+- `verify_before_deploy.py` ampliado para cubrir dark mode, stages y checklist separado.
+
+**Resultado:** `v10.5.6`, 290/290 tests, dashboard más honesto para medir la serie `v10.5` y más cómodo de usar en escritorio.
 
 ---
 

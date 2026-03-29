@@ -101,7 +101,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.5.5"
+BOT_VERSION = "v10.5.6"
 LOGIC_SERIES = "10.5"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -1035,6 +1035,23 @@ def get_clean_closed_trade_stats():
     }
 
 
+def get_logic_series_clean_closed_trade_stats(logic_series=None):
+    """Cuenta trades limpios cerrados asociados solo a la serie lógica actual."""
+    series_records = get_logic_series_records(logic_series)
+    closed = [
+        r for r in series_records
+        if r.get("status") == "closed"
+        and r.get("close_action") in {"SELL", "LOSS_TOTAL", "RESOLVED_WIN"}
+        and r.get("pnl_cash") is not None
+    ]
+    return {
+        "count": len(closed),
+        "sell": sum(1 for r in closed if r.get("close_action") == "SELL"),
+        "loss_total": sum(1 for r in closed if r.get("close_action") == "LOSS_TOTAL"),
+        "resolved_win": sum(1 for r in closed if r.get("close_action") == "RESOLVED_WIN"),
+    }
+
+
 def _get_recent_closed_trades(n=None):
     """Devuelve los últimos N trades cerrados de postmortem.json, más reciente primero."""
     records = load_postmortem_data()
@@ -1477,8 +1494,24 @@ def load_agent_events(limit=None):
     return events
 
 
+def _normalize_agent_event_stage(event):
+    """Normaliza el estado de una contribución para el scoreboard."""
+    if not isinstance(event, dict):
+        return "proposed"
+
+    stage = str(event.get("stage", "") or "").strip().lower()
+    if stage in {"proposed", "implemented", "validated"}:
+        return stage
+
+    if event.get("validated"):
+        return "validated"
+    if event.get("type") in {"fix_implemented", "feature_shipped", "review_correction", "validated_improvement"}:
+        return "implemented"
+    return "proposed"
+
+
 def compute_agent_scorecard(events):
-    """Agrega eventos en un ranking simple y útil para comparar agentes."""
+    """Agrega eventos en un ranking útil, priorizando impacto validado."""
     scorecard = {}
     for event in events:
         agent = event.get("agent", "Unknown")
@@ -1488,22 +1521,29 @@ def compute_agent_scorecard(events):
             "events": 0,
             "bugs_detected": 0,
             "fixes": 0,
+            "proposed": 0,
+            "implemented": 0,
             "validated": 0,
             "corrections": 0,
             "major_changes": 0,
+            "proposed_points": 0,
+            "implemented_points": 0,
+            "validated_points": 0,
             "last_event": "",
         })
+        stage = _normalize_agent_event_stage(event)
+        points = int(event.get("points", 0) or 0)
         row["events"] += 1
-        row["points"] += int(event.get("points", 0) or 0)
+        row["points"] += points
         row["last_event"] = max(row["last_event"], event.get("timestamp", ""))
+        row[stage] += 1
+        row[f"{stage}_points"] += points
 
         event_type = event.get("type", "")
         if event_type == "bug_detected":
             row["bugs_detected"] += 1
         if event_type in {"fix_implemented", "review_correction", "feature_shipped", "validated_improvement"}:
             row["fixes"] += 1
-        if event.get("validated"):
-            row["validated"] += 1
         if event.get("target_agent") and event.get("target_agent") != agent:
             row["corrections"] += 1
         if event.get("impact") in {"high", "critical"}:
@@ -1511,7 +1551,13 @@ def compute_agent_scorecard(events):
 
     ranking = sorted(
         scorecard.values(),
-        key=lambda row: (-row["points"], -row["validated"], -row["bugs_detected"], row["agent"]),
+        key=lambda row: (
+            -row["validated_points"],
+            -row["points"],
+            -row["corrections"],
+            -row["bugs_detected"],
+            row["agent"],
+        ),
     )
     return ranking
 
@@ -1605,6 +1651,7 @@ def build_promotion_checklist():
     """Checklist gamificado para decidir si el bankroll puede subir de nivel."""
     levels = get_bankroll_level_context()
     clean_stats = get_clean_closed_trade_stats()
+    series_clean_stats = get_logic_series_clean_closed_trade_stats()
     series_stats = get_logic_series_stats()
     alerts = get_dashboard_alert_summary()
     cycle_total, cycle_series = _load_cycle_counts()
@@ -1612,50 +1659,65 @@ def build_promotion_checklist():
 
     checks = [
         {
-            "label": "Trades limpios cerrados",
+            "label": "Trades limpios históricos",
             "value": f"{clean_stats['count']} / {REVIEW_READY_CLEAN_TRADES}",
+            "scope": "Histórico",
             "passed": clean_stats["count"] >= REVIEW_READY_CLEAN_TRADES,
+            "blocking": False,
+        },
+        {
+            "label": f"Trades limpios serie v{LOGIC_SERIES}",
+            "value": f"{series_clean_stats['count']} / {REVIEW_READY_CLEAN_TRADES}",
+            "scope": f"Serie v{LOGIC_SERIES}",
+            "passed": series_clean_stats["count"] >= REVIEW_READY_CLEAN_TRADES,
             "blocking": True,
         },
         {
             "label": f"Ciclos estables serie v{LOGIC_SERIES}",
             "value": f"{cycle_series} / {PROMOTION_MIN_SERIES_CYCLES}",
+            "scope": f"Serie v{LOGIC_SERIES}",
             "passed": cycle_series >= PROMOTION_MIN_SERIES_CYCLES,
             "blocking": True,
         },
         {
             "label": f"PnL serie v{LOGIC_SERIES}",
             "value": f"${series_stats['pnl']:+.2f}",
+            "scope": f"Serie v{LOGIC_SERIES}",
             "passed": series_stats["pnl"] >= PROMOTION_MIN_SERIES_PNL,
             "blocking": True,
         },
         {
             "label": f"Win rate serie v{LOGIC_SERIES}",
             "value": f"{series_stats['win_rate']}% / {PROMOTION_MIN_SERIES_WIN_RATE:.1f}%",
+            "scope": f"Serie v{LOGIC_SERIES}",
             "passed": series_stats["win_rate"] >= PROMOTION_MIN_SERIES_WIN_RATE and series_stats["closed_count"] > 0,
             "blocking": True,
         },
         {
             "label": f"Drawdown últimos {DRAWDOWN_WINDOW} cierres",
             "value": f"${series_stats['recent_drawdown']:+.2f} / umbral ${DRAWDOWN_THRESHOLD:.2f}",
+            "scope": f"Serie v{LOGIC_SERIES}",
             "passed": series_stats["recent_window_size"] < DRAWDOWN_WINDOW or series_stats["recent_drawdown"] > DRAWDOWN_THRESHOLD,
             "blocking": True,
         },
         {
             "label": "Signals operativas",
             "value": alerts["signals"]["status"],
+            "scope": "Operativa",
             "passed": alerts["signals"]["status"] == "ok",
             "blocking": True,
         },
         {
             "label": "Pending exits atascadas",
             "value": str(len(alerts["pending_stuck"])),
+            "scope": "Operativa",
             "passed": len(alerts["pending_stuck"]) == 0,
             "blocking": True,
         },
         {
             "label": "Ciudades flaggeadas críticas",
             "value": str(len(alerts["flagged_cities"])),
+            "scope": "Riesgo",
             "passed": len(alerts["flagged_cities"]) == 0,
             "blocking": False,
         },
@@ -1681,6 +1743,9 @@ def build_promotion_checklist():
     return {
         "levels": levels,
         "checks": checks,
+        "trade_target": REVIEW_READY_CLEAN_TRADES,
+        "history_clean_stats": clean_stats,
+        "series_clean_stats": series_clean_stats,
         "passed": passed,
         "total": total,
         "progress_pct": round((passed / total) * 100, 1) if total else 0.0,
@@ -1708,13 +1773,32 @@ def build_dashboard_snapshot():
     cycle_summary = load_cycle_summary_data()
     cycle_history = load_cycle_history(limit=8)
     clean_stats = get_clean_closed_trade_stats()
+    series_clean_stats = get_logic_series_clean_closed_trade_stats()
     perf = get_performance_summary() or {}
     series_stats = get_logic_series_stats()
     alerts = get_dashboard_alert_summary()
     promotion = build_promotion_checklist()
     portfolio = _get_portfolio_and_positions()
     city_accuracy = get_city_accuracy()
-    agent_events = load_agent_events(limit=30)
+    agent_events = []
+    stage_labels = {
+        "proposed": "Propuesta",
+        "implemented": "Implementada",
+        "validated": "Validada",
+    }
+    stage_badges = {
+        "proposed": "muted",
+        "implemented": "accent",
+        "validated": "good",
+    }
+    for raw_event in load_agent_events(limit=30):
+        event = dict(raw_event)
+        stage = _normalize_agent_event_stage(event)
+        event["stage"] = stage
+        event["validated"] = bool(event.get("validated")) or stage == "validated"
+        event["stage_label"] = stage_labels[stage]
+        event["stage_badge"] = stage_badges[stage]
+        agent_events.append(event)
     agent_scoreboard = compute_agent_scorecard(agent_events)
     rivalry = build_agent_rivalry(agent_events)
 
@@ -1728,6 +1812,7 @@ def build_dashboard_snapshot():
                 "percent_pnl": round(float(pos.get("percentPnl", 0) or 0), 1),
             })
 
+    flagged_city_names = {item["city"] for item in alerts["flagged_cities"]}
     top_cities = sorted(
         (
             {
@@ -1735,19 +1820,58 @@ def build_dashboard_snapshot():
                 "trades": data["trades"],
                 "win_rate": data["win_rate"],
                 "pnl": round(data["pnl"], 2),
+                "risk_level": (
+                    "critical"
+                    if city in flagged_city_names
+                    else "watch" if data["pnl"] < 0 or data["win_rate"] < 50.0 else "good"
+                ),
+                "risk_label": (
+                    "Crítica"
+                    if city in flagged_city_names
+                    else "Observación" if data["pnl"] < 0 or data["win_rate"] < 50.0 else "OK"
+                ),
             }
             for city, data in city_accuracy.items()
         ),
-        key=lambda item: (-item["trades"], item["city"]),
+        key=lambda item: (
+            0 if item["risk_level"] == "critical" else 1 if item["risk_level"] == "watch" else 2,
+            item["win_rate"],
+            item["pnl"],
+            -item["trades"],
+            item["city"],
+        ),
     )[:8]
+
+    cycle_history_display = []
+    for raw_cycle in reversed(cycle_history):
+        cycle = dict(raw_cycle)
+        cycle_logic_series = (
+            _extract_logic_series(cycle.get("logic_series"))
+            or _extract_logic_series(cycle.get("version"))
+        )
+        if cycle_logic_series and cycle.get("logic_cycle_number") is not None:
+            cycle["series_display"] = f"v{cycle_logic_series} #{cycle.get('logic_cycle_number')}"
+        elif cycle_logic_series:
+            cycle["series_display"] = f"legacy v{cycle_logic_series}"
+        else:
+            cycle["series_display"] = "legacy"
+        cycle_history_display.append(cycle)
 
     last_cycle_label = "Sin ciclos aún"
     if cycle_summary:
-        last_cycle_label = (
-            f"Total #{cycle_summary.get('cycle_number', '?')} | "
-            f"Serie v{cycle_summary.get('logic_series', LOGIC_SERIES)} "
-            f"#{cycle_summary.get('logic_cycle_number', '?')}"
+        cycle_label_series = (
+            _extract_logic_series(cycle_summary.get("logic_series"))
+            or _extract_logic_series(cycle_summary.get("version"))
         )
+        if cycle_label_series and cycle_summary.get("logic_cycle_number") is not None:
+            last_cycle_label = (
+                f"Total #{cycle_summary.get('cycle_number', '?')} | "
+                f"Serie v{cycle_label_series} #{cycle_summary.get('logic_cycle_number')}"
+            )
+        elif cycle_label_series:
+            last_cycle_label = f"Total #{cycle_summary.get('cycle_number', '?')} | legacy v{cycle_label_series}"
+        else:
+            last_cycle_label = f"Total #{cycle_summary.get('cycle_number', '?')} | legacy"
 
     auth_enabled = bool(DASHBOARD_USER and DASHBOARD_PASSWORD)
 
@@ -1764,9 +1888,10 @@ def build_dashboard_snapshot():
         "cycle_series": cycle_series,
         "last_cycle_label": last_cycle_label,
         "cycle_summary": cycle_summary,
-        "cycle_history": list(reversed(cycle_history)),
+        "cycle_history": cycle_history_display,
         "promotion": promotion,
         "clean_stats": clean_stats,
+        "series_clean_stats": series_clean_stats,
         "series_stats": series_stats,
         "performance": perf,
         "alerts": alerts,

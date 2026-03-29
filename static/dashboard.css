@@ -1,16 +1,17 @@
 :root {
-  --bg: #f4efe6;
-  --bg-accent: linear-gradient(135deg, #f8f1d8 0%, #f3ddd0 55%, #d7e9e1 100%);
-  --card: rgba(255, 252, 246, 0.88);
-  --card-border: rgba(58, 47, 35, 0.12);
-  --text: #2d241c;
-  --muted: #6f6358;
-  --good: #1c7c54;
-  --warn: #c77700;
-  --bad: #b93a32;
-  --accent: #0f4c5c;
-  --accent-soft: #d9edf1;
-  --shadow: 0 20px 60px rgba(52, 39, 28, 0.12);
+  --bg: #071018;
+  --bg-accent: linear-gradient(140deg, #081219 0%, #101b24 42%, #16232f 70%, #0a1318 100%);
+  --card: rgba(12, 20, 29, 0.9);
+  --card-soft: rgba(18, 28, 39, 0.82);
+  --card-border: rgba(168, 191, 211, 0.12);
+  --text: #f4eadb;
+  --muted: #9da9b8;
+  --good: #63d29f;
+  --warn: #f0b768;
+  --bad: #ff8b7d;
+  --accent: #8ed9ff;
+  --accent-soft: rgba(142, 217, 255, 0.12);
+  --shadow: 0 28px 80px rgba(0, 0, 0, 0.4);
 }
 
 * {
@@ -22,8 +23,9 @@ body {
   font-family: "Segoe UI", "Trebuchet MS", sans-serif;
   color: var(--text);
   background:
-    radial-gradient(circle at top right, rgba(15, 76, 92, 0.12), transparent 30%),
-    radial-gradient(circle at bottom left, rgba(185, 58, 50, 0.09), transparent 28%),
+    radial-gradient(circle at top right, rgba(142, 217, 255, 0.14), transparent 26%),
+    radial-gradient(circle at 18% 8%, rgba(240, 183, 104, 0.12), transparent 18%),
+    radial-gradient(circle at bottom left, rgba(255, 139, 125, 0.1), transparent 24%),
     var(--bg-accent);
   min-height: 100vh;
 }
@@ -121,7 +123,7 @@ body {
   width: 120px;
   height: 120px;
   border-radius: 999px;
-  background: rgba(15, 76, 92, 0.08);
+  background: rgba(142, 217, 255, 0.08);
 }
 
 .stat-label {
@@ -156,27 +158,27 @@ body {
 }
 
 .badge-good {
-  background: rgba(28, 124, 84, 0.12);
+  background: rgba(99, 210, 159, 0.14);
   color: var(--good);
 }
 
 .badge-warn {
-  background: rgba(199, 119, 0, 0.12);
+  background: rgba(240, 183, 104, 0.14);
   color: var(--warn);
 }
 
 .badge-bad {
-  background: rgba(185, 58, 50, 0.12);
+  background: rgba(255, 139, 125, 0.14);
   color: var(--bad);
 }
 
 .badge-accent {
-  background: rgba(15, 76, 92, 0.12);
+  background: rgba(142, 217, 255, 0.14);
   color: var(--accent);
 }
 
 .badge-muted {
-  background: rgba(45, 36, 28, 0.08);
+  background: rgba(157, 169, 184, 0.12);
   color: var(--text);
 }
 
@@ -191,18 +193,18 @@ body {
 }
 
 .notice-good {
-  background: rgba(28, 124, 84, 0.08);
-  border-color: rgba(28, 124, 84, 0.18);
+  background: rgba(99, 210, 159, 0.08);
+  border-color: rgba(99, 210, 159, 0.2);
 }
 
 .notice-warn {
-  background: rgba(199, 119, 0, 0.08);
-  border-color: rgba(199, 119, 0, 0.18);
+  background: rgba(240, 183, 104, 0.09);
+  border-color: rgba(240, 183, 104, 0.2);
 }
 
 .notice-muted {
-  background: rgba(45, 36, 28, 0.05);
-  border-color: rgba(45, 36, 28, 0.1);
+  background: rgba(157, 169, 184, 0.08);
+  border-color: rgba(157, 169, 184, 0.12);
 }
 
 .progress-block {
@@ -224,14 +226,14 @@ body {
 
 .progress-bar {
   height: 14px;
-  background: rgba(45, 36, 28, 0.08);
+  background: rgba(157, 169, 184, 0.12);
   border-radius: 999px;
   overflow: hidden;
 }
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #0f4c5c 0%, #1c7c54 100%);
+  background: linear-gradient(90deg, #168aad 0%, #63d29f 100%);
   border-radius: 999px;
 }
 
@@ -248,7 +250,7 @@ body {
   gap: 14px;
   padding: 12px 14px;
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.45);
+  background: var(--card-soft);
 }
 
 .check-status {
@@ -295,7 +297,7 @@ body {
 
 .metric-list div {
   padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--card-soft);
   border-radius: 16px;
 }
 
@@ -321,7 +323,7 @@ body {
   min-width: 140px;
   padding: 12px 14px;
   border-radius: 16px;
-  background: rgba(15, 76, 92, 0.08);
+  background: rgba(142, 217, 255, 0.08);
 }
 
 .pill span {
@@ -354,16 +356,16 @@ body {
 }
 
 .alert-good {
-  background: rgba(28, 124, 84, 0.08);
+  background: rgba(99, 210, 159, 0.09);
 }
 
 .alert-warn {
-  background: rgba(199, 119, 0, 0.09);
+  background: rgba(240, 183, 104, 0.1);
 }
 
 .alert-critical,
 .alert-bad {
-  background: rgba(185, 58, 50, 0.09);
+  background: rgba(255, 139, 125, 0.11);
 }
 
 .table-wrap {
@@ -379,7 +381,7 @@ th,
 td {
   text-align: left;
   padding: 12px 10px;
-  border-bottom: 1px solid rgba(45, 36, 28, 0.08);
+  border-bottom: 1px solid rgba(168, 191, 211, 0.08);
   font-size: 0.92rem;
 }
 
@@ -400,6 +402,14 @@ th {
 
 .pnl {
   font-weight: 700;
+}
+
+.event-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 @media (max-width: 1120px) {

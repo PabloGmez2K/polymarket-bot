@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 29 de marzo de 2026 (Sesión 23 — v10.5.5)
-**Próxima sesión:** Abrir el dashboard web en Railway, configurar autenticación básica y validar visualmente el checklist de bankroll y el scoreboard de agentes
+**Última actualización:** 29 de marzo de 2026 (Sesión 24 — v10.5.6)
+**Próxima sesión:** Validar visualmente en Railway el dashboard oscuro, revisar el scorecard por stages y decidir si el checklist de promoción necesita más señales de riesgo
 
 ---
 
@@ -29,7 +29,7 @@ Para estado exacto: usar `/info` + `/cartera` + `/rendimiento` + `/accuracy` en 
 
 ---
 
-## Qué hace el bot v10.5.5 (paso a paso)
+## Qué hace el bot v10.5.6 (paso a paso)
 
 Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
@@ -55,7 +55,7 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Contador dual de ciclos (v10.5.4):** Mantiene `cycle_count` como histórico total y añade `cycle_count_series` para la serie lógica actual (`LOGIC_SERIES`). Cada ciclo nuevo guarda `logic_series` y `logic_cycle_number`. `/estado` y `/info` muestran ambos para comparar estrategia nueva sin perder continuidad operativa.
 
-**Dashboard web + scorecard de agentes (v10.5.5):** Levanta un panel HTML separado de Telegram en el mismo servicio Railway, accesible por navegador en `PORT`. Muestra checklist de subida de bankroll (`$25 -> $35`), salud del sistema, métricas de la serie `v10.5`, últimos ciclos, cartera abierta y un scoreboard de agentes basado en `agent_events.jsonl`.
+**Dashboard web + scorecard de agentes (v10.5.6):** Levanta un panel HTML separado de Telegram en el mismo servicio Railway, accesible por navegador en `PORT`. Ahora usa modo oscuro, separa checklist histórico vs serie `v10.5`, muestra ciclos legacy con etiquetas legibles y enseña el scoreboard por stages (`proposed / implemented / validated`) a partir de `agent_events.jsonl`.
 
 **Zona horaria por ciudad (v10.4.5):** Ya no usa offsets manuales; usa zonas IANA reales con `ZoneInfo` para que DST cambie automáticamente sin tocar el código en marzo/octubre.
 
@@ -82,13 +82,13 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción:** Railway — Online, EU West Amsterdam, MODO REAL, DRY_RUN=false
-**Versión activa:** v10.5.5
+**Versión activa:** v10.5.6
 
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.5.5 |
-| `verify_before_deploy.py` | v9 — 279 tests de comportamiento |
+| `bot.py` | Script principal v10.5.6 |
+| `verify_before_deploy.py` | v9 — 290 tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |
@@ -128,7 +128,7 @@ MIN_BET="1.00"
 DATA_DIR="/app/data"
 ```
 
-### Configuración en código (defaults bot.py v10.5.5):
+### Configuración en código (defaults bot.py v10.5.6):
 ```python
 MIN_EDGE = 7.0%
 MIN_EDGE_EXACT = 15.0%          # v10.5.0: filtro más estricto para apuestas exactas
@@ -137,8 +137,8 @@ TAKE_PROFIT_PCT = +40.0%
 MAX_EXPOSURE_PCT = 40%
 MIN_BET = $1.00
 BLOCKED_CITIES = ["London"]
-BANKROLL_LEVELS = [25, 35, 50, 75, 100]  # v10.5.5: niveles gamificados del dashboard
-DASHBOARD_PORT = $PORT                    # v10.5.5: panel web separado de Telegram
+BANKROLL_LEVELS = [25, 35, 50, 75, 100]  # v10.5.5+: niveles gamificados del dashboard
+DASHBOARD_PORT = $PORT                    # v10.5.5+: panel web separado de Telegram
 DASHBOARD_REFRESH_SEC = 60               # auto-refresh del dashboard
 INTRA_SL_INTERVAL = 90          # v10.5.1: minutos entre checks intra-ciclo (0=desactivar)
 CITY_MIN_TRADES_FOR_BLOCK = 3   # v10.5.2: mínimo trades para evaluar accuracy
@@ -149,7 +149,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 ---
 
-## Telegram — Comandos disponibles (v10.5.5)
+## Telegram — Comandos disponibles (v10.5.6)
 
 | Comando | Qué muestra |
 |---------|-------------|
@@ -168,7 +168,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 **Para iniciar una sesión de análisis en claude.ai:** pegar `/info` + `/cartera` + `/rendimiento`.
 
-## Dashboard web (v10.5.5)
+## Dashboard web (v10.5.6)
 
 - **Ruta principal:** `/`
 - **Healthcheck:** `/healthz`
@@ -178,11 +178,12 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 ### Qué muestra
 - nivel actual y siguiente bankroll objetivo
-- checklist de promoción `$25 -> $35`
+- checklist de promoción `$25 -> $35` separando histórico vs serie `v10.5`
 - salud operativa del sistema
 - métricas de la serie `v10.5`
 - últimos ciclos y posiciones abiertas
-- scoreboard de agentes y rivalidad constructiva
+- scoreboard de agentes y rivalidad constructiva por stages (`proposed / implemented / validated`)
+- modo oscuro por defecto para revisión en navegador
 
 ---
 
@@ -234,6 +235,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 | v10.5.3 | 29 mar | `/accuracy` integrado en menú + menú persistente + `/estado` muestra intra-SL + trazabilidad corregida, 242 tests |
 | v10.5.4 | 29 mar | contador dual de ciclos (histórico total + serie lógica), `logic_series`/`logic_cycle_number` en historial, `/estado` y `/info` separan total vs serie, 251 tests |
 | v10.5.5 | 29 mar | dashboard web HTML separado de Telegram + checklist de bankroll + scoreboard de agentes + `agent_events.jsonl`, 279 tests |
+| v10.5.6 | 29 mar | dashboard oscuro + checklist histórico/serie separado + scorecard por stages + ciclos legacy legibles, 290 tests |
 
 ---
 
@@ -400,6 +402,33 @@ Usar esta plantilla al cerrar cada sesión relevante:
 
 - **Estado final:**
   v10.5.5, 279/279 tests, dashboard web listo para abrir en navegador, Telegram queda separado de la capa visual principal
+
+### Sesión 24 — Registro multi-herramienta
+
+- **Fecha:** 2026-03-29
+- **Versión activa al cerrar:** v10.5.6
+- **Objetivo de la sesión:** Refinar el dashboard tras la primera revisión visual para que el checklist mida mejor la serie `v10.5`, el scorecard sea más legible y el panel quede en modo oscuro
+
+- **Claude Code (Opus):**
+  - No usado directamente en esta sesión
+
+- **Codex:**
+  - Detectó que el checklist del dashboard mezclaba `trades limpios` históricos con métricas de la serie `v10.5`, lo que hacía menos fiable la decisión de subir bankroll
+  - Cambió el checklist para separar explícitamente `histórico` vs `serie v10.5`
+  - Añadió `get_logic_series_clean_closed_trade_stats()` para medir cierres limpios de la serie lógica actual
+  - Refinó el scoreboard de agentes para mostrar estados `proposed / implemented / validated`
+  - Hizo que los ciclos legacy se muestren como `legacy v10.X` en vez de `#?`
+  - Reordenó las ciudades clave por riesgo operativo en vez de solo por número de trades
+  - Rediseñó `static/dashboard.css` a modo oscuro y actualizó la plantilla HTML para reflejar mejor los nuevos estados
+  - Amplió `verify_before_deploy.py` hasta `290/290` con checks de dark mode, stages y checklist separado
+
+- **Problemas detectados en trabajo previo:**
+  - El dashboard v10.5.5 mezclaba progreso histórico y progreso de la serie nueva en una misma vista de promoción
+  - El scorecard seguía siendo útil pero no mostraba todavía la madurez de cada contribución
+  - Los ciclos anteriores a `v10.5` se veían ambiguos en la tabla (`#?`)
+
+- **Estado final:**
+  v10.5.6, 290/290 tests, dashboard oscuro y más honesto para evaluar la serie `v10.5` sin perder contexto histórico
 
 ### Sesión 19 — Registro multi-herramienta
 
