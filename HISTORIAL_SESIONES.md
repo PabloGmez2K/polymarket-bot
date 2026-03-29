@@ -197,6 +197,22 @@ Comandos útiles:
 
 **Resultado:** repo alineado a nivel código, tests y documentación; queda pendiente decidir si desplegar `v10.5.3` o seguir observando `v10.5.2` primero.
 
+## Sesión 22 — 29 marzo 2026
+
+**Herramienta:** Codex
+**Versión:** v10.5.4
+**Tests:** 251
+
+**Cambios realizados:**
+- separación del contador de ciclos en dos dimensiones: histórico total y serie lógica actual `v10.5`;
+- nuevo helper `_load_cycle_counts()` para reconstruir ambos contadores desde `cycles_history.jsonl` sin romper continuidad histórica;
+- `cycle_summary.json` y `cycles_history.jsonl` pasan a guardar `logic_series` y `logic_cycle_number`;
+- `/estado` y `/info` muestran `N total | M serie v10.5`, resolviendo la ambigüedad que mezclaba observabilidad global con evaluación de la nueva lógica;
+- `verify_before_deploy.py` ampliado con tests funcionales de historial mixto `v10.4`/`v10.5`;
+- temporales del verificador movidos al directorio temporal del sistema para no dejar `_tmp_*` en el repo en futuras ejecuciones.
+
+**Resultado:** `v10.5.4`, 251/251 tests, histórico total preservado y serie `v10.5` visible por separado para análisis comparativo.
+
 ---
 
 ## Sesiones aún no reconstruidas con certeza

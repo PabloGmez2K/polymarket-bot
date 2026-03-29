@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 29 de marzo de 2026 (Sesión 21 — v10.5.3)
-**Próxima sesión:** Verificar por Telegram/SSH el comportamiento real de `v10.5.3` y decidir si `v10.5.0` queda estable o experimental
+**Última actualización:** 29 de marzo de 2026 (Sesión 22 — v10.5.4)
+**Próxima sesión:** Verificar por Telegram que `/estado` y `/info` muestran correctamente `ciclos totales` y `serie v10.5`, y decidir si `v10.5.0` queda estable o experimental
 
 ---
 
@@ -29,7 +29,7 @@ Para estado exacto: usar `/info` + `/cartera` + `/rendimiento` + `/accuracy` en 
 
 ---
 
-## Qué hace el bot v10.5.3 (paso a paso)
+## Qué hace el bot v10.5.4 (paso a paso)
 
 Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
@@ -51,7 +51,9 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **7. Registro de ciclo (v10.4.1+):** Guarda resumen en cycle_summary.json + append en cycles_history.jsonl.
 
-**Al arrancar (v10.4.3+):** Carga ciclos históricos desde cycles_history.jsonl (contador no se reinicia con deploys).
+**Al arrancar (v10.4.3+):** Carga ciclos históricos desde `cycles_history.jsonl` (contador total no se reinicia con deploys).
+
+**Contador dual de ciclos (v10.5.4):** Mantiene `cycle_count` como histórico total y añade `cycle_count_series` para la serie lógica actual (`LOGIC_SERIES`). Cada ciclo nuevo guarda `logic_series` y `logic_cycle_number`. `/estado` y `/info` muestran ambos para comparar estrategia nueva sin perder continuidad operativa.
 
 **Zona horaria por ciudad (v10.4.5):** Ya no usa offsets manuales; usa zonas IANA reales con `ZoneInfo` para que DST cambie automáticamente sin tocar el código en marzo/octubre.
 
@@ -78,13 +80,13 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción:** Railway — Online, EU West Amsterdam, MODO REAL, DRY_RUN=false
-**Versión activa:** v10.5.3
+**Versión activa:** v10.5.4
 
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.5.3 |
-| `verify_before_deploy.py` | v9 — 242 tests de comportamiento |
+| `bot.py` | Script principal v10.5.4 |
+| `verify_before_deploy.py` | v9 — 251 tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |
@@ -120,7 +122,7 @@ MIN_BET="1.00"
 DATA_DIR="/app/data"
 ```
 
-### Configuración en código (defaults bot.py v10.5.3):
+### Configuración en código (defaults bot.py v10.5.4):
 ```python
 MIN_EDGE = 7.0%
 MIN_EDGE_EXACT = 15.0%          # v10.5.0: filtro más estricto para apuestas exactas
@@ -138,18 +140,18 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 ---
 
-## Telegram — Comandos disponibles (v10.5.3)
+## Telegram — Comandos disponibles (v10.5.4)
 
 | Comando | Qué muestra |
 |---------|-------------|
-| `/estado` | Versión, modo, bankroll, SL/TP, intervalo intra-SL, próximo ciclo, último ciclo |
+| `/estado` | Versión, modo, bankroll, SL/TP, intervalo intra-SL, próximo ciclo, último ciclo y contadores `total`/`serie v10.5` |
 | `/cartera` | Cash, posiciones vivas (ciudad+temp+fecha, precios en ¢), resueltas, muertas |
 | `/log` | Resumen del último ciclo desde cycle_summary.json |
 | `/detalle` | Último ciclo completo del `decisions.log`, paginado y sin corte fijo de 40 líneas |
 | `/rendimiento` | Portfolio real + historial trades (TP/SL/reeval, por ciudad con win rate) |
 | `/ordenes` | Órdenes GTC pendientes con etiquetas legibles |
 | `/traders` | Señales activas + coincidencias filtradas por ciudad, lado y fecha exacta del mercado |
-| `/info` | Bloque resumen completo para pegar en Claude/ChatGPT |
+| `/info` | Bloque resumen completo para pegar en Claude/ChatGPT, incluyendo contadores `total`/`serie v10.5` |
 | `/postmortem` | Resumen rápido de abiertas/cierres desde `postmortem.json` |
 | `/accuracy` | Win rate por ciudad desde postmortem, con iconos de bloqueada/flaggeada y botón visible en el menú |
 | `/forzar` | Ejecuta ciclo inmediatamente |
@@ -185,7 +187,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 - **v10.4.X** = misma lógica de trading, mejoras UI/Telegram/observabilidad
 - **v10.5.0** = recalibración de lógica de entrada (sigma, exact filter)
 - **v10.5.X** (X>0) = mejoras operativas sin cambiar lógica de entrada
-- Ciclos y datos son continuos y acumulativos entre versiones
+- Ciclos y datos son continuos y acumulativos entre versiones; desde `v10.5.4` se muestra además contador por serie lógica actual
 - Cada registro incluye la versión del bot que lo generó
 
 ### Historial de versiones:
@@ -205,6 +207,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 | v10.5.1 | 29 mar | intra-cycle SL/TP monitor cada 90min, threading.Lock, 226 tests |
 | v10.5.2 | 29 mar | city accuracy tracker, `/accuracy`, win rate en `/rendimiento`, alertas por ciudad, 234 tests |
 | v10.5.3 | 29 mar | `/accuracy` integrado en menú + menú persistente + `/estado` muestra intra-SL + trazabilidad corregida, 242 tests |
+| v10.5.4 | 29 mar | contador dual de ciclos (histórico total + serie lógica), `logic_series`/`logic_cycle_number` en historial, `/estado` y `/info` separan total vs serie, 251 tests |
 
 ---
 
@@ -322,6 +325,31 @@ Usar esta plantilla al cerrar cada sesión relevante:
 
 - **Estado final:**
   v10.5.3, 242/242 tests, repo alineado a nivel código/tests/docs, listo para decidir si hacer deploy
+
+### Sesión 22 — Registro multi-herramienta
+
+- **Fecha:** 2026-03-29
+- **Versión activa al cerrar:** v10.5.4
+- **Objetivo de la sesión:** Separar el contador histórico de ciclos del contador específico de la nueva lógica `v10.5`
+
+- **Claude Code (Opus):**
+  - No usado directamente en esta sesión
+
+- **Codex:**
+  - Detectó que `Ciclos: 4` seguía mezclando histórico total con evaluación de la serie `v10.5`
+  - Implementó `_load_cycle_counts()` para cargar `total` y `serie lógica` desde `cycles_history.jsonl`
+  - Mantuvo `cycle_count` como histórico total para no romper continuidad operativa
+  - Añadió `cycle_count_series`, `logic_series` y `logic_cycle_number`
+  - Actualizó `/estado` y `/info` para mostrar `total | serie v10.5`
+  - Amplió `verify_before_deploy.py` con tests estructurales y funcionales del recuento mixto `v10.4`/`v10.5`
+  - Movió los temporales del verificador al directorio temporal del sistema para no ensuciar el repo
+
+- **Problemas detectados en trabajo previo:**
+  - El contador acumulativo total era correcto operativamente, pero confuso para analizar la lógica nueva
+  - La suite de tests dejaba temporales `_tmp_*` en el workspace de Windows
+
+- **Estado final:**
+  v10.5.4, 251/251 tests, histórico total preservado y serie `v10.5` visible por separado en Telegram
 
 ### Sesión 19 — Registro multi-herramienta
 
@@ -450,7 +478,7 @@ railway ssh "ls /app/data/"         # ver archivos del volume
 
 ### Workflow de deploy:
 ```bash
-python verify_before_deploy.py   # 242/242 deben pasar
+python verify_before_deploy.py   # todos los tests deben pasar
 # actualizar CONTEXTO.md si cambió el estado actual
 # actualizar HISTORIAL_SESIONES.md si hubo una sesión/hito nuevo
 git add .

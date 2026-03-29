@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-verify_before_deploy.py v9 — Tests de comportamiento para bot.py v10.5.2
+verify_before_deploy.py v9 — Tests de comportamiento para bot.py v10.5.4
 
 Ejecutar ANTES de cada deploy:
   python verify_before_deploy.py
@@ -253,7 +253,9 @@ def run_tests():
     test("CYCLES_HISTORY_FILE definido", "CYCLES_HISTORY_FILE" in code)
     test("cycles_history.jsonl append-only", "cycles_history.jsonl" in code)
     test("cycle_summary se guarda en main()", "cycle_data" in code and "CYCLE_SUMMARY_FILE" in code)
-    test("cycle_data incluye version v10.5.3", '"version"' in code and "v10.5.3" in code)
+    test("cycle_data incluye version v10.5.4", '"version"' in code and "v10.5.4" in code)
+    test("cycle_data incluye logic_series", '"logic_series": LOGIC_SERIES' in code)
+    test("cycle_data incluye logic_cycle_number", '"logic_cycle_number"' in code)
 
     # ---- Test 14: Rediseño Telegram v10.4.2 ----
     print("\n🔍 Rediseño Telegram v10.4.2")
@@ -272,7 +274,7 @@ def run_tests():
     test("Bug #13: send_telegram_paged en cmd_log", "send_telegram_paged" in code and "cmd_log" in code)
     test("Bug #13: send_telegram_paged en cmd_cartera", "send_telegram_paged" in code)
     test("_parse_position_label usa centavos (¢)", "¢" in code)
-    test("cmd_estado versión correcta", "Bot v10.5.3" in code or "v10.5.3" in code)
+    test("cmd_estado versión correcta", "Bot v10.5.4" in code or "v10.5.4" in code)
 
     # ---- Test 14c: Zonas horarias reales v10.4.5 ----
     print("\n🔍 Zonas horarias reales")
@@ -288,8 +290,10 @@ def run_tests():
     print("\n🔍 Fixes v10.4.3")
     test("Ciclos persistentes: _load_cycle_count definida",
          "def _load_cycle_count(" in code)
-    test("Ciclos persistentes: se carga al arrancar",
-         "_load_cycle_count()" in code and 'bot_state["cycle_count"]' in code)
+    test("Ciclos por serie: _load_cycle_counts definida",
+         "def _load_cycle_counts(" in code)
+    test("Ciclos persistentes: se cargan total y serie al arrancar",
+         "_load_cycle_counts()" in code and 'bot_state["cycle_count_series"]' in code)
     test("Fix arranque: sin texto 'Bug #11' en mensaje Telegram",
          "Fix Bug #11: evita ciclo duplicado al deploy" not in code)
     test("Fix /detalle: escapa HTML (replace < y >)",
@@ -302,6 +306,7 @@ def run_tests():
     test("Fix traders: línea Scan/Análisis sin separador huérfano",
          "timing_bits = []" in code and "' | '.join(timing_bits)" in code)
     test("cmd_estado muestra Intra-SL", "🛡 Intra-SL:" in code or "Intra-SL:" in code)
+    test("cmd_estado muestra total y serie", "serie v{LOGIC_SERIES}" in code and "total |" in code)
 
     print("\n🔍 Bloqueo London")
     test("main filtra ciudades bloqueadas", "blocked_city_skip" in code and "Ciudades bloqueadas operativamente" in code)
@@ -344,6 +349,7 @@ def run_tests():
         test("cmd_info muestra MIN_EDGE",     "MIN_EDGE" in info_body)
         test("cmd_info muestra STOP_LOSS_PCT","STOP_LOSS_PCT" in info_body)
         test("cmd_info muestra cycle_count",  "cycle_count" in info_body)
+        test("cmd_info muestra cycle_count_series", "cycle_count_series" in info_body)
         test("cmd_info avisa de WU vs OMA",   "Weather Underground" in info_body)
     else:
         test("cmd_info encontrada", False, "función no encontrada")
@@ -376,6 +382,34 @@ def run_tests():
              helper_ns["is_city_blocked"]("London") and helper_ns["is_city_blocked"]("london"))
         test("blocked city helper: Paris permitida",
              not helper_ns["is_city_blocked"]("Paris"))
+
+        fd, tmp_cycles = tempfile.mkstemp(
+            dir=tempfile.gettempdir(),
+            prefix="_tmp_cycles_history_test_",
+            suffix=".jsonl",
+        )
+        os.close(fd)
+        with open(tmp_cycles, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"version": "v10.4.8", "cycle_number": 1}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"version": "v10.5.1", "cycle_number": 2}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"logic_series": "10.5", "version": "v10.5.3", "cycle_number": 3}, ensure_ascii=False) + "\n")
+        cycle_ns = {
+            "os": os,
+            "json": json,
+            "re": re,
+            "LOGIC_SERIES": "10.5",
+            "CYCLES_HISTORY_FILE": tmp_cycles,
+        }
+        exec(get_function_source(module_ast, code_lines, "_extract_logic_series"), cycle_ns)
+        exec(get_function_source(module_ast, code_lines, "_load_cycle_counts"), cycle_ns)
+        total_count, series_count = cycle_ns["_load_cycle_counts"]()
+        test("cycle_counts: total histórico correcto", total_count == 3, f"got {total_count}")
+        test("cycle_counts: serie lógica correcta", series_count == 2, f"got {series_count}")
+        if os.path.exists(tmp_cycles):
+            try:
+                os.remove(tmp_cycles)
+            except PermissionError:
+                pass
 
         pager_calls = []
         pager_ns = {
@@ -437,14 +471,15 @@ def run_tests():
 
         info_messages = []
         fd, tmp_cycle_summary = tempfile.mkstemp(
-            dir=os.path.dirname(__file__),
+            dir=tempfile.gettempdir(),
             prefix="_tmp_cycle_summary_test_",
             suffix=".json",
         )
         os.close(fd)
         with open(tmp_cycle_summary, "w", encoding="utf-8") as f:
             json.dump({
-                "cycle_number": 1,
+                "version": "v10.5.4",
+                "cycle_number": 12,
                 "timestamp_utc": "2026-03-28T16:00:33.073674+00:00",
                 "management": {"n_kept": 0, "n_sold": 1, "n_resolved": 0},
                 "scan": {"markets_evaluated": 46, "selected": 2},
@@ -455,7 +490,9 @@ def run_tests():
             "json": __import__("json"),
             "datetime": datetime,
             "send_telegram_paged": lambda text, with_menu=False, page_size=3800: info_messages.append(text),
-            "BOT_VERSION": "v10.5.3",
+            "BOT_VERSION": "v10.5.4",
+            "LOGIC_SERIES": "10.5",
+            "_extract_logic_series": cycle_ns["_extract_logic_series"],
             "DRY_RUN": False,
             "BANKROLL": 25.0,
             "MIN_EDGE": 7.0,
@@ -466,15 +503,22 @@ def run_tests():
             "MIN_BET": 1.0,
             "INTRA_SL_INTERVAL": 90,
             "SCHEDULE_HOURS_UTC": [8, 16, 23],
-            "bot_state": {"cycle_count": 12, "last_run": None},
+            "bot_state": {"cycle_count": 12, "cycle_count_series": 3, "last_run": None},
             "CYCLE_SUMMARY_FILE": tmp_cycle_summary,
             "get_performance_summary": lambda: None,
         }
         exec(get_function_source(module_ast, code_lines, "cmd_info"), info_ns)
         info_ns["cmd_info"]()
         info_msg = info_messages[-1] if info_messages else ""
-        test("info: versión visible correcta", "BOT POLYMARKET v10.5.3" in info_msg, info_msg[:120])
+        test("info: versión visible correcta", "BOT POLYMARKET v10.5.4" in info_msg, info_msg[:120])
         test("info: usa cycle_summary como fallback de último", "Último: 2026-03-28 16:00 UTC" in info_msg, info_msg[:220])
+        test("info: muestra doble contador", "Ciclos completados: 12 total | 3 serie v10.5" in info_msg, info_msg[:240])
+        test("info: muestra ciclo total y de serie", "Ciclo total #12 | serie v10.5 #3" in info_msg, info_msg[:260])
+        if os.path.exists(tmp_cycle_summary):
+            try:
+                os.remove(tmp_cycle_summary)
+            except PermissionError:
+                pass
 
         pm_messages = []
         pm_ns = {
@@ -513,7 +557,7 @@ def run_tests():
              pm_msg[:220])
 
         fd, tmp_signals = tempfile.mkstemp(
-            dir=os.path.dirname(__file__),
+            dir=tempfile.gettempdir(),
             prefix="_tmp_signals_test_",
             suffix=".json",
         )
@@ -567,7 +611,7 @@ def run_tests():
 
         pm_empty_messages = []
         fd, tmp_perf_summary = tempfile.mkstemp(
-            dir=os.path.dirname(__file__),
+            dir=tempfile.gettempdir(),
             prefix="_tmp_postmortem_perf_test_",
             suffix=".json",
         )
@@ -620,7 +664,7 @@ def run_tests():
 
     try:
         fd, tmp_postmortem = tempfile.mkstemp(
-            dir=os.path.dirname(__file__),
+            dir=tempfile.gettempdir(),
             prefix="_tmp_postmortem_test_",
             suffix=".json",
         )
@@ -727,13 +771,13 @@ def run_tests():
 
     try:
         fd, tmp_perf = tempfile.mkstemp(
-            dir=os.path.dirname(__file__),
+            dir=tempfile.gettempdir(),
             prefix="_tmp_perf_backfill_test_",
             suffix=".json",
         )
         os.close(fd)
         fd, tmp_pm = tempfile.mkstemp(
-            dir=os.path.dirname(__file__),
+            dir=tempfile.gettempdir(),
             prefix="_tmp_pm_backfill_test_",
             suffix=".json",
         )
@@ -1053,7 +1097,7 @@ def run_tests():
     test("/accuracy en MENU_KEYBOARD", '"callback_data": "accuracy"' in code)
     test("cmd_accuracy vuelve con menú", 'send_telegram("Sin datos de accuracy todavía.", with_menu=True)' in code and 'send_telegram_paged("\\n".join(lines), with_menu=True)' in code)
     test("Win rate en rendimiento", "WR:" in code)
-    test("Version v10.5.3", "v10.5.3" in code)
+    test("Version v10.5.4", "v10.5.4" in code)
 
     # ---- Resultado ----
     print(f"\n{'='*50}")

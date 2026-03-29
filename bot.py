@@ -21,8 +21,8 @@ from py_clob_client.order_builder.constants import BUY, SELL
 load_dotenv()
 
 # =============================================================
-# bot.py v10.5.3 — integración accuracy en Telegram + revisión crítica
-# Sesión 21: cierre de UX/menú tras revisión de v10.5.x
+# bot.py v10.5.4 — doble contador de ciclos (histórico + serie lógica)
+# Sesión 22: separar observabilidad total de la evaluación de la serie v10.5
 # =============================================================
 #
 # Nuevo en v10.4.3:
@@ -72,6 +72,10 @@ load_dotenv()
 #   - /traders alinea cartera por ciudad+lado+fecha exacta del mercado
 #   - /postmortem mejora etiquetas para registros legacy sin question
 #   - /detalle muestra el ultimo ciclo completo del log, sin corte fijo
+# v10.5.4:
+#   - Contador dual de ciclos: histórico total + serie lógica actual
+#   - cycle_summary/cycles_history guardan logic_series y logic_cycle_number
+#   - /estado y /info muestran ambos contadores para comparar estrategias
 # =============================================================
 
 
@@ -90,7 +94,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.5.3"
+BOT_VERSION = "v10.5.4"
 LOGIC_SERIES = "10.5"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -266,6 +270,7 @@ bot_state = {
     "last_opportunities": 0,
     "running": False,
     "cycle_count": 0,
+    "cycle_count_series": 0,
     "last_trades": [],
     "last_decision_summary": "",
     "last_trader_scan": None,
@@ -363,19 +368,59 @@ def save_alerts_state(state):
         log.warning(f"Error guardando alerts_state: {e}")
 
 
-def _load_cycle_count():
+def _extract_logic_series(value):
+    """Normaliza 'v10.5.4' o '10.5' a '10.5'."""
+    if not isinstance(value, str):
+        return None
+    match = re.search(r"(\d+\.\d+)", value)
+    return match.group(1) if match else None
+
+
+def _load_cycle_counts():
     """
-    Lee cycles_history.jsonl y devuelve el número de ciclos históricos.
-    Así el contador no se reinicia con cada deploy — es acumulativo
-    mientras el volume de Railway persista y la versión sea 10.4.X.
+    Lee cycles_history.jsonl y devuelve:
+      - total de ciclos históricos
+      - ciclos de la serie lógica actual (LOGIC_SERIES)
+
+    El contador total nunca se reinicia con deploys; el de serie permite
+    medir cambios de estrategia sin perder continuidad operativa.
     """
     if not os.path.exists(CYCLES_HISTORY_FILE):
-        return 0
+        return 0, 0
     try:
         with open(CYCLES_HISTORY_FILE, "r", encoding="utf-8") as f:
-            return sum(1 for line in f if line.strip())
+            total = 0
+            series = 0
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                total += 1
+                entry_series = None
+                try:
+                    data = json.loads(line)
+                    if isinstance(data, dict):
+                        entry_series = (
+                            _extract_logic_series(data.get("logic_series"))
+                            or _extract_logic_series(data.get("version"))
+                        )
+                except Exception:
+                    logic_match = re.search(r'"logic_series"\s*:\s*"([^"]+)"', line)
+                    version_match = re.search(r'"version"\s*:\s*"([^"]+)"', line)
+                    if logic_match:
+                        entry_series = _extract_logic_series(logic_match.group(1))
+                    elif version_match:
+                        entry_series = _extract_logic_series(version_match.group(1))
+                if entry_series == LOGIC_SERIES:
+                    series += 1
+            return total, series
     except Exception:
-        return 0
+        return 0, 0
+
+
+def _load_cycle_count():
+    """Compatibilidad: devuelve solo el total histórico."""
+    return _load_cycle_counts()[0]
 
 
 def parse_city_from_title(title):
@@ -1618,8 +1663,20 @@ def cmd_estado():
             n_mkts = scan.get("markets_evaluated", 0)
             exp = cd.get("exposure_after")
             exp_str = f" | Exp ${exp:.2f}" if exp is not None else ""
+            cycle_total_num = cd.get("cycle_number", "?")
+            logic_cycle_num = cd.get("logic_cycle_number")
+            if logic_cycle_num is None:
+                cycle_series = (
+                    _extract_logic_series(cd.get("logic_series"))
+                    or _extract_logic_series(cd.get("version"))
+                )
+                if cycle_series == LOGIC_SERIES and cycle_total_num == bot_state.get("cycle_count"):
+                    logic_cycle_num = bot_state.get("cycle_count_series")
+            cycle_label = f"Ciclo total #{cycle_total_num}"
+            if logic_cycle_num is not None:
+                cycle_label += f" | serie v{LOGIC_SERIES} #{logic_cycle_num}"
             cycle_line = (
-                f"\n📋 Ciclo #{cd.get('cycle_number','?')} "
+                f"\n📋 {cycle_label} "
                 f"({cd.get('timestamp_utc','?')[:10]}):\n"
                 f"  Mercados: {n_mkts} | Compras: {n_buys} | Ventas: {n_sold}{exp_str}"
             )
@@ -1653,7 +1710,7 @@ def cmd_estado():
         f"⏱ Estado: {running}\n"
         f"📅 Último: {last_str}\n"
         f"⏰ Próximo: {next_str}\n"
-        f"🔢 Ciclos: {bot_state['cycle_count']}"
+        f"🔢 Ciclos: {bot_state['cycle_count']} total | {bot_state.get('cycle_count_series', 0)} serie v{LOGIC_SERIES}"
         f"{cycle_line}\n\n"
         f"Schedule: {schedule} UTC",
         with_menu=True,
@@ -2321,8 +2378,20 @@ def cmd_info():
             ) if buys else "ninguna"
             exp = cd.get("exposure_after")
             bud = cd.get("budget_left")
+            cycle_total_num = cd.get("cycle_number", "?")
+            logic_cycle_num = cd.get("logic_cycle_number")
+            if logic_cycle_num is None:
+                cycle_series = (
+                    _extract_logic_series(cd.get("logic_series"))
+                    or _extract_logic_series(cd.get("version"))
+                )
+                if cycle_series == LOGIC_SERIES and cycle_total_num == bot_state.get("cycle_count"):
+                    logic_cycle_num = bot_state.get("cycle_count_series")
+            cycle_label = f"Ciclo total #{cycle_total_num}"
+            if logic_cycle_num is not None:
+                cycle_label += f" | serie v{LOGIC_SERIES} #{logic_cycle_num}"
             cycle_block = (
-                f"\nCiclo #{cd.get('cycle_number','?')} ({cd.get('timestamp_utc','?')[:16]} UTC)\n"
+                f"\n{cycle_label} ({cd.get('timestamp_utc','?')[:16]} UTC)\n"
                 f"  Gestión: {mgmt.get('n_kept',0)} mantenidas, {mgmt.get('n_sold',0)} vendidas, "
                 f"{mgmt.get('n_resolved',0)} resueltas\n"
                 f"  Escaneo: {scan.get('markets_evaluated',0)} mercados → "
@@ -2366,7 +2435,7 @@ def cmd_info():
         f"Exp máx: {int(MAX_EXPOSURE_PCT*100)}% | Min bet: ${MIN_BET:.2f}\n"
         f"{intra_info}"
         f"Schedule: {schedule} UTC\n"
-        f"Ciclos completados: {bot_state['cycle_count']}\n"
+        f"Ciclos completados: {bot_state['cycle_count']} total | {bot_state.get('cycle_count_series', 0)} serie v{LOGIC_SERIES}\n"
         f"Último: {last_str}\n"
     )
     if cycle_block:
@@ -4235,7 +4304,9 @@ def main(client):
     try:
         cycle_data = {
             "version": BOT_VERSION,
+            "logic_series": LOGIC_SERIES,
             "cycle_number": bot_state["cycle_count"] + 1,
+            "logic_cycle_number": bot_state.get("cycle_count_series", 0) + 1,
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
             "mode": "DRY_RUN" if DRY_RUN else "REAL",
             "management": {
@@ -4278,6 +4349,7 @@ def main(client):
         log.warning(f"Error evaluando alertas de observabilidad: {e}")
 
     bot_state["cycle_count"] += 1
+    bot_state["cycle_count_series"] = bot_state.get("cycle_count_series", 0) + 1
     bot_state["running"] = False
     log.info("Ciclo finalizado.")
 
@@ -4431,9 +4503,14 @@ if __name__ == "__main__":
     log.info(f"Modo: {'DRY RUN' if DRY_RUN else 'REAL'}")
     log.info("=" * 65)
 
-    # v10.4.2: ciclos acumulativos — no se reinician con cada deploy
-    bot_state["cycle_count"] = _load_cycle_count()
-    log.info(f"Ciclos históricos cargados: {bot_state['cycle_count']}")
+    # v10.5.4: ciclos acumulativos + contador por serie lógica
+    cycle_count_total, cycle_count_series = _load_cycle_counts()
+    bot_state["cycle_count"] = cycle_count_total
+    bot_state["cycle_count_series"] = cycle_count_series
+    log.info(
+        f"Ciclos históricos cargados: {bot_state['cycle_count']} total | "
+        f"{bot_state['cycle_count_series']} serie v{LOGIC_SERIES}"
+    )
 
     clob_client = setup_client()
     if clob_client is None:

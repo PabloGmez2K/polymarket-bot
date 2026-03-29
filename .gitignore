@@ -26,6 +26,7 @@ Desktop.ini
 
 # Archivos de debug (temporales)
 debug_tags.py
+_tmp_*
 
 # Notas personales
 *.log
