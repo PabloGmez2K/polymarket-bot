@@ -21,8 +21,8 @@ from py_clob_client.order_builder.constants import BUY, SELL
 load_dotenv()
 
 # =============================================================
-# bot.py v10.5.1 — intra-cycle SL monitor
-# Sesión 20: recalibración + protección entre ciclos
+# bot.py v10.5.2 — city accuracy tracker
+# Sesión 20: recalibración + protección entre ciclos + detección WU divergencia
 # =============================================================
 #
 # Nuevo en v10.4.3:
@@ -90,7 +90,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.5.1"
+BOT_VERSION = "v10.5.2"
 LOGIC_SERIES = "10.5"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -103,6 +103,10 @@ SCALING_WINDOW = int(os.getenv("SCALING_WINDOW", "20"))
 WIN_RATE_WINDOW = int(os.getenv("WIN_RATE_WINDOW", "15"))
 WIN_RATE_LOW = float(os.getenv("WIN_RATE_LOW", "30.0"))
 WIN_RATE_HIGH = float(os.getenv("WIN_RATE_HIGH", "50.0"))
+# v10.5.2: City accuracy tracker
+CITY_MIN_TRADES_FOR_BLOCK = int(os.getenv("CITY_MIN_TRADES_FOR_BLOCK", "3"))
+CITY_BLOCK_WIN_RATE = float(os.getenv("CITY_BLOCK_WIN_RATE", "25.0"))
+
 BLOCKED_CITIES = {
     city.strip().lower()
     for city in os.getenv("BLOCKED_CITIES", "London").split(",")
@@ -313,6 +317,8 @@ def load_alerts_state():
         "scaling_negative_alerted": False,
         "win_rate_low_alerted": False,
         "win_rate_high_alerted": False,
+        # v10.5.2: city accuracy tracker
+        "city_accuracy_flagged": {},
     }
     if not os.path.exists(ALERTS_FILE):
         return default
@@ -334,6 +340,7 @@ def load_alerts_state():
         state.setdefault("scaling_negative_alerted", False)
         state.setdefault("win_rate_low_alerted", False)
         state.setdefault("win_rate_high_alerted", False)
+        state.setdefault("city_accuracy_flagged", {})
         return state
     except Exception:
         return default
@@ -973,6 +980,29 @@ def _get_recent_closed_trades(n=None):
     return closed
 
 
+def get_city_accuracy():
+    """Calcula win rate y PnL por ciudad desde postmortem.json cerrados."""
+    records = load_postmortem_data()
+    closed = [r for r in records if r.get("status") == "closed"
+              and r.get("close_action") in {"SELL", "LOSS_TOTAL", "RESOLVED_WIN"}
+              and r.get("city")]
+
+    cities = {}
+    for r in closed:
+        city = r["city"]
+        if city not in cities:
+            cities[city] = {"trades": 0, "wins": 0, "pnl": 0.0}
+        cities[city]["trades"] += 1
+        if (r.get("pnl_cash") or 0) > 0:
+            cities[city]["wins"] += 1
+        cities[city]["pnl"] += r.get("pnl_cash", 0) or 0
+
+    for city, data in cities.items():
+        data["win_rate"] = round(data["wins"] / data["trades"] * 100, 1) if data["trades"] > 0 else 0.0
+
+    return cities
+
+
 def run_observability_alerts():
     """
     Alertas one-shot de observabilidad y review readiness.
@@ -1164,6 +1194,25 @@ def run_observability_alerts():
         elif win_rate < WIN_RATE_HIGH and state.get("win_rate_high_alerted"):
             state["win_rate_high_alerted"] = False
             changed = True
+
+    # ---- v10.5.2: City Accuracy Alert ----
+    city_stats = get_city_accuracy()
+    flagged_key = "city_accuracy_flagged"
+    if flagged_key not in state:
+        state[flagged_key] = {}
+
+    for city, data in city_stats.items():
+        if data["trades"] >= CITY_MIN_TRADES_FOR_BLOCK and data["win_rate"] <= CITY_BLOCK_WIN_RATE:
+            if not is_city_blocked(city) and city not in state[flagged_key]:
+                now_iso = datetime.now(timezone.utc).isoformat()
+                send_telegram(
+                    f"⚠️ <b>Ciudad con baja accuracy</b>\n"
+                    f"{city}: {data['win_rate']}% win rate ({data['wins']}/{data['trades']} trades)\n"
+                    f"PnL: ${data['pnl']:+.2f}\n"
+                    f"<i>Considerar añadir a BLOCKED_CITIES</i>"
+                )
+                state[flagged_key][city] = {"sent_at": now_iso, **data}
+                changed = True
 
     if changed:
         save_alerts_state(state)
@@ -2232,10 +2281,13 @@ def cmd_rendimiento():
             text += f"  🔹 {stats['unconfirmed_count']} ops → ${stats['unconfirmed_pnl']:+.2f}\n"
 
     if stats['top_cities']:
+        city_acc = get_city_accuracy()
         text += f"\n<b>Top ciudades:</b>\n"
         for city, count in stats['top_cities']:
             pnl = stats['city_pnl'].get(city, 0)
-            text += f"  {city}: {count} ops, ${pnl:+.2f}\n"
+            acc = city_acc.get(city, {})
+            wr = f" | WR:{acc['win_rate']}%" if acc.get('win_rate') is not None else ""
+            text += f"  {city}: {count} ops, ${pnl:+.2f}{wr}\n"
 
     text += f"\n<i>⚠️ PnL fiable: dashboard Polymarket.</i>\n"
     send_telegram_paged(text, with_menu=True)
@@ -2326,11 +2378,33 @@ def cmd_info():
     send_telegram_paged(text, with_menu=True)
 
 
+def cmd_accuracy():
+    """Muestra accuracy (win rate) por ciudad desde postmortem."""
+    city_stats = get_city_accuracy()
+    if not city_stats:
+        send_telegram("Sin datos de accuracy todavía.")
+        return
+
+    sorted_cities = sorted(city_stats.items(), key=lambda x: -x[1]["trades"])
+
+    lines = ["<b>Accuracy por ciudad</b>\n"]
+    for city, data in sorted_cities:
+        blocked = " 🚫" if is_city_blocked(city) else ""
+        flag = " ⚠️" if data["trades"] >= CITY_MIN_TRADES_FOR_BLOCK and data["win_rate"] <= CITY_BLOCK_WIN_RATE else ""
+        lines.append(
+            f"<b>{city}</b>{blocked}{flag}: "
+            f"{data['wins']}/{data['trades']} ({data['win_rate']}%) "
+            f"${data['pnl']:+.2f}"
+        )
+
+    send_telegram_paged("\n".join(lines))
+
+
 COMMANDS = {
     "estado": cmd_estado, "cartera": cmd_cartera, "ordenes": cmd_ordenes,
     "log": cmd_log, "logfull": cmd_logfull, "forzar": cmd_forzar,
     "modo": cmd_modo, "traders": cmd_traders, "rendimiento": cmd_rendimiento,
-    "info": cmd_info, "postmortem": cmd_postmortem,
+    "info": cmd_info, "postmortem": cmd_postmortem, "accuracy": cmd_accuracy,
     "confirmar_real": cmd_confirmar_real, "confirmar_dry": cmd_confirmar_dry,
     "cancelar_modo": cmd_cancelar_modo,
 }
