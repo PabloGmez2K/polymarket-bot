@@ -149,6 +149,50 @@
       </article>
     </section>
 
+    <section class="grid layout-main">
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Progreso</p>
+            <h2>Readiness operativo</h2>
+          </div>
+        </div>
+        <div class="checklist">
+          {% for item in dashboard.progress %}
+          <div class="check-item check-item-{{ item.status }}">
+            <div class="check-status {{ item.status }}"></div>
+            <div class="check-body">
+              <strong>{{ item.label }}</strong>
+              <span>{{ item.value }} · {{ item.detail }}</span>
+            </div>
+            <span class="check-tag check-tag-{{ item.status }}">{{ item.tag }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Desbloqueos</p>
+            <h2>Qué falta para habilitar decisiones</h2>
+          </div>
+        </div>
+        <div class="checklist">
+          {% for item in dashboard.unlocks %}
+          <div class="check-item check-item-{{ item.status }}">
+            <div class="check-status {{ item.status }}"></div>
+            <div class="check-body">
+              <strong>{{ item.label }}</strong>
+              <span>{{ item.value }} · {{ item.detail }}</span>
+            </div>
+            <span class="check-tag check-tag-{{ item.status }}">{{ item.tag }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </article>
+    </section>
+
     <section class="grid cards-4">
       <article class="card mini-card">
         <span class="stat-label">PnL serie v{{ dashboard.logic_series }}</span>
@@ -174,6 +218,29 @@
         {% if not dashboard.series_stats.has_drawdown_data %}
         <span class="stat-sub">Sin cierres todavía</span>
         {% endif %}
+      </article>
+    </section>
+
+    <section class="grid">
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Trofeos</p>
+            <h2>Hitos validados del sistema</h2>
+          </div>
+        </div>
+        <div class="trophy-grid">
+          {% for trophy in dashboard.trophies %}
+          <div class="trophy-card trophy-{{ trophy.status }}">
+            <span class="trophy-label">{{ trophy.label }}</span>
+            <strong class="trophy-value">{{ trophy.value }}</strong>
+            <span class="trophy-detail">{{ trophy.detail }}</span>
+            {% if trophy.meta %}
+            <span class="trophy-meta">{{ trophy.meta }}</span>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
       </article>
     </section>
 

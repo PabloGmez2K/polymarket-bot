@@ -101,7 +101,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.5.8"
+BOT_VERSION = "v10.5.9"
 LOGIC_SERIES = "10.5"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -134,6 +134,7 @@ BANKROLL_LEVELS = [
 PROMOTION_MIN_SERIES_CYCLES = int(os.getenv("PROMOTION_MIN_SERIES_CYCLES", "10"))
 PROMOTION_MIN_SERIES_WIN_RATE = float(os.getenv("PROMOTION_MIN_SERIES_WIN_RATE", "40.0"))
 PROMOTION_MIN_SERIES_PNL = float(os.getenv("PROMOTION_MIN_SERIES_PNL", "0.0"))
+PROMOTION_CITY_COVERAGE_TARGET = int(os.getenv("PROMOTION_CITY_COVERAGE_TARGET", "3"))
 
 BLOCKED_CITIES = {
     city.strip().lower()
@@ -1444,6 +1445,428 @@ def get_logic_series_stats(logic_series=None):
     }
 
 
+def get_validated_closed_postmortems():
+    """Postmortems cerrados y validados para observabilidad/trofeos del dashboard."""
+    records = load_postmortem_data()
+    closed = [
+        r for r in records
+        if r.get("status") == "closed"
+        and r.get("close_action") in {"SELL", "LOSS_TOTAL", "RESOLVED_WIN"}
+        and r.get("pnl_cash") is not None
+    ]
+    closed.sort(key=lambda r: (r.get("closed_at") or "", r.get("opened_at") or ""), reverse=True)
+    return closed
+
+
+def _dashboard_status_item(label, value, detail, status):
+    """Normaliza items operativos reutilizables para dashboard."""
+    tags = {
+        "good": "OK",
+        "bad": "Pendiente",
+        "waiting": "Esperando muestra",
+        "blocked": "Bloqueado",
+    }
+    return {
+        "label": label,
+        "value": value,
+        "detail": detail,
+        "status": status,
+        "tag": tags.get(status, "Pendiente"),
+    }
+
+
+def _dashboard_record_meta(record):
+    """Contexto compacto de serie/versión para trofeos del dashboard."""
+    version = record.get("bot_version_closed") or record.get("bot_version_opened") or "v?"
+    logic_series = _extract_logic_series(record.get("bot_version_opened")) or _extract_logic_series(record.get("bot_version_closed"))
+    action = record.get("close_action", "")
+    reason = record.get("close_reason", "")
+    parts = [version]
+    if logic_series:
+        parts.append(f"serie v{logic_series}")
+    if action:
+        parts.append(action)
+    if reason and reason not in {"", action}:
+        parts.append(reason)
+    return " · ".join(parts)
+
+
+def build_dashboard_progress(
+    promotion=None,
+    clean_stats=None,
+    series_clean_stats=None,
+    series_stats=None,
+    city_accuracy=None,
+    alerts=None,
+    cycle_series=None,
+):
+    """Bloque de progreso operativo y readiness del dashboard."""
+    if promotion is None:
+        promotion = build_promotion_checklist()
+    if clean_stats is None:
+        clean_stats = get_clean_closed_trade_stats()
+    if series_clean_stats is None:
+        series_clean_stats = get_logic_series_clean_closed_trade_stats()
+    if series_stats is None:
+        series_stats = get_logic_series_stats()
+    if city_accuracy is None:
+        city_accuracy = get_city_accuracy()
+    if alerts is None:
+        alerts = get_dashboard_alert_summary()
+    if cycle_series is None:
+        _, cycle_series = _load_cycle_counts()
+
+    critical_alerts = 0
+    if alerts.get("signals", {}).get("status") != "ok":
+        critical_alerts += 1
+    if alerts.get("pending_stuck"):
+        critical_alerts += 1
+
+    series_trade_remaining = max(0, REVIEW_READY_CLEAN_TRADES - int(series_clean_stats.get("count", 0) or 0))
+    series_cycle_remaining = max(0, PROMOTION_MIN_SERIES_CYCLES - int(cycle_series or 0))
+    series_closed_count = int(series_stats.get("closed_count", 0) or 0)
+    city_coverage_count = sum(
+        1 for data in city_accuracy.values()
+        if int(data.get("trades", 0) or 0) >= CITY_MIN_TRADES_FOR_BLOCK
+    )
+    max_city_sample = max((int(data.get("trades", 0) or 0) for data in city_accuracy.values()), default=0)
+    gates_missing = max(0, int(promotion.get("total", 0) or 0) - int(promotion.get("passed", 0) or 0))
+
+    readiness_status = "good" if promotion.get("decision") == "READY" else "bad"
+    if critical_alerts:
+        readiness_status = "blocked"
+    elif promotion.get("levels", {}).get("is_max_level"):
+        readiness_status = "good"
+
+    useful_closures_status = "good" if series_closed_count >= 1 else "waiting"
+    city_coverage_status = "good" if city_coverage_count >= PROMOTION_CITY_COVERAGE_TARGET else "bad"
+    if not city_accuracy:
+        city_coverage_status = "waiting"
+
+    return [
+        _dashboard_status_item(
+            f"Muestra para revisar lógica v{LOGIC_SERIES}",
+            f"{series_clean_stats['count']} / {REVIEW_READY_CLEAN_TRADES}",
+            (
+                "muestra suficiente alcanzada"
+                if series_trade_remaining == 0
+                else f"faltan {series_trade_remaining} trades limpios serie"
+            ),
+            "good" if series_trade_remaining == 0 else "bad",
+        ),
+        _dashboard_status_item(
+            f"Estabilidad de serie v{LOGIC_SERIES}",
+            f"{cycle_series} / {PROMOTION_MIN_SERIES_CYCLES}",
+            (
+                "estabilidad mínima alcanzada"
+                if series_cycle_remaining == 0
+                else f"faltan {series_cycle_remaining} ciclos estables"
+            ),
+            "good" if series_cycle_remaining == 0 else "bad",
+        ),
+        _dashboard_status_item(
+            "Cierres útiles para win rate",
+            f"{series_closed_count} cierres",
+            (
+                "faltan cierres validados para activar win rate y drawdown"
+                if series_closed_count == 0
+                else "win rate y drawdown de serie ya están activos"
+            ),
+            useful_closures_status,
+        ),
+        _dashboard_status_item(
+            f"Readiness subida ${promotion['levels']['next_target']:.0f}" if promotion["levels"].get("next_target") else "Readiness nivel máximo",
+            f"{promotion['passed']} / {promotion['total']} gates",
+            (
+                "sin siguiente nivel disponible"
+                if promotion["levels"].get("is_max_level")
+                else f"faltan {gates_missing} gates · críticos {promotion['blocking_failed']}"
+            ),
+            readiness_status,
+        ),
+        _dashboard_status_item(
+            "Cobertura de ciudades",
+            f"{city_coverage_count} / {PROMOTION_CITY_COVERAGE_TARGET} ciudades",
+            (
+                f"ninguna ciudad supera {CITY_MIN_TRADES_FOR_BLOCK} cierres todavía"
+                if not city_accuracy
+                else f"objetivo: >= {CITY_MIN_TRADES_FOR_BLOCK} cierres por ciudad · mejor muestra {max_city_sample}/{CITY_MIN_TRADES_FOR_BLOCK}"
+            ),
+            city_coverage_status,
+        ),
+    ]
+
+
+def build_dashboard_trophies(closed_records=None, city_accuracy=None):
+    """Trofeos e hitos del bot usando solo cierres validados."""
+    if closed_records is None:
+        closed_records = get_validated_closed_postmortems()
+    if city_accuracy is None:
+        city_accuracy = get_city_accuracy()
+
+    def _safe_float(value):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _record_pct(record):
+        pct = _safe_float(record.get("pnl_pct"))
+        if pct is not None:
+            return pct
+        pnl_cash = _safe_float(record.get("pnl_cash"))
+        total_amount = _safe_float(record.get("total_amount"))
+        if pnl_cash is not None and total_amount and total_amount > 0:
+            return round((pnl_cash / total_amount) * 100, 1)
+        return None
+
+    def _make_trophy(label, value="n/d", detail="sin muestra validada", meta="", status="waiting"):
+        return {
+            "label": label,
+            "value": value,
+            "detail": detail,
+            "meta": meta,
+            "status": status,
+        }
+
+    trophies = []
+
+    if closed_records:
+        best_trade = max(closed_records, key=lambda r: _safe_float(r.get("pnl_cash")) or float("-inf"))
+        trophies.append(_make_trophy(
+            "Mejor operación",
+            f"${(_safe_float(best_trade.get('pnl_cash')) or 0):+.2f}",
+            format_postmortem_label(best_trade),
+            _dashboard_record_meta(best_trade),
+            "good",
+        ))
+
+        pct_candidates = [r for r in closed_records if _record_pct(r) is not None]
+        if pct_candidates:
+            best_return = max(pct_candidates, key=lambda r: _record_pct(r) or float("-inf"))
+            trophies.append(_make_trophy(
+                "Mejor retorno %",
+                f"{(_record_pct(best_return) or 0):+.1f}%",
+                format_postmortem_label(best_return),
+                _dashboard_record_meta(best_return),
+                "good",
+            ))
+        else:
+            trophies.append(_make_trophy("Mejor retorno %"))
+
+        edge_candidates = []
+        for record in closed_records:
+            for buy in record.get("buys", []) or []:
+                edge = _safe_float(buy.get("edge_pct"))
+                if edge is not None:
+                    edge_candidates.append((edge, record, buy))
+            fallback_edge = _safe_float(record.get("latest_edge_pct"))
+            if fallback_edge is not None and not (record.get("buys") or []):
+                edge_candidates.append((fallback_edge, record, None))
+        if edge_candidates:
+            edge_value, edge_record, _ = max(edge_candidates, key=lambda item: item[0])
+            trophies.append(_make_trophy(
+                "Mayor edge ejecutado",
+                f"{edge_value:+.1f}%",
+                format_postmortem_label(edge_record),
+                _dashboard_record_meta(edge_record),
+                "good",
+            ))
+        else:
+            trophies.append(_make_trophy("Mayor edge ejecutado"))
+
+        win_candidates = [
+            r for r in closed_records
+            if (_safe_float(r.get("pnl_cash")) or 0) > 0 or r.get("close_action") == "RESOLVED_WIN"
+        ]
+        if win_candidates:
+            first_win = min(win_candidates, key=lambda r: (r.get("closed_at") or r.get("opened_at") or ""))
+            trophies.append(_make_trophy(
+                "Primera victoria validada",
+                format_postmortem_label(first_win),
+                f"${(_safe_float(first_win.get('pnl_cash')) or 0):+.2f}",
+                _dashboard_record_meta(first_win),
+                "good",
+            ))
+        else:
+            trophies.append(_make_trophy("Primera victoria validada"))
+
+        recovery_candidates = [
+            r for r in closed_records
+            if r.get("close_action") == "SELL" and (_safe_float(r.get("pnl_cash")) or 0) > 0
+        ]
+        if recovery_candidates:
+            recovery = max(recovery_candidates, key=lambda r: _safe_float(r.get("pnl_cash")) or float("-inf"))
+            trophies.append(_make_trophy(
+                "Mayor recuperación en una salida",
+                f"${(_safe_float(recovery.get('pnl_cash')) or 0):+.2f}",
+                format_postmortem_label(recovery),
+                _dashboard_record_meta(recovery),
+                "good",
+            ))
+        else:
+            trophies.append(_make_trophy("Mayor recuperación en una salida"))
+
+        worst_trade = min(closed_records, key=lambda r: _safe_float(r.get("pnl_cash")) or float("inf"))
+        trophies.append(_make_trophy(
+            "Peor operación",
+            f"${(_safe_float(worst_trade.get('pnl_cash')) or 0):+.2f}",
+            format_postmortem_label(worst_trade),
+            _dashboard_record_meta(worst_trade),
+            "bad",
+        ))
+    else:
+        trophies.extend([
+            _make_trophy("Mejor operación"),
+            _make_trophy("Mejor retorno %"),
+            _make_trophy("Mayor edge ejecutado"),
+            _make_trophy("Primera victoria validada"),
+            _make_trophy("Mayor recuperación en una salida"),
+            _make_trophy("Peor operación"),
+        ])
+
+    if city_accuracy:
+        city_items = list(city_accuracy.items())
+        best_city = max(city_items, key=lambda item: (item[1].get("pnl", 0), item[1].get("win_rate", 0), item[1].get("trades", 0)))
+        worst_city = min(city_items, key=lambda item: (item[1].get("pnl", 0), item[1].get("win_rate", 0), -item[1].get("trades", 0)))
+        trophies.append(_make_trophy(
+            "Ciudad más rentable",
+            best_city[0],
+            f"${best_city[1].get('pnl', 0):+.2f} · WR {best_city[1].get('win_rate', 0):.1f}%",
+            f"{best_city[1].get('trades', 0)} trades validados",
+            "good",
+        ))
+        trophies.append(_make_trophy(
+            "Ciudad más peligrosa",
+            worst_city[0],
+            f"${worst_city[1].get('pnl', 0):+.2f} · WR {worst_city[1].get('win_rate', 0):.1f}%",
+            f"{worst_city[1].get('trades', 0)} trades validados",
+            "bad",
+        ))
+    else:
+        trophies.extend([
+            _make_trophy("Ciudad más rentable"),
+            _make_trophy("Ciudad más peligrosa"),
+        ])
+
+    return trophies
+
+
+def build_dashboard_unlocks(
+    promotion=None,
+    series_stats=None,
+    series_clean_stats=None,
+    city_accuracy=None,
+    alerts=None,
+):
+    """Desbloqueos y confirmaciones pendientes antes de actuar."""
+    if promotion is None:
+        promotion = build_promotion_checklist()
+    if series_stats is None:
+        series_stats = get_logic_series_stats()
+    if series_clean_stats is None:
+        series_clean_stats = get_logic_series_clean_closed_trade_stats()
+    if city_accuracy is None:
+        city_accuracy = get_city_accuracy()
+    if alerts is None:
+        alerts = get_dashboard_alert_summary()
+    _, cycle_series = _load_cycle_counts()
+
+    series_trade_remaining = max(0, REVIEW_READY_CLEAN_TRADES - int(series_clean_stats.get("count", 0) or 0))
+    series_cycle_remaining = max(0, PROMOTION_MIN_SERIES_CYCLES - int(cycle_series or 0))
+    series_closed_count = int(series_stats.get("closed_count", 0) or 0)
+    critical_operational = []
+    if alerts.get("signals", {}).get("status") != "ok":
+        critical_operational.append(f"signals={alerts['signals']['status']}")
+    if alerts.get("pending_stuck"):
+        critical_operational.append(f"pending_exit={len(alerts['pending_stuck'])}")
+
+    best_city_name = None
+    best_city_trades = 0
+    if city_accuracy:
+        best_city_name, best_city_data = max(city_accuracy.items(), key=lambda item: int(item[1].get("trades", 0) or 0))
+        best_city_trades = int(best_city_data.get("trades", 0) or 0)
+
+    qualified_cities = sum(
+        1 for data in city_accuracy.values()
+        if int(data.get("trades", 0) or 0) >= CITY_MIN_TRADES_FOR_BLOCK
+    )
+
+    next_target = promotion["levels"].get("next_target")
+    next_target_text = f"${next_target:.0f}" if next_target else "siguiente nivel"
+
+    return [
+        _dashboard_status_item(
+            f"Revisar lógica v{LOGIC_SERIES} con confianza",
+            (
+                "muestra suficiente alcanzada"
+                if series_trade_remaining == 0
+                else f"faltan {series_trade_remaining} trades limpios serie"
+            ),
+            f"objetivo: {REVIEW_READY_CLEAN_TRADES} cierres limpios de la serie actual",
+            "good" if series_trade_remaining == 0 else "bad",
+        ),
+        _dashboard_status_item(
+            f"Evaluar subida de bankroll a {next_target_text}",
+            (
+                "gates completos para evaluación manual"
+                if promotion["decision"] == "READY"
+                else f"faltan {promotion['blocking_failed']} gates críticos"
+            ),
+            f"gates totales: {promotion['passed']}/{promotion['total']}",
+            (
+                "blocked" if critical_operational else
+                "good" if promotion["decision"] == "READY" else
+                "bad"
+            ),
+        ),
+        _dashboard_status_item(
+            "Activar win rate y drawdown de serie",
+            (
+                f"{series_closed_count} cierres validados"
+                if series_closed_count > 0
+                else "falta al menos 1 cierre serie validado"
+            ),
+            "sin este cierre, las métricas de serie no son interpretables",
+            "good" if series_closed_count > 0 else "waiting",
+        ),
+        _dashboard_status_item(
+            "Accuracy con muestra suficiente por ciudad",
+            (
+                f"{qualified_cities} ciudades ya superan el umbral"
+                if qualified_cities > 0
+                else (
+                    f"faltan {max(0, CITY_MIN_TRADES_FOR_BLOCK - best_city_trades)} cierres en {best_city_name}"
+                    if best_city_name
+                    else "sin cierres por ciudad todavía"
+                )
+            ),
+            f"umbral: {CITY_MIN_TRADES_FOR_BLOCK} cierres validados por ciudad",
+            "good" if qualified_cities > 0 else "waiting" if not city_accuracy else "bad",
+        ),
+        _dashboard_status_item(
+            "Sin alertas críticas operativas",
+            (
+                "signals ok y sin pending exits atascadas"
+                if not critical_operational
+                else " | ".join(critical_operational)
+            ),
+            "las alertas de observabilidad bloquean decisiones de subida si siguen activas",
+            "good" if not critical_operational else "blocked",
+        ),
+        _dashboard_status_item(
+            "Confiar en métricas de serie",
+            (
+                f"{series_closed_count} cierres validados disponibles"
+                if series_closed_count > 0
+                else "todavía no hay cierres validados en la serie"
+            ),
+            "sin cierres validados, PnL/WR/drawdown de la serie son solo placeholders",
+            "good" if series_closed_count > 0 else "waiting",
+        ),
+    ]
+
+
 def get_bankroll_level_context():
     """Calcula el nivel actual y el siguiente escalón de bankroll."""
     levels = sorted({float(v) for v in BANKROLL_LEVELS})
@@ -1811,12 +2234,30 @@ def build_dashboard_snapshot():
     cycle_history = load_cycle_history(limit=8)
     clean_stats = get_clean_closed_trade_stats()
     series_clean_stats = get_logic_series_clean_closed_trade_stats()
+    validated_closed = get_validated_closed_postmortems()
     perf = get_performance_summary() or {}
     series_stats = get_logic_series_stats()
     alerts = get_dashboard_alert_summary()
     promotion = build_promotion_checklist()
-    portfolio = _get_portfolio_and_positions()
     city_accuracy = get_city_accuracy()
+    progress = build_dashboard_progress(
+        promotion=promotion,
+        clean_stats=clean_stats,
+        series_clean_stats=series_clean_stats,
+        series_stats=series_stats,
+        city_accuracy=city_accuracy,
+        alerts=alerts,
+        cycle_series=cycle_series,
+    )
+    unlocks = build_dashboard_unlocks(
+        promotion=promotion,
+        series_stats=series_stats,
+        series_clean_stats=series_clean_stats,
+        city_accuracy=city_accuracy,
+        alerts=alerts,
+    )
+    portfolio = _get_portfolio_and_positions()
+    trophies = build_dashboard_trophies(closed_records=validated_closed, city_accuracy=city_accuracy)
     agent_events = []
     stage_labels = {
         "proposed": "Propuesta",
@@ -1935,6 +2376,9 @@ def build_dashboard_snapshot():
         "cycle_summary": cycle_summary,
         "cycle_history": cycle_history_display,
         "promotion": promotion,
+        "progress": progress,
+        "trophies": trophies,
+        "unlocks": unlocks,
         "clean_stats": clean_stats,
         "series_clean_stats": series_clean_stats,
         "series_stats": series_metrics,

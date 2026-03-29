@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-verify_before_deploy.py v9 — Tests de comportamiento para bot.py v10.5.8
+verify_before_deploy.py v9 — Tests de comportamiento para bot.py v10.5.9
 
 Ejecutar ANTES de cada deploy:
   python verify_before_deploy.py
@@ -283,6 +283,10 @@ def run_tests():
     test("_normalize_agent_event_stage definida", "def _normalize_agent_event_stage(" in code)
     test("compute_agent_scorecard definida", "def compute_agent_scorecard(" in code)
     test("get_logic_series_clean_closed_trade_stats definida", "def get_logic_series_clean_closed_trade_stats(" in code)
+    test("get_validated_closed_postmortems definida", "def get_validated_closed_postmortems(" in code)
+    test("build_dashboard_progress definida", "def build_dashboard_progress(" in code)
+    test("build_dashboard_trophies definida", "def build_dashboard_trophies(" in code)
+    test("build_dashboard_unlocks definida", "def build_dashboard_unlocks(" in code)
     test("build_promotion_checklist definida", "def build_promotion_checklist(" in code)
     test("build_dashboard_snapshot definida", "def build_dashboard_snapshot(" in code)
     test("create_dashboard_app definida", "def create_dashboard_app(" in code)
@@ -296,9 +300,14 @@ def run_tests():
     test("template dashboard usa cycle.series_display", "cycle.series_display" in dashboard_template_code)
     test("template dashboard muestra stages de eventos", "event.stage_label" in dashboard_template_code and "Prop." in dashboard_template_code)
     test("template dashboard usa estado waiting en checklist", "check-item-{{ item.status }}" in dashboard_template_code and "check-tag-{{ item.status }}" in dashboard_template_code)
+    test("template dashboard incluye progreso", "dashboard.progress" in dashboard_template_code and "Readiness operativo" in dashboard_template_code)
+    test("template dashboard incluye trofeos", "dashboard.trophies" in dashboard_template_code and "Hitos validados del sistema" in dashboard_template_code)
+    test("template dashboard incluye desbloqueos", "dashboard.unlocks" in dashboard_template_code and "Qué falta para habilitar decisiones" in dashboard_template_code)
     test("template dashboard muestra n/d sin cierres", "pnl_display" in dashboard_template_code and "win_rate_display" in dashboard_template_code and "drawdown_display" in dashboard_template_code)
     test("css dashboard en modo oscuro", "--bg: #071018;" in dashboard_css_code and "--card: rgba(12, 20, 29, 0.9);" in dashboard_css_code)
     test("css dashboard define estado waiting", ".check-status.waiting" in dashboard_css_code and ".check-tag-waiting" in dashboard_css_code)
+    test("css dashboard define estado blocked", ".check-status.blocked" in dashboard_css_code and ".check-tag-blocked" in dashboard_css_code)
+    test("css dashboard define trophy-grid", ".trophy-grid" in dashboard_css_code and ".trophy-card" in dashboard_css_code)
     if os.path.exists(agent_events_path):
         try:
             with open(agent_events_path, "r", encoding="utf-8") as f:
@@ -314,7 +323,7 @@ def run_tests():
     test("CYCLES_HISTORY_FILE definido", "CYCLES_HISTORY_FILE" in code)
     test("cycles_history.jsonl append-only", "cycles_history.jsonl" in code)
     test("cycle_summary se guarda en main()", "cycle_data" in code and "CYCLE_SUMMARY_FILE" in code)
-    test("cycle_data incluye version v10.5.8", '"version"' in code and "v10.5.8" in code)
+    test("cycle_data incluye version v10.5.9", '"version"' in code and "v10.5.9" in code)
     test("cycle_data incluye logic_series", '"logic_series": LOGIC_SERIES' in code)
     test("cycle_data incluye logic_cycle_number", '"logic_cycle_number"' in code)
 
@@ -335,7 +344,7 @@ def run_tests():
     test("Bug #13: send_telegram_paged en cmd_log", "send_telegram_paged" in code and "cmd_log" in code)
     test("Bug #13: send_telegram_paged en cmd_cartera", "send_telegram_paged" in code)
     test("_parse_position_label usa centavos (¢)", "¢" in code)
-    test("cmd_estado versión correcta", "Bot v10.5.8" in code or "v10.5.8" in code)
+    test("cmd_estado versión correcta", "Bot v10.5.9" in code or "v10.5.9" in code)
 
     # ---- Test 14c: Zonas horarias reales v10.4.5 ----
     print("\n🔍 Zonas horarias reales")
@@ -559,6 +568,189 @@ def run_tests():
         test("checklist vacío: win rate usa estado waiting", wr_item["status"] == "waiting" and wr_item["tag"] == "Esperando muestra", wr_item)
         test("checklist vacío: drawdown usa estado waiting", dd_item["status"] == "waiting" and dd_item["tag"] == "Esperando muestra", dd_item)
 
+        progress_ns = {
+            "LOGIC_SERIES": "10.5",
+            "REVIEW_READY_CLEAN_TRADES": 30,
+            "PROMOTION_MIN_SERIES_CYCLES": 10,
+            "PROMOTION_CITY_COVERAGE_TARGET": 3,
+            "CITY_MIN_TRADES_FOR_BLOCK": 3,
+            "_load_cycle_counts": lambda: (5, 1),
+        }
+        exec(get_function_source(module_ast, code_lines, "_dashboard_status_item"), progress_ns)
+        exec(get_function_source(module_ast, code_lines, "build_dashboard_progress"), progress_ns)
+        progress_items = progress_ns["build_dashboard_progress"](
+            promotion={
+                "levels": {"next_target": 35.0, "is_max_level": False},
+                "passed": 3,
+                "total": 9,
+                "blocking_failed": 3,
+                "decision": "HOLD",
+            },
+            clean_stats={"count": 18, "sell": 12, "loss_total": 6, "resolved_win": 0},
+            series_clean_stats={"count": 0, "sell": 0, "loss_total": 0, "resolved_win": 0},
+            series_stats={"closed_count": 0, "pnl": 0.0, "win_rate": 0.0, "recent_window_size": 0, "recent_drawdown": 0.0},
+            city_accuracy={},
+            alerts={"signals": {"status": "ok"}, "pending_stuck": [], "flagged_cities": []},
+            cycle_series=1,
+        )
+        sample_item = next(item for item in progress_items if item["label"] == "Muestra para revisar lógica v10.5")
+        closures_item = next(item for item in progress_items if item["label"] == "Cierres útiles para win rate")
+        readiness_item = next(item for item in progress_items if item["label"] == "Readiness subida $35")
+        coverage_item = next(item for item in progress_items if item["label"] == "Cobertura de ciudades")
+        test("progress: muestra trades restantes", sample_item["value"] == "0 / 30" and "faltan 30" in sample_item["detail"], sample_item)
+        test("progress: cierres útiles esperan muestra", closures_item["status"] == "waiting" and closures_item["tag"] == "Esperando muestra", closures_item)
+        test("progress: readiness etiqueta gates pendientes", readiness_item["value"] == "3 / 9 gates" and "faltan 6 gates" in readiness_item["detail"], readiness_item)
+        test("progress: cobertura ciudades no la presenta como firme sin muestra", coverage_item["status"] == "waiting" and "ninguna ciudad supera 3 cierres" in coverage_item["detail"], coverage_item)
+
+        unlocks_ns = {
+            "LOGIC_SERIES": "10.5",
+            "REVIEW_READY_CLEAN_TRADES": 30,
+            "PROMOTION_MIN_SERIES_CYCLES": 10,
+            "CITY_MIN_TRADES_FOR_BLOCK": 3,
+            "_load_cycle_counts": lambda: (5, 1),
+        }
+        exec(get_function_source(module_ast, code_lines, "_dashboard_status_item"), unlocks_ns)
+        exec(get_function_source(module_ast, code_lines, "build_dashboard_unlocks"), unlocks_ns)
+        unlock_items = unlocks_ns["build_dashboard_unlocks"](
+            promotion={
+                "levels": {"next_target": 35.0},
+                "passed": 3,
+                "total": 9,
+                "blocking_failed": 2,
+                "decision": "HOLD",
+            },
+            series_stats={"closed_count": 0, "pnl": 0.0, "win_rate": 0.0, "recent_window_size": 0, "recent_drawdown": 0.0},
+            series_clean_stats={"count": 0, "sell": 0, "loss_total": 0, "resolved_win": 0},
+            city_accuracy={"Miami": {"trades": 2, "wins": 0, "pnl": -4.07, "win_rate": 0.0}},
+            alerts={"signals": {"status": "stale"}, "pending_stuck": [{"city": "Dallas"}], "flagged_cities": []},
+        )
+        activate_item = next(item for item in unlock_items if item["label"] == "Activar win rate y drawdown de serie")
+        alerts_item = next(item for item in unlock_items if item["label"] == "Sin alertas críticas operativas")
+        accuracy_item = next(item for item in unlock_items if item["label"] == "Accuracy con muestra suficiente por ciudad")
+        trust_item = next(item for item in unlock_items if item["label"] == "Confiar en métricas de serie")
+        test("unlocks: sin cierres usa Esperando muestra", activate_item["status"] == "waiting" and activate_item["tag"] == "Esperando muestra", activate_item)
+        test("unlocks: alertas críticas bloquean subida", alerts_item["status"] == "blocked" and alerts_item["tag"] == "Bloqueado", alerts_item)
+        test("unlocks: accuracy explica cuánto falta por ciudad", "faltan 1 cierres en Miami" in accuracy_item["value"], accuracy_item)
+        test("unlocks: métricas serie no son confiables sin cierres", trust_item["status"] == "waiting" and "todavía no hay cierres validados" in trust_item["value"], trust_item)
+
+        trophies_ns = {
+            "datetime": datetime,
+            "timezone": timezone,
+            "re": re,
+        }
+        exec(get_function_source(module_ast, code_lines, "parse_market_date_iso"), trophies_ns)
+        exec(get_function_source(module_ast, code_lines, "format_market_date_short"), trophies_ns)
+        exec(get_function_source(module_ast, code_lines, "parse_city_from_title"), trophies_ns)
+        exec(get_function_source(module_ast, code_lines, "_parse_position_label"), trophies_ns)
+        exec(get_function_source(module_ast, code_lines, "format_postmortem_label"), trophies_ns)
+        exec(get_function_source(module_ast, code_lines, "_extract_logic_series"), trophies_ns)
+        exec(get_function_source(module_ast, code_lines, "_dashboard_record_meta"), trophies_ns)
+        exec(get_function_source(module_ast, code_lines, "build_dashboard_trophies"), trophies_ns)
+        trophy_items = trophies_ns["build_dashboard_trophies"](
+            closed_records=[
+                {
+                    "status": "closed",
+                    "city": "Chicago",
+                    "side": "YES",
+                    "date": "2026-03-26",
+                    "question": "",
+                    "pnl_cash": 3.96,
+                    "pnl_pct": 85.0,
+                    "close_action": "SELL",
+                    "close_reason": "take_profit",
+                    "bot_version_opened": "v10.4.0",
+                    "bot_version_closed": "v10.4.0",
+                    "buys": [{"edge_pct": 17.3}],
+                    "closed_at": "2026-03-26T23:00:00+00:00",
+                },
+                {
+                    "status": "closed",
+                    "city": "Dallas",
+                    "side": "YES",
+                    "date": "2026-03-28",
+                    "question": "",
+                    "pnl_cash": 0.26,
+                    "pnl_pct": 10.6,
+                    "close_action": "SELL",
+                    "close_reason": "reeval",
+                    "bot_version_opened": "v10.4.4",
+                    "bot_version_closed": "v10.4.4",
+                    "buys": [{"edge_pct": 27.0}],
+                    "closed_at": "2026-03-28T16:00:22+00:00",
+                },
+                {
+                    "status": "closed",
+                    "city": "London",
+                    "side": "NO",
+                    "date": "2026-03-26",
+                    "question": "",
+                    "pnl_cash": -2.25,
+                    "pnl_pct": -90.0,
+                    "close_action": "LOSS_TOTAL",
+                    "close_reason": "wu_mismatch",
+                    "bot_version_opened": "v10.4.0",
+                    "bot_version_closed": "v10.4.0",
+                    "buys": [{"edge_pct": 28.9}],
+                    "closed_at": "2026-03-26T20:00:00+00:00",
+                },
+            ],
+            city_accuracy={
+                "Chicago": {"trades": 1, "wins": 1, "pnl": 3.96, "win_rate": 100.0},
+                "London": {"trades": 1, "wins": 0, "pnl": -2.25, "win_rate": 0.0},
+            },
+        )
+        best_trade_item = next(item for item in trophy_items if item["label"] == "Mejor operación")
+        best_return_item = next(item for item in trophy_items if item["label"] == "Mejor retorno %")
+        edge_item = next(item for item in trophy_items if item["label"] == "Mayor edge ejecutado")
+        dangerous_city_item = next(item for item in trophy_items if item["label"] == "Ciudad más peligrosa")
+        test("trofeos: best_trade usa pnl_cash", best_trade_item["value"] == "$+3.96", best_trade_item)
+        test("trofeos: best_return usa pnl_pct", best_return_item["value"] == "+85.0%", best_return_item)
+        test("trofeos: mayor edge ejecutado sale de compra ejecutada", edge_item["value"] == "+28.9%" and "London" in edge_item["detail"], edge_item)
+        test("trofeos: ciudad peligrosa usa pnl agregado", dangerous_city_item["value"] == "London" and "$-2.25" in dangerous_city_item["detail"], dangerous_city_item)
+
+        empty_trophies = trophies_ns["build_dashboard_trophies"](closed_records=[], city_accuracy={})
+        test("trofeos vacíos: usan n/d", all(item["value"] == "n/d" for item in empty_trophies), empty_trophies[:2])
+
+        snapshot_ns = {
+            "datetime": datetime,
+            "timezone": timezone,
+            "_load_cycle_counts": lambda: (5, 1),
+            "load_cycle_summary_data": lambda: {"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.5.9"},
+            "load_cycle_history": lambda limit=None: [{"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.5.9", "timestamp_utc": "2026-03-29T11:08:00+00:00", "buys": [], "management": {"n_sold": 1}, "exposure_after": 2.94}],
+            "get_clean_closed_trade_stats": lambda: {"count": 18, "sell": 12, "loss_total": 6, "resolved_win": 0},
+            "get_logic_series_clean_closed_trade_stats": lambda: {"count": 0, "sell": 0, "loss_total": 0, "resolved_win": 0},
+            "get_validated_closed_postmortems": lambda: [],
+            "get_performance_summary": lambda: {},
+            "get_logic_series_stats": lambda: {"pnl": 0.0, "win_rate": 0.0, "closed_count": 0, "recent_window_size": 0, "recent_drawdown": 0.0},
+            "get_dashboard_alert_summary": lambda: {"signals": {"status": "ok"}, "pending_stuck": [], "flagged_cities": [], "active_items": []},
+            "build_promotion_checklist": lambda: {"levels": {"next_target": 35.0, "is_max_level": False}, "passed": 3, "total": 9, "blocking_failed": 3, "decision": "HOLD", "decision_label": "Aún no listo", "trade_target": 30, "checks": []},
+            "get_city_accuracy": lambda: {},
+            "build_dashboard_progress": lambda **kwargs: [{"label": "Muestra", "status": "bad"}],
+            "build_dashboard_trophies": lambda **kwargs: [{"label": "Mejor operación", "value": "n/d"}],
+            "build_dashboard_unlocks": lambda **kwargs: [{"label": "Confiar en métricas", "status": "waiting"}],
+            "_get_portfolio_and_positions": lambda: None,
+            "_parse_position_label": lambda title, outcome: "Mock",
+            "load_agent_events": lambda limit=None: [],
+            "_normalize_agent_event_stage": lambda event: "validated",
+            "compute_agent_scorecard": lambda events: [],
+            "build_agent_rivalry": lambda events: [],
+            "_extract_logic_series": lambda value: "10.5" if "10.5" in str(value) else "10.4" if "10.4" in str(value) else None,
+            "BOT_VERSION": "v10.5.9",
+            "LOGIC_SERIES": "10.5",
+            "DRY_RUN": False,
+            "DASHBOARD_USER": "pablo",
+            "DASHBOARD_PASSWORD": "secret",
+            "DASHBOARD_TITLE": "Polymarket Bot Control Center",
+            "DASHBOARD_REFRESH_SEC": 60,
+            "INTRA_SL_INTERVAL": 90,
+            "bot_state": {"next_run": None, "last_run": None},
+        }
+        exec(get_function_source(module_ast, code_lines, "build_dashboard_snapshot"), snapshot_ns)
+        snapshot = snapshot_ns["build_dashboard_snapshot"]()
+        test("snapshot: incluye progress", "progress" in snapshot and snapshot["progress"][0]["label"] == "Muestra", snapshot)
+        test("snapshot: incluye trophies", "trophies" in snapshot and snapshot["trophies"][0]["label"] == "Mejor operación", snapshot)
+        test("snapshot: incluye unlocks", "unlocks" in snapshot and snapshot["unlocks"][0]["label"] == "Confiar en métricas", snapshot)
+
         fd, tmp_agent_events = tempfile.mkstemp(
             dir=tempfile.gettempdir(),
             prefix="_tmp_agent_events_test_",
@@ -651,7 +843,7 @@ def run_tests():
         os.close(fd)
         with open(tmp_cycle_summary, "w", encoding="utf-8") as f:
             json.dump({
-                "version": "v10.5.8",
+                "version": "v10.5.9",
                 "cycle_number": 12,
                 "timestamp_utc": "2026-03-28T16:00:33.073674+00:00",
                 "management": {"n_kept": 0, "n_sold": 1, "n_resolved": 0},
@@ -663,7 +855,7 @@ def run_tests():
             "json": __import__("json"),
             "datetime": datetime,
             "send_telegram_paged": lambda text, with_menu=False, page_size=3800: info_messages.append(text),
-            "BOT_VERSION": "v10.5.8",
+            "BOT_VERSION": "v10.5.9",
             "LOGIC_SERIES": "10.5",
             "_extract_logic_series": cycle_ns["_extract_logic_series"],
             "DRY_RUN": False,
@@ -683,7 +875,7 @@ def run_tests():
         exec(get_function_source(module_ast, code_lines, "cmd_info"), info_ns)
         info_ns["cmd_info"]()
         info_msg = info_messages[-1] if info_messages else ""
-        test("info: versión visible correcta", "BOT POLYMARKET v10.5.8" in info_msg, info_msg[:120])
+        test("info: versión visible correcta", "BOT POLYMARKET v10.5.9" in info_msg, info_msg[:120])
         test("info: usa cycle_summary como fallback de último", "Último: 2026-03-28 16:00 UTC" in info_msg, info_msg[:220])
         test("info: muestra doble contador", "Ciclos completados: 12 total | 3 serie v10.5" in info_msg, info_msg[:240])
         test("info: muestra ciclo total y de serie", "Ciclo total #12 | serie v10.5 #3" in info_msg, info_msg[:260])
@@ -1270,7 +1462,7 @@ def run_tests():
     test("/accuracy en MENU_KEYBOARD", '"callback_data": "accuracy"' in code)
     test("cmd_accuracy vuelve con menú", 'send_telegram("Sin datos de accuracy todavía.", with_menu=True)' in code and 'send_telegram_paged("\\n".join(lines), with_menu=True)' in code)
     test("Win rate en rendimiento", "WR:" in code)
-    test("Version v10.5.8", "v10.5.8" in code)
+    test("Version v10.5.9", "v10.5.9" in code)
 
     # ---- Resultado ----
     print(f"\n{'='*50}")

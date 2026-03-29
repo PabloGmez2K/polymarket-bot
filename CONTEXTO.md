@@ -1,6 +1,6 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 29 de marzo de 2026 (Sesión 26 — v10.5.8)
+**Última actualización:** 29 de marzo de 2026 (Sesión 27 — v10.5.9)
 **Próxima sesión:** Revisión integral con Claude Code Sonnet de las sesiones recientes de dashboard, scorecard y checklist
 
 ---
@@ -29,7 +29,7 @@ Para estado exacto: usar `/info` + `/cartera` + `/rendimiento` + `/accuracy` en 
 
 ---
 
-## Qué hace el bot v10.5.8 (paso a paso)
+## Qué hace el bot v10.5.9 (paso a paso)
 
 Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
@@ -55,7 +55,7 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Contador dual de ciclos (v10.5.4):** Mantiene `cycle_count` como histórico total y añade `cycle_count_series` para la serie lógica actual (`LOGIC_SERIES`). Cada ciclo nuevo guarda `logic_series` y `logic_cycle_number`. `/estado` y `/info` muestran ambos para comparar estrategia nueva sin perder continuidad operativa.
 
-**Dashboard web + scorecard de agentes (v10.5.8):** Levanta un panel HTML separado de Telegram en el mismo servicio Railway, accesible por navegador en `PORT`. Usa modo oscuro, separa checklist histórico vs serie `v10.5`, muestra ciclos legacy con etiquetas legibles, enseña el scoreboard por stages (`proposed / implemented / validated`) a partir de `agent_events.jsonl`, evita mostrar métricas de serie como `0.0%` o `+$0.00` cuando todavía no hay cierres y ahora distingue visualmente entre `fallo real` y `esperando muestra` en el checklist.
+**Dashboard web + scorecard de agentes (v10.5.9):** Levanta un panel HTML separado de Telegram en el mismo servicio Railway, accesible por navegador en `PORT`. Usa modo oscuro, separa checklist histórico vs serie `v10.5`, muestra ciclos legacy con etiquetas legibles, enseña el scoreboard por stages (`proposed / implemented / validated`) a partir de `agent_events.jsonl`, evita mostrar métricas de serie como `0.0%` o `+$0.00` cuando todavía no hay cierres, distingue visualmente entre `fallo real` y `esperando muestra` en el checklist y añade tres bloques nuevos: `Progreso`, `Trofeos` y `Desbloqueos` para saber qué evidencia falta antes de sacar conclusiones o evaluar subir bankroll.
 
 **Zona horaria por ciudad (v10.4.5):** Ya no usa offsets manuales; usa zonas IANA reales con `ZoneInfo` para que DST cambie automáticamente sin tocar el código en marzo/octubre.
 
@@ -82,13 +82,13 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción:** Railway — Online, EU West Amsterdam, MODO REAL, DRY_RUN=false
-**Versión activa:** v10.5.8
+**Versión activa:** v10.5.9
 
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.5.8 |
-| `verify_before_deploy.py` | v9 — 300 tests de comportamiento |
+| `bot.py` | Script principal v10.5.9 |
+| `verify_before_deploy.py` | v9 — 325 tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |
@@ -128,7 +128,7 @@ MIN_BET="1.00"
 DATA_DIR="/app/data"
 ```
 
-### Configuración en código (defaults bot.py v10.5.8):
+### Configuración en código (defaults bot.py v10.5.9):
 ```python
 MIN_EDGE = 7.0%
 MIN_EDGE_EXACT = 15.0%          # v10.5.0: filtro más estricto para apuestas exactas
@@ -140,6 +140,7 @@ BLOCKED_CITIES = ["London"]
 BANKROLL_LEVELS = [25, 35, 50, 75, 100]  # v10.5.5+: niveles gamificados del dashboard
 DASHBOARD_PORT = $PORT                    # v10.5.5+: panel web separado de Telegram
 DASHBOARD_REFRESH_SEC = 60               # auto-refresh del dashboard
+PROMOTION_CITY_COVERAGE_TARGET = 3       # v10.5.9: ciudades con muestra suficiente para fiarse del accuracy
 INTRA_SL_INTERVAL = 90          # v10.5.1: minutos entre checks intra-ciclo (0=desactivar)
 CITY_MIN_TRADES_FOR_BLOCK = 3   # v10.5.2: mínimo trades para evaluar accuracy
 CITY_BLOCK_WIN_RATE = 25.0%     # v10.5.2: umbral de alerta
@@ -149,7 +150,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 ---
 
-## Telegram — Comandos disponibles (v10.5.8)
+## Telegram — Comandos disponibles (v10.5.9)
 
 | Comando | Qué muestra |
 |---------|-------------|
@@ -168,7 +169,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 **Para iniciar una sesión de análisis en claude.ai:** pegar `/info` + `/cartera` + `/rendimiento`.
 
-## Dashboard web (v10.5.8)
+## Dashboard web (v10.5.9)
 
 - **Ruta principal:** `/`
 - **Healthcheck:** `/healthz`
@@ -186,6 +187,9 @@ Schedule: 08:00, 16:00, 23:00 UTC
 - modo oscuro por defecto para revisión en navegador
 - cuando la serie aún no tiene cierres, muestra `n/d` / `sin cierres` en lugar de métricas aparentes
 - el checklist distingue visualmente entre `Pendiente` y `Esperando muestra`
+- bloque `Progreso` con `faltan X para Y` sobre muestra, estabilidad, cierres útiles, readiness de nivel y cobertura de ciudades
+- bloque `Trofeos` con hitos del bot calculados solo desde cierres validados (`mejor operación`, `mayor edge ejecutado`, `ciudad más rentable`, etc.)
+- bloque `Desbloqueos` con evidencias/confirmaciones pendientes antes de revisar lógica o evaluar subir bankroll
 
 ---
 
@@ -240,6 +244,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 | v10.5.6 | 29 mar | dashboard oscuro + checklist histórico/serie separado + scorecard por stages + ciclos legacy legibles, 290 tests |
 | v10.5.7 | 29 mar | dashboard evita métricas falsas sin muestra (`n/d` / `sin cierres`) en serie nueva, 294 tests |
 | v10.5.8 | 29 mar | checklist con estado visual neutral `Esperando muestra` para serie sin datos, 300 tests |
+| v10.5.9 | 29 mar | dashboard añade `Progreso`, `Trofeos` y `Desbloqueos`, más cobertura de tests funcionales de snapshot y readiness, 325 tests |
 
 ---
 
@@ -476,6 +481,29 @@ Usar esta plantilla al cerrar cada sesión relevante:
 
 - **Estado final:**
   v10.5.8, 300/300 tests, dashboard visualmente más fino y más fácil de interpretar en fases tempranas de una serie nueva
+
+### Sesión 27 — Registro multi-herramienta
+
+- **Fecha:** 2026-03-29
+- **Versión activa al cerrar:** v10.5.9
+- **Objetivo de la sesión:** Añadir al dashboard una capa más operativa de progreso, trofeos e hitos desbloqueables para saber qué evidencia falta antes de revisar la estrategia o subir bankroll
+
+- **Claude Code (Opus / Sonnet):**
+  - No usado directamente en esta sesión
+
+- **Codex:**
+  - Implementó un bloque `Progreso` con muestra pendiente para revisar la serie `v10.5`, estabilidad por ciclos, cierres útiles para activar win rate/drawdown, readiness de subida a `$35` y cobertura de ciudades con muestra suficiente
+  - Añadió un bloque `Trofeos` calculado solo desde cierres validados para destacar mejor operación, mejor retorno, mayor edge ejecutado, primera victoria validada, peor operación y ciudades extremas
+  - Añadió un bloque `Desbloqueos` para expresar de forma explícita qué confirmaciones faltan antes de confiar en métricas de serie o evaluar decisiones de bankroll
+  - Reutilizó `postmortem.json`, `performance.json`, `cycles_history.jsonl` y `alerts_state.json` sin tocar la lógica de trading
+  - Amplió `verify_before_deploy.py` hasta `325/325` con tests estructurales y funcionales de snapshot, progreso, trofeos y desbloqueos
+
+- **Problemas detectados en trabajo previo:**
+  - El dashboard era ya consistente, pero todavía faltaba una capa más práctica de “faltan X para poder hacer Y”
+  - El panel tenía scorecard y checklist, pero no convertía bien la evidencia acumulada en hitos operativos fáciles de interpretar
+
+- **Estado final:**
+  v10.5.9, 325/325 tests, dashboard más útil para readiness operativa y más preparado para una revisión global con Claude Code Sonnet
 
 ### Sesión 19 — Registro multi-herramienta
 

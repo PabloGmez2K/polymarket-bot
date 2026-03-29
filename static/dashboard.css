@@ -272,6 +272,10 @@ body {
   background: var(--accent);
 }
 
+.check-status.blocked {
+  background: var(--warn);
+}
+
 .check-body {
   flex: 1;
   display: grid;
@@ -302,6 +306,10 @@ body {
 
 .check-tag-waiting {
   color: var(--accent);
+}
+
+.check-tag-blocked {
+  color: var(--warn);
 }
 
 .metric-list {
@@ -357,6 +365,55 @@ body {
 .list-stack {
   display: grid;
   gap: 12px;
+}
+
+.trophy-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.trophy-card {
+  display: grid;
+  gap: 6px;
+  padding: 16px;
+  border-radius: 18px;
+  background: var(--card-soft);
+  border: 1px solid rgba(168, 191, 211, 0.1);
+}
+
+.trophy-good {
+  box-shadow: inset 0 0 0 1px rgba(99, 210, 159, 0.14);
+}
+
+.trophy-bad {
+  box-shadow: inset 0 0 0 1px rgba(255, 139, 125, 0.14);
+}
+
+.trophy-waiting {
+  box-shadow: inset 0 0 0 1px rgba(142, 217, 255, 0.12);
+}
+
+.trophy-label,
+.trophy-detail,
+.trophy-meta {
+  color: var(--muted);
+}
+
+.trophy-label {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.trophy-value {
+  font-size: 1.45rem;
+  line-height: 1.1;
+}
+
+.trophy-detail,
+.trophy-meta {
+  font-size: 0.92rem;
 }
 
 .list-stack.compact .list-row {
@@ -448,5 +505,9 @@ th {
 
   .page-shell {
     padding: 18px 14px 32px;
+  }
+
+  .trophy-grid {
+    grid-template-columns: 1fr;
   }
 }
