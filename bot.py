@@ -24,8 +24,8 @@ from waitress import serve
 load_dotenv()
 
 # =============================================================
-# bot.py v10.5.5 — dashboard web de monitorización + scorecard de agentes
-# Sesión 23: observabilidad visual separada de Telegram
+# bot.py v10.6.0 — revert trading logic a v10.3 + mantener observabilidad
+# Sesión 24: sigma original, sin intra-cycle, sin MIN_EDGE_EXACT
 # =============================================================
 #
 # Nuevo en v10.4.3:
@@ -94,15 +94,14 @@ DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
 BANKROLL = float(os.getenv("BANKROLL", "15.00"))
 
 MIN_EDGE = float(os.getenv("MIN_EDGE", "7.0"))
-MIN_EDGE_EXACT = float(os.getenv("MIN_EDGE_EXACT", "15.0"))  # v10.5: exact bets necesitan más edge (20% win rate histórico)
 MIN_BET = float(os.getenv("MIN_BET", "1.00"))           # v10.4: default alineado con Railway
 MAX_BET_PCT = float(os.getenv("MAX_BET_PCT", "0.10"))   # v9: subido de 0.05 a 0.10 (10%)
 MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.5.12"
-LOGIC_SERIES = "10.5"
+BOT_VERSION = "v10.6.0"
+LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
 
@@ -220,7 +219,7 @@ def get_min_days_for_city(city):
 STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", "-25.0"))     # vender si PnL% < -25%
 TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", "40.0"))  # vender si PnL% > +40%
 SELL_AGGRESSION = 0.02  # cuánto bajar el precio para asegurar venta rápida
-INTRA_SL_INTERVAL = int(os.getenv("INTRA_SL_INTERVAL", "90"))  # minutos entre checks, 0=desactivar
+INTRA_SL_INTERVAL = int(os.getenv("INTRA_SL_INTERVAL", "0"))  # v10.6: desactivado — cada 8h es suficiente para mercados diarios
 
 MIN_PRICE = 0.08
 MAX_PRICE = 0.92
@@ -3087,7 +3086,7 @@ def cmd_estado():
 
     send_telegram(
         f"📊 <b>Bot {BOT_VERSION} | {modo}</b>\n\n"
-        f"💰 Bankroll: <b>${BANKROLL:.2f}</b> | Edge mín: {MIN_EDGE}% (exact: {MIN_EDGE_EXACT}%)\n"
+        f"💰 Bankroll: <b>${BANKROLL:.2f}</b> | Edge mín: {MIN_EDGE}%\n"
         f"🔧 SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n"
         f"🛡 Intra-SL: {intra_label}\n\n"
         f"⏱ Estado: {running}\n"
@@ -3814,7 +3813,7 @@ def cmd_info():
     text = (
         f"<b>BOT POLYMARKET {BOT_VERSION}</b>\n"
         f"Modo: {modo} | Bankroll: ${BANKROLL:.2f}\n"
-        f"Edge mín: {MIN_EDGE}% (exact: {MIN_EDGE_EXACT}%) | SL: {STOP_LOSS_PCT}% | TP: +{TAKE_PROFIT_PCT}%\n"
+        f"Edge mín: {MIN_EDGE}% | SL: {STOP_LOSS_PCT}% | TP: +{TAKE_PROFIT_PCT}%\n"
         f"Exp máx: {int(MAX_EXPOSURE_PCT*100)}% | Min bet: ${MIN_BET:.2f}\n"
         f"{intra_info}"
         f"Schedule: {schedule} UTC\n"
@@ -3828,7 +3827,7 @@ def cmd_info():
     text += (
         f"\n<b>Arquitectura:</b>\n"
         f"~330 mercados temp | Open-Meteo | normal(μ,σ)\n"
-        f"Sigma: D0=1.2 D1=1.5 D2=2.0 D3=2.5 D4+=3.0\n"
+        f"Sigma: D0=1.2 D1=1.5 D2=2.0 D3=2.5 D4-5=3.0\n"
         f"Half-Kelly | Railway EU-West (Amsterdam)\n"
         f"⚠️ Polymarket resuelve con Weather Underground, no Open-Meteo"
     )
@@ -5109,10 +5108,10 @@ def normal_cdf(x, mu, sigma):
 
 
 def get_uncertainty(days_ahead):
-    # v10.5: sigma ampliada — v10.4 sobreconfiaba (win rate 29%, PnL -$8.57)
-    # Evidencia: exact bets 20% win rate, modelo asignaba 70-85% a outcomes que perdían
-    # Sigma más alta → probabilidades más moderadas → menos trades pero con edge real
-    return {0: 2.0, 1: 2.5, 2: 3.0, 3: 3.5}.get(days_ahead, 4.0 if days_ahead <= 5 else 4.5)
+    # v10.6: revertida a v10.3 — la sigma ampliada de v10.5 vendía posiciones ganadoras
+    # en re-eval y bloqueaba entradas. El problema real es la fuente de datos (Open-Meteo
+    # vs Weather Underground), no la confianza del modelo. Recoger datos con sigma original.
+    return {0: 1.2, 1: 1.5, 2: 2.0, 3: 2.5}.get(days_ahead, 3.0 if days_ahead <= 5 else 3.5)
 
 
 def estimate_prob(forecast_max, threshold_c, condition, days_ahead, threshold_high_c=None):
@@ -5229,7 +5228,7 @@ def main(client):
     dl = []  # Lista de líneas para el log de decisiones
     dl.append(f"{'='*50}")
     dl.append(f"CICLO {bot_state['cycle_count']+1} | {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} | {mode_label}")
-    dl.append(f"BANKROLL: ${effective_bankroll:.2f} (tope ${BANKROLL:.2f}) | MIN_EDGE={MIN_EDGE}% (exact: {MIN_EDGE_EXACT}%)")
+    dl.append(f"BANKROLL: ${effective_bankroll:.2f} (tope ${BANKROLL:.2f}) | MIN_EDGE={MIN_EDGE}%")
     dl.append(f"{'='*50}")
 
     if client is None:
@@ -5492,10 +5491,8 @@ def main(client):
 
         edge_pct = edge * 100
 
-        # v10.5: exact bets requieren MIN_EDGE_EXACT (15%) por win rate histórico bajo
-        effective_min_edge = MIN_EDGE_EXACT if c["condition"] == "exact" else MIN_EDGE
-        if edge_pct < effective_min_edge:
-            edge_analysis.append(f"  ✗ {city} {side} {temp_label} {c['date_iso']} | forecast={forecast_max:.1f}°C | nuestro={our_prob*100:.1f}% mercado={mkt_price*100:.1f}% | edge={edge_pct:.1f}% → BAJO (min {effective_min_edge}%)")
+        if edge_pct < MIN_EDGE:
+            edge_analysis.append(f"  ✗ {city} {side} {temp_label} {c['date_iso']} | forecast={forecast_max:.1f}°C | nuestro={our_prob*100:.1f}% mercado={mkt_price*100:.1f}% | edge={edge_pct:.1f}% → BAJO (min {MIN_EDGE}%)")
             continue
 
         if token_id in open_token_ids:
@@ -5920,7 +5917,7 @@ if __name__ == "__main__":
     send_telegram(
         f"🤖 <b>Bot {BOT_VERSION} arrancado</b>\n"
         f"Modo: {modo} | ${BANKROLL:.2f}\n"
-        f"Min edge: {MIN_EDGE}% (exact: {MIN_EDGE_EXACT}%) | Schedule: {schedule} UTC\n"
+        f"Min edge: {MIN_EDGE}% | Schedule: {schedule} UTC\n"
         f"🔧 Gestión activa: SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n"
         f"⏱ Intra-SL: {intra_label}\n"
         f"🌏 Zona horaria per-city activa\n"
