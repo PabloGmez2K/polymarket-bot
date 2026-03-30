@@ -55,6 +55,8 @@ Comandos útiles:
 | 2026-03-30 | Explícita | Sesión 37 | `—` | Playbook operativo multiagente, helper seguro para `agent_events.jsonl`, checks de consistencia docs-scoreboard y sync del scoreboard live. |
 | 2026-03-30 | Explícita | Sesión 38 | `—` | Limpieza del scoreboard live, deduplicación robusta en `load_agent_events()` y regla explícita: review sin delta = `0 puntos` o sin evento. |
 | 2026-03-30 | Explícita | Sesión 39 | `—` | Research final Lean Six Sigma: no adoptar salvo FMEA-lite y definiciones mínimas; playbook mínimo, hitos NOAA one-shot y nueva vista Telegram `/noaa`. |
+| 2026-03-30 | Explícita | Sesión 40 | `—` | Diagnóstico pérdidas NYC/Munich/Atlanta: bot entraba en ciudades sin validación (Seoul, Tokyo, NYC, Munich no bloqueadas). Ventas manuales NYC. Identificado bug #15 — allowlist `ACTIVE_TRADING_CITIES` pendiente en v10.6.6. |
+| 2026-03-30 | Explícita | Sesión 41 | `—` | Implementación local de `v10.6.6`: allowlist `ACTIVE_TRADING_CITIES`, skip claro en `decisions.log`, bump de versión y suite en `419/419`. |
 
 ---
 
@@ -715,6 +717,41 @@ Investigación completa de trades, commits y lógica de trading desde v10.3 hast
   - check explícito de `state.setdefault("milestones", {})`.
 
 **Resultado:** el proyecto sale de esta sesión con criterio metodológico más claro, un playbook mínimo más útil y una capa de seguimiento diario mejor alineada con el cuello de botella real. `v10.6.5` queda lista para deploy sin tocar lógica de trading.
+
+---
+
+## Sesión 41 — v10.6.6 allowlist ACTIVE_TRADING_CITIES (30 mar 2026, local)
+
+**Disparador:** tras el diagnóstico de la sesión 40, quedó claro que `BLOCKED_CITIES` como lista negra no bastaba: seguían entrando mercados de ciudades sin validación NOAA/WU como NYC, Munich, Seoul o Tokyo.
+
+**Diagnóstico (Codex):**
+
+1. **El bug estaba en el modelo de filtro.** Una blacklist evita reincidir en ciudades ya problemáticas, pero no protege frente a ciudades nuevas todavía no validadas.
+
+2. **La corrección debía afectar solo a entradas nuevas.** `manage_positions` no se toca: el bot debe seguir gestionando SL/TP/reeval en cualquier posición ya abierta, incluso si nació fuera del universo validado.
+
+3. **La solución correcta era un allowlist explícito.** Si ahora mismo solo hay 4 ciudades con monitoreo NOAA y observabilidad suficiente, el scan debe restringirse a esas 4 y dejar trazabilidad clara en `decisions.log`.
+
+**Cambios realizados:**
+- `bot.py` sube a `v10.6.6`;
+- añade `ACTIVE_TRADING_CITIES` justo después de `BLOCKED_CITIES`, con default:
+  - `Chicago`
+  - `Atlanta`
+  - `Dallas`
+  - `Buenos Aires`
+- el scan de mercados añade un filtro nuevo:
+  - si la ciudad no está en `ACTIVE_TRADING_CITIES`, no entra en candidatos para BUY;
+  - se registra `SKIP {city}: fuera de ACTIVE_TRADING_CITIES`;
+  - el resumen de filtros ahora separa también cuántos mercados quedaron fuera del allowlist;
+- `manage_positions` queda intacta;
+- `verify_before_deploy.py` añade checks para:
+  - existencia de `ACTIVE_TRADING_CITIES`;
+  - default correcto con las 4 activas;
+  - presencia del filtro de allowlist y del log de skip;
+- la prueba de idempotencia NOAA ya existente se mantiene como guardrail vigente;
+- la suite sube a `419/419`.
+
+**Resultado:** el bot deja de abrir posiciones nuevas en ciudades no validadas sin tocar la gestión de posiciones existentes. `v10.6.6` queda lista para push/deploy como fix quirúrgico del bug #15.
 
 ---
 

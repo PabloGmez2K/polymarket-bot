@@ -24,7 +24,7 @@ from waitress import serve
 load_dotenv()
 
 # =============================================================
-# bot.py v10.6.5 — dashboard NOAA observed quality
+# bot.py v10.6.6 — allowlist de ciudades activas para entradas nuevas
 # Sesión 36: fallback BANKROLL sincronizado a $25 tras recarga manual
 # =============================================================
 #
@@ -100,7 +100,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.5"
+BOT_VERSION = "v10.6.6"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -145,6 +145,15 @@ BLOCKED_CITIES = {
         # Chicago, Atlanta, Buenos Aires, Dallas: siguen activas (accuracy positiva o neutra con muestra pequeña).
         # El resto: 0% WR con 1-2+ trades reales → no entrar hasta resolver fuente de datos.
         "London,Miami,Seattle,Paris,Tel Aviv,Wellington,Toronto,Madrid,Singapore,Ankara"
+    ).split(",")
+    if city.strip()
+}
+
+ACTIVE_TRADING_CITIES = {
+    city.strip()
+    for city in os.getenv(
+        "ACTIVE_TRADING_CITIES",
+        "Chicago,Atlanta,Dallas,Buenos Aires"
     ).split(",")
     if city.strip()
 }
@@ -6060,6 +6069,8 @@ def main(client):
     timezone_skip = 0  # v10.3: contador de filtrados por zona horaria
     blocked_city_skip = 0
     blocked_seen = set()
+    allowlist_city_skip = 0
+    allowlist_seen = set()
     price_fail = 0
     liq_fail = 0
 
@@ -6085,6 +6096,12 @@ def main(client):
         if is_city_blocked(city):
             blocked_city_skip += 1
             blocked_seen.add(city)
+            continue
+        if ACTIVE_TRADING_CITIES and city not in ACTIVE_TRADING_CITIES:
+            allowlist_city_skip += 1
+            if city not in allowlist_seen:
+                dl.append(f"SKIP {city}: fuera de ACTIVE_TRADING_CITIES")
+                allowlist_seen.add(city)
             continue
         min_days = get_min_days_for_city(city)
 
@@ -6136,9 +6153,11 @@ def main(client):
         })
         candidates.append(parsed)
 
-    dl.append(f"FILTROS: {len(candidates)} pasan | {parse_fail} no parseables | {date_fail} fuera de fecha | {timezone_skip} bloqueados por zona horaria | {blocked_city_skip} bloqueados por ciudad | {price_fail} fuera de precio | {liq_fail} sin liquidez")
+    dl.append(f"FILTROS: {len(candidates)} pasan | {parse_fail} no parseables | {date_fail} fuera de fecha | {timezone_skip} bloqueados por zona horaria | {blocked_city_skip} bloqueados por ciudad | {allowlist_city_skip} fuera de ACTIVE_TRADING_CITIES | {price_fail} fuera de precio | {liq_fail} sin liquidez")
     if blocked_seen:
         dl.append(f"  🚫 Ciudades bloqueadas operativamente: {', '.join(sorted(blocked_seen))} (WU vs Open-Meteo)")
+    if allowlist_seen:
+        dl.append(f"  ✅ Allowlist activa: {', '.join(sorted(ACTIVE_TRADING_CITIES))}")
 
     # ---- PASO 3: Previsiones ----
     cities_needed = set(c["city"] for c in candidates)
