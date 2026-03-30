@@ -225,6 +225,113 @@
       <article class="card">
         <div class="card-head">
           <div>
+            <p class="section-kicker">Observabilidad</p>
+            <h2>Calidad Forecast Observada (NOAA)</h2>
+          </div>
+          <span class="badge badge-{{ 'good' if dashboard.forecast_quality.global_ready else 'warn' if dashboard.forecast_quality.sample_size else 'muted' }}">
+            n={{ dashboard.forecast_quality.sample_size }}
+          </span>
+        </div>
+        <dl class="metric-list">
+          <div><dt>Muestra NOAA</dt><dd>{{ dashboard.forecast_quality.sample_display }}</dd></div>
+          <div><dt>MAE NOAA</dt><dd>{{ dashboard.forecast_quality.mae_display }}</dd></div>
+          <div><dt>Bias NOAA</dt><dd>{{ dashboard.forecast_quality.bias_display }}</dd></div>
+          <div><dt>Cobertura</dt><dd>{{ dashboard.forecast_quality.coverage_display }}</dd></div>
+        </dl>
+        <div class="notice notice-{{ dashboard.forecast_quality.note_level }}">
+          <strong>{{ dashboard.forecast_quality.coverage_detail }}</strong><br>
+          {{ dashboard.forecast_quality.note }}
+        </div>
+
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Cobertura por ciudad activa</p>
+          </div>
+        </div>
+        <div class="list-stack compact">
+          {% for row in dashboard.forecast_quality.city_rows %}
+          <div class="list-row">
+            <div class="check-body">
+              <strong>{{ row.city }}</strong>
+              <span>{{ row.detail }}</span>
+            </div>
+            <div class="event-meta">
+              <span class="badge badge-muted">{{ row.count_display }}</span>
+              <span class="badge badge-{{ 'good' if row.status == 'good' else 'warn' if row.status == 'waiting' else 'bad' }}">{{ row.bias_display }}</span>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Ultimos 20 casos</p>
+          </div>
+        </div>
+        {% if dashboard.forecast_quality.latest_rows %}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Ciudad</th>
+                <th>Fecha</th>
+                <th>Forecast</th>
+                <th>Observado</th>
+                <th>Error</th>
+                <th>Source</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in dashboard.forecast_quality.latest_rows %}
+              <tr>
+                <td>{{ row.city }}</td>
+                <td>{{ row.date }}</td>
+                <td>{{ row.forecast_display }}</td>
+                <td>{{ row.observed_display }}</td>
+                <td><span class="badge badge-{{ row.error_badge }}">{{ row.error_display }}</span></td>
+                <td>{{ row.source }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="notice notice-muted">Todavia no hay registros NOAA en <code>observed_vs_forecast</code>.</div>
+        {% endif %}
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Legacy</p>
+            <h2>Drift Open-Meteo (historico - no comparable con NOAA)</h2>
+          </div>
+          <span class="badge badge-muted">n={{ dashboard.legacy_forecast_drift.sample_size }}</span>
+        </div>
+        <div class="notice notice-muted">{{ dashboard.legacy_forecast_drift.note }}</div>
+        <dl class="metric-list">
+          <div><dt>n historico</dt><dd>{{ dashboard.legacy_forecast_drift.sample_display }}</dd></div>
+          <div><dt>Ultimo registro</dt><dd>{{ dashboard.legacy_forecast_drift.last_record_display }}</dd></div>
+          <div><dt>MAE drift</dt><dd>{{ dashboard.legacy_forecast_drift.mae_display }}</dd></div>
+          <div><dt>Bias drift</dt><dd>{{ dashboard.legacy_forecast_drift.bias_display }}</dd></div>
+        </dl>
+        {% if dashboard.legacy_forecast_drift.latest_case %}
+        <div class="list-stack compact">
+          <div class="list-row">
+            <div class="check-body">
+              <strong>Ultimo caso legacy</strong>
+              <span>{{ dashboard.legacy_forecast_drift.latest_case }}</span>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+      </article>
+    </section>
+
+    <section class="grid layout-main">
+      <article class="card">
+        <div class="card-head">
+          <div>
             <p class="section-kicker">Salidas</p>
             <h2>Balance por tipo de cierre</h2>
           </div>

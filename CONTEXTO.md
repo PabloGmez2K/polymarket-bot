@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 30 de marzo de 2026 (Sesión 34 — implementación local de `v10.6.4`)
-**Próxima sesión:** Validar/push/deploy de `v10.6.4`, dejar correr la auditoría NOAA 2+ días y comprobar primeras entradas `observed_vs_forecast`, especialmente Buenos Aires.
+**Última actualización:** 30 de marzo de 2026 (Sesión 35 — implementación local de `v10.6.5`)
+**Próxima sesión:** Validar/push/deploy de `v10.6.5`, comprobar que el dashboard publica el bloque NOAA correctamente y dejar correr la auditoría 2+ días para acumular muestra real en `observed_vs_forecast`.
 
 ---
 
@@ -29,7 +29,7 @@ Para estado exacto: usar `/info` + `/cartera` + `/rendimiento` + `/accuracy` en 
 
 ---
 
-## Qué hace el bot v10.6.4 (paso a paso)
+## Qué hace el bot v10.6.5 (paso a paso)
 
 Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
@@ -85,6 +85,8 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Observed proxy layer NOAA (v10.6.4):** Añade `noaa_station_id` explícito en `RESOLUTION_ICAO` solo para las 4 ciudades activas y crea una auditoría separada `observed_vs_forecast` con `source="noaa_ncei"`. Esta capa compara forecast original vs observado NOAA NCEI con lag de 2 días y deja intacta la clave legacy `forecast_vs_real`. Importante: es `observed proxy`, no la fuente real de settlement de Polymarket. El spike de Buenos Aires quedó cerrado: `SAEZ` usa `87576099999`, confirmado vía NOAA HOMR + probe real sobre `global-hourly`. `verify_before_deploy.py` sube a `371/371`.
 
+**Dashboard NOAA observado (v10.6.5):** Añade un bloque nuevo `Calidad Forecast Observada (NOAA)` separado de performance/trading. Lee `audit.json -> observed_vs_forecast`, muestra `n total`, `MAE`, `bias`, cobertura por ciudad activa y los últimos 20 casos. Mantiene visible un bloque legacy `Drift Open-Meteo (historico - no comparable con NOAA)` con `n=` y `ultimo registro` prominentes, sin mezclar ambas series. `verify_before_deploy.py` sube a `386/386`.
+
 **City accuracy tracker (v10.5.2):** Calcula win rate por ciudad desde postmortem. Alerta por Telegram si una ciudad baja de 25% win rate con 3+ trades. Nuevo comando `/accuracy`. Win rate visible en `/rendimiento`.
 
 **Integración `/accuracy` + revisión crítica (v10.5.3):** `/accuracy` queda visible en el menú, responde siempre con menú, `/estado` muestra explícitamente el intervalo intra-SL y la trazabilidad de sesión 20 queda corregida para reflejar mejor lo que realmente introdujeron los commits de la mañana.
@@ -95,15 +97,15 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
-**Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.1`)
+**Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.4`)
 **Repositorio remoto (`origin/main`):** `v10.6.4` empujado con commit `a08c68b`
-**Versión local / remoto GitHub:** local `v10.6.4` | `origin/main` en `v10.6.4`
+**Versión local / remoto GitHub:** local `v10.6.5` | `origin/main` en `v10.6.4`
 
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.6.4 |
-| `verify_before_deploy.py` | v10 — 371 tests de comportamiento |
+| `bot.py` | Script principal v10.6.5 |
+| `verify_before_deploy.py` | v10 — 386 tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |
@@ -188,7 +190,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 **Para iniciar una sesión de análisis en claude.ai:** pegar `/info` + `/cartera` + `/rendimiento`.
 
-## Dashboard web (v10.6.4)
+## Dashboard web (v10.6.5)
 
 - **Ruta principal:** `/`
 - **Healthcheck:** `/healthz`
@@ -210,6 +212,8 @@ Schedule: 08:00, 16:00, 23:00 UTC
 - bloque `Progreso` con `faltan X para Y` sobre muestra, estabilidad, cierres útiles, readiness de nivel y cobertura de ciudades
 - bloque `Trofeos` con hitos del bot calculados solo desde cierres validados (`mejor operación`, `mayor edge ejecutado`, `ciudad más rentable`, etc.)
 - bloque `Desbloqueos` con evidencias/confirmaciones pendientes antes de revisar lógica o evaluar subir bankroll
+- bloque `Calidad Forecast Observada (NOAA)` separado del PnL/trading, con `n`, `MAE`, `bias`, cobertura por ciudad activa y últimos 20 casos de `observed_vs_forecast`
+- bloque legacy `Drift Open-Meteo (historico - no comparable con NOAA)` con `n=` y fecha del último registro para no mezclar la serie nueva con la auditoría vieja
 
 ---
 
@@ -230,7 +234,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 - **#14** ✅ Precio límite vs fill clarificado en Telegram
 
 ### Pendientes:
-- **Observed proxy NOAA pendiente de validación en producción:** `v10.6.4` ya crea `observed_vs_forecast`, pero hay que dejar correr 2+ días y confirmar que `audit.json` empieza a poblarse con datos útiles para las 4 ciudades activas.
+- **Observed proxy NOAA pendiente de validación en producción:** `v10.6.5` ya expone `observed_vs_forecast` en el dashboard, pero hay que dejar correr 2+ días y confirmar que `audit.json` empieza a poblarse con datos útiles para las 4 ciudades activas.
 - **Buenos Aires NOAA spike cerrado:** `SAEZ` usa `87576099999`, confirmado con NOAA HOMR y una consulta real al endpoint `global-hourly`.
 - **Fuente real de resolución sigue sin automatizarse:** NOAA mejora mucho la observabilidad, pero sigue siendo `observed proxy`, no la fuente real de settlement de Polymarket.
 - **Auditoría legacy sigue limitada aunque honesta:** `forecast_vs_real` sigue existiendo como nombre legacy en `audit.json`, pero los logs/código ya dejan claro que compara `forecast original vs forecast posterior Open-Meteo`, no “real” ni Weather Underground.
@@ -278,6 +282,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 | v10.6.2 | 29 mar | hardening alerta bankroll: exige `cash_ok` y ausencia de `api_error`, añade `LOW_BANKROLL_RESET_MARGIN`, tests funcionales dashboard/Telegram/reset. 348 tests |
 | v10.6.3 | 30 mar | fix Dallas `KDAL`, añade `RESOLUTION_ICAO` con URLs WU, renombra/documenta la pseudo-auditoría como `forecast vs forecast posterior Open-Meteo`, y sube a 358 tests |
 | v10.6.4 | 30 mar | añade `observed_vs_forecast` con NOAA NCEI, `noaa_station_id` explícito para las 4 activas, lag de 2 días, tests funcionales NOAA y 371 tests |
+| v10.6.5 | 30 mar | dashboard añade bloque `Calidad Forecast Observada (NOAA)` + bloque legacy `Drift Open-Meteo`, separados de performance/trading, y sube a 386 tests |
 
 ---
 
@@ -659,6 +664,26 @@ Usar esta plantilla al cerrar cada sesión relevante:
 
 - **Estado final:**
   `v10.6.4` local, `371/371` tests, observabilidad NOAA añadida como capa separada y trading/scheduling intactos.
+
+### Sesión 35 — Implementación local de v10.6.5
+
+- **Fecha:** 2026-03-30
+- **Versión activa al cerrar:** `v10.6.5` local (`origin/main` sigue en `v10.6.4`)
+- **Objetivo de la sesión:** separar en el dashboard la nueva serie NOAA observada del bloque legacy para poder analizar el forecast sin mezclar fuentes ni romper la continuidad de trading.
+
+- **Codex:**
+  - Añadió `build_dashboard_forecast_quality()` para leer `audit.json -> observed_vs_forecast` y exponer `n`, `MAE`, `bias`, cobertura por ciudad activa y últimos 20 casos
+  - Añadió `build_dashboard_legacy_forecast_drift()` para mantener visible `forecast_vs_real` como bloque histórico no comparable
+  - Integró ambos bloques en `build_dashboard_snapshot()` sin tocar trading, scheduling ni auditorías
+  - Actualizó `templates/dashboard.html` para renderizar `Calidad Forecast Observada (NOAA)` y `Drift Open-Meteo (historico - no comparable con NOAA)`
+  - Amplió `verify_before_deploy.py` con checks estructurales, thresholds de muestra y tests funcionales del snapshot
+
+- **Problemas detectados / matices:**
+  - `observed_vs_forecast` necesita todavía 2+ días de lag y acumulación real para empezar a leer sesgo con muestra útil
+  - El bloque legacy sigue siendo útil como histórico, pero queda marcado explícitamente como no comparable con NOAA
+
+- **Estado final:**
+  `v10.6.5` local, `386/386` tests, dashboard preparado para observar NOAA vs legacy sin tocar la lógica de trading.
 
 ---
 

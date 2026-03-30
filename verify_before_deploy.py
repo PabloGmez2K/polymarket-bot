@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-verify_before_deploy.py v10 — Tests de comportamiento para bot.py v10.6.4
+verify_before_deploy.py v10 — Tests de comportamiento para bot.py v10.6.5
 
 Ejecutar ANTES de cada deploy:
   python verify_before_deploy.py
@@ -257,8 +257,8 @@ def run_tests():
     test("parse_market_date_iso definida", "def parse_market_date_iso(" in code)
     test("format_postmortem_label definida", "def format_postmortem_label(" in code)
 
-    # ---- Test 12b: v10.6.4 Resolution fidelity ----
-    print("\n🔍 v10.6.4: Resolution fidelity")
+    # ---- Test 12b: v10.6.5 Resolution fidelity + dashboard NOAA ----
+    print("\n🔍 v10.6.5: Resolution fidelity + dashboard NOAA")
     test("Dallas usa coords KDAL / Love Field",
          '"Dallas":         {"lat": 32.8459,  "lon": -96.8510,  "name": "Dallas Love Field"}' in code)
     test("RESOLUTION_ICAO existe", "RESOLUTION_ICAO = {" in code)
@@ -276,6 +276,8 @@ def run_tests():
     test("OBSERVED_AUDIT_KEY separado del legacy", 'OBSERVED_AUDIT_KEY = "observed_vs_forecast"' in code)
     test("OBSERVED_AUDIT_CITIES solo contiene 4 activas",
          'OBSERVED_AUDIT_CITIES = {"Chicago", "Atlanta", "Buenos Aires", "Dallas"}' in code)
+    test("OBSERVED_FORECAST_MIN_SAMPLE es 3", "OBSERVED_FORECAST_MIN_SAMPLE = 3" in code)
+    test("OBSERVED_FORECAST_GLOBAL_TARGET es 10", "OBSERVED_FORECAST_GLOBAL_TARGET = 10" in code)
     test("fetch_noaa_observed_max definida", "def fetch_noaa_observed_max(" in code)
     test("audit_check_resolution_truth definida", "def audit_check_resolution_truth(" in code)
     test("audit NOAA usa source=noaa_ncei", '"source": "noaa_ncei"' in code)
@@ -322,6 +324,8 @@ def run_tests():
     test("build_dashboard_trophies definida", "def build_dashboard_trophies(" in code)
     test("build_dashboard_unlocks definida", "def build_dashboard_unlocks(" in code)
     test("build_dashboard_exit_breakdown definida", "def build_dashboard_exit_breakdown(" in code)
+    test("build_dashboard_forecast_quality definida", "def build_dashboard_forecast_quality(" in code)
+    test("build_dashboard_legacy_forecast_drift definida", "def build_dashboard_legacy_forecast_drift(" in code)
     test("build_promotion_checklist definida", "def build_promotion_checklist(" in code)
     test("build_dashboard_snapshot definida", "def build_dashboard_snapshot(" in code)
     test("create_dashboard_app definida", "def create_dashboard_app(" in code)
@@ -339,6 +343,8 @@ def run_tests():
     test("template dashboard incluye balance por tipo de cierre", "dashboard.exit_breakdown" in dashboard_template_code and "Balance por tipo de cierre" in dashboard_template_code)
     test("template dashboard incluye trofeos", "dashboard.trophies" in dashboard_template_code and "Hitos validados del sistema" in dashboard_template_code)
     test("template dashboard incluye desbloqueos", "dashboard.unlocks" in dashboard_template_code and "Qué falta para habilitar decisiones" in dashboard_template_code)
+    test("template dashboard incluye NOAA observado", "dashboard.forecast_quality" in dashboard_template_code and "Calidad Forecast Observada (NOAA)" in dashboard_template_code)
+    test("template dashboard mantiene bloque legacy drift", "dashboard.legacy_forecast_drift" in dashboard_template_code and "Drift Open-Meteo (historico - no comparable con NOAA)" in dashboard_template_code)
     test("template dashboard muestra n/d sin cierres", "pnl_display" in dashboard_template_code and "win_rate_display" in dashboard_template_code and "drawdown_display" in dashboard_template_code)
     test("css dashboard en modo oscuro", "--bg: #071018;" in dashboard_css_code and "--card: rgba(12, 20, 29, 0.9);" in dashboard_css_code)
     test("css dashboard define table-note", ".table-note" in dashboard_css_code)
@@ -360,7 +366,7 @@ def run_tests():
     test("CYCLES_HISTORY_FILE definido", "CYCLES_HISTORY_FILE" in code)
     test("cycles_history.jsonl append-only", "cycles_history.jsonl" in code)
     test("cycle_summary se guarda en main()", "cycle_data" in code and "CYCLE_SUMMARY_FILE" in code)
-    test("cycle_data incluye version v10.6.4", '"version"' in code and "v10.6.4" in code)
+    test("cycle_data incluye version v10.6.5", '"version"' in code and "v10.6.5" in code)
     test("cycle_data incluye logic_series", '"logic_series": LOGIC_SERIES' in code)
     test("cycle_data incluye logic_cycle_number", '"logic_cycle_number"' in code)
 
@@ -381,7 +387,7 @@ def run_tests():
     test("Bug #13: send_telegram_paged en cmd_log", "send_telegram_paged" in code and "cmd_log" in code)
     test("Bug #13: send_telegram_paged en cmd_cartera", "send_telegram_paged" in code)
     test("_parse_position_label usa centavos (¢)", "¢" in code)
-    test("cmd_estado versión correcta", "Bot v10.6.4" in code or "v10.6.4" in code)
+    test("cmd_estado versión correcta", "Bot v10.6.5" in code or "v10.6.5" in code)
 
     # ---- Test 14c: Zonas horarias reales v10.4.5 ----
     print("\n🔍 Zonas horarias reales")
@@ -501,8 +507,8 @@ def run_tests():
         with open(tmp_cycles, "w", encoding="utf-8") as f:
             f.write(json.dumps({"version": "v10.4.8", "cycle_number": 1}, ensure_ascii=False) + "\n")
             f.write(json.dumps({"version": "v10.5.1", "cycle_number": 2}, ensure_ascii=False) + "\n")
-            f.write(json.dumps({"logic_series": "10.6", "version": "v10.6.4", "cycle_number": 3}, ensure_ascii=False) + "\n")
-            f.write(json.dumps({"logic_series": "10.6", "version": "v10.6.4", "cycle_number": 4}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"logic_series": "10.6", "version": "v10.6.5", "cycle_number": 3}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"logic_series": "10.6", "version": "v10.6.5", "cycle_number": 4}, ensure_ascii=False) + "\n")
         cycle_ns = {
             "os": os,
             "json": json,
@@ -838,12 +844,71 @@ def run_tests():
         test("exit breakdown: pending_exit usa pnl estimado", pending_row["status"] == "blocked" and pending_row["balance_display"] == "$-1.40", pending_row)
         test("exit breakdown: canjear muestra valor pendiente", payout_row["count"] == 2 and payout_row["balance_display"] == "$5.00", payout_row)
 
+        forecast_quality_ns = {
+            "OBSERVED_AUDIT_KEY": "observed_vs_forecast",
+            "OBSERVED_AUDIT_CITIES": {"Chicago", "Atlanta", "Buenos Aires", "Dallas"},
+            "OBSERVED_FORECAST_MIN_SAMPLE": 3,
+            "OBSERVED_FORECAST_GLOBAL_TARGET": 10,
+        }
+        exec(get_function_source(module_ast, code_lines, "build_dashboard_forecast_quality"), forecast_quality_ns)
+        observed_dashboard = forecast_quality_ns["build_dashboard_forecast_quality"](
+            audit={
+                "observed_vs_forecast": [
+                    {"city": "Chicago", "date": "2026-03-26", "observed_temp_c": 21.0, "forecast_temp_c": 20.0, "error_c": 1.0, "abs_error_c": 1.0, "source": "noaa_ncei", "checked_at": "2026-03-28T10:00:00+00:00"},
+                    {"city": "Chicago", "date": "2026-03-25", "observed_temp_c": 18.0, "forecast_temp_c": 19.0, "error_c": -1.0, "abs_error_c": 1.0, "source": "noaa_ncei", "checked_at": "2026-03-27T10:00:00+00:00"},
+                    {"city": "Chicago", "date": "2026-03-24", "observed_temp_c": 19.5, "forecast_temp_c": 19.0, "error_c": 0.5, "abs_error_c": 0.5, "source": "noaa_ncei", "checked_at": "2026-03-26T10:00:00+00:00"},
+                    {"city": "Dallas", "date": "2026-03-23", "observed_temp_c": 25.5, "forecast_temp_c": 23.0, "error_c": 2.5, "abs_error_c": 2.5, "source": "noaa_ncei", "checked_at": "2026-03-25T10:00:00+00:00"},
+                ]
+            }
+        )
+        chicago_observed_row = next(item for item in observed_dashboard["city_rows"] if item["city"] == "Chicago")
+        dallas_observed_row = next(item for item in observed_dashboard["city_rows"] if item["city"] == "Dallas")
+        test("forecast quality NOAA: muestra global y coverage correctos",
+             observed_dashboard["sample_size"] == 4 and observed_dashboard["coverage_display"] == "2 / 4 ciudades con muestra",
+             observed_dashboard)
+        test("forecast quality NOAA: activa KPIs desde n>=3",
+             observed_dashboard["mae_display"] == "1.2C" and observed_dashboard["bias_display"] == "+0.8C",
+             observed_dashboard)
+        test("forecast quality NOAA: bias por ciudad exige >=3 casos",
+             chicago_observed_row["bias_display"] == "+0.2C" and dallas_observed_row["bias_display"] == "acumulando muestra...",
+             observed_dashboard["city_rows"])
+        test("forecast quality NOAA: mantiene lectura preliminar antes de n=10",
+             observed_dashboard["note_level"] == "warn" and "10 casos" in observed_dashboard["note"],
+             observed_dashboard)
+
+        observed_low_sample = forecast_quality_ns["build_dashboard_forecast_quality"](
+            audit={"observed_vs_forecast": [{"city": "Atlanta", "date": "2026-03-26", "observed_temp_c": 20.0, "forecast_temp_c": 19.0, "error_c": 1.0, "abs_error_c": 1.0, "source": "noaa_ncei", "checked_at": "2026-03-28T11:00:00+00:00"}]}
+        )
+        test("forecast quality NOAA: con n<3 muestra acumulando",
+             observed_low_sample["mae_display"] == "acumulando muestra..." and "acumulando muestra" in observed_low_sample["note"],
+             observed_low_sample)
+
+        legacy_drift_ns = {
+            "FORECAST_AUDIT_KEY": "forecast_vs_real",
+        }
+        exec(get_function_source(module_ast, code_lines, "build_dashboard_legacy_forecast_drift"), legacy_drift_ns)
+        legacy_dashboard = legacy_drift_ns["build_dashboard_legacy_forecast_drift"](
+            audit={
+                "forecast_vs_real": [
+                    {"city": "Chicago", "date": "2026-03-26", "forecast_original": 20.0, "forecast_posterior": 21.0, "error_c": 1.0, "abs_error_c": 1.0, "checked_at": "2026-03-28T09:15:00+00:00"},
+                    {"city": "Dallas", "date": "2026-03-25", "forecast_original": 23.0, "forecast_posterior": 22.5, "error_c": -0.5, "abs_error_c": 0.5, "checked_at": "2026-03-27T09:15:00+00:00"},
+                ]
+            }
+        )
+        test("legacy drift: bloque separado y no comparable con NOAA",
+             legacy_dashboard["sample_size"] == 2 and "No es comparable" in legacy_dashboard["note"],
+             legacy_dashboard)
+        test("legacy drift: expone ultimo registro prominente",
+             legacy_dashboard["last_record_display"] == "2026-03-28 09:15 UTC" and legacy_dashboard["mae_display"] == "0.8C",
+             legacy_dashboard)
+
         snapshot_ns = {
             "datetime": datetime,
             "timezone": timezone,
             "_load_cycle_counts": lambda: (5, 1),
-            "load_cycle_summary_data": lambda: {"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.6.4"},
-            "load_cycle_history": lambda limit=None: [{"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.6.4", "timestamp_utc": "2026-03-29T11:08:00+00:00", "buys": [], "management": {"n_sold": 1}, "exposure_after": 2.94}],
+            "load_cycle_summary_data": lambda: {"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.6.5"},
+            "load_cycle_history": lambda limit=None: [{"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.6.5", "timestamp_utc": "2026-03-29T11:08:00+00:00", "buys": [], "management": {"n_sold": 1}, "exposure_after": 2.94}],
+            "load_audit_data": lambda: {"pending_sells": [], "forecast_vs_real": [], "observed_vs_forecast": [], "errors": []},
             "get_clean_closed_trade_stats": lambda: {"count": 18, "sell": 12, "loss_total": 6, "resolved_win": 0},
             "get_logic_series_clean_closed_trade_stats": lambda: {"count": 0, "sell": 0, "loss_total": 0, "resolved_win": 0},
             "get_validated_closed_postmortems": lambda: [],
@@ -854,6 +919,8 @@ def run_tests():
             "get_city_accuracy": lambda: {},
             "build_dashboard_progress": lambda **kwargs: [{"label": "Muestra", "status": "bad"}],
             "build_dashboard_exit_breakdown": lambda **kwargs: {"validated_rows": [{"label": "Take-profit", "balance_display": "$+1.00"}], "series_rows": [{"label": "Pending exit serie v10.6", "balance_display": "$-0.50"}]},
+            "build_dashboard_forecast_quality": lambda **kwargs: {"sample_size": 0, "sample_display": "0 mercados", "mae_display": "acumulando muestra...", "bias_display": "acumulando muestra...", "coverage_display": "0 / 4 ciudades con muestra", "coverage_detail": "0 / 4 con >= 3 casos", "city_rows": [], "latest_rows": [], "note": "acumulando muestra...", "note_level": "muted", "last_record_display": "n/d", "kpis_ready": False, "global_ready": False},
+            "build_dashboard_legacy_forecast_drift": lambda **kwargs: {"sample_size": 0, "sample_display": "0 mercados", "mae_display": "n/d", "bias_display": "n/d", "last_record_display": "n/d", "latest_case": "", "note": "legacy"},
             "build_dashboard_trophies": lambda **kwargs: [{"label": "Mejor operación", "value": "n/d"}],
             "build_dashboard_unlocks": lambda **kwargs: [{"label": "Activar win rate", "status": "waiting"}],
             "_get_portfolio_and_positions": lambda: None,
@@ -863,7 +930,7 @@ def run_tests():
             "compute_agent_scorecard": lambda events: [],
             "build_agent_rivalry": lambda events: [],
             "_extract_logic_series": lambda value: "10.5" if "10.5" in str(value) else "10.4" if "10.4" in str(value) else None,
-            "BOT_VERSION": "v10.6.4",
+            "BOT_VERSION": "v10.6.5",
             "LOGIC_SERIES": "10.6",
             "DRY_RUN": False,
             "DASHBOARD_USER": "pablo",
@@ -877,6 +944,8 @@ def run_tests():
         snapshot = snapshot_ns["build_dashboard_snapshot"]()
         test("snapshot: incluye progress", "progress" in snapshot and snapshot["progress"][0]["label"] == "Muestra", snapshot)
         test("snapshot: incluye exit_breakdown", "exit_breakdown" in snapshot and snapshot["exit_breakdown"]["validated_rows"][0]["label"] == "Take-profit", snapshot)
+        test("snapshot: incluye forecast_quality", "forecast_quality" in snapshot and snapshot["forecast_quality"]["sample_size"] == 0, snapshot)
+        test("snapshot: incluye legacy_forecast_drift", "legacy_forecast_drift" in snapshot and snapshot["legacy_forecast_drift"]["last_record_display"] == "n/d", snapshot)
         test("snapshot: incluye trophies", "trophies" in snapshot and snapshot["trophies"][0]["label"] == "Mejor operación", snapshot)
         test("snapshot: incluye unlocks", "unlocks" in snapshot and snapshot["unlocks"][0]["label"] == "Activar win rate", snapshot)
 
@@ -1008,7 +1077,7 @@ def run_tests():
         os.close(fd)
         with open(tmp_cycle_summary, "w", encoding="utf-8") as f:
             json.dump({
-                "version": "v10.6.4",
+                "version": "v10.6.5",
                 "cycle_number": 12,
                 "timestamp_utc": "2026-03-28T16:00:33.073674+00:00",
                 "management": {"n_kept": 0, "n_sold": 1, "n_resolved": 0},
@@ -1020,7 +1089,7 @@ def run_tests():
             "json": __import__("json"),
             "datetime": datetime,
             "send_telegram_paged": lambda text, with_menu=False, page_size=3800: info_messages.append(text),
-            "BOT_VERSION": "v10.6.4",
+            "BOT_VERSION": "v10.6.5",
             "LOGIC_SERIES": "10.6",
             "_extract_logic_series": cycle_ns["_extract_logic_series"],
             "DRY_RUN": False,
@@ -1039,7 +1108,7 @@ def run_tests():
         exec(get_function_source(module_ast, code_lines, "cmd_info"), info_ns)
         info_ns["cmd_info"]()
         info_msg = info_messages[-1] if info_messages else ""
-        test("info: versión visible correcta", "BOT POLYMARKET v10.6.4" in info_msg, info_msg[:120])
+        test("info: versión visible correcta", "BOT POLYMARKET v10.6.5" in info_msg, info_msg[:120])
         test("info: usa cycle_summary como fallback de último", "Último: 2026-03-28 16:00 UTC" in info_msg, info_msg[:220])
         test("info: muestra doble contador", "Ciclos completados: 12 total | 3 serie v10.6" in info_msg, info_msg[:240])
         test("info: muestra ciclo total y de serie", "Ciclo total #12 | serie v10.6 #3" in info_msg, info_msg[:260])
@@ -1882,7 +1951,7 @@ def run_tests():
     test("/accuracy en MENU_KEYBOARD", '"callback_data": "accuracy"' in code)
     test("cmd_accuracy vuelve con menú", 'send_telegram("Sin datos de accuracy todavía.", with_menu=True)' in code and 'send_telegram_paged("\\n".join(lines), with_menu=True)' in code)
     test("Win rate en rendimiento", "WR:" in code)
-    test("Version v10.6.4", "v10.6.4" in code)
+    test("Version v10.6.5", "v10.6.5" in code)
 
     # ---- Resultado ----
     print(f"\n{'='*50}")

@@ -24,8 +24,8 @@ from waitress import serve
 load_dotenv()
 
 # =============================================================
-# bot.py v10.6.4 — observed proxy layer con NOAA NCEI
-# Sesión 34: auditoria observed_vs_forecast sin tocar trading
+# bot.py v10.6.5 — dashboard NOAA observed quality
+# Sesión 35: bloque de calidad forecast observada sin tocar trading
 # =============================================================
 #
 # Nuevo en v10.4.3:
@@ -100,7 +100,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.4"
+BOT_VERSION = "v10.6.5"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -2122,6 +2122,252 @@ def build_dashboard_exit_breakdown(closed_records=None, series_records=None, por
     }
 
 
+def build_dashboard_forecast_quality(audit=None):
+    """Resume observed_vs_forecast (NOAA) sin mezclarlo con trading ni legacy drift."""
+    if audit is None:
+        audit = load_audit_data()
+
+    def _safe_float(value):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _fmt_temp(value, signed=False):
+        number = _safe_float(value)
+        if number is None:
+            return "n/d"
+        return f"{number:+.1f}C" if signed else f"{number:.1f}C"
+
+    def _fmt_checked_at(value):
+        text = str(value or "").strip()
+        if not text:
+            return "n/d"
+        text = text.replace("T", " ")
+        if text.endswith("+00:00"):
+            return f"{text[:16]} UTC"
+        return text[:16]
+
+    def _error_badge(abs_error_c):
+        if abs_error_c is None:
+            return "muted"
+        if abs_error_c <= 1.0:
+            return "good"
+        if abs_error_c <= 2.0:
+            return "warn"
+        return "bad"
+
+    rows = []
+    for raw in audit.get(OBSERVED_AUDIT_KEY, []):
+        if not isinstance(raw, dict) or raw.get("source") != "noaa_ncei":
+            continue
+        row = dict(raw)
+        observed_temp = _safe_float(row.get("observed_temp_c"))
+        forecast_temp = _safe_float(row.get("forecast_temp_c"))
+        error_c = _safe_float(row.get("error_c"))
+        if error_c is None and observed_temp is not None and forecast_temp is not None:
+            error_c = round(observed_temp - forecast_temp, 1)
+        abs_error_c = _safe_float(row.get("abs_error_c"))
+        if abs_error_c is None and error_c is not None:
+            abs_error_c = abs(error_c)
+        row["_error_c"] = error_c
+        row["_abs_error_c"] = abs_error_c
+        rows.append(row)
+
+    rows.sort(
+        key=lambda item: (
+            item.get("checked_at") or "",
+            item.get("date") or "",
+            item.get("city") or "",
+        ),
+        reverse=True,
+    )
+
+    all_errors = [item["_error_c"] for item in rows if item.get("_error_c") is not None]
+    all_abs_errors = [item["_abs_error_c"] for item in rows if item.get("_abs_error_c") is not None]
+    sample_size = len(rows)
+    kpis_ready = sample_size >= OBSERVED_FORECAST_MIN_SAMPLE and bool(all_abs_errors)
+    global_ready = sample_size >= OBSERVED_FORECAST_GLOBAL_TARGET and bool(all_abs_errors)
+
+    mae_c = round(sum(all_abs_errors) / len(all_abs_errors), 1) if kpis_ready else None
+    bias_c = round(sum(all_errors) / len(all_errors), 1) if kpis_ready and all_errors else None
+
+    city_order = [city for city in ["Chicago", "Atlanta", "Dallas", "Buenos Aires"] if city in OBSERVED_AUDIT_CITIES]
+    for city in sorted(OBSERVED_AUDIT_CITIES):
+        if city not in city_order:
+            city_order.append(city)
+
+    coverage_with_sample = 0
+    coverage_ready = 0
+    city_rows = []
+    for city in city_order:
+        city_entries = [item for item in rows if item.get("city") == city]
+        city_errors = [item["_error_c"] for item in city_entries if item.get("_error_c") is not None]
+        city_abs_errors = [item["_abs_error_c"] for item in city_entries if item.get("_abs_error_c") is not None]
+        count = len(city_entries)
+        if count > 0:
+            coverage_with_sample += 1
+        interpretable = count >= OBSERVED_FORECAST_MIN_SAMPLE and bool(city_abs_errors)
+        if interpretable:
+            coverage_ready += 1
+        city_mae = round(sum(city_abs_errors) / len(city_abs_errors), 1) if interpretable else None
+        city_bias = round(sum(city_errors) / len(city_errors), 1) if interpretable and city_errors else None
+        last_date = city_entries[0].get("date", "") if city_entries else ""
+        if count == 0:
+            status = "bad"
+            tag = "Sin muestra"
+            detail = "sin casos NOAA todavia"
+        elif interpretable:
+            status = "good"
+            tag = "Interpretable"
+            detail = f"{count} casos | MAE {city_mae:.1f}C | ultimo {last_date}"
+        else:
+            status = "waiting"
+            tag = "Acumulando"
+            detail = f"{count}/{OBSERVED_FORECAST_MIN_SAMPLE} casos para leer bias | ultimo {last_date}"
+        city_rows.append({
+            "city": city,
+            "count": count,
+            "count_display": f"{count} caso" if count == 1 else f"{count} casos",
+            "status": status,
+            "tag": tag,
+            "detail": detail,
+            "bias_display": _fmt_temp(city_bias, signed=True) if city_bias is not None else "acumulando muestra...",
+        })
+
+    latest_rows = []
+    for item in rows[:20]:
+        latest_rows.append({
+            "city": item.get("city", "?"),
+            "date": item.get("date", "?"),
+            "forecast_display": _fmt_temp(item.get("forecast_temp_c")),
+            "observed_display": _fmt_temp(item.get("observed_temp_c")),
+            "error_display": _fmt_temp(item.get("_error_c"), signed=True),
+            "error_badge": _error_badge(item.get("_abs_error_c")),
+            "source": item.get("source", "?"),
+        })
+
+    if sample_size < OBSERVED_FORECAST_MIN_SAMPLE:
+        note_level = "muted"
+        note = (
+            "acumulando muestra... los KPIs NOAA se activan con al menos "
+            f"{OBSERVED_FORECAST_MIN_SAMPLE} casos observados."
+        )
+    elif sample_size < OBSERVED_FORECAST_GLOBAL_TARGET:
+        note_level = "warn"
+        note = (
+            "lectura global preliminar: MAE y bias ya son visibles, pero conviene "
+            f"llegar a {OBSERVED_FORECAST_GLOBAL_TARGET} casos antes de leer sesgo global."
+        )
+    else:
+        note_level = "good"
+        note = (
+            "muestra global util: revisar tambien la distribucion por ciudad. "
+            f"El bias por ciudad solo es interpretable con >= {OBSERVED_FORECAST_MIN_SAMPLE} casos."
+        )
+
+    return {
+        "sample_size": sample_size,
+        "sample_display": f"{sample_size} mercado" if sample_size == 1 else f"{sample_size} mercados",
+        "mae_display": _fmt_temp(mae_c) if mae_c is not None else "acumulando muestra...",
+        "bias_display": _fmt_temp(bias_c, signed=True) if bias_c is not None else "acumulando muestra...",
+        "coverage_display": f"{coverage_with_sample} / {len(city_order)} ciudades con muestra",
+        "coverage_detail": (
+            f"{coverage_ready} / {len(city_order)} con >= {OBSERVED_FORECAST_MIN_SAMPLE} casos"
+            if city_order else
+            "sin ciudades activas configuradas"
+        ),
+        "city_rows": city_rows,
+        "latest_rows": latest_rows,
+        "note": note,
+        "note_level": note_level,
+        "last_record_display": _fmt_checked_at(rows[0].get("checked_at")) if rows else "n/d",
+        "kpis_ready": kpis_ready,
+        "global_ready": global_ready,
+    }
+
+
+def build_dashboard_legacy_forecast_drift(audit=None):
+    """Resume el bloque legacy forecast_vs_real, dejando claro que es historico y no comparable."""
+    if audit is None:
+        audit = load_audit_data()
+
+    def _safe_float(value):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _fmt_temp(value, signed=False):
+        number = _safe_float(value)
+        if number is None:
+            return "n/d"
+        return f"{number:+.1f}C" if signed else f"{number:.1f}C"
+
+    def _fmt_checked_at(value):
+        text = str(value or "").strip()
+        if not text:
+            return "n/d"
+        text = text.replace("T", " ")
+        if text.endswith("+00:00"):
+            return f"{text[:16]} UTC"
+        return text[:16]
+
+    rows = []
+    for raw in audit.get(FORECAST_AUDIT_KEY, []):
+        if not isinstance(raw, dict):
+            continue
+        row = dict(raw)
+        original = _safe_float(row.get("forecast_original"))
+        posterior = _safe_float(row.get("forecast_posterior"))
+        error_c = _safe_float(row.get("error_c"))
+        if error_c is None and original is not None and posterior is not None:
+            error_c = round(posterior - original, 1)
+        abs_error_c = _safe_float(row.get("abs_error_c"))
+        if abs_error_c is None and error_c is not None:
+            abs_error_c = abs(error_c)
+        row["_error_c"] = error_c
+        row["_abs_error_c"] = abs_error_c
+        rows.append(row)
+
+    rows.sort(
+        key=lambda item: (
+            item.get("checked_at") or "",
+            item.get("date") or "",
+            item.get("city") or "",
+        ),
+        reverse=True,
+    )
+
+    all_errors = [item["_error_c"] for item in rows if item.get("_error_c") is not None]
+    all_abs_errors = [item["_abs_error_c"] for item in rows if item.get("_abs_error_c") is not None]
+    mae_c = round(sum(all_abs_errors) / len(all_abs_errors), 1) if all_abs_errors else None
+    bias_c = round(sum(all_errors) / len(all_errors), 1) if all_errors else None
+    latest = rows[0] if rows else {}
+
+    latest_case = ""
+    if latest:
+        latest_case = (
+            f"{latest.get('city', '?')} {latest.get('date', '?')} | "
+            f"forecast original { _fmt_temp(latest.get('forecast_original')) } | "
+            f"forecast posterior { _fmt_temp(latest.get('forecast_posterior')) } | "
+            f"deriva { _fmt_temp(latest.get('_error_c'), signed=True) }"
+        )
+
+    return {
+        "sample_size": len(rows),
+        "sample_display": f"{len(rows)} mercado" if len(rows) == 1 else f"{len(rows)} mercados",
+        "mae_display": _fmt_temp(mae_c) if mae_c is not None else "n/d",
+        "bias_display": _fmt_temp(bias_c, signed=True) if bias_c is not None else "n/d",
+        "last_record_display": _fmt_checked_at(latest.get("checked_at")) if latest else "n/d",
+        "latest_case": latest_case,
+        "note": (
+            "Historico legacy congelado: compara forecast original vs forecast posterior Open-Meteo. "
+            "No es comparable 1:1 con NOAA ni con resolucion real."
+        ),
+    }
+
+
 def get_bankroll_level_context():
     """Calcula el nivel actual y el siguiente escalón de bankroll."""
     levels = sorted({float(v) for v in BANKROLL_LEVELS})
@@ -2504,6 +2750,7 @@ def build_dashboard_snapshot():
     cycle_total, cycle_series = _load_cycle_counts()
     cycle_summary = load_cycle_summary_data()
     cycle_history = load_cycle_history(limit=8)
+    audit = load_audit_data()
     clean_stats = get_clean_closed_trade_stats()
     series_clean_stats = get_logic_series_clean_closed_trade_stats()
     validated_closed = get_validated_closed_postmortems()
@@ -2535,6 +2782,8 @@ def build_dashboard_snapshot():
         portfolio=portfolio,
         logic_series=LOGIC_SERIES,
     )
+    forecast_quality = build_dashboard_forecast_quality(audit=audit)
+    legacy_forecast_drift = build_dashboard_legacy_forecast_drift(audit=audit)
     agent_events = []
     stage_labels = {
         "proposed": "Propuesta",
@@ -2655,6 +2904,8 @@ def build_dashboard_snapshot():
         "promotion": promotion,
         "progress": progress,
         "exit_breakdown": exit_breakdown,
+        "forecast_quality": forecast_quality,
+        "legacy_forecast_drift": legacy_forecast_drift,
         "trophies": trophies,
         "unlocks": unlocks,
         "clean_stats": clean_stats,
@@ -4831,6 +5082,8 @@ FORECAST_AUDIT_KEY = "forecast_vs_real"  # Legacy key: hoy guarda forecast origi
 OBSERVED_AUDIT_KEY = "observed_vs_forecast"  # NOAA NCEI observed proxy vs forecast original.
 NOAA_NCEI_ACCESS_URL = "https://www.ncei.noaa.gov/access/services/data/v1"
 NOAA_OBSERVED_LAG_DAYS = 2
+OBSERVED_FORECAST_MIN_SAMPLE = 3
+OBSERVED_FORECAST_GLOBAL_TARGET = 10
 
 def load_audit_data():
     """Carga datos de auditoría acumulativos."""
