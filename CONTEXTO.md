@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 29 de marzo de 2026 (Sesión 31 — v10.6.2 local)
-**Próxima sesión:** Hacer push/deploy de `v10.6.2` y monitorizar en Railway que la alerta de bankroll no dé falsos positivos por fallo de API. Integrar Weather Underground si IBM Trial se desbloquea.
+**Última actualización:** 30 de marzo de 2026 (Sesión 32 — investigación estratégica + preparación de v10.6.3)
+**Próxima sesión:** Implementar `v10.6.3` en una sesión limpia: fix Dallas `KDAL`, capa formal de resolución (`RESOLUTION_ICAO` + URLs WU), renombrar/documentar la pseudo-auditoría actual y ampliar tests. No tocar lógica de trading ni scheduling hasta cerrar esa base.
 
 ---
 
@@ -43,7 +43,7 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 - Si no: recalcula edge. Si edge < -3% → VENDER (re-evaluación)
 - Devuelve `sold_token_ids` para evitar re-entrada en el mismo ciclo
 
-**0.6. Auditoría:** Convierte SELL_PENDING → SELL/SELL_FAILED según fills confirmados.
+**0.6. Auditoría actual:** Convierte SELL_PENDING → SELL/SELL_FAILED según fills confirmados y mantiene una pseudo-auditoría `forecast_vs_forecast posterior` con Open-Meteo. **No valida contra la fuente real de resolución de Polymarket (Weather Underground).**
 
 **1-5. Buscar oportunidades:** Escanea ~330 mercados, consulta previsiones, calcula edge, cruza con señales de traders, dimensiona con Half-Kelly, respeta exposición máxima 40%.
 
@@ -79,6 +79,8 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Hardening alerta bankroll (v10.6.2):** La alerta de bankroll bajo ahora solo se activa con señal fiable de cartera (`cash_ok` y sin `api_error`) tanto en Telegram como en dashboard, evitando falsos “recargar” cuando falla la API. Añade `LOW_BANKROLL_RESET_MARGIN=1.0` para rearmar la alerta al salir de la zona roja sin exigir recuperar hasta 2x el umbral.
 
+**Investigación estratégica Codex + Claude (30 mar):** La comparación cruzada dejó tres conclusiones de alta prioridad: (1) `resolution fidelity first` sigue siendo la dirección correcta; (2) Dallas está mal mapeada en producción lógica (`KDFW` en código vs `KDAL` en reglas reales de Polymarket); y (3) la auditoría `forecast_vs_real` actual no compara contra la fuente real de resolución y debe renombrarse/documentarse antes de confiar en esa señal. Se añadieron tres artefactos al repo: `RESEARCH_CODEX_HANDOFF_2026-03-30.md`, `RESEARCH_CLAUDE_2026-03-30.md` y `RESEARCH_SYNTHESIS_CODEX_CLAUDE_2026-03-30.md`.
+
 **City accuracy tracker (v10.5.2):** Calcula win rate por ciudad desde postmortem. Alerta por Telegram si una ciudad baja de 25% win rate con 3+ trades. Nuevo comando `/accuracy`. Win rate visible en `/rendimiento`.
 
 **Integración `/accuracy` + revisión crítica (v10.5.3):** `/accuracy` queda visible en el menú, responde siempre con menú, `/estado` muestra explícitamente el intervalo intra-SL y la trazabilidad de sesión 20 queda corregida para reflejar mejor lo que realmente introdujeron los commits de la mañana.
@@ -89,8 +91,9 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
-**Producción:** Railway — Online, EU West Amsterdam, MODO REAL, DRY_RUN=false (último deploy: `v10.6.1`)
-**Versión local lista para deploy:** v10.6.2
+**Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.1`)
+**Repositorio remoto (`origin/main`):** `v10.6.2` empujado con commit `29049a1`
+**Versión local / remoto GitHub:** v10.6.2
 
 ### Archivos del proyecto:
 | Archivo | Función |
@@ -103,6 +106,9 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 | `CONTEXTO.md` | Estado del proyecto (este archivo) |
 | `HISTORIAL_SESIONES.md` | Bitácora append-only de sesiones e hitos reconstruidos desde Git |
 | `OBSERVABILIDAD_Y_APRENDIZAJE.md` | Plan de fases futuras |
+| `RESEARCH_CODEX_HANDOFF_2026-03-30.md` | Informe de investigación de Codex para revisión cruzada |
+| `RESEARCH_CLAUDE_2026-03-30.md` | Informe de investigación de Claude Code (Opus) |
+| `RESEARCH_SYNTHESIS_CODEX_CLAUDE_2026-03-30.md` | Síntesis combinada de ambos informes + roadmap |
 | `templates/dashboard.html` | Plantilla principal del dashboard web |
 | `static/dashboard.css` | Estilos del dashboard web |
 | `agent_events.jsonl` | Eventos semilla para el scoreboard de agentes |
@@ -123,7 +129,7 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 | `trader_history.json` | Historial auxiliar del pipeline de traders |
 | `cycle_summary.json` | Último ciclo (se sobreescribe) |
 | `cycles_history.jsonl` | Historial acumulativo de todos los ciclos |
-| `audit.json` | Ventas pendientes + forecast vs real |
+| `audit.json` | Ventas pendientes + pseudo-auditoría `forecast vs forecast posterior` con Open-Meteo |
 | `decisions.log` | Log detallado por ciclo |
 | `trades.log` | Log compacto de órdenes |
 
@@ -220,7 +226,10 @@ Schedule: 08:00, 16:00, 23:00 UTC
 - **#14** ✅ Precio límite vs fill clarificado en Telegram
 
 ### Pendientes:
-- **Weather Underground vs Open-Meteo:** Polymarket resuelve con WU, no Open-Meteo. Ha causado pérdidas en London. London bloqueada en código desde `v10.4.7`. IBM Trial no accesible (problema de verificación). Desde `v10.5.2`, el bot detecta ciudades con baja accuracy por win rate y alerta por Telegram.
+- **Dallas mal mapeada:** el bot usa `Dallas Fort Worth / KDFW`, pero los mercados reales verificados de Polymarket resuelven con `Dallas Love Field / KDAL`. Es una de las 4 ciudades activas y el fix debe entrar en `v10.6.3`.
+- **Auditoría mal nombrada / poco fiable:** `forecast_vs_real` no valida contra la fuente real de resolución. Usa la misma vía de Open-Meteo y debe renombrarse/documentarse antes de seguir interpretando esa métrica como “real”.
+- **Capa formal de resolución pendiente:** falta materializar en código un mapping `ciudad/mercado -> ICAO -> URL WU -> timezone -> semántica de finalización`, empezando por las 4 activas y manteniendo también las bloqueadas.
+- **Weather Underground vs Open-Meteo:** Polymarket resuelve con WU, no Open-Meteo. London sigue bloqueada en código desde `v10.4.7`. IBM Trial no accesible; la vía correcta a corto plazo es alinear resolución, no esperar una API oficial.
 
 ---
 
@@ -575,6 +584,31 @@ Usar esta plantilla al cerrar cada sesión relevante:
 
 - **Estado final:**
   v10.6.2 local, 348/348 tests, alerta de bankroll más fiable en Telegram/dashboard y repo listo para push/deploy
+
+### Sesión 32 — Investigación estratégica + preparación de v10.6.3
+
+- **Fecha:** 2026-03-30
+- **Versión activa al cerrar:** v10.6.2 (local + `origin/main`), sin cambio funcional todavía
+- **Objetivo de la sesión:** investigar competidores/estrategia, contrastar Codex vs Claude y cerrar el siguiente bloque técnico antes de tocar producción
+
+- **Codex:**
+  - Investigó wallets, bots y tooling del ecosistema weather de Polymarket
+  - Detectó y documentó que Polymarket usa Weather Underground en múltiples mercados de temperatura
+  - Identificó el bug Dallas `KDAL vs KDFW`
+  - Preparó `RESEARCH_CODEX_HANDOFF_2026-03-30.md` y la plantilla de comparación con Claude
+  - Contrastó después el informe de Claude y creó `RESEARCH_SYNTHESIS_CODEX_CLAUDE_2026-03-30.md`
+
+- **Claude Code (Opus):**
+  - Reforzó el hallazgo de Dallas con evidencia adicional
+  - Señaló correctamente que la auditoría `forecast_vs_real` actual no valida contra la fuente real de resolución
+  - Añadió `Degen Doppler` al mapa competitivo como referencia más directa
+
+- **Conclusión compartida:**
+  - `resolution fidelity first`
+  - El siguiente bloque correcto no es “más modelo” ni “más ciudades”, sino `v10.6.3`: fix Dallas, capa formal de resolución y honestidad explícita en la auditoría actual
+
+- **Estado final:**
+  Repo documentado para arrancar una sesión nueva de implementación con contexto limpio y alcance acotado (`v10.6.3` sin tocar la lógica de trading).
 
 ---
 

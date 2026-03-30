@@ -47,6 +47,7 @@ Comandos útiles:
 | 2026-03-29 | Explícita | Sesión 27 | `—` | Nueva capa del dashboard: progreso operativo, trofeos validados y desbloqueos para saber qué evidencia falta antes de revisar lógica o subir bankroll. |
 | 2026-03-29 | Explícita | Sesión 28 | `—` | Dashboard añade balance por tipo de cierre y liquidación para distinguir TP/SL/Reeval/LOSS_TOTAL/RESOLVED_WIN de `pending_exit` y valor pendiente de canjear. |
 | 2026-03-29 | Explícita | Sesión 31 | `—` | Hardening local de `v10.6.2`: alerta de bankroll fiable, rearme con margen, scorecard actualizado y docs/tests alineados. |
+| 2026-03-30 | Explícita | Sesión 32 | `—` | Investigación estratégica Codex + Claude: Dallas `KDAL` como bug activo, auditoría mal nombrada, síntesis competitiva y preparación del alcance de `v10.6.3`. |
 
 ---
 
@@ -449,7 +450,44 @@ Investigación completa de trades, commits y lógica de trading desde v10.3 hast
   - rearma la alerta al salir de zona roja con margen;
 - `CONTEXTO.md` y este historial quedan alineados con `v10.6.2`.
 
-**Resultado:** `v10.6.2` listo en local, `348/348` tests, sin deploy todavía. Railway sigue en `v10.6.1` hasta hacer push.
+**Resultado:** `v10.6.2` quedó listo en local con `348/348` tests. Posteriormente se hizo commit (`29049a1`) y push a `origin/main`. El estado de deploy de Railway no se re-verificó durante la sesión de investigación siguiente.
+
+---
+
+## Sesión 32 — Investigación estratégica + preparación de v10.6.3
+
+**Fecha:** 2026-03-30
+**Herramientas:** Codex + Claude Code (Opus) + revisión cruzada
+**Versión del código al investigar:** `v10.6.2`
+**Cambios de código:** ninguno funcional; sesión centrada en investigación, síntesis y preparación del siguiente bloque técnico
+
+**Trabajo realizado:**
+- Codex investigó competidores, reglas reales de resolución en Polymarket y microestructura básica del mercado;
+- Claude Code realizó una investigación paralela y una revisión adversarial del informe de Codex;
+- se prepararon tres artefactos nuevos en el repo:
+  - `RESEARCH_CODEX_HANDOFF_2026-03-30.md`
+  - `RESEARCH_CLAUDE_2026-03-30.md`
+  - `RESEARCH_SYNTHESIS_CODEX_CLAUDE_2026-03-30.md`
+
+**Hallazgos compartidos de mayor impacto:**
+- Polymarket temperature resuelve con Weather Underground, no con Open-Meteo;
+- Dallas está mal mapeada en el bot: código actual `KDFW`, reglas verificadas `KDAL`;
+- la auditoría `forecast_vs_real` no debe interpretarse como verdad de resolución, porque no compara contra la fuente real que liquida Polymarket;
+- la dirección estratégica correcta sigue siendo `resolution fidelity first`.
+
+**Correcciones / matices surgidos en la revisión cruzada:**
+- Claude reforzó correctamente el hallazgo de Dallas y la debilidad real de la auditoría;
+- Claude añadió `Degen Doppler` como competidor/referencia más directa;
+- se detectó que una parte de la corrección sobre `WeatherClaw` estaba contaminada por confusión de dominio (`.com` vs `.xyz`), así que no debía tomarse sin verificar.
+
+**Roadmap resultante para la siguiente sesión:**
+1. Fix Dallas `KDAL`
+2. Crear capa formal de resolución (`RESOLUTION_ICAO` + URLs WU)
+3. Renombrar/documentar la pseudo-auditoría actual para no presentar Open-Meteo como “real”
+4. Añadir tests de estos tres puntos
+5. No tocar todavía lógica de trading, scheduling ni nuevas features
+
+**Resultado:** el proyecto queda listo para abrir una sesión nueva de implementación acotada (`v10.6.3`) con contexto claro y sin reabrir la investigación desde cero.
 
 ---
 
