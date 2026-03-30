@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 30 de marzo de 2026 (Sesión 42 — v10.6.7 dashboard estado por ciudad)
-**Próxima sesión:** decidir si la tabla nueva del dashboard basta como capa de seguimiento o si el siguiente paso debe ser un sistema real de `watchlist / shadow / canary` por ciudad usando ya la vista live de `v10.6.7`.
+**Última actualización:** 30 de marzo de 2026 (Sesión 45 — v10.6.10 focus readability / Railway validation)
+**Próxima sesión:** validar en Railway si la capa 1 refleja bien la realidad operativa con datos live y decidir si la siguiente iteración debe ser una capa temporal de tendencias NOAA por dia o un drill-down interactivo por ciudad.
 
 ---
 
@@ -26,11 +26,11 @@ Un bot automatizado de arbitraje meteorológico en Polymarket. El bot detecta me
 - **Acción tomada:** v10.6.0 revierte lógica de trading a v10.3 (sigma original, sin intra-cycle, sin MIN_EDGE_EXACT)
 - **Actualización 30 mar:** depósito manual `+$14.99` para reponer bankroll operativo hacia el objetivo de `$25`.
 
-Para estado exacto: usar `/info` + `/cartera` + `/rendimiento` + `/accuracy` en Telegram.
+Para estado exacto: usar `/focus` + `/info` + `/cartera` + `/rendimiento` + `/accuracy` en Telegram.
 
 ---
 
-## Qué hace el bot v10.6.7 (paso a paso)
+## Qué hace el bot v10.6.10 (paso a paso)
 
 Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
@@ -94,6 +94,12 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Dashboard estado por ciudad (v10.6.7):** El dashboard añade una tabla nueva `Estado de observacion por ciudad` que cruza `ACTIVE_TRADING_CITIES`, `BLOCKED_CITIES`, muestra NOAA y cierres validados por ciudad. La tabla distingue entre `Activa`, `Bloqueada`, `Fuera allowlist`, `Operando con observabilidad`, `Referencia historica` y `Sin observabilidad`. Importante: es una capa descriptiva para seguimiento, no una promocion automatica de ciudades.
 
+**Control Center Discovery/Stabilization (v10.6.8):** Nueva capa 1 operativa tanto en dashboard como en Telegram. El dashboard abre ahora con un `Control Center` que responde explícitamente `¿está sano el sistema?`, `¿hay que intervenir hoy?`, `¿qué limita ahora?`, `¿estamos aprendiendo o solo operando?` y `¿cuál es la acción recomendada hoy?`. Añade `build_dashboard_focus_center()`, prioriza incidentes reales, allowlist y crecimiento NOAA por encima del resto, mueve el detalle pesado a capas inferiores y crea `/focus` en Telegram como vista principal corta, manteniendo `/estado`, `/noaa`, `/accuracy` y `/detalle` como segunda capa.
+
+**Mission HUD operativo (v10.6.9):** La capa 1 del dashboard da un paso mas y se convierte en un HUD tipo videojuego, pero con semantica operativa real. La cabecera pasa a mostrar la mision actual, `System HP`, progreso de `allowlist vs NOAA`, crecimiento de muestra NOAA y ruta operativa por etapas. Añade tabs interactivos `Overview / Progress / Cities`, barras de progreso, `city race` por cobertura NOAA y un `Operator Console` para conservar el detalle fuera del primer golpe de vista. Se mantiene la misma prioridad: discovery / stabilization, sin tocar trading, exits, scheduler ni gestion de posiciones.
+
+**Focus readability pass (v10.6.10):** Refinamiento de la capa 1 tras la primera previsualizacion real. El dashboard pasa a modo claro por defecto para lectura prolongada, agrupa las ciudades en `universo operativo`, `seguimiento/referencia` y `archivo bloqueado`, y deja de repetir la alerta `signals.json stale` como bloqueo principal cuando el cuello de botella real es `NOAA / muestra / cobertura`. La prioridad operativa no cambia: sigue siendo discovery / stabilization, pero con menos ruido y lectura mas directa. `verify_before_deploy.py` sube a `449/449`.
+
 **City accuracy tracker (v10.5.2):** Calcula win rate por ciudad desde postmortem. Alerta por Telegram si una ciudad baja de 25% win rate con 3+ trades. Nuevo comando `/accuracy`. Win rate visible en `/rendimiento`.
 
 **Integración `/accuracy` + revisión crítica (v10.5.3):** `/accuracy` queda visible en el menú, responde siempre con menú, `/estado` muestra explícitamente el intervalo intra-SL y la trazabilidad de sesión 20 queda corregida para reflejar mejor lo que realmente introdujeron los commits de la mañana.
@@ -105,14 +111,14 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.7`)
-**Estado actual tras sesión 42:** `v10.6.7` en `main` y Railway, con tabla de `estado por ciudad` en el dashboard y `426/426` tests antes de push.
-**Versión local / remoto GitHub:** `v10.6.7` desplegada/verificada en commit `14c3152`.
+**Estado actual tras sesión 45:** local en `v10.6.10` con `Mission HUD` refinado para legibilidad, tabs `Overview / Progress / Cities`, agrupacion operativa de ciudades y `/focus` como primera lectura en Telegram; produccion y `origin/main` siguen en `v10.6.7` hasta el deploy de esta iteracion.
+**Versión local / remoto GitHub:** local `v10.6.10` validada con `449/449` tests; remoto/desplegado sigue en commit `14c3152` (`v10.6.7`) hasta el siguiente push.
 
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.6.7 |
-| `verify_before_deploy.py` | v10 — 419 tests de comportamiento |
+| `bot.py` | Script principal v10.6.10 |
+| `verify_before_deploy.py` | v10 — 447 tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |
@@ -125,6 +131,7 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 | `RESEARCH_SYNTHESIS_CODEX_CLAUDE_2026-03-30.md` | Síntesis combinada de ambos informes + roadmap |
 | `templates/dashboard.html` | Plantilla principal del dashboard web |
 | `static/dashboard.css` | Estilos del dashboard web |
+| `static/dashboard.js` | Interaccion ligera para tabs del Mission HUD |
 | `agent_events.jsonl` | Eventos semilla para el scoreboard de agentes |
 | `tools/append_agent_event.py` | Helper seguro para añadir eventos al scoreboard sin editar JSONL a mano |
 | `signals.json` | Copia bootstrap local; producción usa la copia persistente del Volume |
@@ -180,10 +187,11 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 ---
 
-## Telegram — Comandos disponibles (v10.6.7)
+## Telegram — Comandos disponibles (v10.6.10)
 
 | Comando | Qué muestra |
 |---------|-------------|
+| `/focus` | Vista principal de capa 1: salud real, intervención hoy, limitador actual, estado de aprendizaje NOAA y acción recomendada |
 | `/estado` | Versión, modo, bankroll, SL/TP, intervalo intra-SL, próximo ciclo, último ciclo y contadores `total`/`serie v10.6` |
 | `/cartera` | Cash, posiciones vivas (ciudad+temp+fecha, precios en ¢), resueltas, muertas |
 | `/log` | Resumen del último ciclo desde cycle_summary.json |
@@ -200,7 +208,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 **Para iniciar una sesión de análisis en claude.ai:** pegar `/info` + `/cartera` + `/rendimiento`.
 
-## Dashboard web (v10.6.7)
+## Dashboard web (v10.6.10)
 
 - **Ruta principal:** `/`
 - **Healthcheck:** `/healthz`
@@ -209,13 +217,18 @@ Schedule: 08:00, 16:00, 23:00 UTC
 - **Objetivo:** separar monitorización visual de Telegram para revisar el sistema en navegador
 
 ### Qué muestra
+- capa 1 `Mission HUD / Discovery-Stabilization` con mision actual, `System HP`, accion recomendada y respuestas explicitas a salud, intervencion, limitador y aprendizaje
+- tabs interactivos `Overview / Progress / Cities` para alternar entre lectura rapida, barras de progreso y carrera NOAA por ciudad sin abandonar la capa 1
+- quick stats de universo activo, NOAA interpretable, muestra NOAA y próximo ciclo
+- incidents rail con solo alertas activas relevantes
+- layering operativa clara: `capa 1` visible primero, `capa 2` como seguimiento/explicación y `capa 3` colapsada para detalle extendido
 - nivel actual y siguiente bankroll objetivo
 - checklist de promoción `$25 -> $35` separando histórico vs serie `v10.6`
 - salud operativa del sistema
 - métricas de la serie `v10.6`
 - últimos ciclos y posiciones abiertas
 - scoreboard de agentes y rivalidad constructiva por stages (`proposed / implemented / validated`)
-- modo oscuro por defecto para revisión en navegador
+- modo claro por defecto para lectura y seguimiento prolongado en navegador
 - cuando la serie aún no tiene cierres, muestra `n/d` / `sin cierres` en lugar de métricas aparentes
 - el checklist distingue visualmente entre `Pendiente` y `Esperando muestra`
 - alerta crítica de bankroll bajo cuando la cartera cae bajo `$5`, pero solo con señal fiable (`cash_ok` y sin `api_error`)
@@ -225,6 +238,25 @@ Schedule: 08:00, 16:00, 23:00 UTC
 - bloque `Calidad Forecast Observada (NOAA)` separado del PnL/trading, con `n`, `MAE`, `bias`, cobertura por ciudad activa y últimos 20 casos de `observed_vs_forecast`
 - tabla `Estado de observacion por ciudad`, que cruza allowlist actual, bloqueo, muestra NOAA e histórico validado para distinguir operativa real vs referencia historica vs falta de observabilidad
 - bloque legacy `Drift Open-Meteo (historico - no comparable con NOAA)` con `n=` y fecha del último registro para no mezclar la serie nueva con la auditoría vieja
+
+## Hoja de ruta UX operativa
+
+**Fase 1 — Mission HUD (consolidada en v10.6.10):**
+- una sola pantalla para decidir si hoy toca actuar o solo seguir recogiendo evidencia;
+- capa 1 limitada a salud real, bloqueo dominante, allowlist, NOAA y accion recomendada;
+- interaccion ligera con tabs, sin mover el detalle fuera del dashboard.
+
+**Fase 2 — Tendencias de aprendizaje (siguiente iteracion recomendada):**
+- series temporales cortas para `sample NOAA por dia`, `coverage activa por ciudad` y `eventos/incidentes por jornada`;
+- comparativas visuales para distinguir si estamos aprendiendo mas rapido o solo operando mas;
+- mantener esto en `Progress` o capa 2, nunca mezclado con la decision principal.
+
+**Fase 3 — Drill-down operativo:**
+- filtros por ciudad/estado (`activa`, `bloqueada`, `solo observacion`, `interpretable`);
+- detalle interactivo por ciudad con ultimo caso NOAA, historico validado y razon de estado;
+- timeline de checkpoints diarios para sesiones de seguimiento mientras se acumulan datos.
+
+**Regla de diseño:** cualquier nueva visual entra en capa 1 solo si cambia la decision de hoy; si solo explica, vive en capa 2 o capa 3.
 
 ---
 

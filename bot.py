@@ -24,7 +24,7 @@ from waitress import serve
 load_dotenv()
 
 # =============================================================
-# bot.py v10.6.7 — dashboard de estado por ciudad de observación
+# bot.py v10.6.10 — mission HUD discovery / stabilization
 # Sesión 36: fallback BANKROLL sincronizado a $25 tras recarga manual
 # =============================================================
 #
@@ -100,7 +100,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.7"
+BOT_VERSION = "v10.6.10"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -205,14 +205,14 @@ def get_min_days_for_city(city):
     local_now = datetime.now(timezone.utc).astimezone(local_tz)
     local_hour = local_now.hour
 
-    # Caso 1: local_hour >= 24 → la ciudad ya está en el DÍA SIGUIENTE.
+    # Caso 1: local_hour >= 24 → la ciudad ya está en el DA SIGUIENTE.
     # "Hoy" (fecha UTC) ya terminó completamente allí.
     # Con ZoneInfo no vemos 25 directamente; lo detectamos comparando fechas.
     # La temperatura de "hoy" (fecha UTC) ya se registró entera.
     if local_now.date() > datetime.now(timezone.utc).date():
         return 1
 
-    # Caso 2: local_hour < 0 → la ciudad está aún en el DÍA ANTERIOR.
+    # Caso 2: local_hour < 0 → la ciudad está aún en el DA ANTERIOR.
     # "Hoy" (fecha UTC) aún no empezó allí. El mercado para "hoy" es futuro.
     # Con ZoneInfo tampoco vemos negativos; si la fecha local va retrasada, sigue siendo 0.
     if local_now.date() < datetime.now(timezone.utc).date():
@@ -1203,24 +1203,24 @@ def run_observability_alerts():
     if issue != prev_issue:
         if issue == "missing":
             send_telegram(
-                "⚠️ <b>Alerta traders</b>\n"
+                "⚠ <b>Alerta traders</b>\n"
                 "signals.json no existe en DATA_DIR.\n"
                 "El bot seguirá funcionando, pero sin confirmación de traders."
             )
         elif issue == "stale":
             send_telegram(
-                f"⚠️ <b>Alerta traders</b>\n"
+                f"⚠ <b>Alerta traders</b>\n"
                 f"signals.json está expirado ({signals.get('age_hours', 0):.1f}h).\n"
                 f"Señales accionables actuales: {signals.get('actionable', 0)}."
             )
         elif issue == "empty":
             send_telegram(
-                f"⚠️ <b>Alerta traders</b>\n"
+                f"⚠ <b>Alerta traders</b>\n"
                 f"signals.json está al día ({signals.get('age_hours', 0):.1f}h), pero sin señales accionables."
             )
         elif issue == "error":
             send_telegram(
-                "⚠️ <b>Alerta traders</b>\n"
+                "⚠ <b>Alerta traders</b>\n"
                 f"No se pudo leer signals.json.\n<code>{signals.get('detail', 'error')}</code>"
             )
         elif prev_issue:
@@ -1259,7 +1259,7 @@ def run_observability_alerts():
     observed_started_key = "observed_proxy_started"
     if observed_sample_size >= 1 and observed_started_key not in milestones:
         send_telegram(
-            f"🛰️ <b>Observed proxy NOAA activo</b>\n"
+            f"🛰 <b>Observed proxy NOAA activo</b>\n"
             f"Ya hay <b>{observed_sample_size} caso(s)</b> en <code>{OBSERVED_AUDIT_KEY}</code>.\n"
             f"Ciudades con muestra: {len(observed_with_sample)}/{len(observed_city_counts)}."
         )
@@ -1312,7 +1312,7 @@ def run_observability_alerts():
             changed = True
     if new_observed_cities:
         send_telegram(
-            f"🗺️ <b>NOAA nueva ciudad con muestra</b>\n"
+            f"🗺 <b>NOAA nueva ciudad con muestra</b>\n"
             f"{', '.join(new_observed_cities)}.\n"
             f"Cobertura actual: {len(observed_with_sample)}/{len(observed_city_counts)} ciudades activas."
         )
@@ -1329,7 +1329,7 @@ def run_observability_alerts():
             changed = True
     if new_interpretable_cities:
         send_telegram(
-            f"📍 <b>NOAA ciudad interpretable</b>\n"
+            f" <b>NOAA ciudad interpretable</b>\n"
             f"{', '.join(new_interpretable_cities)}.\n"
             f"Ciudades con >= {OBSERVED_FORECAST_MIN_SAMPLE} casos: "
             f"{len(observed_interpretable)}/{len(observed_city_counts)}."
@@ -1354,7 +1354,7 @@ def run_observability_alerts():
 
     if stuck_new:
         lines = [
-            "⏳ <b>Ventas pendientes atascadas</b>",
+            " <b>Ventas pendientes atascadas</b>",
             f"Hay {len(stuck_new)} orden(es) > {PENDING_EXIT_ALERT_HOURS:.0f}h sin fill.",
             "",
         ]
@@ -1419,7 +1419,7 @@ def run_observability_alerts():
 
         if scaling_pnl < 0 and not state.get("scaling_negative_alerted"):
             send_telegram(
-                f"⚠️ <b>Scaling Warning</b>\n"
+                f"⚠ <b>Scaling Warning</b>\n"
                 f"PnL acumulado de últimos {SCALING_WINDOW} trades: <b>${scaling_pnl:+.2f}</b>.\n"
                 f"No subir de escalón hasta recuperar."
             )
@@ -1472,7 +1472,7 @@ def run_observability_alerts():
             if not is_city_blocked(city) and city not in state[flagged_key]:
                 now_iso = datetime.now(timezone.utc).isoformat()
                 send_telegram(
-                    f"⚠️ <b>Ciudad con baja accuracy</b>\n"
+                    f"⚠ <b>Ciudad con baja accuracy</b>\n"
                     f"{city}: {data['win_rate']}% win rate ({data['wins']}/{data['trades']} trades)\n"
                     f"PnL: ${data['pnl']:+.2f}\n"
                     f"<i>Considerar añadir a BLOCKED_CITIES</i>"
@@ -2537,6 +2537,17 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None):
 
         rows.append({
             "city": city,
+            "active": active,
+            "blocked": blocked,
+            "noaa_configured": noaa_configured,
+            "interpretable": interpretable,
+            "observed_count": observed_count,
+            "observed_goal": OBSERVED_FORECAST_MIN_SAMPLE,
+            "observed_progress_pct": int(min(100, round((observed_count / max(1, OBSERVED_FORECAST_MIN_SAMPLE)) * 100))),
+            "trades": trades,
+            "wins": wins,
+            "win_rate": round(win_rate, 1),
+            "pnl": pnl,
             "trading_label": trading_label,
             "trading_badge": trading_badge,
             "trading_detail": trading_detail,
@@ -2563,6 +2574,15 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None):
     for row in rows:
         row.pop("_sort", None)
 
+    active_rows = [row for row in rows if row.get("active")]
+    watch_rows = [
+        row for row in rows
+        if not row.get("active") and not row.get("blocked") and (
+            row.get("noaa_configured") or row.get("trades", 0) > 0
+        )
+    ]
+    blocked_rows = [row for row in rows if row.get("blocked")]
+
     observed_target_display = observed_configured_count if observed_configured_count else 0
     summary = (
         f"{active_count} activas | "
@@ -2585,6 +2605,541 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None):
         "note": note,
         "note_level": "muted" if observed_ready_count < observed_configured_count else "good",
         "rows": rows,
+        "active_rows": active_rows,
+        "watch_rows": watch_rows,
+        "blocked_rows": blocked_rows,
+    }
+
+
+def build_dashboard_focus_center(
+    alerts=None,
+    forecast_quality=None,
+    city_observation=None,
+    series_stats=None,
+    series_clean_stats=None,
+    next_run_display="No programado",
+    last_cycle_label="Sin ciclos aún",
+):
+    """Construye la capa 1 operativa para discovery / stabilization."""
+    if alerts is None:
+        alerts = get_dashboard_alert_summary()
+    if forecast_quality is None:
+        forecast_quality = build_dashboard_forecast_quality()
+    if city_observation is None:
+        city_observation = build_dashboard_city_observation()
+    if series_stats is None:
+        series_stats = get_logic_series_stats()
+    if series_clean_stats is None:
+        series_clean_stats = get_logic_series_clean_closed_trade_stats()
+
+    def _pct(value, total):
+        if total <= 0:
+            return 0
+        return max(0, min(100, int(round((value / total) * 100))))
+
+    def _answer(question, answer, detail, badge, tag):
+        return {
+            "question": question,
+            "answer": answer,
+            "detail": detail,
+            "badge": badge,
+            "tag": tag,
+        }
+
+    def _item(label, value, detail, status):
+        tags = {
+            "good": "OK",
+            "warn": "Watch",
+            "bad": "Atender",
+            "accent": "Focus",
+            "muted": "n/d",
+        }
+        return {
+            "label": label,
+            "value": value,
+            "detail": detail,
+            "status": status,
+            "tag": tags.get(status, "Focus"),
+        }
+
+    signal_status = str(alerts.get("signals", {}).get("status", "unknown") or "unknown")
+    signal_actionable = int(alerts.get("signals", {}).get("actionable", 0) or 0)
+    pending_count = len(alerts.get("pending_stuck", []))
+    flagged_cities = alerts.get("flagged_cities", [])
+    flagged_count = len(flagged_cities)
+    low_bankroll = bool(alerts.get("low_bankroll"))
+    portfolio_total = alerts.get("portfolio_total")
+
+    sample_size = int(forecast_quality.get("sample_size", 0) or 0)
+    active_count = int(city_observation.get("active_count", 0) or 0)
+    blocked_count = int(city_observation.get("blocked_count", 0) or 0)
+    observed_ready_count = int(city_observation.get("observed_ready_count", 0) or 0)
+    observed_configured_count = int(city_observation.get("observed_configured_count", 0) or 0)
+    observed_target = observed_configured_count or active_count or len(OBSERVED_AUDIT_CITIES)
+    series_clean_count = int(series_clean_stats.get("count", 0) or 0)
+    coverage_target = active_count or observed_target
+    measurement_limited = active_count > observed_ready_count or sample_size < OBSERVED_FORECAST_GLOBAL_TARGET
+
+    critical_ops = []
+    warn_ops = []
+
+    if low_bankroll:
+        total_display = f"${portfolio_total:.2f}" if isinstance(portfolio_total, (int, float)) else "n/d"
+        critical_ops.append(
+            f"bankroll bajo: cartera {total_display} por debajo del umbral ${LOW_BANKROLL_THRESHOLD:.2f}"
+        )
+    if signal_status in {"missing", "error"}:
+        critical_ops.append(
+            f"signals.json en estado {signal_status} con {signal_actionable} señales accionables"
+        )
+    elif signal_status in {"stale", "empty"} and not measurement_limited:
+        warn_ops.append(
+            f"signals.json en estado {signal_status} con {signal_actionable} señales accionables"
+        )
+    if pending_count > 0:
+        critical_ops.append(
+            f"{pending_count} pending exits llevan más de {PENDING_EXIT_ALERT_HOURS:.0f}h"
+        )
+    if flagged_count > 0:
+        flagged_names = ", ".join(item.get("city", "?") for item in flagged_cities[:3])
+        warn_ops.append(
+            f"{flagged_count} ciudades bajo review por accuracy ({flagged_names})"
+        )
+
+    if critical_ops:
+        status_label = "Intervención requerida"
+        status_badge = "bad"
+        headline = "Resolver el incidente operativo antes de dejar al bot seguir solo."
+        summary = critical_ops[0]
+    elif measurement_limited:
+        status_label = "Sano con limitaciones"
+        status_badge = "accent"
+        headline = "La operativa parece estable; el cuello de botella ahora es learning / measurement."
+        summary = (
+            f"NOAA {sample_size}/{OBSERVED_FORECAST_GLOBAL_TARGET} casos | "
+            f"{observed_ready_count}/{max(1, observed_target)} ciudades interpretables."
+        )
+    elif warn_ops:
+        status_label = "Sano con alertas"
+        status_badge = "warn"
+        headline = "El sistema sigue operativo, pero hoy conviene revisar una alerta real."
+        summary = warn_ops[0]
+    else:
+        status_label = "Sano"
+        status_badge = "good"
+        headline = "Sistema sano y con observabilidad suficiente para seguir aprendiendo."
+        summary = "No hay incidentes operativos activos ni cuellos de botella dominantes visibles."
+
+    health_score = 100
+    if low_bankroll:
+        health_score -= 45
+    if signal_status in {"missing", "error"}:
+        health_score -= 35
+    elif signal_status in {"stale", "empty"} and not measurement_limited:
+        health_score -= 18
+    if pending_count > 0:
+        health_score -= min(35, 12 + pending_count * 8)
+    if flagged_count > 0:
+        health_score -= min(15, flagged_count * 3)
+    health_score = max(0, min(100, health_score))
+    health_badge = "good" if health_score >= 85 and not critical_ops else "warn" if health_score >= 60 else "bad"
+    coverage_pct = _pct(observed_ready_count, max(1, coverage_target))
+    sample_pct = _pct(sample_size, OBSERVED_FORECAST_GLOBAL_TARGET)
+    series_pct = _pct(series_clean_count, REVIEW_READY_CLEAN_TRADES)
+
+    if critical_ops:
+        intervention_answer = "Sí, antes del próximo ciclo"
+        intervention_badge = "bad"
+        intervention_detail = critical_ops[0]
+    elif measurement_limited and warn_ops:
+        intervention_answer = "No; seguir discovery y sanear alertas secundarias"
+        intervention_badge = "accent"
+        intervention_detail = (
+            "La prioridad sigue siendo NOAA / coverage; "
+            f"secundario: {warn_ops[0]}"
+        )
+    elif warn_ops:
+        intervention_answer = "Revisión hoy, sin urgencia crítica"
+        intervention_badge = "warn"
+        intervention_detail = warn_ops[0]
+    else:
+        intervention_answer = "No; solo monitorizar"
+        intervention_badge = "good"
+        intervention_detail = "Sin incidentes operativos activos ahora mismo."
+
+    if low_bankroll:
+        limiter_answer = "Bankroll operativo"
+        limiter_badge = "bad"
+        limiter_detail = (
+            f"la cartera cayó por debajo del umbral ${LOW_BANKROLL_THRESHOLD:.2f}; "
+            "sin caja el bot deja de aprender"
+        )
+    elif signal_status in {"missing", "error"}:
+        limiter_answer = "Señales de traders"
+        limiter_badge = "bad" if signal_status in {"missing", "error"} else "warn"
+        limiter_detail = f"signals.json está en {signal_status} y limita el scan accionable"
+    elif pending_count > 0:
+        limiter_answer = "Pending exits atascadas"
+        limiter_badge = "bad"
+        limiter_detail = (
+            f"{pending_count} órdenes siguen pendientes tras {PENDING_EXIT_ALERT_HOURS:.0f}h"
+        )
+    elif active_count > 0 and observed_ready_count < active_count:
+        limiter_answer = "Cobertura NOAA del universo activo"
+        limiter_badge = "accent" if observed_ready_count > 0 else "warn"
+        limiter_detail = (
+            f"{observed_ready_count}/{active_count} activas tienen NOAA interpretable; "
+            "seguimos operando mejor de lo que medimos"
+        )
+    elif sample_size < OBSERVED_FORECAST_GLOBAL_TARGET:
+        limiter_answer = "Muestra NOAA global"
+        limiter_badge = "accent" if sample_size else "warn"
+        limiter_detail = (
+            f"{sample_size}/{OBSERVED_FORECAST_GLOBAL_TARGET} casos; "
+            "todavía cuesta leer sesgo global con confianza"
+        )
+    elif signal_status != "ok":
+        limiter_answer = "SeÃ±ales de traders"
+        limiter_badge = "warn"
+        limiter_detail = f"signals.json estÃ¡ en {signal_status} y limita el scan accionable"
+    elif flagged_count > 0:
+        limiter_answer = "Histórico desigual por ciudad"
+        limiter_badge = "warn"
+        limiter_detail = f"{flagged_count} ciudades siguen bajo review por accuracy"
+    elif series_clean_count < REVIEW_READY_CLEAN_TRADES:
+        limiter_answer = "Muestra de la serie actual"
+        limiter_badge = "accent"
+        limiter_detail = (
+            f"{series_clean_count}/{REVIEW_READY_CLEAN_TRADES} cierres limpios; "
+            "aún no toca reinterpretar trading"
+        )
+    else:
+        limiter_answer = "Sin limitador dominante"
+        limiter_badge = "good"
+        limiter_detail = "no aparece un bloqueo principal claro ahora mismo"
+
+    if sample_size == 0:
+        learning_answer = "Solo operando"
+        learning_badge = "bad"
+        learning_detail = "0 casos NOAA: todavía no estamos aprendiendo de forma útil"
+    elif observed_ready_count == 0:
+        learning_answer = "Aprendizaje incipiente"
+        learning_badge = "warn"
+        learning_detail = (
+            f"{sample_size} casos NOAA, pero 0/{max(1, observed_target)} ciudades interpretables"
+        )
+    elif sample_size < OBSERVED_FORECAST_GLOBAL_TARGET or observed_ready_count < max(1, active_count):
+        learning_answer = "Operando y aprendiendo"
+        learning_badge = "accent"
+        learning_detail = (
+            f"{sample_size}/{OBSERVED_FORECAST_GLOBAL_TARGET} casos NOAA | "
+            f"{observed_ready_count}/{max(1, observed_target)} ciudades interpretables"
+        )
+    else:
+        learning_answer = "Aprendizaje útil"
+        learning_badge = "good"
+        learning_detail = (
+            f"{sample_size} casos NOAA | "
+            f"{observed_ready_count}/{max(1, observed_target)} ciudades interpretables"
+        )
+
+    if critical_ops:
+        mission_label = "Mission Critical"
+        mission_badge = "bad"
+        mission_title = "Primera misión: estabilizar la operación antes del siguiente ciclo."
+        mission_detail = "Hay un bloqueo operativo real; cualquier mejora visual o de muestra queda en segundo plano hasta cerrar esta incidencia."
+    elif measurement_limited:
+        mission_label = "Primary Quest"
+        mission_badge = "accent"
+        mission_title = "Misión actual: convertir operativa en aprendizaje medible."
+        mission_detail = (
+            "La prioridad no es tocar reglas de trading, sino ganar cobertura NOAA y volumen de muestra suficiente "
+            "para entender mejor lo que ya estamos ejecutando."
+        )
+    elif flagged_count > 0:
+        mission_label = "Hold Position"
+        mission_badge = "warn"
+        mission_title = "Misión actual: mantener la estabilidad y revisar ciudades en observación."
+        mission_detail = "La operativa aguanta, pero todavía no toca expandir el universo ni relajar la vigilancia."
+    else:
+        mission_label = "Cruise Control"
+        mission_badge = "good"
+        mission_title = "Misión actual: sostener estabilidad y seguir acumulando evidencia útil."
+        mission_detail = "La capa 1 pasa a modo seguimiento: no hay una intervención dominante y el sistema puede seguir aprendiendo."
+
+    if low_bankroll:
+        action_title = "Recargar bankroll antes del próximo ciclo"
+        action_badge = "bad"
+        total_display = f"${portfolio_total:.2f}" if isinstance(portfolio_total, (int, float)) else "n/d"
+        action_detail = (
+            f"Total cartera {total_display}; sin caja el bot no puede seguir operando ni generando muestra."
+        )
+    elif signal_status in {"missing", "error"}:
+        action_title = "Reparar o regenerar señales antes del próximo ciclo"
+        action_badge = "bad"
+        action_detail = (
+            f"signals.json está en {signal_status}; revisar pipeline de traders antes de dejar correr el bot."
+        )
+    elif pending_count > 0:
+        action_title = "Auditar y reconciliar pending exits atascadas"
+        action_badge = "bad"
+        action_detail = (
+            f"Hay {pending_count} órdenes por encima de {PENDING_EXIT_ALERT_HOURS:.0f}h; "
+            "es la única señal que hoy justifica intervención manual."
+        )
+    elif signal_status in {"stale", "empty"} and not measurement_limited:
+        action_title = "Revisar el estado de signals hoy"
+        action_badge = "warn"
+        action_detail = (
+            f"signals.json está en {signal_status}; no rompe el bot, pero conviene sanearlo antes del siguiente ciclo."
+        )
+    elif measurement_limited:
+        action_title = "No tocar trading: priorizar crecimiento de muestra NOAA"
+        action_badge = "accent"
+        action_detail = (
+            f"Universo activo {active_count} | NOAA interpretable {observed_ready_count}/{max(1, observed_target)} | "
+            f"muestra global {sample_size}/{OBSERVED_FORECAST_GLOBAL_TARGET}."
+        )
+        if signal_status in {"stale", "empty"}:
+            action_detail += f" Secundario: signals.json {signal_status}."
+    elif flagged_count > 0:
+        action_title = "Mantener allowlist y revisar ciudades con accuracy baja"
+        action_badge = "warn"
+        action_detail = (
+            f"{flagged_count} ciudades siguen bajo review; no ampliar universo hasta tener evidencia mejor."
+        )
+    else:
+        action_title = "Sin intervención hoy; seguir monitorizando"
+        action_badge = "good"
+        action_detail = f"Próximo ciclo: {next_run_display} | Último ciclo: {last_cycle_label}"
+
+    incidents = []
+    for item in alerts.get("active_items", []):
+        level = str(item.get("level", "warn") or "warn")
+        badge = "bad" if level in {"critical", "bad"} else "warn" if level == "warn" else "accent"
+        incidents.append({
+            "title": item.get("title", "?"),
+            "detail": item.get("detail", ""),
+            "badge": badge,
+        })
+
+    quick_stats = [
+        {
+            "label": "Universo activo",
+            "value": f"{active_count} activas",
+            "detail": f"{blocked_count} bloqueadas",
+            "badge": "accent" if active_count else "muted",
+        },
+        {
+            "label": "NOAA interpretable",
+            "value": f"{observed_ready_count}/{max(1, observed_target)}",
+            "detail": "ciudades con >= 3 casos",
+            "badge": "good" if observed_ready_count >= active_count and active_count else "warn" if observed_ready_count else "bad",
+        },
+        {
+            "label": "Muestra NOAA",
+            "value": f"{sample_size}/{OBSERVED_FORECAST_GLOBAL_TARGET}",
+            "detail": forecast_quality.get("coverage_display", "sin muestra"),
+            "badge": "good" if sample_size >= OBSERVED_FORECAST_GLOBAL_TARGET else "accent" if sample_size >= OBSERVED_FORECAST_MIN_SAMPLE else "warn" if sample_size else "bad",
+        },
+        {
+            "label": "Próximo ciclo",
+            "value": next_run_display,
+            "detail": last_cycle_label,
+            "badge": "muted",
+        },
+    ]
+
+    tracks = [
+        {
+            "id": "health",
+            "label": "System health",
+            "value": health_score,
+            "target": 100,
+            "value_text": f"{health_score}/100",
+            "target_text": "0 incidentes críticos",
+            "pct": health_score,
+            "badge": health_badge,
+            "tag": "HP",
+            "detail": (
+                "Operación estable y sin intervención manual urgente."
+                if health_badge == "good"
+                else "Hay señales que degradan la salud operativa y conviene vigilarlas."
+                if health_badge == "warn"
+                else "Hay una incidencia que puede romper la sesión si no se atiende."
+            ),
+        },
+        {
+            "id": "coverage",
+            "label": "Allowlist vs NOAA",
+            "value": observed_ready_count,
+            "target": max(1, coverage_target),
+            "value_text": f"{observed_ready_count}/{max(1, coverage_target)}",
+            "target_text": "ciudades activas cubiertas",
+            "pct": coverage_pct,
+            "badge": "good" if active_count and observed_ready_count >= active_count else "accent" if observed_ready_count else "warn" if active_count else "muted",
+            "tag": "MAP",
+            "detail": (
+                "Cada ciudad activa ya tiene NOAA interpretable."
+                if active_count and observed_ready_count >= active_count
+                else "Seguimos operando con parte del universo sin lectura observable suficiente."
+            ),
+        },
+        {
+            "id": "sample",
+            "label": "NOAA sample growth",
+            "value": sample_size,
+            "target": OBSERVED_FORECAST_GLOBAL_TARGET,
+            "value_text": f"{sample_size}/{OBSERVED_FORECAST_GLOBAL_TARGET}",
+            "target_text": "meta global de casos",
+            "pct": sample_pct,
+            "badge": "good" if sample_size >= OBSERVED_FORECAST_GLOBAL_TARGET else "accent" if sample_size >= OBSERVED_FORECAST_MIN_SAMPLE else "warn" if sample_size else "bad",
+            "tag": "EXP",
+            "detail": forecast_quality.get("note", "Sin muestra NOAA suficiente todavía."),
+        },
+        {
+            "id": "learning",
+            "label": f"Serie v{LOGIC_SERIES}",
+            "value": series_clean_count,
+            "target": REVIEW_READY_CLEAN_TRADES,
+            "value_text": f"{series_clean_count}/{REVIEW_READY_CLEAN_TRADES}",
+            "target_text": "cierres limpios para revisión",
+            "pct": series_pct,
+            "badge": "good" if series_clean_count >= REVIEW_READY_CLEAN_TRADES else "accent" if series_clean_count else "warn",
+            "tag": "XP",
+            "detail": "Progreso de evidencia de la serie actual sin reinterpretar aún la lógica de trading.",
+        },
+    ]
+
+    drivers = [
+        _item(
+            "Universo activo vs NOAA",
+            f"{observed_ready_count}/{max(1, active_count)} cubiertas" if active_count else "0 activas",
+            (
+                "todas las ciudades activas ya tienen NOAA interpretable"
+                if active_count and observed_ready_count >= active_count
+                else "seguimos operando con parte del universo aún sin lectura observable útil"
+            ),
+            "good" if active_count and observed_ready_count >= active_count else "warn" if observed_ready_count else "bad",
+        ),
+        _item(
+            "Muestra NOAA global",
+            f"{sample_size}/{OBSERVED_FORECAST_GLOBAL_TARGET}",
+            forecast_quality.get("note", "sin muestra"),
+            "good" if sample_size >= OBSERVED_FORECAST_GLOBAL_TARGET else "accent" if sample_size >= OBSERVED_FORECAST_MIN_SAMPLE else "warn" if sample_size else "bad",
+        ),
+        _item(
+            f"Serie v{LOGIC_SERIES}",
+            f"{series_clean_count}/{REVIEW_READY_CLEAN_TRADES}",
+            "cierres limpios de la serie actual para revisar lógica con confianza",
+            "good" if series_clean_count >= REVIEW_READY_CLEAN_TRADES else "accent" if series_clean_count else "warn",
+        ),
+        _item(
+            "Incidentes operativos",
+            str(len(incidents)),
+            incidents[0]["title"] if incidents else "sin incidentes operativos activos",
+            "bad" if critical_ops else "warn" if warn_ops else "good",
+        ),
+    ]
+
+    stage_path = [
+        {
+            "label": "Health",
+            "value": status_label,
+            "detail": summary,
+            "status": status_badge,
+            "tag": "OPS",
+        },
+        {
+            "label": "Universe",
+            "value": f"{active_count} activas | {blocked_count} bloqueadas",
+            "detail": "Allowlist real que hoy determina qué estamos operando y qué solo observamos.",
+            "status": "good" if active_count else "muted",
+            "tag": "MAP",
+        },
+        {
+            "label": "NOAA",
+            "value": f"{sample_size}/{OBSERVED_FORECAST_GLOBAL_TARGET} casos",
+            "detail": f"{observed_ready_count}/{max(1, observed_target)} ciudades interpretables.",
+            "status": "good" if sample_size >= OBSERVED_FORECAST_GLOBAL_TARGET else "accent" if sample_size >= OBSERVED_FORECAST_MIN_SAMPLE else "warn" if sample_size else "bad",
+            "tag": "EXP",
+        },
+        {
+            "label": "Learning",
+            "value": learning_answer,
+            "detail": learning_detail,
+            "status": learning_badge,
+            "tag": "XP",
+        },
+    ]
+
+    city_rows = list(city_observation.get("rows", []))
+    city_race = []
+    for row in city_rows:
+        if not row.get("active") and not row.get("noaa_configured"):
+            continue
+        observed_count = int(row.get("observed_count", 0) or 0)
+        city_race.append({
+            "city": row.get("city", "?"),
+            "value": observed_count,
+            "target": OBSERVED_FORECAST_MIN_SAMPLE,
+            "pct": _pct(min(observed_count, OBSERVED_FORECAST_MIN_SAMPLE), OBSERVED_FORECAST_MIN_SAMPLE),
+            "value_text": f"{observed_count}/{OBSERVED_FORECAST_MIN_SAMPLE}",
+            "detail": row.get("state_detail", ""),
+            "badge": row.get("state_badge", "muted"),
+            "tag": row.get("state_label", "Seguimiento"),
+            "active": bool(row.get("active")),
+            "trades": int(row.get("trades", 0) or 0),
+        })
+
+    city_race.sort(
+        key=lambda item: (
+            0 if item["active"] else 1,
+            0 if item["value"] >= OBSERVED_FORECAST_MIN_SAMPLE else 1 if item["value"] > 0 else 2,
+            -item["value"],
+            -item["trades"],
+            item["city"],
+        )
+    )
+    city_race = city_race[:6]
+
+    detail_routes = [
+        {"label": "/estado", "detail": "salud y ciclos"},
+        {"label": "/noaa", "detail": "sample NOAA"},
+        {"label": "/accuracy", "detail": "histórico por ciudad"},
+        {"label": "/detalle", "detail": "último ciclo raw"},
+    ]
+
+    return {
+        "headline": headline,
+        "summary": summary,
+        "status_label": status_label,
+        "status_badge": status_badge,
+        "health_score": health_score,
+        "mission": {
+            "label": mission_label,
+            "badge": mission_badge,
+            "title": mission_title,
+            "detail": mission_detail,
+        },
+        "answers": [
+            _answer("¿Está sano el sistema?", status_label, summary, status_badge, "Sistema"),
+            _answer("¿Hay que intervenir hoy?", intervention_answer, intervention_detail, intervention_badge, "Hoy"),
+            _answer("¿Qué me limita ahora?", limiter_answer, limiter_detail, limiter_badge, "Bloqueo"),
+            _answer("¿Estamos aprendiendo o solo operando?", learning_answer, learning_detail, learning_badge, "Discovery"),
+        ],
+        "action": {
+            "title": action_title,
+            "detail": action_detail,
+            "badge": action_badge,
+        },
+        "incidents": incidents,
+        "quick_stats": quick_stats,
+        "tracks": tracks,
+        "stage_path": stage_path,
+        "city_race": city_race,
+        "drivers": drivers,
+        "detail_routes": detail_routes,
     }
 
 
@@ -3208,6 +3763,20 @@ def build_dashboard_snapshot():
     series_metrics["drawdown_display"] = (
         f"${series_stats['recent_drawdown']:+.2f}" if series_metrics["has_drawdown_data"] else "n/d"
     )
+    next_run_display = (
+        bot_state["next_run"].strftime("%Y-%m-%d %H:%M UTC")
+        if bot_state.get("next_run")
+        else "No programado"
+    )
+    focus = build_dashboard_focus_center(
+        alerts=alerts,
+        forecast_quality=forecast_quality,
+        city_observation=city_observation,
+        series_stats=series_stats,
+        series_clean_stats=series_clean_stats,
+        next_run_display=next_run_display,
+        last_cycle_label=last_cycle_label,
+    )
 
     return {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
@@ -3216,12 +3785,13 @@ def build_dashboard_snapshot():
         "logic_series": LOGIC_SERIES,
         "mode": "REAL" if not DRY_RUN else "DRY RUN",
         "auth_enabled": auth_enabled,
-        "next_run": bot_state["next_run"].strftime("%Y-%m-%d %H:%M UTC") if bot_state.get("next_run") else "No programado",
+        "next_run": next_run_display,
         "last_run": bot_state["last_run"].strftime("%Y-%m-%d %H:%M UTC") if bot_state.get("last_run") else "",
         "cycle_total": cycle_total,
         "cycle_series": cycle_series,
         "last_cycle_label": last_cycle_label,
         "cycle_summary": cycle_summary,
+        "focus": focus,
         "cycle_history": cycle_history_display,
         "promotion": promotion,
         "progress": progress,
@@ -3395,7 +3965,7 @@ def run_trader_discovery():
     import subprocess
     try:
         log.info("Ejecutando find_traders.py (descubrimiento semanal)...")
-        send_telegram("🔍 Descubrimiento semanal de traders iniciado...")
+        send_telegram(" Descubrimiento semanal de traders iniciado...")
         result = subprocess.run(
             [sys.executable, "find_traders.py", "--quick"],
             capture_output=True, text=True, timeout=300
@@ -3409,7 +3979,7 @@ def run_trader_discovery():
             return True
         else:
             log.warning(f"find_traders.py error: {result.stderr[:200]}")
-            send_telegram(f"⚠️ Error en descubrimiento: {result.stderr[:100]}")
+            send_telegram(f"⚠ Error en descubrimiento: {result.stderr[:100]}")
             return False
     except Exception as e:
         log.warning(f"Error ejecutando find_traders.py: {e}")
@@ -3560,30 +4130,34 @@ def normalize_city(city_raw):
 
 
 # =============================================================
-# TELEGRAM — ENVÍO
+# TELEGRAM — ENVO
 # =============================================================
 
 MENU_KEYBOARD = {
     "inline_keyboard": [
         [
+            {"text": "🎯 Focus", "callback_data": "focus"},
             {"text": "📊 Estado", "callback_data": "estado"},
+        ],
+        [
+            {"text": "🛰 Observabilidad", "callback_data": "noaa"},
             {"text": "💰 Cartera", "callback_data": "cartera"},
+        ],
+        [
+            {"text": " Accuracy", "callback_data": "accuracy"},
+            {"text": "📚 Postmortem", "callback_data": "postmortem"},
         ],
         [
             {"text": "📓 Log", "callback_data": "log"},
             {"text": "📋 Detalle", "callback_data": "logfull"},
         ],
         [
-            {"text": "🔍 Traders", "callback_data": "traders"},
+            {"text": " Traders", "callback_data": "traders"},
             {"text": "📈 Rendimiento", "callback_data": "rendimiento"},
         ],
         [
             {"text": "🗒 Órdenes", "callback_data": "ordenes"},
-            {"text": "ℹ️ Info", "callback_data": "info"},
-        ],
-        [
-            {"text": "📚 Postmortem", "callback_data": "postmortem"},
-            {"text": "📍 Accuracy", "callback_data": "accuracy"},
+            {"text": "ℹ Info", "callback_data": "info"},
         ],
         [
             {"text": "🚀 Forzar ciclo", "callback_data": "forzar"},
@@ -3668,6 +4242,86 @@ def send_telegram_paged(text, with_menu=False, page_size=3800):
 # TELEGRAM — COMANDOS
 # =============================================================
 
+def cmd_focus():
+    """Vista principal Telegram: capa 1 para discovery / stabilization."""
+    audit = load_audit_data()
+    city_accuracy = get_city_accuracy()
+    cycle_summary = load_cycle_summary_data()
+
+    next_run_display = (
+        bot_state["next_run"].strftime("%Y-%m-%d %H:%M UTC")
+        if bot_state.get("next_run")
+        else "No programado"
+    )
+
+    last_cycle_label = "Sin ciclos aún"
+    if cycle_summary:
+        cycle_label_series = (
+            _extract_logic_series(cycle_summary.get("logic_series"))
+            or _extract_logic_series(cycle_summary.get("version"))
+        )
+        if cycle_label_series and cycle_summary.get("logic_cycle_number") is not None:
+            last_cycle_label = (
+                f"Total #{cycle_summary.get('cycle_number', '?')} | "
+                f"Serie v{cycle_label_series} #{cycle_summary.get('logic_cycle_number')}"
+            )
+        elif cycle_label_series:
+            last_cycle_label = f"Total #{cycle_summary.get('cycle_number', '?')} | legacy v{cycle_label_series}"
+        else:
+            last_cycle_label = f"Total #{cycle_summary.get('cycle_number', '?')} | legacy"
+
+    focus = build_dashboard_focus_center(
+        alerts=get_dashboard_alert_summary(),
+        forecast_quality=build_dashboard_forecast_quality(audit=audit),
+        city_observation=build_dashboard_city_observation(audit=audit, city_accuracy=city_accuracy),
+        series_stats=get_logic_series_stats(),
+        series_clean_stats=get_logic_series_clean_closed_trade_stats(),
+        next_run_display=next_run_display,
+        last_cycle_label=last_cycle_label,
+    )
+    icon_map = {"good": "🟢", "accent": "🔵", "warn": "🟡", "bad": "🔴", "muted": "⚪"}
+
+    lines = [
+        "🎯 <b>Focus / Discovery-Stabilization</b>",
+        "",
+        f"{icon_map.get(focus['status_badge'], '⚪')} <b>{focus['headline']}</b>",
+        f"<i>{focus['summary']}</i>",
+        "",
+    ]
+
+    for answer in focus["answers"]:
+        icon = icon_map.get(answer.get("badge"), "⚪")
+        lines.append(f"{icon} <b>{answer['question']}</b>")
+        lines.append(answer["answer"])
+        lines.append(f"<i>{answer['detail']}</i>")
+        lines.append("")
+
+    lines.append("👉 <b>Acción recomendada hoy</b>")
+    lines.append(focus["action"]["title"])
+    lines.append(f"<i>{focus['action']['detail']}</i>")
+
+    lines.append("")
+    lines.append("<b>Universo y muestra</b>")
+    for item in focus["quick_stats"][:3]:
+        lines.append(f"• <b>{item['label']}</b>: {item['value']} | {item['detail']}")
+    lines.append(f"• <b>Próximo ciclo</b>: {next_run_display}")
+
+    if focus["incidents"]:
+        lines.append("")
+        lines.append("<b>Incidentes activos</b>")
+        for item in focus["incidents"][:3]:
+            icon = icon_map.get(item.get("badge"), "⚪")
+            lines.append(f"{icon} <b>{item['title']}</b>: {item['detail']}")
+    else:
+        lines.append("")
+        lines.append("🟢 <b>Incidentes activos</b>: ninguno relevante ahora mismo.")
+
+    lines.append("")
+    lines.append("<b>Siguiente capa</b>")
+    lines.append("/estado sistema | /noaa muestra | /accuracy ciudades | /detalle ciclo raw")
+    send_telegram_paged("\n".join(lines), with_menu=True)
+
+
 def cmd_estado():
     global DRY_RUN
     modo = "🔴 REAL" if not DRY_RUN else "🟡 DRY RUN"
@@ -3747,9 +4401,9 @@ def cmd_estado():
         f"💰 Bankroll: <b>${BANKROLL:.2f}</b> | Edge mín: {MIN_EDGE}%\n"
         f"🔧 SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n"
         f"🛡 Intra-SL: {intra_label}\n\n"
-        f"⏱ Estado: {running}\n"
+        f" Estado: {running}\n"
         f"📅 Último: {last_str}\n"
-        f"⏰ Próximo: {next_str}\n"
+        f" Próximo: {next_str}\n"
         f"🔢 Ciclos: {bot_state['cycle_count']} total | {bot_state.get('cycle_count_series', 0)} serie v{LOGIC_SERIES}"
         f"{cycle_line}\n\n"
         f"Schedule: {schedule} UTC",
@@ -3761,7 +4415,7 @@ def cmd_cartera():
     """💰 Cartera: cash + posiciones activas. v10.4.2: etiquetas legibles, precios en centavos."""
     portfolio = _get_portfolio_and_positions()
     if portfolio is None:
-        send_telegram("❌ No hay FUNDER configurado.", with_menu=True)
+        send_telegram(" No hay FUNDER configurado.", with_menu=True)
         return
 
     cash = portfolio["cash"]
@@ -3779,7 +4433,7 @@ def cmd_cartera():
 
     msg = f"💰 <b>Cartera</b>\n\n"
     if api_error:
-        msg += f"⚠️ <i>Error API posiciones: {api_error[:80]}</i>\n\n"
+        msg += f"⚠ <i>Error API posiciones: {api_error[:80]}</i>\n\n"
     if cash_ok:
         msg += f"💵 Cash: <b>${cash:.2f}</b>\n"
     else:
@@ -3787,7 +4441,7 @@ def cmd_cartera():
 
     msg += f"📊 Posiciones vivas: <b>${active_value:.2f}</b> ({len(active)} pos)\n"
     if resolved_won:
-        msg += f"🏁 Pendiente pago: ${resolved_value:.2f} ({len(resolved_won)})\n"
+        msg += f" Pendiente pago: ${resolved_value:.2f} ({len(resolved_won)})\n"
     if cash_ok:
         msg += f"{'─'*24}\n💼 Total: <b>${portfolio_total:.2f}</b>\n"
 
@@ -3815,7 +4469,7 @@ def cmd_cartera():
 
     # ---- Resueltas ganadas ----
     if resolved_won:
-        msg += f"\n<b>🏁 Esperando pago:</b>\n"
+        msg += f"\n<b> Esperando pago:</b>\n"
         for pos in resolved_won:
             label = _parse_position_label(pos.get("title", ""), pos.get("outcome", "?"))
             current_value = float(pos.get("currentValue", 0))
@@ -3835,13 +4489,13 @@ def cmd_ordenes():
         send_telegram("🔄 Ciclo en ejecución...", with_menu=True)
         return
     if clob_client is None:
-        send_telegram("❌ No autenticado.", with_menu=True)
+        send_telegram(" No autenticado.", with_menu=True)
         return
 
     try:
         orders = get_open_orders(clob_client)
     except Exception as e:
-        send_telegram(f"❌ Error: {e}", with_menu=True)
+        send_telegram(f" Error: {e}", with_menu=True)
         return
 
     if not orders:
@@ -3869,7 +4523,7 @@ def cmd_ordenes():
                 else:
                     created = datetime.fromisoformat(str(created_raw).replace("Z", "+00:00"))
                 age_h = (datetime.now(timezone.utc) - created).total_seconds() / 3600
-                age_str = f" ⏱{age_h:.1f}h"
+                age_str = f" {age_h:.1f}h"
             except (ValueError, TypeError, OSError):
                 pass
 
@@ -3940,7 +4594,7 @@ def cmd_log():
             if buys:
                 msg += f"\n<b>Compras ({len(buys)}):</b>\n"
                 for b in buys:
-                    trader_icon = " 🤝" if b.get("traders") else ""
+                    trader_icon = " " if b.get("traders") else ""
                     msg += f"  🟢 {b.get('city','?')} {b.get('side','?')} ${b.get('amount',0):.2f} | edge {b.get('edge',0)}%{trader_icon}\n"
             else:
                 msg += "\n<i>Sin compras este ciclo</i>\n"
@@ -4035,7 +4689,7 @@ def cmd_logfull():
                 near_misses.append((edge_val, stripped[2:]))
             elif "SIN EDGE" in stripped:
                 no_edge.append(stripped[2:])
-            elif stripped.startswith("⏭"):
+            elif stripped.startswith(""):
                 duplicates.append(stripped[2:])
             elif "KELLY" in stripped:
                 kelly_low.append(stripped[2:])
@@ -4046,9 +4700,9 @@ def cmd_logfull():
         text += f"Total: {len(edge_analysis)} mercados evaluados\n"
         text += f"✅ Aceptados: {len(accepted)}\n"
         text += f"🔶 Near miss (edge ≥3%): {len([n for n in near_misses if n[0] >= 3])}\n"
-        text += f"⏭ Duplicados: {len(duplicates)}\n"
-        text += f"❌ Sin edge: {len(no_edge)}\n"
-        text += f"❌ Kelly bajo: {len(kelly_low)}\n"
+        text += f" Duplicados: {len(duplicates)}\n"
+        text += f" Sin edge: {len(no_edge)}\n"
+        text += f" Kelly bajo: {len(kelly_low)}\n"
 
         # Aceptados
         if accepted:
@@ -4081,7 +4735,7 @@ def cmd_logfull():
 
     except Exception as e:
         log.error(f"Error en /detalle: {e}")
-        send_telegram(f"❌ Error en detalle: {str(e)[:200]}", with_menu=True)
+        send_telegram(f" Error en detalle: {str(e)[:200]}", with_menu=True)
 
 
 def cmd_modo():
@@ -4091,11 +4745,11 @@ def cmd_modo():
             f"⚡ <b>Modo: 🟡 DRY RUN</b>\n\n"
             f"¿Activar <b>MODO REAL</b>?\n"
             f"Bankroll: ${BANKROLL:.2f}\n\n"
-            f"⚠️ Dinero real."
+            f"⚠ Dinero real."
         )
         kb = {"inline_keyboard": [[
             {"text": "✅ Activar REAL", "callback_data": "confirmar_real"},
-            {"text": "❌ Cancelar", "callback_data": "cancelar_modo"},
+            {"text": " Cancelar", "callback_data": "cancelar_modo"},
         ]]}
     else:
         msg = (
@@ -4104,7 +4758,7 @@ def cmd_modo():
         )
         kb = {"inline_keyboard": [[
             {"text": "🟡 Volver a DRY RUN", "callback_data": "confirmar_dry"},
-            {"text": "❌ Cancelar", "callback_data": "cancelar_modo"},
+            {"text": " Cancelar", "callback_data": "cancelar_modo"},
         ]]}
     send_telegram(msg, custom_keyboard=kb)
 
@@ -4116,7 +4770,7 @@ def cmd_confirmar_real():
     send_telegram(
         f"🔴 <b>MODO REAL ACTIVADO</b>\n\n"
         f"Bankroll: ${BANKROLL:.2f}\n\n"
-        f"⚠️ Si Railway reinicia → vuelve a DRY_RUN de Railway.\n"
+        f"⚠ Si Railway reinicia → vuelve a DRY_RUN de Railway.\n"
         f"Permanente: Railway → Variables → DRY_RUN=false",
         with_menu=True,
     )
@@ -4136,12 +4790,12 @@ def cmd_cancelar_modo():
 
 def cmd_traders():
     """
-    🔍 Traders Intel: señales + coincidencias con posiciones activas.
+     Traders Intel: señales + coincidencias con posiciones activas.
     v10.4.2: cruza señales con cartera actual.
     """
     if not os.path.exists(SIGNALS_FILE):
         send_telegram(
-            "🔍 <b>Traders Intel</b>\n\n"
+            " <b>Traders Intel</b>\n\n"
             "Sin datos todavía.\n"
             "Se generarán automáticamente en el próximo ciclo.",
             with_menu=True,
@@ -4152,7 +4806,7 @@ def cmd_traders():
         with open(SIGNALS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception as e:
-        send_telegram(f"❌ Error: {e}", with_menu=True)
+        send_telegram(f" Error: {e}", with_menu=True)
         return
 
     generated = data.get("generated", "?")[:16]
@@ -4163,13 +4817,13 @@ def cmd_traders():
     quality_names = data.get("quality_traders", [])
     n_skipped = data.get("n_skipped_low_quality", 0)
 
-    text = f"🔍 <b>Traders Intel</b>\n"
+    text = f" <b>Traders Intel</b>\n"
     text += f"<i>{generated} UTC</i>\n"
     text += f"Analizados: {n_traders} | Calidad: {n_quality} | Skip: {n_skipped}\n"
     text += f"Señales: {n_signals} | Consenso: {n_consensus}\n"
 
     if quality_names:
-        text += f"\n⭐ <b>Calidad:</b> {', '.join(quality_names[:6])}\n"
+        text += f"\n <b>Calidad:</b> {', '.join(quality_names[:6])}\n"
 
     # Cruce con posiciones activas — filtra por ciudad + lado + fecha exacta del mercado
     portfolio = _get_portfolio_and_positions()
@@ -4209,7 +4863,7 @@ def cmd_traders():
             # Filtrar: fecha no pasada (si el formato es ISO)
             if sig_date_iso and sig_date_iso < today_str:
                 continue
-            icon = "🤝" if s.get("has_consensus") else "📍"
+            icon = "" if s.get("has_consensus") else ""
             price = s.get("avg_price", 0)
             text += f"  {icon} {city} {outcome} {sig_date} @ {int(price*100)}¢\n"
             found_any = True
@@ -4238,7 +4892,7 @@ def cmd_traders():
             if shown >= 10:
                 text += f"<i>... y {n_signals - shown} más</i>\n"
                 break
-            icon = "🤝" if s.get("has_consensus") else "📍"
+            icon = "" if s.get("has_consensus") else ""
             city = s.get("city", "?")
             date_str = s.get("date", "?")
             outcome = s.get("outcome", "?")
@@ -4353,7 +5007,7 @@ def cmd_rendimiento():
             text += f" ({active_pnl:+.2f})"
         text += "\n"
         if resolved_value > 0:
-            text += f"🏁 Pendiente pago: ${resolved_value:.2f} ({len(resolved_won)})\n"
+            text += f" Pendiente pago: ${resolved_value:.2f} ({len(resolved_won)})\n"
         if cash_ok:
             total = portfolio["portfolio_total"]
             text += f"💼 Total: <b>${total:.2f}</b>\n"
@@ -4369,7 +5023,7 @@ def cmd_rendimiento():
     text += f"<b>Trades (v10.2+):</b>\n"
     text += f"  Compras: {stats['total_buys']} | Ventas: {stats['total_sells']}\n"
     if stats.get('pending_sells', 0) > 0:
-        text += f"  ⏳ Pendientes fill: {stats['pending_sells']}\n"
+        text += f"   Pendientes fill: {stats['pending_sells']}\n"
     text += f"  Invertido: ${stats['total_invested']:.2f}\n"
     text += f"  PnL ventas: <b>${stats['sell_pnl']:+.2f}</b>\n"
 
@@ -4379,7 +5033,7 @@ def cmd_rendimiento():
     if stats['confirmed_count'] + stats['unconfirmed_count'] > 0:
         text += f"\n<b>Con/sin trader:</b>\n"
         if stats['confirmed_count'] > 0:
-            text += f"  🤝 {stats['confirmed_count']} ops → ${stats['confirmed_pnl']:+.2f}\n"
+            text += f"   {stats['confirmed_count']} ops → ${stats['confirmed_pnl']:+.2f}\n"
         if stats['unconfirmed_count'] > 0:
             text += f"  🔹 {stats['unconfirmed_count']} ops → ${stats['unconfirmed_pnl']:+.2f}\n"
 
@@ -4392,12 +5046,12 @@ def cmd_rendimiento():
             wr = f" | WR:{acc['win_rate']}%" if acc.get('win_rate') is not None else ""
             text += f"  {city}: {count} ops, ${pnl:+.2f}{wr}\n"
 
-    text += f"\n<i>⚠️ PnL fiable: dashboard Polymarket.</i>\n"
+    text += f"\n<i>⚠ PnL fiable: dashboard Polymarket.</i>\n"
     send_telegram_paged(text, with_menu=True)
 
 
 def cmd_info():
-    """ℹ️ Bloque resumen del bot para pegar en ChatGPT/Claude."""
+    """ℹ Bloque resumen del bot para pegar en ChatGPT/Claude."""
     modo = "DRY RUN" if DRY_RUN else "REAL"
     schedule = ", ".join(f"{h:02d}:00" for h in sorted(SCHEDULE_HOURS_UTC))
 
@@ -4487,7 +5141,7 @@ def cmd_info():
         f"~330 mercados temp | Open-Meteo | normal(μ,σ)\n"
         f"Sigma: D0=1.2 D1=1.5 D2=2.0 D3=2.5 D4-5=3.0\n"
         f"Half-Kelly | Railway EU-West (Amsterdam)\n"
-        f"⚠️ Polymarket resuelve con Weather Underground, no Open-Meteo"
+        f"⚠ Polymarket resuelve con Weather Underground, no Open-Meteo"
     )
 
     send_telegram_paged(text, with_menu=True)
@@ -4505,7 +5159,7 @@ def cmd_accuracy():
     lines = ["<b>Accuracy por ciudad</b>\n"]
     for city, data in sorted_cities:
         blocked = " 🚫" if is_city_blocked(city) else ""
-        flag = " ⚠️" if data["trades"] >= CITY_MIN_TRADES_FOR_BLOCK and data["win_rate"] <= CITY_BLOCK_WIN_RATE else ""
+        flag = " ⚠" if data["trades"] >= CITY_MIN_TRADES_FOR_BLOCK and data["win_rate"] <= CITY_BLOCK_WIN_RATE else ""
         lines.append(
             f"<b>{city}</b>{blocked}{flag}: "
             f"{data['wins']}/{data['trades']} ({data['win_rate']}%) "
@@ -4521,7 +5175,7 @@ def cmd_noaa():
     level_icons = {"good": "🟢", "waiting": "🟡", "warn": "🟡", "bad": "🔴", "muted": "⚪"}
 
     lines = [
-        "🛰️ <b>NOAA / Observabilidad</b>",
+        "🛰 <b>NOAA / Observabilidad</b>",
         "",
         f"Muestra: <b>{summary['sample_display']}</b>",
         f"MAE global: <b>{summary['mae_display']}</b>",
@@ -4555,7 +5209,7 @@ def cmd_noaa():
 
 
 COMMANDS = {
-    "estado": cmd_estado, "cartera": cmd_cartera, "ordenes": cmd_ordenes,
+    "focus": cmd_focus, "estado": cmd_estado, "cartera": cmd_cartera, "ordenes": cmd_ordenes,
     "log": cmd_log, "logfull": cmd_logfull, "forzar": cmd_forzar,
     "modo": cmd_modo, "traders": cmd_traders, "rendimiento": cmd_rendimiento,
     "info": cmd_info, "postmortem": cmd_postmortem, "accuracy": cmd_accuracy,
@@ -4587,7 +5241,7 @@ def handle_telegram_update(update):
             try:
                 COMMANDS[command]()
             except Exception as e:
-                send_telegram(f"❌ Error: {e}", with_menu=True)
+                send_telegram(f" Error: {e}", with_menu=True)
         return
 
     if "message" in update:
@@ -4604,7 +5258,7 @@ def handle_telegram_update(update):
             try:
                 COMMANDS[text]()
             except Exception as e:
-                send_telegram(f"❌ Error: {e}", with_menu=True)
+                send_telegram(f" Error: {e}", with_menu=True)
         else:
             send_telegram("🤖 <b>Bot Polymarket</b>\n\nToca un botón:", with_menu=True)
 
@@ -4775,7 +5429,7 @@ def get_current_exposure():
     """
     Consulta la Data API para saber cuánto dinero hay invertido en posiciones.
 
-    Esto es CRÍTICO: sin esto, cada ciclo cree que tiene presupuesto completo
+    Esto es CRTICO: sin esto, cada ciclo cree que tiene presupuesto completo
     y puede sobreinvertir (bug de v9 que causó 80% de exposición).
 
     Devuelve total_invested (float): dinero real comprometido en posiciones vivas.
@@ -5065,7 +5719,7 @@ def manage_positions(client, dl):
                 })
             except Exception as e:
                 log.warning(f"Error actualizando postmortem resolved_win: {e}")
-            dl.append(f"  🏁 RESUELTO ({outcome} @ {cur_price:.2f}) | {title} | Esperando pago")
+            dl.append(f"   RESUELTO ({outcome} @ {cur_price:.2f}) | {title} | Esperando pago")
             # v10.4 Fix Bug #12: NO añadir a keeping — son resueltas, no mantenidas
             n_resolved += 1
             continue
@@ -5113,7 +5767,7 @@ def manage_positions(client, dl):
 
         # Si ya pasó la fecha, no re-evaluar (se resolverá sola)
         if days_ahead < 0:
-            dl.append(f"  ⏳ RESOLUCIÓN pendiente | {label}")
+            dl.append(f"   RESOLUCIÓN pendiente | {label}")
             keeping.append(p)
             continue
 
@@ -5203,7 +5857,7 @@ def manage_positions(client, dl):
         # No intentar vender posiciones que no valen nada
         # Polymarket rechaza ventas con "not enough balance/allowance" si es muy poco
         if estimated_return < 0.10:
-            dl.append(f"    ⏭ {outcome} {title} | valor ~${estimated_return:.2f} < $0.10, no vale la pena")
+            dl.append(f"     {outcome} {title} | valor ~${estimated_return:.2f} < $0.10, no vale la pena")
             continue
 
         log.info(f"{'[DRY] ' if DRY_RUN else ''}VENTA: {outcome} {shares_to_sell}sh × ${sell_price:.2f} | {title}")
@@ -5246,7 +5900,7 @@ def manage_positions(client, dl):
                 f"{outcome} {city}\n"
                 f"Venta: {shares_to_sell}sh × ${sell_price:.2f} (precio límite)\n"
                 f"PnL estimado: {pct:+.1f}% (${float(p.get('cashPnl', 0)):+.2f})\n"
-                f"<i>⏳ Pendiente de fill — precio real puede diferir</i>"
+                f"<i> Pendiente de fill — precio real puede diferir</i>"
             )
 
             # v10.3 Fix Bug #7: Registrar como SELL_PENDING, NO como SELL
@@ -5278,7 +5932,7 @@ def manage_positions(client, dl):
             )
 
         except Exception as e:
-            dl.append(f"    ❌ ERROR vendiendo {outcome} {title}: {e}")
+            dl.append(f"     ERROR vendiendo {outcome} {title}: {e}")
             log.error(f"Error vendiendo posición: {e}")
 
     dl.append(f"\n  Resultado: {n_sold} vendidas | ~${capital_freed:.2f} liberados")
@@ -5527,7 +6181,7 @@ def audit_check_sell_fills(client, dl):
                 expired.append(sell)
                 dl.append(f"  ⚠ Venta expirada >24h: {sell.get('city', '?')} {sell.get('side', '?')} | ${sell.get('price', 0):.2f} — marcando como fallida")
             elif age_hours > 12:
-                dl.append(f"  ⏳ Venta pendiente >12h: {sell.get('city', '?')} {sell.get('side', '?')} | ${sell.get('price', 0):.2f}")
+                dl.append(f"   Venta pendiente >12h: {sell.get('city', '?')} {sell.get('side', '?')} | ${sell.get('price', 0):.2f}")
                 still_pending.append(sell)
             else:
                 still_pending.append(sell)
@@ -5593,7 +6247,7 @@ def _confirm_sell_fills_in_performance(filled, expired, dl):
         try:
             with open(PERFORMANCE_FILE, "w", encoding="utf-8") as f:
                 json.dump(history, f, indent=2, ensure_ascii=False)
-            dl.append(f"  📝 performance.json: {updated} entradas actualizadas")
+            dl.append(f"   performance.json: {updated} entradas actualizadas")
             for entry in updated_entries:
                 try:
                     update_postmortem(entry.get("action", ""), entry)
@@ -5780,7 +6434,7 @@ def audit_check_resolution_truth(dl):
         audit[OBSERVED_AUDIT_KEY].append(record)
         n_checked += 1
 
-        emoji = "✅" if abs(error) <= 1.0 else "⚠️" if abs(error) <= 2.0 else "❌"
+        emoji = "✅" if abs(error) <= 1.0 else "⚠" if abs(error) <= 2.0 else ""
         dl.append(
             f"  {emoji} {city} {market_date}: "
             f"observado NOAA NCEI={observed_temp_c:.1f}°C | "
@@ -5892,7 +6546,7 @@ def audit_check_open_meteo_forecast_drift(dl):
         audit[FORECAST_AUDIT_KEY].append(record)
         n_checked += 1
 
-        emoji = "✅" if abs(error) <= 1.0 else "⚠️" if abs(error) <= 2.0 else "❌"
+        emoji = "✅" if abs(error) <= 1.0 else "⚠" if abs(error) <= 2.0 else ""
         dl.append(
             f"  {emoji} {city} {market_date}: "
             f"prevision original={forecast_temp:.1f}°C | "
@@ -6207,7 +6861,7 @@ def main(client):
         dl.append(f"GESTIÓN: error: {e}")
         log.warning(f"Error en gestión de posiciones: {e}")
 
-    # ---- PASO 0.6: AUDITORÍA (v10.1 final) ----
+    # ---- PASO 0.6: AUDITORA (v10.1 final) ----
     # Verificar si ventas anteriores se llenaron
     try:
         audit_check_sell_fills(client, dl)
@@ -6418,19 +7072,19 @@ def main(client):
 
         if token_id in open_token_ids:
             skipped_dup += 1
-            edge_analysis.append(f"  ⏭ {city} {side} | edge={edge_pct:.1f}% → YA HAY ORDEN")
+            edge_analysis.append(f"   {city} {side} | edge={edge_pct:.1f}% → YA HAY ORDEN")
             continue
 
         # v10.4 Fix Bug #9: no re-comprar lo que vendimos este ciclo
         if token_id in sold_this_cycle:
             skipped_dup += 1
-            edge_analysis.append(f"  ⏭ {city} {side} | edge={edge_pct:.1f}% → VENDIDO ESTE CICLO (no re-entrada)")
+            edge_analysis.append(f"   {city} {side} | edge={edge_pct:.1f}% → VENDIDO ESTE CICLO (no re-entrada)")
             continue
 
         # v10.4 Fix Bug #3: no comprar si ya tenemos posición abierta
         if token_id in existing_position_tokens:
             skipped_dup += 1
-            edge_analysis.append(f"  ⏭ {city} {side} | edge={edge_pct:.1f}% → YA HAY POSICIÓN ABIERTA")
+            edge_analysis.append(f"   {city} {side} | edge={edge_pct:.1f}% → YA HAY POSICIÓN ABIERTA")
             continue
 
         position = calculate_position(effective_bankroll, our_prob, mkt_price)
@@ -6448,7 +7102,7 @@ def main(client):
         trader_confirm = ""
         if matching_traders:
             names = [s["trader"] for s in matching_traders]
-            trader_confirm = f" 🤝 CONFIRMADO por: {', '.join(names)}"
+            trader_confirm = f"  CONFIRMADO por: {', '.join(names)}"
 
         edge_analysis.append(f"  ✓ {city} {side} {temp_label} {c['date_iso']} | forecast={forecast_max:.1f}°C | nuestro={our_prob*100:.1f}% mercado={mkt_price*100:.1f}% | edge={edge_pct:.1f}% | ${position['amount']:.2f} EV=${position['expected_value']:+.2f}{trader_confirm}")
 
@@ -6476,7 +7130,7 @@ def main(client):
     bot_state["last_edge_analysis"] = edge_analysis
     bot_state["last_trader_signals"] = trader_signals
 
-    dl.append(f"\nANÁLISIS DE EDGE ({len(candidates)} mercados evaluados):")
+    dl.append(f"\nANLISIS DE EDGE ({len(candidates)} mercados evaluados):")
     dl.extend(edge_analysis)
     if skipped_dup:
         dl.append(f"\n  {skipped_dup} saltados (orden ya abierta)")
@@ -6584,14 +7238,14 @@ def main(client):
                 icon = icons.get(s["type"], "📤")
                 summary += f"{icon} Vendido: {s['side']} {s['city']} ({s['pnl_pct']:+.0f}%)\n"
         if mgmt["resolved"] > 0:
-            summary += f"🏁 {mgmt['resolved']} resueltas (esperando pago)\n"
+            summary += f" {mgmt['resolved']} resueltas (esperando pago)\n"
         if mgmt["kept"] > 0:
             summary += f"✓ {mgmt['kept']} mantenidas\n"
 
         # Compras
         if buy_summaries:
             for b in buy_summaries:
-                trader_tag = " 🤝" if b["traders"] else ""
+                trader_tag = " " if b["traders"] else ""
                 summary += f"🛒 Compra: {b['side']} {b['city']} ${b['amount']:.2f} edge={b['edge']:.0f}%{trader_tag}\n"
         elif not mgmt["n_sold"]:
             summary += f"💤 Sin operaciones\n"
@@ -6696,8 +7350,8 @@ def _save_decision_log(lines):
             summary += f"<b>{line}</b>\n"
         elif line.strip().startswith("✓"):
             text = line.strip()[2:]
-            if "🤝" in text:
-                summary += f"🟢🤝 {text}\n"
+            if "" in text:
+                summary += f"🟢 {text}\n"
             else:
                 summary += f"🟢 {text}\n"
         elif line.strip().startswith("✗") and "BAJO" in line:
@@ -6709,8 +7363,8 @@ def _save_decision_log(lines):
                 edge_val = float(edge_match.group(1))
                 if edge_val >= 3.0:  # solo mostrar los interesantes (≥3%)
                     near_misses.append((edge_val, line.strip()[2:]))
-        elif line.strip().startswith("⏭"):
-            summary += f"⏭ {line.strip()[2:]}\n"
+        elif line.strip().startswith(""):
+            summary += f" {line.strip()[2:]}\n"
         elif line.strip().startswith("OK") or line.strip().startswith("FAIL"):
             summary += f"{line.strip()}\n"
         elif "Sin operaciones" in line:
@@ -6824,7 +7478,7 @@ if __name__ == "__main__":
 
     clob_client = setup_client()
     if clob_client is None:
-        send_telegram("❌ <b>Error autenticación</b>")
+        send_telegram(" <b>Error autenticación</b>")
 
     if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
         threading.Thread(target=telegram_polling_loop, daemon=True, name="TelegramPoller").start()
@@ -6843,9 +7497,9 @@ if __name__ == "__main__":
         f"Modo: {modo} | ${BANKROLL:.2f}\n"
         f"Min edge: {MIN_EDGE}% | Schedule: {schedule} UTC\n"
         f"🔧 Gestión activa: SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n"
-        f"⏱ Intra-SL: {intra_label}\n"
-        f"🌏 Zona horaria per-city activa\n"
-        f"🔍 Traders: auto-análisis diario, descubrimiento lunes",
+        f" Intra-SL: {intra_label}\n"
+        f" Zona horaria per-city activa\n"
+        f" Traders: auto-análisis diario, descubrimiento lunes",
         with_menu=True,
     )
 
@@ -6891,7 +7545,7 @@ if __name__ == "__main__":
                         skip_first_cycle = True
                         log.info(f"Último ciclo hace {age_hours:.1f}h (< {min_cycle_gap_hours}h) — saltando ciclo inicial")
                         send_telegram(
-                            f"⏭ <b>Bot arrancado</b>\n"
+                            f" <b>Bot arrancado</b>\n"
                             f"Último ciclo hace {age_hours:.1f}h — esperando al siguiente programado."
                         )
     except Exception as e:
@@ -6905,7 +7559,7 @@ if __name__ == "__main__":
             main(clob_client)
         except Exception as e:
             log.error(f"Error primer ciclo: {e}")
-            send_telegram(f"❌ <b>Error</b>\n<code>{str(e)[:200]}</code>")
+            send_telegram(f" <b>Error</b>\n<code>{str(e)[:200]}</code>")
 
     while True:
         next_run = get_next_run_time()
@@ -6925,4 +7579,5 @@ if __name__ == "__main__":
             main(clob_client)
         except Exception as e:
             log.error(f"Error: {e}")
-            send_telegram(f"❌ <b>Error</b>\n<code>{str(e)[:200]}</code>")
+            send_telegram(f" <b>Error</b>\n<code>{str(e)[:200]}</code>")
+

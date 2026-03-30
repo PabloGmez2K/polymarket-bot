@@ -58,6 +58,9 @@ Comandos útiles:
 | 2026-03-30 | Explícita | Sesión 40 | `—` | Diagnóstico pérdidas NYC/Munich/Atlanta: bot entraba en ciudades sin validación (Seoul, Tokyo, NYC, Munich no bloqueadas). Ventas manuales NYC. Identificado bug #15 — allowlist `ACTIVE_TRADING_CITIES` pendiente en v10.6.6. |
 | 2026-03-30 | Explícita | Sesión 41 | `—` | Implementación local de `v10.6.6`: allowlist `ACTIVE_TRADING_CITIES`, skip claro en `decisions.log`, bump de versión y suite en `419/419`. |
 | 2026-03-30 | Explícita | Sesión 42 | `—` | Implementación local de `v10.6.7`: tabla `Estado de observacion por ciudad` en el dashboard, cruzando allowlist, NOAA e histórico validado, con suite en `426/426`. |
+| 2026-03-30 | Explícita | Sesión 43 | `—` | Implementación local de `v10.6.8`: nueva capa 1 `Control Center Discovery/Stabilization` en dashboard + `/focus` en Telegram, con detalle relegado a capas inferiores y suite en `440/440`. |
+| 2026-03-30 | Explícita | Sesión 44 | `—` | Implementación local de `v10.6.9`: `Mission HUD` para discovery/stabilization con estilo videojuego operacional, tabs `Overview / Progress / Cities`, barras de progreso, `city race`, `dashboard.js` y suite en `447/447`. |
+| 2026-03-30 | Explícita | Sesión 45 | `—` | Refinamiento local de `v10.6.10`: modo claro por defecto, ciudades agrupadas por prioridad operativa, repetición de `signals stale` reducida cuando NOAA es el cuello de botella y suite en `449/449`, listo para validar en Railway. |
 
 ---
 
@@ -783,6 +786,118 @@ Investigación completa de trades, commits y lógica de trading desde v10.3 hast
   - test de snapshot para asegurar que `city_observation` llega al dashboard.
 
 **Resultado:** el dashboard ya enseña de un vistazo qué ciudades están en operativa real, cuáles siguen bloqueadas y cuáles solo tienen valor como referencia mientras falta una capa futura de `watchlist / shadow / canary`. `v10.6.7` queda validada en local con `426/426`.
+
+---
+
+## Sesión 43 — v10.6.8 control center discovery / stabilization (30 mar 2026, local)
+
+**Disparador:** tras ver que el dashboard y Telegram seguían demasiado cargados, hacía falta una capa 1 explícita que priorizara salud real, incidentes, universo activo, crecimiento NOAA y acción recomendada sin tocar trading, exits ni scheduler.
+
+**Diagnóstico (Codex):**
+
+1. **La información importante estaba mezclada con demasiado detalle.** El dashboard actual sí contenía casi todo, pero no en un orden que permitiera responder rápido `¿está sano?`, `¿hay que actuar?` o `¿estamos aprendiendo?`.
+
+2. **Telegram tenía piezas útiles pero no una vista principal operativa.** `/estado`, `/noaa`, `/accuracy` y `/detalle` existían, pero obligaban a reconstruir mentalmente la capa 1.
+
+3. **La solución correcta era jerárquica, no decorativa.** Había que construir una capa 1 honesta sobre alertas, allowlist y NOAA ya existentes, mover el detalle a capas inferiores y dejar claro qué es incidente real vs limitación de aprendizaje.
+
+**Cambios realizados:**
+- `bot.py` sube a `v10.6.8`;
+- nuevo builder `build_dashboard_focus_center()`:
+  - resume salud operativa, necesidad de intervención, limitador dominante, estado de aprendizaje y acción recomendada;
+  - reutiliza `get_dashboard_alert_summary()`, `build_dashboard_forecast_quality()`, `build_dashboard_city_observation()` y muestra quick stats del universo activo;
+  - separa incidentes operativos reales de gaps de `measurement / NOAA`;
+- `build_dashboard_snapshot()` incorpora `focus` como nueva capa 1 del dashboard;
+- Telegram añade `/focus` como vista principal corta y el menú se reordena para poner `Focus` y observabilidad al frente, manteniendo `/estado`, `/noaa`, `/accuracy` y `/detalle` como segunda capa;
+- `templates/dashboard.html` abre ahora con un bloque `Control Center Discovery / Stabilization` y deja el detalle extendido dentro de `Capa 3`;
+- `static/dashboard.css` añade layout y estilos específicos para la capa 1, los quick stats y el panel colapsable de detalle;
+- `verify_before_deploy.py` sube a `440/440` con:
+  - checks estructurales del builder nuevo;
+  - checks del template/CSS de `focus`;
+  - test funcional del `focus center`;
+  - test funcional de `/focus`;
+  - test de snapshot para asegurar que `focus` llega al dashboard.
+
+**Resultado:** queda una UX operativa mucho más clara para discovery/stabilization: en 10-15 segundos ya se puede leer si el sistema está sano, si hoy toca actuar, qué lo limita, si NOAA está enseñando algo útil y cuál es la acción recomendada. `v10.6.8` queda validada en local con `440/440` tests, sin tocar lógica de trading, exits, scheduler ni gestión de posiciones.
+
+---
+
+## Sesión 44 — v10.6.9 mission HUD discovery / stabilization (30 mar 2026, local)
+
+**Disparador:** una vez resuelta la jerarquía básica de capa 1, el siguiente paso era convertirla en una interfaz mucho más enfocada y visual, con estética de videojuego operativo, para seguir la prioridad actual sin volver a llenar el dashboard de ruido.
+
+**Diagnóstico (Codex):**
+
+1. **La capa 1 ya era correcta en contenido, pero todavía demasiado “dashboard”.** Faltaba un lenguaje visual de misión, progreso y estado que ayudara a fijar la atención en la prioridad actual.
+
+2. **La prioridad no es trading, sino discovery/stabilization.** Por tanto, el HUD tenía que representar `salud`, `allowlist vs NOAA`, `crecimiento de muestra` y `aprendizaje útil`, no PnL táctico ni gestión de posiciones.
+
+3. **La interactividad debía ser ligera y segura.** Lo correcto era añadir tabs y paneles visuales alimentados por el snapshot actual, sin tocar la lógica core ni crear una capa JavaScript compleja.
+
+**Cambios realizados:**
+- `bot.py` sube a `v10.6.9`;
+- `build_dashboard_city_observation()` expone campos de presentación adicionales (`observed_count`, `progress_pct`, `trades`, `win_rate`, etc.) para alimentar visuales sin alterar decisiones;
+- `build_dashboard_focus_center()` gana:
+  - `mission` actual;
+  - `health_score`;
+  - `tracks` de progreso;
+  - `stage_path` de prioridad;
+  - `city_race` para cobertura NOAA por ciudad;
+- `templates/dashboard.html` añade una nueva cabecera `Mission HUD · Discovery / Stabilization` por encima del bloque anterior y oculta la versión previa como fallback;
+- el HUD nuevo incorpora:
+  - tarjeta principal de misión;
+  - `System HP`;
+  - ruta operativa por etapas;
+  - tabs `Overview / Progress / Cities`;
+  - barras de progreso por misión;
+  - panel `City race` y `Operator console`;
+- `static/dashboard.css` redefine la capa 1 con estética HUD, grid visual, scan lines, chips, barras y paneles de misión;
+- aparece `static/dashboard.js` para alternar paneles de la capa 1 sin recargar la página;
+- se borran los ficheros antiguos `RESEARCH_LEAN_SIX_SIGMA*.md` dejando solo `RESEARCH_LEAN_SIX_SIGMA_FINAL_2026-03-30.md`;
+- `verify_before_deploy.py` sube a `447/447` con checks nuevos de:
+  - `dashboard.js`;
+  - template `Mission HUD`;
+  - tracks y `city_race`;
+  - tabs interactivas;
+  - shape funcional ampliada de `build_dashboard_focus_center()`.
+
+**Resultado:** la capa 1 deja de sentirse como un tablero genérico y pasa a leerse como una misión operativa: qué proteger, qué está bloqueando, cuánto progreso llevamos y dónde mirar después. Queda lista para previsualización funcional y para una siguiente iteración centrada en tendencias temporales de aprendizaje, no en más detalle táctico.
+
+---
+
+## Sesión 45 — v10.6.10 focus readability / Railway validation prep (30 mar 2026, local)
+
+**Disparador:** tras la primera preview real del `Mission HUD`, la lectura seguía costando: la alerta `signals.json stale` aparecía demasiadas veces, la tabla de ciudades era pesada y el modo oscuro no ayudaba a entender rápido la prioridad operativa.
+
+**Diagnóstico (Codex):**
+
+1. **La capa 1 seguía exagerando un síntoma secundario.** `signals.json stale` es una alerta real, pero no debe ocupar toda la lectura cuando el bloqueo dominante sigue siendo `NOAA / muestra / cobertura`.
+
+2. **La tabla de ciudades era correcta, pero no legible como primera pantalla.** Hacía falta agrupar por prioridad operativa y no pedir una lectura fila a fila de 14 ciudades.
+
+3. **La estética debía ayudar a decidir, no solo a impresionar.** En esta fase discovery/stabilization, el contraste y la claridad pesan más que un look oscuro agresivo.
+
+**Cambios realizados:**
+- `bot.py` sube a `v10.6.10`;
+- `build_dashboard_focus_center()`:
+  - relega `signals.json stale` a señal secundaria cuando el bloqueo real es de muestra/cobertura NOAA;
+  - deja más clara la lectura de `salud`, `intervención`, `limitador` y `acción recomendada`;
+- `build_dashboard_city_observation()` expone grupos listos para UI:
+  - `active_rows`;
+  - `watch_rows`;
+  - `blocked_rows`;
+- `templates/dashboard.html` sustituye la tabla larga por zonas operativas:
+  - `Universo operativo`;
+  - `Seguimiento y referencia`;
+  - `Archivo de ciudades fuera de juego`;
+- `static/dashboard.css` cambia la experiencia a modo claro por defecto y añade estilos específicos para tarjetas/zonas de ciudad;
+- `verify_before_deploy.py` sube a `449/449` con checks nuevos de:
+  - modo claro;
+  - agrupación visual de ciudades;
+  - shape funcional de `active_rows / watch_rows / blocked_rows`;
+- se añade `tools/preview_dashboard.py` para levantar solo el dashboard local sin arrancar todo el bot y sin depender de auth.
+
+**Resultado:** la capa 1 conserva el enfoque de misión, pero gana legibilidad operativa real. El dashboard ya no repite tanto una alerta secundaria, las ciudades se entienden como `operativas / seguimiento / bloqueadas` y la iteración queda lista para validarse en Railway con datos live.
 
 ---
 

@@ -36,7 +36,7 @@ def test(name, condition, detail=""):
         print(f"  ✅ {name}")
         passed += 1
     else:
-        msg = f"  ❌ {name}"
+        msg = f"   {name}"
         if detail:
             msg += f" — {detail}"
         print(msg)
@@ -58,7 +58,7 @@ def run_tests():
     # ---- Cargar bot.py ----
     bot_path = os.path.join(os.path.dirname(__file__), "bot.py")
     if not os.path.exists(bot_path):
-        print(f"❌ bot.py no encontrado en {bot_path}")
+        print(f" bot.py no encontrado en {bot_path}")
         sys.exit(1)
 
     with open(bot_path, "r", encoding="utf-8") as f:
@@ -74,6 +74,7 @@ def run_tests():
     append_agent_event_path = os.path.join(os.path.dirname(__file__), "tools", "append_agent_event.py")
     dashboard_template_path = os.path.join(os.path.dirname(__file__), "templates", "dashboard.html")
     dashboard_css_path = os.path.join(os.path.dirname(__file__), "static", "dashboard.css")
+    dashboard_js_path = os.path.join(os.path.dirname(__file__), "static", "dashboard.js")
     agent_events_path = os.path.join(os.path.dirname(__file__), "agent_events.jsonl")
     trader_code = ""
     finder_code = ""
@@ -85,6 +86,7 @@ def run_tests():
     append_agent_event_code = ""
     dashboard_template_code = ""
     dashboard_css_code = ""
+    dashboard_js_code = ""
     agent_event_rows = []
     if os.path.exists(trader_analyzer_path):
         with open(trader_analyzer_path, "r", encoding="utf-8") as f:
@@ -116,6 +118,9 @@ def run_tests():
     if os.path.exists(dashboard_css_path):
         with open(dashboard_css_path, "r", encoding="utf-8") as f:
             dashboard_css_code = f.read()
+    if os.path.exists(dashboard_js_path):
+        with open(dashboard_js_path, "r", encoding="utf-8") as f:
+            dashboard_js_code = f.read()
     if os.path.exists(agent_events_path):
         try:
             with open(agent_events_path, "r", encoding="utf-8") as f:
@@ -127,7 +132,7 @@ def run_tests():
             agent_event_rows = []
 
     # ---- Test 0: Sintaxis válida ----
-    print("\n🔍 Sintaxis")
+    print("\n Sintaxis")
     try:
         module_ast = ast.parse(code)
         test("Python válido", True)
@@ -139,13 +144,13 @@ def run_tests():
     code_lines = code.splitlines()
 
     # ---- Test 1: Versión ----
-    print("\n🔍 Versión")
+    print("\n Versión")
     test("Header dice v10.6", "bot.py v10.6" in code)
     test("Log arranque dice versión", 'POLYMARKET BOT {BOT_VERSION}' in code)
     test("Telegram arranque dice versión", 'Bot {BOT_VERSION} arrancado' in code)
 
     # ---- Test 2: Bug #10 — MIN_BET default ----
-    print("\n🔍 Bug #10: MIN_BET default")
+    print("\n Bug #10: MIN_BET default")
     match = re.search(r'MIN_BET\s*=\s*float\(os\.getenv\("MIN_BET",\s*"([^"]+)"\)', code)
     if match:
         test("MIN_BET default es 1.00", match.group(1) == "1.00",
@@ -160,7 +165,7 @@ def run_tests():
         test("BANKROLL definido con getenv", False)
 
     # ---- Test 3: Bug #12 — Resueltas no en keeping ----
-    print("\n🔍 Bug #12: Resueltas excluidas de keeping")
+    print("\n Bug #12: Resueltas excluidas de keeping")
     # Buscar el bloque de curPrice >= 0.98 en manage_positions
     # Buscamos entre cur_price >= 0.98 y el continue que le sigue
     resolved_block = re.search(
@@ -171,12 +176,12 @@ def run_tests():
         block = resolved_block.group()
         test("Bloque resueltas NO contiene keeping.append", "keeping.append" not in block,
              "keeping.append encontrado en bloque de resueltas")
-        test("Bloque resueltas SÍ incrementa n_resolved", "n_resolved += 1" in block)
+        test("Bloque resueltas S incrementa n_resolved", "n_resolved += 1" in block)
     else:
         test("Bloque de resueltas encontrado", False)
 
     # ---- Test 4: Bug #9 — sold_token_ids ----
-    print("\n🔍 Bug #9: No re-entrada tras venta")
+    print("\n Bug #9: No re-entrada tras venta")
     test("manage_positions devuelve sold_token_ids",
          '"sold_token_ids"' in code or "'sold_token_ids'" in code)
     test("sold_this_cycle se usa en búsqueda",
@@ -194,7 +199,7 @@ def run_tests():
              f"return sin sold_token_ids: {ret[:80]}...")
 
     # ---- Test 5: Bug #3 — Check posiciones existentes ----
-    print("\n🔍 Bug #3: No duplicar posiciones")
+    print("\n Bug #3: No duplicar posiciones")
     test("existing_position_tokens se construye",
          "existing_position_tokens" in code)
     test("Check 'YA HAY POSICIÓN ABIERTA'",
@@ -203,7 +208,7 @@ def run_tests():
          "existing_position_tokens.add(asset)" in code)
 
     # ---- Test 6: Bug #11 — Skip ciclo inicial ----
-    print("\n🔍 Bug #11: Skip ciclo extra al arrancar")
+    print("\n Bug #11: Skip ciclo extra al arrancar")
     test("skip_first_cycle variable existe", "skip_first_cycle" in code)
     test("min_cycle_gap_hours definido", "min_cycle_gap_hours" in code)
     test("Comprueba timestamp del último ciclo",
@@ -212,14 +217,14 @@ def run_tests():
          "if not skip_first_cycle:" in code)
 
     # ---- Test 7: Bug #14 — Precio límite clarificado ----
-    print("\n🔍 Bug #14: Precio límite en Telegram")
+    print("\n Bug #14: Precio límite en Telegram")
     test("Mensaje de venta dice 'precio límite'",
          "precio límite" in code)
     test("Mensaje de venta dice 'precio real puede diferir'",
          "precio real puede diferir" in code)
 
     # ---- Test 8: Mejoras Telegram ----
-    print("\n🔍 Mejoras Telegram")
+    print("\n Mejoras Telegram")
     test("/estado muestra Compras y Ventas separadas",
          "Compras:" in code and "Ventas:" in code and "last_sells_placed" in code)
     test("Resumen ciclo dice 'Exposición actual'",
@@ -228,7 +233,7 @@ def run_tests():
          "Presupuesto libre" in code)
 
     # ---- Test 9: Persistencia DATA_DIR ----
-    print("\n🔍 Persistencia (DATA_DIR)")
+    print("\n Persistencia (DATA_DIR)")
     test("DATA_DIR definido", 'DATA_DIR = os.getenv("DATA_DIR"' in code)
     test("_data_path función definida", "def _data_path(filename):" in code)
     test("PERFORMANCE_FILE usa _data_path",
@@ -255,7 +260,7 @@ def run_tests():
          f"_data_path en posición {data_path_line}, logging en {logging_line}")
 
     # ---- Test 10: Checks heredados v10.3 ----
-    print("\n🔍 Checks heredados (v10.3)")
+    print("\n Checks heredados (v10.3)")
     test("CITY_TIMEZONES existe", "CITY_TIMEZONES" in code)
     test("get_min_days_for_city existe", "def get_min_days_for_city" in code)
     test("SELL_PENDING en track_trade", 'track_trade("SELL_PENDING"' in code)
@@ -265,7 +270,7 @@ def run_tests():
          "cur_price >= 0.98" in code or "curPrice >= 0.98" in code)
 
     # ---- Test 11: Imports necesarios ----
-    print("\n🔍 Imports")
+    print("\n Imports")
     test("import json", "import json" in code)
     test("import re", "import re" in code)
     test("import os", "import os" in code)
@@ -277,7 +282,7 @@ def run_tests():
     test("find_traders.py presente", bool(finder_code))
 
     # ---- Test 12: Configuración sensata ----
-    print("\n🔍 Configuración")
+    print("\n Configuración")
     test("STOP_LOSS_PCT es negativo", 'STOP_LOSS_PCT' in code and '"-25.0"' in code)
     test("TAKE_PROFIT_PCT es positivo", 'TAKE_PROFIT_PCT' in code and '"40.0"' in code)
     test("MAX_EXPOSURE_PCT es 0.40", '"0.40"' in code)
@@ -295,8 +300,8 @@ def run_tests():
     test("parse_market_date_iso definida", "def parse_market_date_iso(" in code)
     test("format_postmortem_label definida", "def format_postmortem_label(" in code)
 
-    # ---- Test 12b: v10.6.7 Resolution fidelity + allowlist activa ----
-    print("\n🔍 v10.6.7: Resolution fidelity + allowlist activa")
+    # ---- Test 12b: v10.6.10 Resolution fidelity + allowlist activa ----
+    print("\n v10.6.10: Resolution fidelity + allowlist activa")
     test("Dallas usa coords KDAL / Love Field",
          '"Dallas":         {"lat": 32.8459,  "lon": -96.8510,  "name": "Dallas Love Field"}' in code)
     test("RESOLUTION_ICAO existe", "RESOLUTION_ICAO = {" in code)
@@ -330,7 +335,7 @@ def run_tests():
     test("Auditoría NOAA documenta observed proxy",
          "Observed proxy audit" in observed_audit_fn_src and "source=noaa_ncei" in observed_audit_fn_src)
 
-    print("\n🔍 Trader data en Volume")
+    print("\n Trader data en Volume")
     try:
         if trader_code:
             ast.parse(trader_code)
@@ -347,7 +352,7 @@ def run_tests():
     except SyntaxError as e:
         test("Scripts trader sintaxis válida", False, str(e))
 
-    print("\n🔍 Dashboard web")
+    print("\n Dashboard web")
     test("DASHBOARD_ENABLED definido", "DASHBOARD_ENABLED" in code)
     test("DASHBOARD_PORT definido", "DASHBOARD_PORT" in code and 'os.getenv("PORT"' in code)
     test("BANKROLL_LEVELS definido", "BANKROLL_LEVELS" in code)
@@ -364,6 +369,7 @@ def run_tests():
     test("build_dashboard_exit_breakdown definida", "def build_dashboard_exit_breakdown(" in code)
     test("build_dashboard_forecast_quality definida", "def build_dashboard_forecast_quality(" in code)
     test("build_dashboard_city_observation definida", "def build_dashboard_city_observation(" in code)
+    test("build_dashboard_focus_center definida", "def build_dashboard_focus_center(" in code)
     test("build_dashboard_legacy_forecast_drift definida", "def build_dashboard_legacy_forecast_drift(" in code)
     test("build_promotion_checklist definida", "def build_promotion_checklist(" in code)
     test("build_dashboard_snapshot definida", "def build_dashboard_snapshot(" in code)
@@ -374,6 +380,7 @@ def run_tests():
     test("requirements incluye waitress", "waitress==" in requirements_code)
     test("template dashboard existe", os.path.exists(dashboard_template_path))
     test("css dashboard existe", os.path.exists(dashboard_css_path))
+    test("js dashboard existe", os.path.exists(dashboard_js_path))
     test("agent_events.jsonl existe", os.path.exists(agent_events_path))
     test("OPERATIONS_PLAYBOOK existe", os.path.exists(operations_playbook_path))
     test("helper append_agent_event existe", os.path.exists(append_agent_event_path))
@@ -398,13 +405,20 @@ def run_tests():
     test("template dashboard incluye desbloqueos", "dashboard.unlocks" in dashboard_template_code and "Qué falta para habilitar decisiones" in dashboard_template_code)
     test("template dashboard incluye NOAA observado", "dashboard.forecast_quality" in dashboard_template_code and "Calidad Forecast Observada (NOAA)" in dashboard_template_code)
     test("template dashboard incluye estado de observacion por ciudad", "dashboard.city_observation" in dashboard_template_code and "Estado de observacion por ciudad" in dashboard_template_code)
+    test("template dashboard incluye mission HUD focus", "dashboard.focus" in dashboard_template_code and "Mission HUD" in dashboard_template_code and "dashboard.focus.tracks" in dashboard_template_code and "dashboard.focus.city_race" in dashboard_template_code)
+    test("template dashboard carga dashboard.js", "dashboard.js" in dashboard_template_code and "data-focus-tabs" in dashboard_template_code)
     test("template dashboard mantiene bloque legacy drift", "dashboard.legacy_forecast_drift" in dashboard_template_code and "Drift Open-Meteo (historico - no comparable con NOAA)" in dashboard_template_code)
     test("template dashboard muestra n/d sin cierres", "pnl_display" in dashboard_template_code and "win_rate_display" in dashboard_template_code and "drawdown_display" in dashboard_template_code)
-    test("css dashboard en modo oscuro", "--bg: #071018;" in dashboard_css_code and "--card: rgba(12, 20, 29, 0.9);" in dashboard_css_code)
+    test("css dashboard en modo claro", "--bg: #f3ede3;" in dashboard_css_code and "--card: rgba(255, 255, 255, 0.92);" in dashboard_css_code)
     test("css dashboard define table-note", ".table-note" in dashboard_css_code)
     test("css dashboard define estado waiting", ".check-status.waiting" in dashboard_css_code and ".check-tag-waiting" in dashboard_css_code)
     test("css dashboard define estado blocked", ".check-status.blocked" in dashboard_css_code and ".check-tag-blocked" in dashboard_css_code)
     test("css dashboard define trophy-grid", ".trophy-grid" in dashboard_css_code and ".trophy-card" in dashboard_css_code)
+    test("css dashboard define focus layer", ".focus-grid" in dashboard_css_code and ".focus-answer-grid" in dashboard_css_code and ".action-callout" in dashboard_css_code)
+    test("css dashboard define mission HUD", ".focus-tab-bar" in dashboard_css_code and ".mission-track-grid" in dashboard_css_code and ".city-race-list" in dashboard_css_code)
+    test("css dashboard define city grouping cards", ".city-zone-grid" in dashboard_css_code and ".city-card-grid" in dashboard_css_code and ".blocked-pill-list" in dashboard_css_code)
+    test("css dashboard define layer toggle", ".layer-toggle" in dashboard_css_code and ".layer-toggle-content" in dashboard_css_code)
+    test("js dashboard define tabs focus", "data-panel-target" in dashboard_js_code and "activate(\"overview\")" in dashboard_js_code)
     if os.path.exists(agent_events_path):
         try:
             with open(agent_events_path, "r", encoding="utf-8") as f:
@@ -426,24 +440,26 @@ def run_tests():
             test("agent_events.jsonl legible", False, str(e))
 
     # ---- Test 13: Nuevas funcionalidades v10.4.1 ----
-    print("\n🔍 Nuevas funcionalidades v10.4.1")
+    print("\n Nuevas funcionalidades v10.4.1")
     test("CYCLE_SUMMARY_FILE definido", "CYCLE_SUMMARY_FILE" in code)
     test("CYCLES_HISTORY_FILE definido", "CYCLES_HISTORY_FILE" in code)
     test("cycles_history.jsonl append-only", "cycles_history.jsonl" in code)
     test("cycle_summary se guarda en main()", "cycle_data" in code and "CYCLE_SUMMARY_FILE" in code)
-    test("cycle_data incluye version v10.6.7", '"version"' in code and "v10.6.7" in code)
+    test("cycle_data incluye version v10.6.10", '"version"' in code and "v10.6.10" in code)
     test("cycle_data incluye logic_series", '"logic_series": LOGIC_SERIES' in code)
     test("cycle_data incluye logic_cycle_number", '"logic_cycle_number"' in code)
 
     # ---- Test 14: Rediseño Telegram v10.4.2 ----
-    print("\n🔍 Rediseño Telegram v10.4.2")
+    print("\n Rediseño Telegram v10.4.2")
     test("send_telegram_paged definida", "def send_telegram_paged(" in code)
     test("_parse_position_label definida", "def _parse_position_label(" in code)
     test("_get_portfolio_and_positions definida", "def _get_portfolio_and_positions(" in code)
     test("cmd_info definida", "def cmd_info(" in code)
     test("cmd_postmortem definida", "def cmd_postmortem(" in code)
     test("cmd_accuracy definida", "def cmd_accuracy(" in code)
+    test("cmd_focus definida", "def cmd_focus(" in code)
     test("cmd_noaa definida", "def cmd_noaa(" in code)
+    test("/focus en COMMANDS", '"focus": cmd_focus' in code)
     test("/info en COMMANDS", '"info": cmd_info' in code)
     test("/postmortem en COMMANDS", '"postmortem": cmd_postmortem' in code)
     test("/accuracy en COMMANDS", '"accuracy": cmd_accuracy' in code)
@@ -455,10 +471,10 @@ def run_tests():
     test("Bug #13: send_telegram_paged en cmd_log", "send_telegram_paged" in code and "cmd_log" in code)
     test("Bug #13: send_telegram_paged en cmd_cartera", "send_telegram_paged" in code)
     test("_parse_position_label usa centavos (¢)", "¢" in code)
-    test("cmd_estado versión correcta", "Bot v10.6.7" in code or "v10.6.7" in code)
+    test("cmd_estado versión correcta", "Bot v10.6.10" in code or "v10.6.10" in code)
 
     # ---- Test 14c: Zonas horarias reales v10.4.5 ----
-    print("\n🔍 Zonas horarias reales")
+    print("\n Zonas horarias reales")
     test("get_min_days_for_city usa ZoneInfo", "ZoneInfo(" in code and "astimezone" in code)
     test("London usa Europe/London", '"London":         "Europe/London"' in code)
     test("Madrid usa Europe/Madrid", '"Madrid":         "Europe/Madrid"' in code)
@@ -468,7 +484,7 @@ def run_tests():
     test("Tel Aviv usa Asia/Jerusalem", '"Tel Aviv":       "Asia/Jerusalem"' in code)
 
     # ---- Test 14b: Fixes v10.4.3 ----
-    print("\n🔍 Fixes v10.4.3")
+    print("\n Fixes v10.4.3")
     test("Ciclos persistentes: _load_cycle_count definida",
          "def _load_cycle_count(" in code)
     test("Ciclos por serie: _load_cycle_counts definida",
@@ -489,21 +505,21 @@ def run_tests():
     test("cmd_estado muestra Intra-SL", "🛡 Intra-SL:" in code or "Intra-SL:" in code)
     test("cmd_estado muestra total y serie", "serie v{LOGIC_SERIES}" in code and "total |" in code)
 
-    print("\n🔍 Bloqueo London")
+    print("\n Bloqueo London")
     test("main filtra ciudades bloqueadas", "blocked_city_skip" in code and "Ciudades bloqueadas operativamente" in code)
     test("London se bloquea por helper", 'if is_city_blocked(city):' in code)
 
     # ---- Test 15: Integridad de COMMANDS (todos los botones siguen presentes) ----
-    print("\n🔍 Integridad de COMMANDS")
-    for cmd in ["estado", "cartera", "ordenes", "log", "logfull",
+    print("\n Integridad de COMMANDS")
+    for cmd in ["focus", "estado", "cartera", "ordenes", "log", "logfull",
                 "forzar", "modo", "traders", "rendimiento", "info", "postmortem", "accuracy",
                 "noaa", "observabilidad",
                 "confirmar_real", "confirmar_dry", "cancelar_modo"]:
         test(f'COMMANDS tiene "{cmd}"', f'"{cmd}"' in code)
 
     # ---- Test 16: send_telegram_paged en todos los comandos de respuesta larga ----
-    print("\n🔍 send_telegram_paged en comandos relevantes")
-    for cmd_name in ["cmd_cartera", "cmd_ordenes", "cmd_log", "cmd_logfull",
+    print("\n send_telegram_paged en comandos relevantes")
+    for cmd_name in ["cmd_focus", "cmd_cartera", "cmd_ordenes", "cmd_log", "cmd_logfull",
                      "cmd_traders", "cmd_rendimiento", "cmd_info", "cmd_postmortem", "cmd_accuracy",
                      "cmd_noaa"]:
         # Buscar la función y verificar que usa send_telegram_paged
@@ -518,13 +534,13 @@ def run_tests():
             test(f"{cmd_name} existe", False, "función no encontrada")
 
     # ---- Test 17: api_error propagado en _get_portfolio_and_positions ----
-    print("\n🔍 Robustez _get_portfolio_and_positions")
+    print("\n Robustez _get_portfolio_and_positions")
     test("api_error en return de _get_portfolio", '"api_error"' in code)
     test("api_error se muestra en cmd_cartera",
          "api_error" in code and "Error API posiciones" in code)
 
     # ---- Test 18: cmd_info contiene campos esenciales ----
-    print("\n🔍 Contenido de cmd_info")
+    print("\n Contenido de cmd_info")
     info_match = re.search(r"def cmd_info\(.*?(?=\ndef |\Z)", code, re.DOTALL)
     if info_match:
         info_body = info_match.group()
@@ -538,7 +554,7 @@ def run_tests():
         test("cmd_info encontrada", False, "función no encontrada")
 
     # ---- Test 19: Tests funcionales reales ----
-    print("\n🔍 Tests funcionales")
+    print("\n Tests funcionales")
     try:
         ns = {"re": re, "datetime": datetime, "timezone": timezone}
         exec(get_function_source(module_ast, code_lines, "parse_city_from_title"), ns)
@@ -577,8 +593,8 @@ def run_tests():
         with open(tmp_cycles, "w", encoding="utf-8") as f:
             f.write(json.dumps({"version": "v10.4.8", "cycle_number": 1}, ensure_ascii=False) + "\n")
             f.write(json.dumps({"version": "v10.5.1", "cycle_number": 2}, ensure_ascii=False) + "\n")
-            f.write(json.dumps({"logic_series": "10.6", "version": "v10.6.7", "cycle_number": 3}, ensure_ascii=False) + "\n")
-            f.write(json.dumps({"logic_series": "10.6", "version": "v10.6.7", "cycle_number": 4}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"logic_series": "10.6", "version": "v10.6.10", "cycle_number": 3}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"logic_series": "10.6", "version": "v10.6.10", "cycle_number": 4}, ensure_ascii=False) + "\n")
         cycle_ns = {
             "os": os,
             "json": json,
@@ -992,6 +1008,11 @@ def run_tests():
         test("city observation: cuenta activas y NOAA interpretables",
              city_observation["active_count"] == 4 and city_observation["observed_ready_count"] == 1,
              city_observation)
+        test("city observation: expone grupos para dashboard",
+             len(city_observation["active_rows"]) == 4
+             and len(city_observation["blocked_rows"]) >= 1
+             and len(city_observation["watch_rows"]) >= 1,
+             city_observation)
         test("city observation: Chicago queda operando con observabilidad",
              chicago_watch_row["trading_label"] == "Activa"
              and chicago_watch_row["noaa_label"] == "Interpretable"
@@ -1007,6 +1028,84 @@ def run_tests():
              and nyc_watch_row["noaa_label"] == "Sin NOAA"
              and nyc_watch_row["state_label"] == "Referencia historica",
              nyc_watch_row)
+
+        focus_ns = {
+            "OBSERVED_AUDIT_CITIES": {"Chicago", "Atlanta", "Buenos Aires", "Dallas"},
+            "OBSERVED_FORECAST_MIN_SAMPLE": 3,
+            "OBSERVED_FORECAST_GLOBAL_TARGET": 10,
+            "LOW_BANKROLL_THRESHOLD": 5.0,
+            "PENDING_EXIT_ALERT_HOURS": 12.0,
+            "REVIEW_READY_CLEAN_TRADES": 30,
+            "LOGIC_SERIES": "10.6",
+        }
+        exec(get_function_source(module_ast, code_lines, "build_dashboard_focus_center"), focus_ns)
+        focus_center = focus_ns["build_dashboard_focus_center"](
+            alerts={
+                "signals": {"status": "ok", "actionable": 4},
+                "pending_stuck": [],
+                "flagged_cities": [],
+                "active_items": [],
+                "low_bankroll": False,
+                "portfolio_total": 14.75,
+            },
+            forecast_quality={
+                "sample_size": 4,
+                "coverage_display": "2 / 4 ciudades con muestra",
+                "note": "lectura global preliminar",
+            },
+            city_observation={
+                "active_count": 4,
+                "blocked_count": 10,
+                "observed_ready_count": 1,
+                "observed_configured_count": 4,
+            },
+            series_stats={"closed_count": 0},
+            series_clean_stats={"count": 2},
+            next_run_display="2026-03-30 16:00 UTC",
+            last_cycle_label="Total #7 | Serie v10.6 #3",
+        )
+        test("focus center: prioriza limitacion de observabilidad sobre trading",
+             focus_center["status_label"] == "Sano con limitaciones"
+             and focus_center["answers"][2]["answer"] == "Cobertura NOAA del universo activo"
+             and focus_center["action"]["title"] == "No tocar trading: priorizar crecimiento de muestra NOAA",
+             focus_center)
+        test("focus center: explicita aprendizaje y quick stats",
+             focus_center["answers"][3]["answer"] == "Operando y aprendiendo"
+             and focus_center["quick_stats"][1]["value"] == "1/4"
+             and len(focus_center["drivers"]) == 4,
+             focus_center)
+        test("focus center: expone mission HUD y tracks",
+             focus_center["mission"]["badge"] == "accent"
+             and len(focus_center["tracks"]) == 4
+             and focus_center["tracks"][1]["value_text"] == "1/4",
+             focus_center)
+        test("focus center: expone stage path para el HUD",
+             len(focus_center["stage_path"]) == 4
+             and focus_center["health_score"] > 0,
+             focus_center)
+
+        focus_low_bankroll = focus_ns["build_dashboard_focus_center"](
+            alerts={
+                "signals": {"status": "ok", "actionable": 2},
+                "pending_stuck": [],
+                "flagged_cities": [],
+                "active_items": [{"title": "Bankroll bajo", "detail": "Total cartera: $4.25", "level": "critical"}],
+                "low_bankroll": True,
+                "portfolio_total": 4.25,
+            },
+            forecast_quality={"sample_size": 0, "coverage_display": "0 / 4 ciudades con muestra", "note": "sin muestra"},
+            city_observation={"active_count": 4, "blocked_count": 10, "observed_ready_count": 0, "observed_configured_count": 4},
+            series_stats={"closed_count": 0},
+            series_clean_stats={"count": 0},
+        )
+        test("focus center: eleva bankroll bajo a intervencion requerida",
+             focus_low_bankroll["status_label"] == "Intervención requerida"
+             and focus_low_bankroll["action"]["title"] == "Recargar bankroll antes del próximo ciclo",
+             focus_low_bankroll)
+        test("focus center: bankroll bajo degrada mission HUD",
+             focus_low_bankroll["health_score"] < 60
+             and focus_low_bankroll["mission"]["badge"] == "bad",
+             focus_low_bankroll)
 
         legacy_drift_ns = {
             "FORECAST_AUDIT_KEY": "forecast_vs_real",
@@ -1031,8 +1130,8 @@ def run_tests():
             "datetime": datetime,
             "timezone": timezone,
             "_load_cycle_counts": lambda: (5, 1),
-            "load_cycle_summary_data": lambda: {"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.6.7"},
-            "load_cycle_history": lambda limit=None: [{"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.6.7", "timestamp_utc": "2026-03-29T11:08:00+00:00", "buys": [], "management": {"n_sold": 1}, "exposure_after": 2.94}],
+            "load_cycle_summary_data": lambda: {"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.6.10"},
+            "load_cycle_history": lambda limit=None: [{"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.6.10", "timestamp_utc": "2026-03-29T11:08:00+00:00", "buys": [], "management": {"n_sold": 1}, "exposure_after": 2.94}],
             "load_audit_data": lambda: {"pending_sells": [], "forecast_vs_real": [], "observed_vs_forecast": [], "errors": []},
             "get_clean_closed_trade_stats": lambda: {"count": 18, "sell": 12, "loss_total": 6, "resolved_win": 0},
             "get_logic_series_clean_closed_trade_stats": lambda: {"count": 0, "sell": 0, "loss_total": 0, "resolved_win": 0},
@@ -1046,6 +1145,7 @@ def run_tests():
             "build_dashboard_exit_breakdown": lambda **kwargs: {"validated_rows": [{"label": "Take-profit", "balance_display": "$+1.00"}], "series_rows": [{"label": "Pending exit serie v10.6", "balance_display": "$-0.50"}]},
             "build_dashboard_forecast_quality": lambda **kwargs: {"sample_size": 0, "sample_display": "0 mercados", "mae_display": "acumulando muestra...", "bias_display": "acumulando muestra...", "coverage_display": "0 / 4 ciudades con muestra", "coverage_detail": "0 / 4 con >= 3 casos", "city_rows": [], "latest_rows": [], "note": "acumulando muestra...", "note_level": "muted", "last_record_display": "n/d", "kpis_ready": False, "global_ready": False},
             "build_dashboard_city_observation": lambda **kwargs: {"tracked_count": 4, "active_count": 4, "blocked_count": 0, "observed_ready_count": 0, "observed_configured_count": 4, "summary": "4 activas", "note": "watch", "note_level": "muted", "rows": []},
+            "build_dashboard_focus_center": lambda **kwargs: {"status_label": "Sano con limitaciones", "status_badge": "accent", "headline": "sample", "summary": "watch", "answers": [], "action": {"title": "No tocar trading", "detail": "NOAA", "badge": "accent"}, "incidents": [], "quick_stats": [], "drivers": [], "detail_routes": []},
             "build_dashboard_legacy_forecast_drift": lambda **kwargs: {"sample_size": 0, "sample_display": "0 mercados", "mae_display": "n/d", "bias_display": "n/d", "last_record_display": "n/d", "latest_case": "", "note": "legacy"},
             "build_dashboard_trophies": lambda **kwargs: [{"label": "Mejor operación", "value": "n/d"}],
             "build_dashboard_unlocks": lambda **kwargs: [{"label": "Activar win rate", "status": "waiting"}],
@@ -1056,7 +1156,7 @@ def run_tests():
             "compute_agent_scorecard": lambda events: [],
             "build_agent_rivalry": lambda events: [],
             "_extract_logic_series": lambda value: "10.5" if "10.5" in str(value) else "10.4" if "10.4" in str(value) else None,
-            "BOT_VERSION": "v10.6.7",
+            "BOT_VERSION": "v10.6.10",
             "LOGIC_SERIES": "10.6",
             "DRY_RUN": False,
             "DASHBOARD_USER": "pablo",
@@ -1072,6 +1172,7 @@ def run_tests():
         test("snapshot: incluye exit_breakdown", "exit_breakdown" in snapshot and snapshot["exit_breakdown"]["validated_rows"][0]["label"] == "Take-profit", snapshot)
         test("snapshot: incluye forecast_quality", "forecast_quality" in snapshot and snapshot["forecast_quality"]["sample_size"] == 0, snapshot)
         test("snapshot: incluye city_observation", "city_observation" in snapshot and snapshot["city_observation"]["tracked_count"] == 4, snapshot)
+        test("snapshot: incluye focus", "focus" in snapshot and snapshot["focus"]["action"]["title"] == "No tocar trading", snapshot)
         test("snapshot: incluye legacy_forecast_drift", "legacy_forecast_drift" in snapshot and snapshot["legacy_forecast_drift"]["last_record_display"] == "n/d", snapshot)
         test("snapshot: incluye trophies", "trophies" in snapshot and snapshot["trophies"][0]["label"] == "Mejor operación", snapshot)
         test("snapshot: incluye unlocks", "unlocks" in snapshot and snapshot["unlocks"][0]["label"] == "Activar win rate", snapshot)
@@ -1205,7 +1306,7 @@ def run_tests():
         os.close(fd)
         with open(tmp_cycle_summary, "w", encoding="utf-8") as f:
             json.dump({
-                "version": "v10.6.7",
+                "version": "v10.6.10",
                 "cycle_number": 12,
                 "timestamp_utc": "2026-03-28T16:00:33.073674+00:00",
                 "management": {"n_kept": 0, "n_sold": 1, "n_resolved": 0},
@@ -1217,7 +1318,7 @@ def run_tests():
             "json": __import__("json"),
             "datetime": datetime,
             "send_telegram_paged": lambda text, with_menu=False, page_size=3800: info_messages.append(text),
-            "BOT_VERSION": "v10.6.7",
+            "BOT_VERSION": "v10.6.10",
             "LOGIC_SERIES": "10.6",
             "_extract_logic_series": cycle_ns["_extract_logic_series"],
             "DRY_RUN": False,
@@ -1236,7 +1337,7 @@ def run_tests():
         exec(get_function_source(module_ast, code_lines, "cmd_info"), info_ns)
         info_ns["cmd_info"]()
         info_msg = info_messages[-1] if info_messages else ""
-        test("info: versión visible correcta", "BOT POLYMARKET v10.6.7" in info_msg, info_msg[:120])
+        test("info: versión visible correcta", "BOT POLYMARKET v10.6.10" in info_msg, info_msg[:120])
         test("info: usa cycle_summary como fallback de último", "Último: 2026-03-28 16:00 UTC" in info_msg, info_msg[:220])
         test("info: muestra doble contador", "Ciclos completados: 12 total | 3 serie v10.6" in info_msg, info_msg[:240])
         test("info: muestra ciclo total y de serie", "Ciclo total #12 | serie v10.6 #3" in info_msg, info_msg[:260])
@@ -1311,6 +1412,54 @@ def run_tests():
         test("noaa cmd: recuerda que NOAA no es settlement final",
              "no equivale a la resolucion final de Polymarket" in noaa_msg,
              noaa_msg[:320])
+
+        focus_messages = []
+        focus_ns = {
+            "datetime": datetime,
+            "load_audit_data": lambda: {},
+            "get_city_accuracy": lambda: {},
+            "load_cycle_summary_data": lambda: {"cycle_number": 7, "logic_cycle_number": 3, "logic_series": "10.6", "version": "v10.6.10"},
+            "_extract_logic_series": lambda value: "10.6" if "10.6" in str(value) else None,
+            "bot_state": {"next_run": datetime(2026, 3, 30, 16, 0, tzinfo=timezone.utc)},
+            "get_dashboard_alert_summary": lambda: {},
+            "build_dashboard_forecast_quality": lambda audit=None: {},
+            "build_dashboard_city_observation": lambda audit=None, city_accuracy=None: {},
+            "get_logic_series_stats": lambda: {},
+            "get_logic_series_clean_closed_trade_stats": lambda: {},
+            "build_dashboard_focus_center": lambda **kwargs: {
+                "status_badge": "accent",
+                "headline": "Sistema sano; el cuello de botella es NOAA",
+                "summary": "NOAA 4/10 casos | 1/4 ciudades interpretables.",
+                "answers": [
+                    {"question": "¿Está sano el sistema?", "answer": "Sano con limitaciones", "detail": "NOAA corto", "badge": "accent"},
+                    {"question": "¿Hay que intervenir hoy?", "answer": "No; solo monitorizar", "detail": "Sin incidentes", "badge": "good"},
+                    {"question": "¿Qué me limita ahora?", "answer": "Cobertura NOAA del universo activo", "detail": "1/4", "badge": "accent"},
+                    {"question": "¿Estamos aprendiendo o solo operando?", "answer": "Operando y aprendiendo", "detail": "4/10", "badge": "accent"},
+                ],
+                "action": {"title": "No tocar trading: priorizar crecimiento de muestra NOAA", "detail": "1/4 activas con NOAA interpretable", "badge": "accent"},
+                "incidents": [],
+                "quick_stats": [
+                    {"label": "Universo activo", "value": "4 activas", "detail": "10 bloqueadas"},
+                    {"label": "NOAA interpretable", "value": "1/4", "detail": "ciudades con >= 3 casos"},
+                    {"label": "Muestra NOAA", "value": "4/10", "detail": "2 / 4 ciudades con muestra"},
+                ],
+                "drivers": [],
+                "detail_routes": [],
+            },
+            "send_telegram_paged": lambda text, with_menu=False, page_size=3800: focus_messages.append(text),
+        }
+        exec(get_function_source(module_ast, code_lines, "cmd_focus"), focus_ns)
+        focus_ns["cmd_focus"]()
+        focus_msg = focus_messages[-1] if focus_messages else ""
+        test("focus cmd: muestra las cinco preguntas y accion del dia",
+             "Focus / Discovery-Stabilization" in focus_msg
+             and "¿Está sano el sistema?" in focus_msg
+             and "Acción recomendada hoy" in focus_msg
+             and "No tocar trading: priorizar crecimiento de muestra NOAA" in focus_msg,
+             focus_msg[:420])
+        test("focus cmd: deja rutas rapidas hacia detalle",
+             "/estado sistema" in focus_msg and "/noaa muestra" in focus_msg and "/detalle ciclo raw" in focus_msg,
+             focus_msg[:420])
 
         fd, tmp_signals = tempfile.mkstemp(
             dir=tempfile.gettempdir(),
@@ -1509,7 +1658,7 @@ def run_tests():
         test("Tests funcionales ejecutan sin excepción", False, str(e))
 
     # ---- Test 20: postmortem.json ----
-    print("\n🔍 Postmortem")
+    print("\n Postmortem")
     test("POSTMORTEM_FILE definido", "POSTMORTEM_FILE" in code)
     test("load_postmortem_data definida", "def load_postmortem_data(" in code)
     test("save_postmortem_data definida", "def save_postmortem_data(" in code)
@@ -1617,7 +1766,7 @@ def run_tests():
         test("Postmortem funcional ejecuta sin excepción", False, str(e))
 
     # ---- Test 21: alertas de observabilidad ----
-    print("\n🔍 Alertas de observabilidad")
+    print("\n Alertas de observabilidad")
     test("ALERTS_FILE definido", "ALERTS_FILE" in code)
     test("load_alerts_state definida", "def load_alerts_state(" in code)
     test("save_alerts_state definida", "def save_alerts_state(" in code)
@@ -2222,7 +2371,7 @@ def run_tests():
         test("Alertas funcionales ejecutan sin excepción", False, str(e))
 
     # ---- Test v10.5.0: Sigma widening ----
-    print("\n🔍 v10.5.0: Sigma widening")
+    print("\n v10.5.0: Sigma widening")
     try:
         sigma_ns = {"math": __import__("math")}
         exec(get_function_source(module_ast, code_lines, "get_uncertainty"), sigma_ns)
@@ -2238,7 +2387,7 @@ def run_tests():
         test("sigma funcional ejecuta sin excepción", False, str(e))
 
     # ---- Test v10.6: Revert trading logic + fixes ----
-    print("\n🔍 v10.6: Revert trading logic + fixes")
+    print("\n v10.6: Revert trading logic + fixes")
     test("MIN_EDGE_EXACT eliminado", "MIN_EDGE_EXACT" not in code or "sin MIN_EDGE_EXACT" in code)
     test("Edge check usa MIN_EDGE directo", "edge_pct < MIN_EDGE" in code)
     test("LOGIC_SERIES es 10.6", 'LOGIC_SERIES = "10.6"' in code)
@@ -2250,7 +2399,7 @@ def run_tests():
     test("Drawdown ordena por fecha", "closed_sorted" in code and "closed_at" in code)
 
     # ---- Test v10.5.0: Smart alerts ----
-    print("\n🔍 v10.5.0: Smart alerts")
+    print("\n v10.5.0: Smart alerts")
     test("DRAWDOWN_WINDOW definido", "DRAWDOWN_WINDOW" in code)
     test("DRAWDOWN_THRESHOLD definido", "DRAWDOWN_THRESHOLD" in code)
     test("SCALING_TIERS definido", "SCALING_TIERS" in code)
@@ -2270,7 +2419,7 @@ def run_tests():
     test("Strategy Signal en run_observability", "Strategy Signal" in code)
 
     # ---- Test v10.5.0: _get_recent_closed_trades funcional ----
-    print("\n🔍 v10.5.0: _get_recent_closed_trades funcional")
+    print("\n v10.5.0: _get_recent_closed_trades funcional")
     try:
         grc_ns = {}
         exec(get_function_source(module_ast, code_lines, "load_postmortem_data"), grc_ns)
@@ -2305,7 +2454,7 @@ def run_tests():
         test("_get_recent_closed_trades funcional ejecuta", False, str(e))
 
     # ---- Test v10.5.1: Intra-cycle SL monitor ----
-    print("\n🔍 v10.5.1: Intra-cycle SL monitor")
+    print("\n v10.5.1: Intra-cycle SL monitor")
     test("INTRA_SL_INTERVAL definido", "INTRA_SL_INTERVAL" in code)
     test("INTRA_SL_INTERVAL default 0", '"INTRA_SL_INTERVAL", "0"' in code)
     test("sell_lock definido", "sell_lock" in code and "threading.Lock()" in code)
@@ -2318,7 +2467,7 @@ def run_tests():
     test("IntraSL thread en __main__", 'name="IntraSL"' in code)
 
     # ---- Test v10.5.2: City accuracy tracker ----
-    print("\n🔍 v10.5.2: City accuracy tracker")
+    print("\n v10.5.2: City accuracy tracker")
     test("CITY_MIN_TRADES_FOR_BLOCK definido", "CITY_MIN_TRADES_FOR_BLOCK" in code)
     test("CITY_BLOCK_WIN_RATE definido", "CITY_BLOCK_WIN_RATE" in code)
     test("get_city_accuracy definida", "def get_city_accuracy(" in code)
@@ -2328,7 +2477,7 @@ def run_tests():
     test("/accuracy en MENU_KEYBOARD", '"callback_data": "accuracy"' in code)
     test("cmd_accuracy vuelve con menú", 'send_telegram("Sin datos de accuracy todavía.", with_menu=True)' in code and 'send_telegram_paged("\\n".join(lines), with_menu=True)' in code)
     test("Win rate en rendimiento", "WR:" in code)
-    test("Version v10.6.7", "v10.6.7" in code)
+    test("Version v10.6.10", "v10.6.10" in code)
 
     # ---- Resultado ----
     print(f"\n{'='*50}")
@@ -2337,7 +2486,7 @@ def run_tests():
         print(f"✅ TODOS LOS TESTS PASARON ({passed}/{total})")
         print("Puedes hacer deploy con confianza.")
     else:
-        print(f"❌ {failed} TESTS FALLARON de {total}")
+        print(f" {failed} TESTS FALLARON de {total}")
         print("Errores:")
         for e in errors:
             print(f"  - {e}")
@@ -2350,3 +2499,4 @@ def run_tests():
 if __name__ == "__main__":
     success = run_tests()
     sys.exit(0 if success else 1)
+

@@ -14,7 +14,8 @@
         <p class="eyebrow">Polymarket Bot Dashboard</p>
         <h1>{{ dashboard.title }}</h1>
         <p class="hero-copy">
-          Monitor visual del sistema, progreso de bankroll y rivalidad constructiva entre agentes.
+          Capa 1 para discovery / stabilization: salud real, incidentes, allowlist,
+          crecimiento NOAA y acción recomendada sin mezclarlo con ruido operativo.
         </p>
       </div>
       <div class="hero-meta">
@@ -31,6 +32,380 @@
       Configura <code>DASHBOARD_USER</code> y <code>DASHBOARD_PASSWORD</code> en Railway antes de usar este panel como endpoint público.
     </section>
     {% endif %}
+
+    <section class="layer-block layer-block-focus" data-focus-shell>
+      <div class="layer-header layer-header-focus">
+        <div>
+          <p class="section-kicker">Capa 1</p>
+          <h2>Mission HUD · Discovery / Stabilization</h2>
+        </div>
+        <div class="hero-meta hero-meta-inline">
+          <span class="badge badge-{{ dashboard.focus.status_badge }}">{{ dashboard.focus.status_label }}</span>
+          <span class="badge badge-{{ dashboard.focus.mission.badge }}">{{ dashboard.focus.mission.label }}</span>
+        </div>
+      </div>
+      <p class="layer-copy">
+        La primera pantalla ya no es un listado de metricas: es la mision operativa actual,
+        sus barras de progreso y el bloqueo dominante que decide si hoy actuamos o solo seguimos recogiendo evidencia.
+      </p>
+
+      <section class="grid focus-command-grid">
+        <article class="card mission-card">
+          <div class="mission-topline">
+            <span class="mission-chip mission-chip-{{ dashboard.focus.mission.badge }}">Priority now</span>
+            <span class="mission-chip mission-chip-muted">Layer 1 HUD</span>
+          </div>
+          <h2>{{ dashboard.focus.mission.title }}</h2>
+          <p class="focus-summary">{{ dashboard.focus.mission.detail }}</p>
+
+          <div class="mission-readings">
+            <div class="mission-reading mission-reading-{{ dashboard.focus.status_badge }}">
+              <span class="mission-reading-label">System HP</span>
+              <strong>{{ dashboard.focus.health_score }}</strong>
+              <span class="mission-reading-detail">{{ dashboard.focus.summary }}</span>
+            </div>
+            {% for track in dashboard.focus.tracks[1:3] %}
+            <div class="mission-reading mission-reading-{{ track.badge }}">
+              <span class="mission-reading-label">{{ track.label }}</span>
+              <strong>{{ track.value_text }}</strong>
+              <span class="mission-reading-detail">{{ track.target_text }}</span>
+            </div>
+            {% endfor %}
+          </div>
+
+          <div class="action-callout action-{{ dashboard.focus.action.badge }}">
+            <span class="action-label">Accion recomendada hoy</span>
+            <strong>{{ dashboard.focus.action.title }}</strong>
+            <span>{{ dashboard.focus.action.detail }}</span>
+          </div>
+
+          <div class="route-list">
+            {% for route in dashboard.focus.detail_routes %}
+            <span class="route-pill"><code>{{ route.label }}</code> {{ route.detail }}</span>
+            {% endfor %}
+          </div>
+        </article>
+
+        <article class="card mission-stage-card">
+          <div class="card-head">
+            <div>
+              <p class="section-kicker">Ruta operativa</p>
+              <h2>Pipeline de prioridad</h2>
+            </div>
+            <span class="badge badge-accent">Mission path</span>
+          </div>
+          <div class="mission-stage-list">
+            {% for stage in dashboard.focus.stage_path %}
+            <div class="mission-stage mission-stage-{{ stage.status }}">
+              <div class="mission-stage-node"></div>
+              <div class="mission-stage-copy">
+                <div class="mission-stage-head">
+                  <strong>{{ stage.label }}</strong>
+                  <span class="badge badge-{{ stage.status }}">{{ stage.tag }}</span>
+                </div>
+                <span class="mission-stage-value">{{ stage.value }}</span>
+                <span class="mission-stage-detail">{{ stage.detail }}</span>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </article>
+      </section>
+
+      <div class="focus-tab-bar" data-focus-tabs>
+        <button type="button" class="focus-tab is-active" data-panel-target="overview">Overview</button>
+        <button type="button" class="focus-tab" data-panel-target="progress">Progress</button>
+        <button type="button" class="focus-tab" data-panel-target="cities">Cities</button>
+      </div>
+
+      <section class="focus-panel is-active" data-panel="overview">
+        <section class="grid focus-grid">
+          <div class="focus-answer-grid">
+            {% for answer in dashboard.focus.answers %}
+            <article class="card focus-answer-card">
+              <div class="answer-head">
+                <span class="focus-question">{{ answer.question }}</span>
+                <span class="badge badge-{{ answer.badge }}">{{ answer.tag }}</span>
+              </div>
+              <strong class="focus-answer">{{ answer.answer }}</strong>
+              <p class="focus-detail">{{ answer.detail }}</p>
+            </article>
+            {% endfor %}
+          </div>
+
+          <article class="card focus-primary-card">
+            <div class="card-head">
+              <div>
+                <p class="section-kicker">Lectura rapida</p>
+                <h2>{{ dashboard.focus.headline }}</h2>
+              </div>
+              <span class="badge badge-{{ dashboard.focus.action.badge }}">Accion</span>
+            </div>
+            <p class="focus-summary">{{ dashboard.focus.summary }}</p>
+            <section class="grid cards-4 focus-stats-grid">
+              {% for item in dashboard.focus.quick_stats %}
+              <article class="mini-card focus-mini-card">
+                <span class="stat-label">{{ item.label }}</span>
+                <strong class="stat-value">{{ item.value }}</strong>
+                <span class="stat-sub">{{ item.detail }}</span>
+              </article>
+              {% endfor %}
+            </section>
+          </article>
+        </section>
+
+        <section class="grid layout-main focus-lower-grid">
+          <article class="card">
+            <div class="card-head">
+              <div>
+                <p class="section-kicker">Incidentes</p>
+                <h2>Salud real e incidentes</h2>
+              </div>
+            </div>
+            {% if dashboard.focus.incidents %}
+            <div class="list-stack compact">
+              {% for item in dashboard.focus.incidents %}
+              <div class="list-row">
+                <div class="check-body">
+                  <strong>{{ item.title }}</strong>
+                  <span>{{ item.detail }}</span>
+                </div>
+                <span class="badge badge-{{ item.badge }}">Activa</span>
+              </div>
+              {% endfor %}
+            </div>
+            {% else %}
+            <div class="notice notice-good">Sin incidentes operativos activos relevantes en este momento.</div>
+            {% endif %}
+          </article>
+
+          <article class="card">
+            <div class="card-head">
+              <div>
+                <p class="section-kicker">Drivers</p>
+                <h2>Que esta limitando ahora</h2>
+              </div>
+            </div>
+            <div class="checklist">
+              {% for item in dashboard.focus.drivers %}
+              <div class="check-item check-item-{{ item.status }}">
+                <div class="check-status {{ item.status }}"></div>
+                <div class="check-body">
+                  <strong>{{ item.label }}</strong>
+                  <span>{{ item.value }} · {{ item.detail }}</span>
+                </div>
+                <span class="check-tag check-tag-{{ item.status }}">{{ item.tag }}</span>
+              </div>
+              {% endfor %}
+            </div>
+          </article>
+        </section>
+      </section>
+
+      <section class="focus-panel" data-panel="progress" hidden>
+        <section class="grid mission-track-grid">
+          {% for track in dashboard.focus.tracks %}
+          <article class="card mission-track-card mission-track-card-{{ track.badge }}">
+            <div class="mission-track-head">
+              <div>
+                <p class="section-kicker">{{ track.tag }}</p>
+                <h2>{{ track.label }}</h2>
+              </div>
+              <span class="badge badge-{{ track.badge }}">{{ track.value_text }}</span>
+            </div>
+            <p class="mission-track-copy">{{ track.detail }}</p>
+            <div class="mission-track-bar">
+              <div class="mission-track-fill mission-track-fill-{{ track.badge }}" style="width: {{ track.pct }}%"></div>
+            </div>
+            <div class="mission-track-meta">
+              <span>{{ track.value_text }}</span>
+              <span>{{ track.target_text }}</span>
+            </div>
+          </article>
+          {% endfor %}
+        </section>
+      </section>
+
+      <section class="focus-panel" data-panel="cities" hidden>
+        <section class="grid focus-city-grid">
+          <article class="card">
+            <div class="card-head">
+              <div>
+                <p class="section-kicker">City race</p>
+                <h2>Cobertura NOAA por ciudad</h2>
+              </div>
+              <span class="badge badge-accent">target {{ dashboard.focus.city_race[0].target if dashboard.focus.city_race else 3 }}</span>
+            </div>
+            {% if dashboard.focus.city_race %}
+            <div class="city-race-list">
+              {% for row in dashboard.focus.city_race %}
+              <div class="city-race-row">
+                <div class="city-race-head">
+                  <strong>{{ row.city }}</strong>
+                  <span class="badge badge-{{ row.badge }}">{{ row.tag }}</span>
+                </div>
+                <div class="city-race-bar">
+                  <div class="city-race-fill city-race-fill-{{ row.badge }}" style="width: {{ row.pct }}%"></div>
+                </div>
+                <div class="city-race-meta">
+                  <span>{{ row.value_text }}</span>
+                  <span>{{ row.detail }}</span>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+            {% else %}
+            <div class="notice notice-muted">Todavia no hay ciudades con NOAA configurado o universo activo suficiente para mostrar carrera.</div>
+            {% endif %}
+          </article>
+
+          <article class="card mission-console-card">
+            <div class="card-head">
+              <div>
+                <p class="section-kicker">Operator console</p>
+                <h2>Que mirar despues</h2>
+              </div>
+              <span class="badge badge-{{ dashboard.focus.action.badge }}">Next</span>
+            </div>
+            <p class="focus-summary">{{ dashboard.focus.action.detail }}</p>
+            <div class="checklist">
+              {% for route in dashboard.focus.detail_routes %}
+              <div class="check-item">
+                <div class="check-status waiting"></div>
+                <div class="check-body">
+                  <strong><code>{{ route.label }}</code></strong>
+                  <span>{{ route.detail }}</span>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+          </article>
+        </section>
+      </section>
+    </section>
+
+    <section class="layer-block legacy-focus-shell" hidden>
+      <div class="layer-header">
+        <div>
+          <p class="section-kicker">Capa 1</p>
+          <h2>Control Center Discovery / Stabilization</h2>
+        </div>
+        <span class="badge badge-{{ dashboard.focus.status_badge }}">{{ dashboard.focus.status_label }}</span>
+      </div>
+      <p class="layer-copy">
+        Respuesta rápida para saber si el sistema está sano, si hoy toca intervenir
+        y cuál es el cuello de botella dominante sin abrir todavía el detalle.
+      </p>
+
+      <section class="grid focus-grid">
+        <article class="card focus-primary-card">
+          <div class="card-head">
+            <div>
+              <p class="section-kicker">Hoy</p>
+              <h2>{{ dashboard.focus.headline }}</h2>
+            </div>
+            <span class="badge badge-{{ dashboard.focus.action.badge }}">Acción</span>
+          </div>
+          <p class="focus-summary">{{ dashboard.focus.summary }}</p>
+
+          <div class="action-callout action-{{ dashboard.focus.action.badge }}">
+            <span class="action-label">Acción recomendada hoy</span>
+            <strong>{{ dashboard.focus.action.title }}</strong>
+            <span>{{ dashboard.focus.action.detail }}</span>
+          </div>
+
+          <div class="route-list">
+            {% for route in dashboard.focus.detail_routes %}
+            <span class="route-pill"><code>{{ route.label }}</code> {{ route.detail }}</span>
+            {% endfor %}
+          </div>
+        </article>
+
+        <div class="focus-answer-grid">
+          {% for answer in dashboard.focus.answers %}
+          <article class="card focus-answer-card">
+            <div class="answer-head">
+              <span class="focus-question">{{ answer.question }}</span>
+              <span class="badge badge-{{ answer.badge }}">{{ answer.tag }}</span>
+            </div>
+            <strong class="focus-answer">{{ answer.answer }}</strong>
+            <p class="focus-detail">{{ answer.detail }}</p>
+          </article>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="grid cards-4 focus-stats-grid">
+        {% for item in dashboard.focus.quick_stats %}
+        <article class="card mini-card focus-mini-card">
+          <span class="stat-label">{{ item.label }}</span>
+          <strong class="stat-value">{{ item.value }}</strong>
+          <span class="stat-sub">{{ item.detail }}</span>
+        </article>
+        {% endfor %}
+      </section>
+
+      <section class="grid layout-main focus-lower-grid">
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <p class="section-kicker">Incidentes</p>
+              <h2>Salud real e incidentes</h2>
+            </div>
+          </div>
+          {% if dashboard.focus.incidents %}
+          <div class="list-stack compact">
+            {% for item in dashboard.focus.incidents %}
+            <div class="list-row">
+              <div class="check-body">
+                <strong>{{ item.title }}</strong>
+                <span>{{ item.detail }}</span>
+              </div>
+              <span class="badge badge-{{ item.badge }}">Activa</span>
+            </div>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="notice notice-good">Sin incidentes operativos activos relevantes en este momento.</div>
+          {% endif %}
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <p class="section-kicker">Drivers</p>
+              <h2>Qué está limitando ahora</h2>
+            </div>
+          </div>
+          <div class="checklist">
+            {% for item in dashboard.focus.drivers %}
+            <div class="check-item check-item-{{ item.status }}">
+              <div class="check-status {{ item.status }}"></div>
+              <div class="check-body">
+                <strong>{{ item.label }}</strong>
+                <span>{{ item.value }} Â· {{ item.detail }}</span>
+              </div>
+              <span class="check-tag check-tag-{{ item.status }}">{{ item.tag }}</span>
+            </div>
+            {% endfor %}
+          </div>
+        </article>
+      </section>
+    </section>
+
+    <section class="layer-block layer-block-secondary">
+      <div class="layer-header">
+        <div>
+          <p class="section-kicker">Capa 2</p>
+          <h2>Seguimiento y explicación</h2>
+        </div>
+        <span class="badge badge-accent">Drivers operativos</span>
+      </div>
+      <p class="layer-copy">
+        Información secundaria para entender por qué la capa 1 dice lo que dice,
+        sin entrar todavía en trazas ni detalle extendido.
+      </p>
+    </section>
 
     <section class="grid cards-4">
       <article class="card stat-card">
@@ -255,42 +630,94 @@
           {{ dashboard.city_observation.note }}
         </div>
 
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Ciudad</th>
-                <th>Trading</th>
-                <th>NOAA</th>
-                <th>Historico</th>
-                <th>Estado actual</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in dashboard.city_observation.rows %}
-              <tr>
-                <td><strong>{{ row.city }}</strong></td>
-                <td>
-                  <span class="badge badge-{{ row.trading_badge }}">{{ row.trading_label }}</span>
-                  <span class="table-note">{{ row.trading_detail }}</span>
-                </td>
-                <td>
-                  <span class="badge badge-{{ row.noaa_badge }}">{{ row.noaa_label }}</span>
-                  <span class="table-note">{{ row.noaa_detail }}</span>
-                </td>
-                <td>
-                  <span class="badge badge-{{ row.history_badge }}">{{ row.history_label }}</span>
-                  <span class="table-note">{{ row.history_detail }}</span>
-                </td>
-                <td>
+        <div class="city-zone-grid">
+          <section class="city-zone-card">
+            <div class="card-head">
+              <div>
+                <p class="section-kicker">Activo ahora</p>
+                <h2>Universo operativo</h2>
+              </div>
+              <span class="badge badge-good">{{ dashboard.city_observation.active_count }} activas</span>
+            </div>
+            <div class="city-card-grid">
+              {% for row in dashboard.city_observation.active_rows %}
+              <article class="city-card city-card-{{ row.state_badge }}">
+                <div class="city-card-head">
+                  <strong>{{ row.city }}</strong>
                   <span class="badge badge-{{ row.state_badge }}">{{ row.state_label }}</span>
-                  <span class="table-note">{{ row.state_detail }}</span>
-                </td>
-              </tr>
+                </div>
+                <p class="city-card-copy">{{ row.trading_detail }}</p>
+                <div class="city-progress-head">
+                  <span>NOAA</span>
+                  <span>{{ row.observed_count }}/{{ row.observed_goal }}</span>
+                </div>
+                <div class="city-progress-bar">
+                  <div class="city-progress-fill city-progress-fill-{{ row.noaa_badge }}" style="width: {{ row.observed_progress_pct }}%"></div>
+                </div>
+                <div class="city-card-meta">
+                  <span>{{ row.noaa_label }} · {{ row.noaa_detail }}</span>
+                  <span>{{ row.history_label }}</span>
+                </div>
+              </article>
               {% endfor %}
-            </tbody>
-          </table>
+            </div>
+          </section>
+
+          {% if dashboard.city_observation.watch_rows %}
+          <section class="city-zone-card">
+            <div class="card-head">
+              <div>
+                <p class="section-kicker">Discovery</p>
+                <h2>Seguimiento y referencia</h2>
+              </div>
+              <span class="badge badge-accent">{{ dashboard.city_observation.watch_rows|length }} en seguimiento</span>
+            </div>
+            <div class="city-card-grid">
+              {% for row in dashboard.city_observation.watch_rows %}
+              <article class="city-card city-card-{{ row.state_badge }}">
+                <div class="city-card-head">
+                  <strong>{{ row.city }}</strong>
+                  <span class="badge badge-{{ row.state_badge }}">{{ row.state_label }}</span>
+                </div>
+                <p class="city-card-copy">{{ row.state_detail }}</p>
+                <div class="city-progress-head">
+                  <span>NOAA</span>
+                  <span>{{ row.observed_count }}/{{ row.observed_goal }}</span>
+                </div>
+                <div class="city-progress-bar">
+                  <div class="city-progress-fill city-progress-fill-{{ row.noaa_badge }}" style="width: {{ row.observed_progress_pct }}%"></div>
+                </div>
+                <div class="city-card-meta">
+                  <span>{{ row.noaa_label }} · {{ row.noaa_detail }}</span>
+                  <span>{{ row.history_label }}</span>
+                </div>
+              </article>
+              {% endfor %}
+            </div>
+          </section>
+          {% endif %}
         </div>
+
+        <section class="blocked-city-section">
+          <div class="card-head">
+            <div>
+              <p class="section-kicker">Bloqueadas</p>
+              <h2>Archivo de ciudades fuera de juego</h2>
+            </div>
+            <span class="badge badge-bad">{{ dashboard.city_observation.blocked_count }} bloqueadas</span>
+          </div>
+          <div class="blocked-pill-list">
+            {% for row in dashboard.city_observation.blocked_rows %}
+            <article class="blocked-pill-card">
+              <div class="blocked-pill-head">
+                <strong>{{ row.city }}</strong>
+                <span class="badge badge-{{ row.state_badge }}">{{ row.state_label }}</span>
+              </div>
+              <span>{{ row.state_detail }}</span>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
 
         <div class="card-head">
           <div>
@@ -357,6 +784,13 @@
       </article>
     </section>
 
+    <details class="layer-toggle">
+      <summary>
+        <span class="layer-toggle-kicker">Capa 3</span>
+        <strong>Detalle extendido y trazabilidad</strong>
+        <span class="layer-toggle-copy">Salidas, ciclos, cartera, scoreboards y resto del detalle operacional.</span>
+      </summary>
+      <div class="layer-toggle-content">
     <section class="grid layout-main">
       <article class="card">
         <div class="card-head">
@@ -645,6 +1079,9 @@
         {% endif %}
       </article>
     </section>
+      </div>
+    </details>
   </div>
+  <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
 </body>
 </html>
