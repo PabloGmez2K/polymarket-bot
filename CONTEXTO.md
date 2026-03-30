@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 30 de marzo de 2026 (Sesión 37 — playbook operativo + guardrails de scoreboard)
-**Próxima sesión:** dejar correr la auditoría NOAA 2+ días, comprobar que `observed_vs_forecast` empieza a poblarse en Railway y vigilar el dashboard operativo ya con proceso multiagente endurecido.
+**Última actualización:** 30 de marzo de 2026 (Sesión 38 — scoreboard limpio + regla de puntuacion)
+**Próxima sesión:** dejar correr la auditoría NOAA 2+ días, comprobar que `observed_vs_forecast` empieza a poblarse en Railway y vigilar el dashboard ya con scoreboard live limpio y scoring mejor definido.
 
 ---
 
@@ -107,7 +107,7 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 | Archivo | Función |
 |---------|---------|
 | `bot.py` | Script principal v10.6.5 |
-| `verify_before_deploy.py` | v10 — 396 tests de comportamiento |
+| `verify_before_deploy.py` | v10 — 397 tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |
@@ -734,6 +734,26 @@ Usar esta plantilla al cerrar cada sesión relevante:
 
 - **Estado final:**
   el sistema ya no depende solo de memoria manual: estado, historial, scoreboard y tests quedan unidos por un protocolo explícito. `verify_before_deploy.py` queda en `396/396`.
+
+### Sesión 38 — Scoreboard limpio + regla de puntuacion
+
+- **Fecha:** 2026-03-30
+- **Versión activa al cerrar:** `v10.6.5` local por encima de `origin/main` con hardening adicional del scoreboard
+- **Objetivo de la sesión:** corregir la diferencia engañosa del scoreboard y fijar una regla explícita para que revisar sin delta no genere puntos.
+
+- **Codex:**
+  - Detectó que el scoreboard live estaba inflado por filas duplicadas y corruptas en `agent_events.jsonl` del Volume
+  - Limpió el fichero live en Railway hasta dejarlo otra vez en `29` líneas canónicas
+  - Endureció `load_agent_events()` para deduplicar eventos equivalentes por clave normalizada y no volver a inflar el ranking por acentos, símbolos o duplicados manuales
+  - Añadió al `OPERATIONS_PLAYBOOK.md` la regla `validacion o aprobacion sin delta = 0 puntos o sin evento`
+  - Amplió `verify_before_deploy.py` con un check de esa regla y un test funcional de deduplicación
+
+- **Problema detectado:**
+  - El scoreboard no dependía solo del scoring manual; también dependía de la higiene del `agent_events.jsonl` persistente del Volume
+  - La vista live usa los últimos `30` eventos válidos; con duplicados de Codex y el límite activo, el panel expulsaba además un evento antiguo de Claude y exageraba la diferencia
+
+- **Estado final:**
+  el scoreboard live vuelve a una base limpia, el loader queda robusto frente a duplicados equivalentes y el protocolo ya deja claro que validar sin cambiar nada no debe generar puntos. `verify_before_deploy.py` sube a `397/397`.
 
 ---
 

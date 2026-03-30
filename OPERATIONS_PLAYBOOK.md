@@ -118,6 +118,17 @@ Campos minimos:
 
 Si un agente corrige o valida trabajo de otro, usar `target_agent`.
 
+### Regla de puntos
+
+- `review_correction` solo puntua si cambia una decision, detecta un riesgo no obvio, evita un bug real o reencuadra la direccion de trabajo.
+- Validacion o aprobacion sin delta no merece puntos: usar `0 puntos` o no registrar evento.
+- En research multiagente, separar el credito por:
+  - descubrimiento del problema;
+  - revision adversarial que cambia framing o fuente;
+  - sintesis ejecutable;
+  - implementacion posterior.
+- No duplicar credito por el mismo delta: si una revision solo confirma algo ya asentado sin mover la decision, no puntuarla aparte.
+
 ### Herramienta recomendada
 
 Usar:

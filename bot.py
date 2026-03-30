@@ -2393,7 +2393,11 @@ def get_bankroll_level_context():
 
 def load_agent_events(limit=None):
     """Carga eventos estructurados del scoreboard de agentes."""
+    import re as _re
+    import unicodedata as _unicodedata
+
     events = []
+    seen_keys = set()
     if not os.path.exists(AGENT_EVENTS_FILE):
         return events
     try:
@@ -2407,6 +2411,22 @@ def load_agent_events(limit=None):
                 except Exception:
                     continue
                 if isinstance(item, dict):
+                    normalized_title = str(item.get("title", "") or "").strip().lower()
+                    normalized_title = _unicodedata.normalize("NFKD", normalized_title)
+                    normalized_title = "".join(
+                        ch for ch in normalized_title if not _unicodedata.combining(ch)
+                    )
+                    normalized_title = _re.sub(r"[^a-z0-9]+", "", normalized_title)
+                    dedupe_key = (
+                        str(item.get("timestamp", "") or "").strip(),
+                        int(item.get("session", 0) or 0),
+                        str(item.get("agent", "") or "").strip(),
+                        str(item.get("type", "") or "").strip(),
+                        normalized_title,
+                    )
+                    if dedupe_key in seen_keys:
+                        continue
+                    seen_keys.add(dedupe_key)
                     events.append(item)
     except Exception as e:
         log.warning(f"Error cargando agent_events: {e}")

@@ -377,6 +377,8 @@ def run_tests():
          "Todo error detectado debe dejar" in operations_playbook_code and "guardrail" in operations_playbook_code)
     test("playbook cubre scoreboard y agent_events",
          "agent_events.jsonl" in operations_playbook_code and "scoreboard" in operations_playbook_code.lower())
+    test("playbook define review sin delta = 0 puntos",
+         "Validacion o aprobacion sin delta no merece puntos" in operations_playbook_code and "`0 puntos`" in operations_playbook_code)
     test("helper append_agent_event evita duplicados",
          "Duplicate event blocked" in append_agent_event_code and 'row.get("session") == event["session"]' in append_agent_event_code)
     test("template dashboard usa cycle.series_display", "cycle.series_display" in dashboard_template_code)
@@ -1046,8 +1048,9 @@ def run_tests():
         )
         os.close(fd)
         with open(tmp_agent_events, "w", encoding="utf-8") as f:
-            f.write(json.dumps({"agent": "Codex", "points": 3, "timestamp": "2026-03-29T12:00:00+00:00"}) + "\n")
-            f.write(json.dumps({"agent": "Claude Code (Opus)", "points": 5, "timestamp": "2026-03-29T11:00:00+00:00"}) + "\n")
+            f.write(json.dumps({"agent": "Codex", "type": "bug_detected", "session": 32, "title": "Research: Dallas KDAL + auditoria mal nombrada", "points": 3, "timestamp": "2026-03-29T12:00:00+00:00"}) + "\n")
+            f.write(json.dumps({"agent": "Codex", "type": "bug_detected", "session": 32, "title": "Research: Dallas KDAL + auditoría mal nombrada", "points": 3, "timestamp": "2026-03-29T12:00:00+00:00"}) + "\n")
+            f.write(json.dumps({"agent": "Claude Code (Opus)", "type": "review_correction", "session": 32, "title": "Research adversarial review NOAA/WU", "points": 5, "timestamp": "2026-03-29T11:00:00+00:00"}) + "\n")
         events_ns = {
             "os": os,
             "json": json,
@@ -1056,7 +1059,7 @@ def run_tests():
         }
         exec(get_function_source(module_ast, code_lines, "load_agent_events"), events_ns)
         loaded_events = events_ns["load_agent_events"]()
-        test("load_agent_events: lee dos eventos", len(loaded_events) == 2, loaded_events)
+        test("load_agent_events: deduplica equivalentes", len(loaded_events) == 2, loaded_events)
         test("load_agent_events: ordena por timestamp desc", loaded_events[0]["agent"] == "Codex", loaded_events)
         if os.path.exists(tmp_agent_events):
             try:

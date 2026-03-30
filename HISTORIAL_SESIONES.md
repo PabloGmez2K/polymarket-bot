@@ -53,6 +53,7 @@ Comandos útiles:
 | 2026-03-30 | Explícita | Sesión 35 | `—` | Implementación local de `v10.6.5`: dashboard separa `Calidad Forecast Observada (NOAA)` del bloque legacy `Drift Open-Meteo`, con suite en `386/386`. |
 | 2026-03-30 | Explícita | Sesión 36 | `—` | Sync post-recarga: depósito manual `+$14.99`, fallback `BANKROLL` alineado a `$25` y test para fijar el default local. |
 | 2026-03-30 | Explícita | Sesión 37 | `—` | Playbook operativo multiagente, helper seguro para `agent_events.jsonl`, checks de consistencia docs-scoreboard y sync del scoreboard live. |
+| 2026-03-30 | Explícita | Sesión 38 | `—` | Limpieza del scoreboard live, deduplicación robusta en `load_agent_events()` y regla explícita: review sin delta = `0 puntos` o sin evento. |
 
 ---
 
@@ -655,6 +656,30 @@ Investigación completa de trades, commits y lógica de trading desde v10.3 hast
 - se sincroniza el scoreboard live en Railway para añadir sesiones 32-36.
 
 **Resultado:** el sistema gana una capa nueva de robustez de proceso. A partir de aquí, estado, historial, scoreboard y tests quedan conectados por un playbook explícito en vez de depender de memoria manual. `verify_before_deploy.py` queda en `396/396`.
+
+---
+
+## Sesión 38 — scoreboard limpio + regla de puntuación (30 mar 2026, local + Railway)
+
+**Disparador:** el scoreboard live mostraba una diferencia engañosa entre Codex y Claude porque el `agent_events.jsonl` persistente del Volume contenía filas duplicadas/corruptas y el dashboard solo mira los últimos `30` eventos válidos.
+
+**Diagnóstico (Codex):**
+
+1. **La métrica estaba siendo contaminada por datos, no solo por scoring.** Había filas duplicadas válidas de Codex y también líneas malformadas antiguas en el fichero live.
+
+2. **El límite de `30` eventos amplificaba el sesgo.** Los duplicados no solo sumaban puntos de más, sino que expulsaban un evento antiguo de Claude del corte visible.
+
+3. **Faltaba una regla explícita de puntuación.** El playbook cubría el cierre de sesiones, pero no dejaba escrito todavía que una revisión sin delta no debe puntuar.
+
+**Cambios realizados:**
+- limpieza quirúrgica del `agent_events.jsonl` live en Railway hasta devolverlo a `29` líneas canónicas;
+- `load_agent_events()` pasa a deduplicar eventos equivalentes por clave normalizada (`timestamp + session + agent + type + title normalizado`);
+- `OPERATIONS_PLAYBOOK.md` añade la regla: validación o aprobación sin delta = `0 puntos` o sin evento;
+- `verify_before_deploy.py` añade:
+  - un check de la nueva regla de scoring;
+  - un test funcional para asegurar que `load_agent_events()` deduplica equivalentes con acentos/símbolos distintos.
+
+**Resultado:** el scoreboard live queda saneado, el loader se vuelve robusto ante duplicados equivalentes y el protocolo deja por escrito que “validar sin cambiar nada” no debe generar puntos. `verify_before_deploy.py` sube a `397/397`.
 
 ---
 
