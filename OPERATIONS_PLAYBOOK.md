@@ -73,6 +73,7 @@ Antes de `git push`:
 2. `git status` limpio salvo cambios intencionales
 3. `CONTEXTO.md`, `HISTORIAL_SESIONES.md` y `agent_events.jsonl` alineados
 4. Si aplica, registrar evento nuevo con `tools/append_agent_event.py`
+5. Si el cambio toca logica core (`sigma`, `Kelly`, `MIN_EDGE`, `MAX_EXPOSURE`, exits, settlement mapping, execution o accounting), pasar antes el premortem corto de este playbook
 
 Despues de `git push`:
 
@@ -170,6 +171,36 @@ Regla: Claude no debe ser cuello de botella para operacion, mantenimiento, obser
 
 ---
 
+## Premortem corto para cambios core
+
+Aplicar solo cuando el cambio toque:
+
+- `sigma`
+- `Kelly`
+- `MIN_EDGE`
+- `MAX_EXPOSURE`
+- logica principal de exits
+- settlement mapping
+- execution
+- accounting
+
+Responder antes de implementar o desplegar:
+
+1. Que podria salir mal?
+2. Cual seria el dano maximo?
+3. Como lo detectariamos rapido?
+4. Que guardrail o test lo cubre?
+5. Que rollback simple existe?
+6. Que supuesto critico depende de una fuente externa no validada?
+
+Si la respuesta a la pregunta 6 es `si`, debe ocurrir al menos una de estas tres cosas:
+
+- se anade un guardrail o test especifico;
+- se documenta explicitamente el riesgo aceptado;
+- se aplaza el cambio hasta tener evidencia mejor.
+
+---
+
 ## Regla de hardening
 
 Todo error detectado debe dejar al menos uno de estos guardrails:
@@ -197,6 +228,20 @@ Cuando aparezca un error:
    - tests
    - docs
    - scoreboard si fue una aportacion relevante
+
+---
+
+## Definicion operativa minima
+
+- `fallo real del sistema`: defecto evitable interno que distorsiona decisiones, datos, ejecucion o lectura del resultado.
+- `limitacion conocida`: restriccion real del sistema ya identificada y tratada honestamente, pero aun no resuelta del todo.
+- `ruido de mercado`: perdida o variacion sin evidencia clara de defecto interno relevante.
+
+Ejemplos:
+
+- `London loss por WU vs Open-Meteo` = fallo de fuente/medicion, no ruido.
+- `v10.5 revertida en v10.6.0` = fallo evitable de decision/proceso.
+- `trade perdido con source/mapping correcto y sin anomalias operativas` = ruido de mercado o error de forecast/estrategia, no necesariamente fallo del sistema.
 
 ---
 

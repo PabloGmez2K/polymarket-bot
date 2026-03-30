@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 30 de marzo de 2026 (Sesión 38 — scoreboard limpio + regla de puntuacion)
-**Próxima sesión:** dejar correr la auditoría NOAA 2+ días, comprobar que `observed_vs_forecast` empieza a poblarse en Railway y vigilar el dashboard ya con scoreboard live limpio y scoring mejor definido.
+**Última actualización:** 30 de marzo de 2026 (Sesión 39 — research final Lean Six Sigma + foco NOAA en Telegram)
+**Próxima sesión:** vigilar en Railway los hitos one-shot NOAA, usar `/noaa` para leer muestra/cobertura sin abrir dashboard y decidir más adelante si hace falta un digest diario o un botón específico de observabilidad.
 
 ---
 
@@ -88,6 +88,8 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Dashboard NOAA observado (v10.6.5):** Añade un bloque nuevo `Calidad Forecast Observada (NOAA)` separado de performance/trading. Lee `audit.json -> observed_vs_forecast`, muestra `n total`, `MAE`, `bias`, cobertura por ciudad activa y los últimos 20 casos. Mantiene visible un bloque legacy `Drift Open-Meteo (historico - no comparable con NOAA)` con `n=` y `ultimo registro` prominentes, sin mezclar ambas series. `verify_before_deploy.py` sube a `386/386`.
 
+**Foco fidelity + Telegram NOAA (30 mar, sin bump):** El research final `RESEARCH_LEAN_SIX_SIGMA_FINAL_2026-03-30.md` concluye `recomiendo no adoptar`, salvo `FMEA-lite` en playbook y una definición mínima de `fallo real / limitacion conocida / ruido`. `OPERATIONS_PLAYBOOK.md` añade ese premortem corto para cambios core, y `run_observability_alerts()` pasa a enviar hitos NOAA one-shot (`primer caso`, `n>=3`, `n>=10`, `ciudad con muestra`, `ciudad interpretable`). Además aparece `/noaa` y `/observabilidad` en Telegram como vista rápida de `sample`, `MAE`, `bias`, cobertura por ciudad y últimos casos, sin tocar el menú principal. `verify_before_deploy.py` sube a `416/416`.
+
 **City accuracy tracker (v10.5.2):** Calcula win rate por ciudad desde postmortem. Alerta por Telegram si una ciudad baja de 25% win rate con 3+ trades. Nuevo comando `/accuracy`. Win rate visible en `/rendimiento`.
 
 **Integración `/accuracy` + revisión crítica (v10.5.3):** `/accuracy` queda visible en el menú, responde siempre con menú, `/estado` muestra explícitamente el intervalo intra-SL y la trazabilidad de sesión 20 queda corregida para reflejar mejor lo que realmente introdujeron los commits de la mañana.
@@ -98,16 +100,15 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
-**Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.4`)
-**Deploy enviado más reciente:** `v10.6.5` empujado a `main` con commit `fb02957` (pendiente de re-verificación visual)
-**Repositorio remoto (`origin/main`):** `v10.6.5` en `fb02957`
-**Versión local / remoto GitHub:** local `v10.6.5` | `origin/main` en `v10.6.5`
+**Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.5`)
+**Estado de despliegue esperado tras sesión 39:** `main` incorpora `v10.6.5` sin bump, con hardening adicional de observabilidad NOAA por Telegram y guardrails mínimos en playbook.
+**Versión local / remoto GitHub:** `v10.6.5` sin bump de versión, con `416/416` tests antes de deploy.
 
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
 | `bot.py` | Script principal v10.6.5 |
-| `verify_before_deploy.py` | v10 — 397 tests de comportamiento |
+| `verify_before_deploy.py` | v10 — 416 tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |
@@ -754,6 +755,38 @@ Usar esta plantilla al cerrar cada sesión relevante:
 
 - **Estado final:**
   el scoreboard live vuelve a una base limpia, el loader queda robusto frente a duplicados equivalentes y el protocolo ya deja claro que validar sin cambiar nada no debe generar puntos. `verify_before_deploy.py` sube a `397/397`.
+
+### Sesión 39 — Research final Lean Six Sigma + foco NOAA en Telegram
+
+- **Fecha:** 2026-03-30
+- **Versión activa al cerrar:** `v10.6.5` local lista para deploy, sin bump de versión
+- **Objetivo de la sesión:** cerrar la investigación metodológica, traducir solo lo útil al playbook y mover el foco operativo diario hacia `measurement / resolution fidelity`.
+
+- **Codex:**
+  - consolidó el research en `RESEARCH_LEAN_SIX_SIGMA_FINAL_2026-03-30.md` con conclusión explícita: `recomiendo no adoptar`, salvo `FMEA-lite` y definiciones operativas mínimas;
+  - actualizó `OPERATIONS_PLAYBOOK.md` con:
+    - `premortem corto para cambios core`;
+    - definición mínima de `fallo real del sistema`, `limitacion conocida` y `ruido de mercado`;
+  - amplió `run_observability_alerts()` para enviar hitos NOAA one-shot sobre `observed_vs_forecast`:
+    - primer caso global;
+    - muestra mínima `>=3`;
+    - muestra global útil `>=10`;
+    - ciudad con primera muestra;
+    - ciudad interpretable `>=3`;
+  - añadió `/noaa` y `/observabilidad` en Telegram para leer `sample`, `MAE`, `bias`, cobertura y últimos casos sin abrir el dashboard;
+  - mantuvo el menú principal sin poda agresiva tras revisar que el gap real era la falta de una vista específica, no el exceso de botones;
+  - endureció `verify_before_deploy.py` con:
+    - test de `/noaa`;
+    - test de idempotencia de alertas NOAA;
+    - check explícito de `state.setdefault("milestones", {})`.
+
+- **Decisión operativa importante:**
+  - el cuello de botella actual no es la lógica de trading, sino `measurement / resolution fidelity`;
+  - por eso no se tocó `sigma`, `Kelly`, `MIN_EDGE`, exits ni menú principal;
+  - el objetivo inmediato pasa a ser observar si NOAA se puebla de verdad en Railway y distinguir mejor `fallo real` vs `limitacion conocida`.
+
+- **Estado final de la sesión:**
+  `v10.6.5` queda lista para deploy con foco explícito en fidelity, Telegram ya tiene vista dedicada `/noaa` y la suite sube a `416/416`.
 
 ---
 

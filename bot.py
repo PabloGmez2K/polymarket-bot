@@ -1170,17 +1170,18 @@ def run_observability_alerts():
     state = load_alerts_state()
     changed = False
     now_iso = datetime.now(timezone.utc).isoformat()
+    milestones = state.setdefault("milestones", {})
 
     stats = get_clean_closed_trade_stats()
     milestone_key = f"clean_trades_{REVIEW_READY_CLEAN_TRADES}"
-    if stats["count"] >= REVIEW_READY_CLEAN_TRADES and milestone_key not in state["milestones"]:
+    if stats["count"] >= REVIEW_READY_CLEAN_TRADES and milestone_key not in milestones:
         send_telegram(
             f"🧠 <b>Review Trigger</b>\n"
             f"Ya hay <b>{stats['count']} trades limpios cerrados</b>.\n"
             f"SELL: {stats['sell']} | LOSS_TOTAL: {stats['loss_total']} | RESOLVED_WIN: {stats['resolved_win']}\n\n"
             f"Recomendado abrir sesión de análisis/coding para revisar la lógica de salida de la serie <b>v{LOGIC_SERIES}.x</b>."
         )
-        state["milestones"][milestone_key] = {
+        milestones[milestone_key] = {
             "sent_at": now_iso,
             "count": stats["count"],
             "logic_series": LOGIC_SERIES,
@@ -1228,8 +1229,105 @@ def run_observability_alerts():
         }
         changed = True
 
+    audit = load_audit_data()
+    observed_rows = [
+        row for row in audit.get(OBSERVED_AUDIT_KEY, [])
+        if isinstance(row, dict) and row.get("source") == "noaa_ncei"
+    ]
+    observed_city_counts = {city: 0 for city in sorted(OBSERVED_AUDIT_CITIES)}
+    for row in observed_rows:
+        city = row.get("city")
+        if city in observed_city_counts:
+            observed_city_counts[city] += 1
+
+    observed_sample_size = len(observed_rows)
+    observed_with_sample = [city for city, count in observed_city_counts.items() if count >= 1]
+    observed_interpretable = [
+        city for city, count in observed_city_counts.items()
+        if count >= OBSERVED_FORECAST_MIN_SAMPLE
+    ]
+
+    observed_started_key = "observed_proxy_started"
+    if observed_sample_size >= 1 and observed_started_key not in milestones:
+        send_telegram(
+            f"🛰️ <b>Observed proxy NOAA activo</b>\n"
+            f"Ya hay <b>{observed_sample_size} caso(s)</b> en <code>{OBSERVED_AUDIT_KEY}</code>.\n"
+            f"Ciudades con muestra: {len(observed_with_sample)}/{len(observed_city_counts)}."
+        )
+        milestones[observed_started_key] = {
+            "sent_at": now_iso,
+            "count": observed_sample_size,
+            "coverage": len(observed_with_sample),
+        }
+        changed = True
+
+    observed_min_key = f"observed_proxy_min_sample_{OBSERVED_FORECAST_MIN_SAMPLE}"
+    if observed_sample_size >= OBSERVED_FORECAST_MIN_SAMPLE and observed_min_key not in milestones:
+        send_telegram(
+            f"🧪 <b>Muestra NOAA mínima alcanzada</b>\n"
+            f"{OBSERVED_AUDIT_KEY} ya tiene <b>{observed_sample_size} casos</b>.\n"
+            f"MAE/bias global preliminar ya es visible en el dashboard.\n"
+            f"Cobertura actual: {len(observed_with_sample)}/{len(observed_city_counts)} ciudades."
+        )
+        milestones[observed_min_key] = {
+            "sent_at": now_iso,
+            "count": observed_sample_size,
+            "coverage": len(observed_with_sample),
+        }
+        changed = True
+
+    observed_global_key = f"observed_proxy_global_target_{OBSERVED_FORECAST_GLOBAL_TARGET}"
+    if observed_sample_size >= OBSERVED_FORECAST_GLOBAL_TARGET and observed_global_key not in milestones:
+        send_telegram(
+            f"📊 <b>Muestra NOAA global útil</b>\n"
+            f"{OBSERVED_AUDIT_KEY} ya tiene <b>{observed_sample_size} casos</b>.\n"
+            f"Ya tiene sentido leer sesgo global con más confianza.\n"
+            f"Cobertura actual: {len(observed_with_sample)}/{len(observed_city_counts)} ciudades."
+        )
+        milestones[observed_global_key] = {
+            "sent_at": now_iso,
+            "count": observed_sample_size,
+            "coverage": len(observed_with_sample),
+        }
+        changed = True
+
+    new_observed_cities = []
+    for city in observed_with_sample:
+        city_key = f"observed_city_started:{city}"
+        if city_key not in milestones:
+            new_observed_cities.append(city)
+            milestones[city_key] = {
+                "sent_at": now_iso,
+                "count": observed_city_counts.get(city, 0),
+            }
+            changed = True
+    if new_observed_cities:
+        send_telegram(
+            f"🗺️ <b>NOAA nueva ciudad con muestra</b>\n"
+            f"{', '.join(new_observed_cities)}.\n"
+            f"Cobertura actual: {len(observed_with_sample)}/{len(observed_city_counts)} ciudades activas."
+        )
+
+    new_interpretable_cities = []
+    for city in observed_interpretable:
+        city_key = f"observed_city_interpretable:{city}"
+        if city_key not in milestones:
+            new_interpretable_cities.append(f"{city} ({observed_city_counts.get(city, 0)})")
+            milestones[city_key] = {
+                "sent_at": now_iso,
+                "count": observed_city_counts.get(city, 0),
+            }
+            changed = True
+    if new_interpretable_cities:
+        send_telegram(
+            f"📍 <b>NOAA ciudad interpretable</b>\n"
+            f"{', '.join(new_interpretable_cities)}.\n"
+            f"Ciudades con >= {OBSERVED_FORECAST_MIN_SAMPLE} casos: "
+            f"{len(observed_interpretable)}/{len(observed_city_counts)}."
+        )
+
     notified = state.get("pending_exit_notified", {})
-    pending = load_audit_data().get("pending_sells", [])
+    pending = audit.get("pending_sells", [])
     active_pending_ids = set()
     stuck_new = []
     now = datetime.now(timezone.utc)
@@ -4212,11 +4310,51 @@ def cmd_accuracy():
     send_telegram_paged("\n".join(lines), with_menu=True)
 
 
+def cmd_noaa():
+    """Vista Telegram del observed proxy NOAA para seguimiento de medicion/fidelity."""
+    summary = build_dashboard_forecast_quality(audit=load_audit_data())
+    level_icons = {"good": "🟢", "waiting": "🟡", "warn": "🟡", "bad": "🔴", "muted": "⚪"}
+
+    lines = [
+        "🛰️ <b>NOAA / Observabilidad</b>",
+        "",
+        f"Muestra: <b>{summary['sample_display']}</b>",
+        f"MAE global: <b>{summary['mae_display']}</b>",
+        f"Bias global: <b>{summary['bias_display']}</b>",
+        f"Cobertura: {summary['coverage_display']}",
+        f"Ciudades interpretables: {summary['coverage_detail']}",
+        f"Ultimo registro: {summary['last_record_display']}",
+        "",
+        f"<i>{summary['note']}</i>",
+    ]
+
+    if summary["city_rows"]:
+        lines.append("")
+        lines.append("<b>Ciudades activas</b>")
+        for row in summary["city_rows"]:
+            icon = level_icons.get(row.get("status"), "⚪")
+            lines.append(f"{icon} <b>{row['city']}</b>: {row['detail']}")
+
+    if summary["latest_rows"]:
+        lines.append("")
+        lines.append("<b>Ultimos casos NOAA</b>")
+        for row in summary["latest_rows"][:5]:
+            lines.append(
+                f"• {row['city']} {row['date']}: forecast {row['forecast_display']} | "
+                f"obs {row['observed_display']} | error {row['error_display']}"
+            )
+
+    lines.append("")
+    lines.append("<i>NOAA es observed proxy; no equivale a la resolucion final de Polymarket.</i>")
+    send_telegram_paged("\n".join(lines), with_menu=True)
+
+
 COMMANDS = {
     "estado": cmd_estado, "cartera": cmd_cartera, "ordenes": cmd_ordenes,
     "log": cmd_log, "logfull": cmd_logfull, "forzar": cmd_forzar,
     "modo": cmd_modo, "traders": cmd_traders, "rendimiento": cmd_rendimiento,
     "info": cmd_info, "postmortem": cmd_postmortem, "accuracy": cmd_accuracy,
+    "noaa": cmd_noaa, "observabilidad": cmd_noaa,
     "confirmar_real": cmd_confirmar_real, "confirmar_dry": cmd_confirmar_dry,
     "cancelar_modo": cmd_cancelar_modo,
 }

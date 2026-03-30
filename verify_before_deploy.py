@@ -434,9 +434,12 @@ def run_tests():
     test("cmd_info definida", "def cmd_info(" in code)
     test("cmd_postmortem definida", "def cmd_postmortem(" in code)
     test("cmd_accuracy definida", "def cmd_accuracy(" in code)
+    test("cmd_noaa definida", "def cmd_noaa(" in code)
     test("/info en COMMANDS", '"info": cmd_info' in code)
     test("/postmortem en COMMANDS", '"postmortem": cmd_postmortem' in code)
     test("/accuracy en COMMANDS", '"accuracy": cmd_accuracy' in code)
+    test("/noaa en COMMANDS", '"noaa": cmd_noaa' in code)
+    test("/observabilidad en COMMANDS", '"observabilidad": cmd_noaa' in code)
     test("/info en MENU_KEYBOARD", '"callback_data": "info"' in code)
     test("/postmortem en MENU_KEYBOARD", '"callback_data": "postmortem"' in code)
     test("/accuracy en MENU_KEYBOARD", '"callback_data": "accuracy"' in code)
@@ -485,13 +488,15 @@ def run_tests():
     print("\n🔍 Integridad de COMMANDS")
     for cmd in ["estado", "cartera", "ordenes", "log", "logfull",
                 "forzar", "modo", "traders", "rendimiento", "info", "postmortem", "accuracy",
+                "noaa", "observabilidad",
                 "confirmar_real", "confirmar_dry", "cancelar_modo"]:
         test(f'COMMANDS tiene "{cmd}"', f'"{cmd}"' in code)
 
     # ---- Test 16: send_telegram_paged en todos los comandos de respuesta larga ----
     print("\n🔍 send_telegram_paged en comandos relevantes")
     for cmd_name in ["cmd_cartera", "cmd_ordenes", "cmd_log", "cmd_logfull",
-                     "cmd_traders", "cmd_rendimiento", "cmd_info", "cmd_postmortem", "cmd_accuracy"]:
+                     "cmd_traders", "cmd_rendimiento", "cmd_info", "cmd_postmortem", "cmd_accuracy",
+                     "cmd_noaa"]:
         # Buscar la función y verificar que usa send_telegram_paged
         fn_match = re.search(
             rf"def {cmd_name}\(.*?(?=\ndef |\Z)", code, re.DOTALL
@@ -1211,6 +1216,36 @@ def run_tests():
              "Dallas Mar28 YES" in pm_msg and "? YES" not in pm_msg,
              pm_msg[:220])
 
+        noaa_messages = []
+        noaa_ns = {
+            "OBSERVED_AUDIT_KEY": "observed_vs_forecast",
+            "OBSERVED_AUDIT_CITIES": {"Chicago", "Atlanta", "Buenos Aires", "Dallas"},
+            "OBSERVED_FORECAST_MIN_SAMPLE": 3,
+            "OBSERVED_FORECAST_GLOBAL_TARGET": 10,
+            "load_audit_data": lambda: {
+                "observed_vs_forecast": [
+                    {"city": "Chicago", "date": "2026-03-25", "forecast_temp_c": 11.0, "observed_temp_c": 12.0, "error_c": 1.0, "abs_error_c": 1.0, "source": "noaa_ncei", "checked_at": "2026-03-30T12:00:00+00:00"},
+                    {"city": "Chicago", "date": "2026-03-26", "forecast_temp_c": 13.0, "observed_temp_c": 12.0, "error_c": -1.0, "abs_error_c": 1.0, "source": "noaa_ncei", "checked_at": "2026-03-30T12:05:00+00:00"},
+                    {"city": "Chicago", "date": "2026-03-27", "forecast_temp_c": 15.0, "observed_temp_c": 14.5, "error_c": -0.5, "abs_error_c": 0.5, "source": "noaa_ncei", "checked_at": "2026-03-30T12:10:00+00:00"},
+                    {"city": "Dallas", "date": "2026-03-27", "forecast_temp_c": 24.0, "observed_temp_c": 25.2, "error_c": 1.2, "abs_error_c": 1.2, "source": "noaa_ncei", "checked_at": "2026-03-30T12:15:00+00:00"},
+                ]
+            },
+            "send_telegram_paged": lambda text, with_menu=False, page_size=3800: noaa_messages.append(text),
+        }
+        exec(get_function_source(module_ast, code_lines, "build_dashboard_forecast_quality"), noaa_ns)
+        exec(get_function_source(module_ast, code_lines, "cmd_noaa"), noaa_ns)
+        noaa_ns["cmd_noaa"]()
+        noaa_msg = noaa_messages[-1] if noaa_messages else ""
+        test("noaa cmd: muestra sample y coverage",
+             "4 mercados" in noaa_msg and "2 / 4 ciudades con muestra" in noaa_msg,
+             noaa_msg[:240])
+        test("noaa cmd: muestra ciudad interpretable y nota de proxy",
+             "Chicago" in noaa_msg and "observed proxy" in noaa_msg,
+             noaa_msg[:320])
+        test("noaa cmd: recuerda que NOAA no es settlement final",
+             "no equivale a la resolucion final de Polymarket" in noaa_msg,
+             noaa_msg[:320])
+
         fd, tmp_signals = tempfile.mkstemp(
             dir=tempfile.gettempdir(),
             prefix="_tmp_signals_test_",
@@ -1524,6 +1559,9 @@ def run_tests():
     test("inspect_signals_file_health definida", "def inspect_signals_file_health(" in code)
     test("get_clean_closed_trade_stats definida", "def get_clean_closed_trade_stats(" in code)
     test("run_observability_alerts definida", "def run_observability_alerts(" in code)
+    test("alertas NOAA observed proxy presentes",
+         "Observed proxy NOAA activo" in code and "Muestra NOAA mínima alcanzada" in code and "Muestra NOAA global útil" in code)
+    test("alertas usan milestones con setdefault", 'state.setdefault("milestones", {})' in code)
     test("arranque hace backfill de postmortem", "backfill_postmortem_from_performance()" in code)
     test("alertas se evalúan en startup y fin de ciclo", code.count("run_observability_alerts()") >= 2)
 
@@ -1633,6 +1671,11 @@ def run_tests():
             "WIN_RATE_LOW": 30.0,
             "WIN_RATE_HIGH": 50.0,
             "BANKROLL": 25.0,
+            "OBSERVED_AUDIT_KEY": "observed_vs_forecast",
+            "OBSERVED_AUDIT_CITIES": {"Chicago", "Atlanta", "Buenos Aires", "Dallas"},
+            "OBSERVED_FORECAST_MIN_SAMPLE": 3,
+            "OBSERVED_FORECAST_GLOBAL_TARGET": 10,
+            "LOW_BANKROLL_RESET_MARGIN": 1.0,
             "load_alerts_state": lambda: {
                 "logic_series": "10.5",
                 "milestones": {},
@@ -1653,7 +1696,7 @@ def run_tests():
             "LOW_BANKROLL_THRESHOLD": 5.0,
             "get_clean_closed_trade_stats": lambda: {"count": 30, "sell": 20, "loss_total": 6, "resolved_win": 4},
             "inspect_signals_file_health": lambda: {"status": "ok", "age_hours": 1.0, "actionable": 12},
-            "load_audit_data": lambda: {"pending_sells": []},
+            "load_audit_data": lambda: {"pending_sells": [], "observed_vs_forecast": []},
             "_get_recent_closed_trades": lambda n=None: [],
             "_get_portfolio_and_positions": lambda: {"cash": 13.0, "portfolio_total": 14.75},
             "send_telegram": lambda text, with_menu=False, custom_keyboard=None: review_messages.append(text),
@@ -1675,6 +1718,11 @@ def run_tests():
             "SCALING_TIERS": [25, 35, 50, 75, 100], "SCALING_WINDOW": 20,
             "WIN_RATE_WINDOW": 15, "WIN_RATE_LOW": 30.0, "WIN_RATE_HIGH": 50.0,
             "BANKROLL": 25.0,
+            "OBSERVED_AUDIT_KEY": "observed_vs_forecast",
+            "OBSERVED_AUDIT_CITIES": {"Chicago", "Atlanta", "Buenos Aires", "Dallas"},
+            "OBSERVED_FORECAST_MIN_SAMPLE": 3,
+            "OBSERVED_FORECAST_GLOBAL_TARGET": 10,
+            "LOW_BANKROLL_RESET_MARGIN": 1.0,
             "load_alerts_state": lambda: {
                 "logic_series": "10.5",
                 "milestones": {},
@@ -1692,7 +1740,7 @@ def run_tests():
             "CITY_BLOCK_WIN_RATE": 25.0,
             "get_clean_closed_trade_stats": lambda: {"count": 5, "sell": 4, "loss_total": 1, "resolved_win": 0},
             "inspect_signals_file_health": lambda: {"status": "stale", "age_hours": 30.5, "actionable": 3},
-            "load_audit_data": lambda: {"pending_sells": []},
+            "load_audit_data": lambda: {"pending_sells": [], "observed_vs_forecast": []},
             "_get_recent_closed_trades": lambda n=None: [],
             "_get_portfolio_and_positions": lambda: {"cash": 13.0, "portfolio_total": 14.75},
             "LOW_BANKROLL_THRESHOLD": 5.0,
@@ -1715,6 +1763,11 @@ def run_tests():
             "SCALING_TIERS": [25, 35, 50, 75, 100], "SCALING_WINDOW": 20,
             "WIN_RATE_WINDOW": 15, "WIN_RATE_LOW": 30.0, "WIN_RATE_HIGH": 50.0,
             "BANKROLL": 25.0,
+            "OBSERVED_AUDIT_KEY": "observed_vs_forecast",
+            "OBSERVED_AUDIT_CITIES": {"Chicago", "Atlanta", "Buenos Aires", "Dallas"},
+            "OBSERVED_FORECAST_MIN_SAMPLE": 3,
+            "OBSERVED_FORECAST_GLOBAL_TARGET": 10,
+            "LOW_BANKROLL_RESET_MARGIN": 1.0,
             "load_alerts_state": lambda: {
                 "logic_series": "10.5",
                 "milestones": {},
@@ -1742,7 +1795,8 @@ def run_tests():
                     "side": "YES",
                     "price": 0.31,
                     "timestamp": "2026-03-27T00:00:00+00:00",
-                }]
+                }],
+                "observed_vs_forecast": [],
             },
             "send_telegram": lambda text, with_menu=False, custom_keyboard=None: pending_messages.append(text),
         }
@@ -1753,6 +1807,194 @@ def run_tests():
         test("alerta pending_exit atascada: guarda order_id notificado",
              "oid-stuck" in saved_pending_state.get("pending_exit_notified", {}),
              str(saved_pending_state))
+
+        observed_messages = []
+        saved_observed_state = {}
+        observed_ns = {
+            "datetime": datetime,
+            "timezone": timezone,
+            "REVIEW_READY_CLEAN_TRADES": 30,
+            "LOGIC_SERIES": "10.6",
+            "PENDING_EXIT_ALERT_HOURS": 12.0,
+            "DRAWDOWN_WINDOW": 5, "DRAWDOWN_THRESHOLD": -3.0,
+            "SCALING_TIERS": [25, 35, 50, 75, 100], "SCALING_WINDOW": 20,
+            "WIN_RATE_WINDOW": 15, "WIN_RATE_LOW": 30.0, "WIN_RATE_HIGH": 50.0,
+            "BANKROLL": 25.0,
+            "LOW_BANKROLL_THRESHOLD": 5.0,
+            "OBSERVED_AUDIT_KEY": "observed_vs_forecast",
+            "OBSERVED_AUDIT_CITIES": {"Chicago", "Atlanta", "Buenos Aires", "Dallas"},
+            "OBSERVED_FORECAST_MIN_SAMPLE": 3,
+            "OBSERVED_FORECAST_GLOBAL_TARGET": 10,
+            "LOW_BANKROLL_RESET_MARGIN": 1.0,
+            "load_alerts_state": lambda: {
+                "logic_series": "10.6",
+                "milestones": {},
+                "signals_health": {"last_issue": None},
+                "pending_exit_notified": {},
+                "drawdown_alerted": False,
+                "scaling_alerted_tier": None,
+                "scaling_negative_alerted": False,
+                "win_rate_low_alerted": False,
+                "win_rate_high_alerted": False,
+                "city_accuracy_flagged": {},
+            },
+            "save_alerts_state": lambda state: saved_observed_state.update(state),
+            "get_city_accuracy": lambda: {},
+            "is_city_blocked": lambda city: False,
+            "CITY_MIN_TRADES_FOR_BLOCK": 3,
+            "CITY_BLOCK_WIN_RATE": 25.0,
+            "get_clean_closed_trade_stats": lambda: {"count": 1, "sell": 1, "loss_total": 0, "resolved_win": 0},
+            "inspect_signals_file_health": lambda: {"status": "ok", "age_hours": 1.0, "actionable": 1},
+            "load_audit_data": lambda: {
+                "pending_sells": [],
+                "observed_vs_forecast": [
+                    {"city": "Chicago", "date": "2026-03-28", "error_c": 0.5, "abs_error_c": 0.5, "source": "noaa_ncei", "checked_at": "2026-03-30T12:00:00+00:00"},
+                ],
+            },
+            "_get_recent_closed_trades": lambda n=None: [],
+            "_get_portfolio_and_positions": lambda: {"cash": 13.0, "cash_ok": True, "api_error": None, "portfolio_total": 14.75},
+            "send_telegram": lambda text, with_menu=False, custom_keyboard=None: observed_messages.append(text),
+        }
+        exec(get_function_source(module_ast, code_lines, "run_observability_alerts"), observed_ns)
+        observed_ns["run_observability_alerts"]()
+        test("alerta NOAA: primer caso global se envía",
+             any("Observed proxy NOAA activo" in msg for msg in observed_messages),
+             str(observed_messages))
+        test("alerta NOAA: primera ciudad con muestra se envía",
+             any("NOAA nueva ciudad con muestra" in msg and "Chicago" in msg for msg in observed_messages),
+             str(observed_messages))
+        test("alerta NOAA: guarda milestones iniciales",
+             "observed_proxy_started" in saved_observed_state.get("milestones", {})
+             and "observed_city_started:Chicago" in saved_observed_state.get("milestones", {}),
+             str(saved_observed_state))
+
+        observed_ready_messages = []
+        saved_observed_ready_state = {}
+        observed_ready_ns = {
+            "datetime": datetime,
+            "timezone": timezone,
+            "REVIEW_READY_CLEAN_TRADES": 30,
+            "LOGIC_SERIES": "10.6",
+            "PENDING_EXIT_ALERT_HOURS": 12.0,
+            "DRAWDOWN_WINDOW": 5, "DRAWDOWN_THRESHOLD": -3.0,
+            "SCALING_TIERS": [25, 35, 50, 75, 100], "SCALING_WINDOW": 20,
+            "WIN_RATE_WINDOW": 15, "WIN_RATE_LOW": 30.0, "WIN_RATE_HIGH": 50.0,
+            "BANKROLL": 25.0,
+            "LOW_BANKROLL_THRESHOLD": 5.0,
+            "OBSERVED_AUDIT_KEY": "observed_vs_forecast",
+            "OBSERVED_AUDIT_CITIES": {"Chicago", "Atlanta", "Buenos Aires", "Dallas"},
+            "OBSERVED_FORECAST_MIN_SAMPLE": 3,
+            "OBSERVED_FORECAST_GLOBAL_TARGET": 10,
+            "LOW_BANKROLL_RESET_MARGIN": 1.0,
+            "load_alerts_state": lambda: {
+                "logic_series": "10.6",
+                "milestones": {},
+                "signals_health": {"last_issue": None},
+                "pending_exit_notified": {},
+                "drawdown_alerted": False,
+                "scaling_alerted_tier": None,
+                "scaling_negative_alerted": False,
+                "win_rate_low_alerted": False,
+                "win_rate_high_alerted": False,
+                "city_accuracy_flagged": {},
+            },
+            "save_alerts_state": lambda state: saved_observed_ready_state.update(state),
+            "get_city_accuracy": lambda: {},
+            "is_city_blocked": lambda city: False,
+            "CITY_MIN_TRADES_FOR_BLOCK": 3,
+            "CITY_BLOCK_WIN_RATE": 25.0,
+            "get_clean_closed_trade_stats": lambda: {"count": 2, "sell": 2, "loss_total": 0, "resolved_win": 0},
+            "inspect_signals_file_health": lambda: {"status": "ok", "age_hours": 1.0, "actionable": 1},
+            "load_audit_data": lambda: {
+                "pending_sells": [],
+                "observed_vs_forecast": [
+                    {"city": "Chicago", "date": "2026-03-25", "error_c": 0.5, "abs_error_c": 0.5, "source": "noaa_ncei", "checked_at": "2026-03-30T12:00:00+00:00"},
+                    {"city": "Chicago", "date": "2026-03-26", "error_c": 0.8, "abs_error_c": 0.8, "source": "noaa_ncei", "checked_at": "2026-03-30T12:05:00+00:00"},
+                    {"city": "Chicago", "date": "2026-03-27", "error_c": -0.2, "abs_error_c": 0.2, "source": "noaa_ncei", "checked_at": "2026-03-30T12:10:00+00:00"},
+                    {"city": "Atlanta", "date": "2026-03-25", "error_c": 1.0, "abs_error_c": 1.0, "source": "noaa_ncei", "checked_at": "2026-03-30T12:15:00+00:00"},
+                    {"city": "Atlanta", "date": "2026-03-26", "error_c": -0.4, "abs_error_c": 0.4, "source": "noaa_ncei", "checked_at": "2026-03-30T12:20:00+00:00"},
+                    {"city": "Atlanta", "date": "2026-03-27", "error_c": 0.3, "abs_error_c": 0.3, "source": "noaa_ncei", "checked_at": "2026-03-30T12:25:00+00:00"},
+                    {"city": "Dallas", "date": "2026-03-25", "error_c": -1.2, "abs_error_c": 1.2, "source": "noaa_ncei", "checked_at": "2026-03-30T12:30:00+00:00"},
+                    {"city": "Dallas", "date": "2026-03-26", "error_c": 0.7, "abs_error_c": 0.7, "source": "noaa_ncei", "checked_at": "2026-03-30T12:35:00+00:00"},
+                    {"city": "Dallas", "date": "2026-03-27", "error_c": 0.1, "abs_error_c": 0.1, "source": "noaa_ncei", "checked_at": "2026-03-30T12:40:00+00:00"},
+                    {"city": "Buenos Aires", "date": "2026-03-25", "error_c": -0.6, "abs_error_c": 0.6, "source": "noaa_ncei", "checked_at": "2026-03-30T12:45:00+00:00"},
+                ],
+            },
+            "_get_recent_closed_trades": lambda n=None: [],
+            "_get_portfolio_and_positions": lambda: {"cash": 13.0, "cash_ok": True, "api_error": None, "portfolio_total": 14.75},
+            "send_telegram": lambda text, with_menu=False, custom_keyboard=None: observed_ready_messages.append(text),
+        }
+        exec(get_function_source(module_ast, code_lines, "run_observability_alerts"), observed_ready_ns)
+        observed_ready_ns["run_observability_alerts"]()
+        test("alerta NOAA: muestra mínima se envía",
+             any("Muestra NOAA mínima alcanzada" in msg for msg in observed_ready_messages),
+             str(observed_ready_messages))
+        test("alerta NOAA: muestra global útil se envía",
+             any("Muestra NOAA global útil" in msg for msg in observed_ready_messages),
+             str(observed_ready_messages))
+        test("alerta NOAA: ciudad interpretable se envía",
+             any("NOAA ciudad interpretable" in msg and "Chicago (3)" in msg for msg in observed_ready_messages),
+             str(observed_ready_messages))
+        test("alerta NOAA: guarda milestones de muestra útil",
+             f"observed_proxy_min_sample_{observed_ready_ns['OBSERVED_FORECAST_MIN_SAMPLE']}" in saved_observed_ready_state.get("milestones", {})
+             and f"observed_proxy_global_target_{observed_ready_ns['OBSERVED_FORECAST_GLOBAL_TARGET']}" in saved_observed_ready_state.get("milestones", {})
+             and "observed_city_interpretable:Chicago" in saved_observed_ready_state.get("milestones", {}),
+             str(saved_observed_ready_state))
+
+        observed_idempotent_messages = []
+        observed_idempotent_state = {
+            "logic_series": "10.6",
+            "milestones": {},
+            "signals_health": {"last_issue": None},
+            "pending_exit_notified": {},
+            "drawdown_alerted": False,
+            "scaling_alerted_tier": None,
+            "scaling_negative_alerted": False,
+            "win_rate_low_alerted": False,
+            "win_rate_high_alerted": False,
+            "city_accuracy_flagged": {},
+        }
+        observed_idempotent_ns = {
+            "datetime": datetime,
+            "timezone": timezone,
+            "REVIEW_READY_CLEAN_TRADES": 30,
+            "LOGIC_SERIES": "10.6",
+            "PENDING_EXIT_ALERT_HOURS": 12.0,
+            "DRAWDOWN_WINDOW": 5, "DRAWDOWN_THRESHOLD": -3.0,
+            "SCALING_TIERS": [25, 35, 50, 75, 100], "SCALING_WINDOW": 20,
+            "WIN_RATE_WINDOW": 15, "WIN_RATE_LOW": 30.0, "WIN_RATE_HIGH": 50.0,
+            "BANKROLL": 25.0,
+            "LOW_BANKROLL_THRESHOLD": 5.0,
+            "LOW_BANKROLL_RESET_MARGIN": 1.0,
+            "OBSERVED_AUDIT_KEY": "observed_vs_forecast",
+            "OBSERVED_AUDIT_CITIES": {"Chicago", "Atlanta", "Buenos Aires", "Dallas"},
+            "OBSERVED_FORECAST_MIN_SAMPLE": 3,
+            "OBSERVED_FORECAST_GLOBAL_TARGET": 10,
+            "load_alerts_state": lambda: observed_idempotent_state,
+            "save_alerts_state": lambda state: observed_idempotent_state.update(state),
+            "get_city_accuracy": lambda: {},
+            "is_city_blocked": lambda city: False,
+            "CITY_MIN_TRADES_FOR_BLOCK": 3,
+            "CITY_BLOCK_WIN_RATE": 25.0,
+            "get_clean_closed_trade_stats": lambda: {"count": 2, "sell": 2, "loss_total": 0, "resolved_win": 0},
+            "inspect_signals_file_health": lambda: {"status": "ok", "age_hours": 1.0, "actionable": 1},
+            "load_audit_data": lambda: {
+                "pending_sells": [],
+                "observed_vs_forecast": [
+                    {"city": "Chicago", "date": "2026-03-25", "error_c": 0.5, "abs_error_c": 0.5, "source": "noaa_ncei", "checked_at": "2026-03-30T12:00:00+00:00"},
+                ],
+            },
+            "_get_recent_closed_trades": lambda n=None: [],
+            "_get_portfolio_and_positions": lambda: {"cash": 13.0, "cash_ok": True, "api_error": None, "portfolio_total": 14.75},
+            "send_telegram": lambda text, with_menu=False, custom_keyboard=None: observed_idempotent_messages.append(text),
+        }
+        exec(get_function_source(module_ast, code_lines, "run_observability_alerts"), observed_idempotent_ns)
+        observed_idempotent_ns["run_observability_alerts"]()
+        first_observed_count = len(observed_idempotent_messages)
+        observed_idempotent_ns["run_observability_alerts"]()
+        test("alerta NOAA: idempotencia evita reenvio en segundo call",
+             len(observed_idempotent_messages) == first_observed_count,
+             str(observed_idempotent_messages))
 
         low_bankroll_messages = []
         saved_low_bankroll_state = {}
@@ -1768,6 +2010,10 @@ def run_tests():
             "BANKROLL": 25.0,
             "LOW_BANKROLL_THRESHOLD": 5.0,
             "LOW_BANKROLL_RESET_MARGIN": 1.0,
+            "OBSERVED_AUDIT_KEY": "observed_vs_forecast",
+            "OBSERVED_AUDIT_CITIES": {"Chicago", "Atlanta", "Buenos Aires", "Dallas"},
+            "OBSERVED_FORECAST_MIN_SAMPLE": 3,
+            "OBSERVED_FORECAST_GLOBAL_TARGET": 10,
             "load_alerts_state": lambda: {
                 "logic_series": "10.6",
                 "milestones": {},
@@ -1788,7 +2034,7 @@ def run_tests():
             "CITY_BLOCK_WIN_RATE": 25.0,
             "get_clean_closed_trade_stats": lambda: {"count": 5, "sell": 4, "loss_total": 1, "resolved_win": 0},
             "inspect_signals_file_health": lambda: {"status": "ok", "age_hours": 1.0, "actionable": 10},
-            "load_audit_data": lambda: {"pending_sells": []},
+            "load_audit_data": lambda: {"pending_sells": [], "observed_vs_forecast": []},
             "_get_recent_closed_trades": lambda n=None: [],
             "_get_portfolio_and_positions": lambda: {"cash": 3.25, "cash_ok": True, "api_error": None, "portfolio_total": 4.75},
             "send_telegram": lambda text, with_menu=False, custom_keyboard=None: low_bankroll_messages.append(text),
@@ -1817,6 +2063,10 @@ def run_tests():
             "BANKROLL": 25.0,
             "LOW_BANKROLL_THRESHOLD": 5.0,
             "LOW_BANKROLL_RESET_MARGIN": 1.0,
+            "OBSERVED_AUDIT_KEY": "observed_vs_forecast",
+            "OBSERVED_AUDIT_CITIES": {"Chicago", "Atlanta", "Buenos Aires", "Dallas"},
+            "OBSERVED_FORECAST_MIN_SAMPLE": 3,
+            "OBSERVED_FORECAST_GLOBAL_TARGET": 10,
             "load_alerts_state": lambda: {
                 "logic_series": "10.6",
                 "milestones": {},
@@ -1837,7 +2087,7 @@ def run_tests():
             "CITY_BLOCK_WIN_RATE": 25.0,
             "get_clean_closed_trade_stats": lambda: {"count": 5, "sell": 4, "loss_total": 1, "resolved_win": 0},
             "inspect_signals_file_health": lambda: {"status": "ok", "age_hours": 1.0, "actionable": 10},
-            "load_audit_data": lambda: {"pending_sells": []},
+            "load_audit_data": lambda: {"pending_sells": [], "observed_vs_forecast": []},
             "_get_recent_closed_trades": lambda n=None: [],
             "_get_portfolio_and_positions": lambda: {"cash": 0.0, "cash_ok": False, "api_error": "timeout", "portfolio_total": 0.0},
             "send_telegram": lambda text, with_menu=False, custom_keyboard=None: low_bankroll_api_messages.append(text),
@@ -1865,6 +2115,10 @@ def run_tests():
             "BANKROLL": 25.0,
             "LOW_BANKROLL_THRESHOLD": 5.0,
             "LOW_BANKROLL_RESET_MARGIN": 1.0,
+            "OBSERVED_AUDIT_KEY": "observed_vs_forecast",
+            "OBSERVED_AUDIT_CITIES": {"Chicago", "Atlanta", "Buenos Aires", "Dallas"},
+            "OBSERVED_FORECAST_MIN_SAMPLE": 3,
+            "OBSERVED_FORECAST_GLOBAL_TARGET": 10,
             "load_alerts_state": lambda: {
                 "logic_series": "10.6",
                 "milestones": {},
@@ -1885,7 +2139,7 @@ def run_tests():
             "CITY_BLOCK_WIN_RATE": 25.0,
             "get_clean_closed_trade_stats": lambda: {"count": 5, "sell": 4, "loss_total": 1, "resolved_win": 0},
             "inspect_signals_file_health": lambda: {"status": "ok", "age_hours": 1.0, "actionable": 10},
-            "load_audit_data": lambda: {"pending_sells": []},
+            "load_audit_data": lambda: {"pending_sells": [], "observed_vs_forecast": []},
             "_get_recent_closed_trades": lambda n=None: [],
             "_get_portfolio_and_positions": lambda: {"cash": 6.30, "cash_ok": True, "api_error": None, "portfolio_total": 6.30},
             "send_telegram": lambda text, with_menu=False, custom_keyboard=None: low_bankroll_reset_messages.append(text),

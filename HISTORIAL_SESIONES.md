@@ -54,6 +54,7 @@ Comandos útiles:
 | 2026-03-30 | Explícita | Sesión 36 | `—` | Sync post-recarga: depósito manual `+$14.99`, fallback `BANKROLL` alineado a `$25` y test para fijar el default local. |
 | 2026-03-30 | Explícita | Sesión 37 | `—` | Playbook operativo multiagente, helper seguro para `agent_events.jsonl`, checks de consistencia docs-scoreboard y sync del scoreboard live. |
 | 2026-03-30 | Explícita | Sesión 38 | `—` | Limpieza del scoreboard live, deduplicación robusta en `load_agent_events()` y regla explícita: review sin delta = `0 puntos` o sin evento. |
+| 2026-03-30 | Explícita | Sesión 39 | `—` | Research final Lean Six Sigma: no adoptar salvo FMEA-lite y definiciones mínimas; playbook mínimo, hitos NOAA one-shot y nueva vista Telegram `/noaa`. |
 
 ---
 
@@ -680,6 +681,40 @@ Investigación completa de trades, commits y lógica de trading desde v10.3 hast
   - un test funcional para asegurar que `load_agent_events()` deduplica equivalentes con acentos/símbolos distintos.
 
 **Resultado:** el scoreboard live queda saneado, el loader se vuelve robusto ante duplicados equivalentes y el protocolo deja por escrito que “validar sin cambiar nada” no debe generar puntos. `verify_before_deploy.py` sube a `397/397`.
+
+---
+
+## Sesión 39 — research final Lean Six Sigma + foco NOAA en Telegram (30 mar 2026, local)
+
+**Disparador:** una vez cerrada la discusión metodológica, hacía falta traducir solo lo útil al sistema real y mover el seguimiento diario hacia el cuello de botella actual: `measurement / resolution fidelity`.
+
+**Diagnóstico (Codex):**
+
+1. **Lean Six Sigma completo no encaja ahora.** El sistema sigue en discovery/stabilization; añadir CTQs, A3s o control charts ahora sería más fricción que valor.
+
+2. **Sí encajan dos guardrails pequeños.** Un premortem corto para cambios core y un lenguaje mínimo compartido (`fallo real`, `limitacion conocida`, `ruido`) ayudan a operar con más claridad sin crear burocracia.
+
+3. **El gap operativo no era el menú de Telegram.** El problema real era no tener una vista rápida del estado NOAA desde el canal donde ya se monitoriza el bot.
+
+**Cambios realizados:**
+- se consolida `RESEARCH_LEAN_SIX_SIGMA_FINAL_2026-03-30.md` con recomendación final `recomiendo no adoptar`, salvo `FMEA-lite` y definiciones mínimas;
+- `OPERATIONS_PLAYBOOK.md` añade:
+  - `premortem corto para cambios core`;
+  - definición operativa mínima de `fallo real del sistema`, `limitacion conocida` y `ruido de mercado`;
+- `bot.py` amplía `run_observability_alerts()` con hitos NOAA one-shot sobre `observed_vs_forecast`:
+  - primer caso global;
+  - muestra mínima `>=3`;
+  - muestra global útil `>=10`;
+  - ciudad con primera muestra;
+  - ciudad interpretable `>=3`;
+- `bot.py` añade `/noaa` y `/observabilidad` como vista Telegram específica de `sample`, `MAE`, `bias`, cobertura y últimos casos;
+- el menú principal de Telegram se mantiene sin poda agresiva;
+- `verify_before_deploy.py` sube a `416/416` con:
+  - test de `/noaa`;
+  - test de idempotencia para alertas NOAA;
+  - check explícito de `state.setdefault("milestones", {})`.
+
+**Resultado:** el proyecto sale de esta sesión con criterio metodológico más claro, un playbook mínimo más útil y una capa de seguimiento diario mejor alineada con el cuello de botella real. `v10.6.5` queda lista para deploy sin tocar lógica de trading.
 
 ---
 
