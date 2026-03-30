@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 30 de marzo de 2026 (Sesión 35 — implementación local de `v10.6.5`)
-**Próxima sesión:** Validar/push/deploy de `v10.6.5`, comprobar que el dashboard publica el bloque NOAA correctamente y dejar correr la auditoría 2+ días para acumular muestra real en `observed_vs_forecast`.
+**Última actualización:** 30 de marzo de 2026 (Sesión 37 — playbook operativo + guardrails de scoreboard)
+**Próxima sesión:** dejar correr la auditoría NOAA 2+ días, comprobar que `observed_vs_forecast` empieza a poblarse en Railway y vigilar el dashboard operativo ya con proceso multiagente endurecido.
 
 ---
 
@@ -11,19 +11,20 @@ Un bot automatizado de arbitraje meteorológico en Polymarket. El bot detecta me
 
 **Cómo gana dinero:** Consulta la previsión meteorológica profesional (Open-Meteo, coordenadas exactas del aeropuerto), calcula la probabilidad real con un modelo matemático (distribución normal + redondeo a °C enteros), y cuando detecta que el precio del mercado está equivocado por más de 7%, apuesta en la dirección correcta.
 
-**Bankroll configurado:** $25.00 en Railway. Cartera real: ~$18.89 (29 mar).
+**Bankroll configurado:** $25.00 en Railway. El 30 mar se depositaron `+$14.99` para volver a la zona objetivo de operación.
 
 **IMPORTANTE — Fuente de resolución:** Polymarket NO usa Open-Meteo — usa Weather Underground (wunderground.com). Esto ha causado pérdidas en London (2 veces). No apostar en London hasta resolver.
 
 ---
 
-## Estado financiero (fin sesión 30 — 29 mar 2026)
+## Estado financiero (referencia histórica fin sesión 30 — 29 mar 2026)
 
 - **Cartera Polymarket:** ~$18.89 (-$9.52 último día, -50.4%)
 - **Disponible para operar:** ~$13.63
 - **P&L all-time:** ~-$21.84
 - **Causa principal de pérdidas:** Open-Meteo vs Weather Underground discrepancia + sigma ampliada de v10.5 que vendía posiciones ganadoras + intra-cycle monitor que disparaba SL ante fluctuaciones normales
 - **Acción tomada:** v10.6.0 revierte lógica de trading a v10.3 (sigma original, sin intra-cycle, sin MIN_EDGE_EXACT)
+- **Actualización 30 mar:** depósito manual `+$14.99` para reponer bankroll operativo hacia el objetivo de `$25`.
 
 Para estado exacto: usar `/info` + `/cartera` + `/rendimiento` + `/accuracy` en Telegram.
 
@@ -98,18 +99,20 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.4`)
-**Repositorio remoto (`origin/main`):** `v10.6.4` empujado con commit `a08c68b`
-**Versión local / remoto GitHub:** local `v10.6.5` | `origin/main` en `v10.6.4`
+**Deploy enviado más reciente:** `v10.6.5` empujado a `main` con commit `fb02957` (pendiente de re-verificación visual)
+**Repositorio remoto (`origin/main`):** `v10.6.5` en `fb02957`
+**Versión local / remoto GitHub:** local `v10.6.5` | `origin/main` en `v10.6.5`
 
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
 | `bot.py` | Script principal v10.6.5 |
-| `verify_before_deploy.py` | v10 — 386 tests de comportamiento |
+| `verify_before_deploy.py` | v10 — 396 tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |
 | `CONTEXTO.md` | Estado del proyecto (este archivo) |
+| `OPERATIONS_PLAYBOOK.md` | Protocolo operativo multiagente y checklist de inicio/cierre |
 | `HISTORIAL_SESIONES.md` | Bitácora append-only de sesiones e hitos reconstruidos desde Git |
 | `OBSERVABILIDAD_Y_APRENDIZAJE.md` | Plan de fases futuras |
 | `RESEARCH_CODEX_HANDOFF_2026-03-30.md` | Informe de investigación de Codex para revisión cruzada |
@@ -118,6 +121,7 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 | `templates/dashboard.html` | Plantilla principal del dashboard web |
 | `static/dashboard.css` | Estilos del dashboard web |
 | `agent_events.jsonl` | Eventos semilla para el scoreboard de agentes |
+| `tools/append_agent_event.py` | Helper seguro para añadir eventos al scoreboard sin editar JSONL a mano |
 | `signals.json` | Copia bootstrap local; producción usa la copia persistente del Volume |
 | `traders_db.json` | Copia bootstrap local; producción usa la copia persistente del Volume |
 | `requirements.txt` | Dependencias Railway |
@@ -292,6 +296,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 ### Convención a seguir en futuras sesiones
 
+- **Lectura obligatoria al abrir sesión:** `CONTEXTO.md` + `OPERATIONS_PLAYBOOK.md`
 - **ChatGPT / Claude.ai:** análisis, estrategia, revisión de contexto, ideas y validación conceptual.
 - **Codex:** cambios de código en local, revisión crítica del repo, corrección de implementaciones previas, validación técnica y tests.
 - **Claude Code:** edición/coding en local cuando se use explícitamente para implementar cambios.
@@ -346,10 +351,12 @@ Usar esta plantilla al cerrar cada sesión relevante:
 
 ### Regla práctica de uso
 
+- `CONTEXTO.md` define el estado actual; `OPERATIONS_PLAYBOOK.md` define el protocolo para no desalinear código, docs y scoreboard.
 - Si solo participa una herramienta, se rellena solo su bloque y se dejan las demás como `No usado en esta sesión`.
 - Si una herramienta corrige o valida trabajo de otra, dejarlo explícito en `Problemas detectados en trabajo previo` y `Correcciones aplicadas en esta sesión`.
 - Si hay cambios en Railway, Volume, Telegram o datos históricos, anotarlo también en el bloque `Estado final`.
 - Antes de cada push relevante, actualizar `CONTEXTO.md` y `HISTORIAL_SESIONES.md` si la sesión cambió estado, arquitectura, datos persistentes, comandos Telegram, workflow o trazabilidad multi-agente.
+- Antes de cerrar una sesión relevante, actualizar también `agent_events.jsonl` usando `tools/append_agent_event.py` o un método equivalente seguro.
 
 ### Sesión 20 — Registro multi-herramienta
 
@@ -684,6 +691,49 @@ Usar esta plantilla al cerrar cada sesión relevante:
 
 - **Estado final:**
   `v10.6.5` local, `386/386` tests, dashboard preparado para observar NOAA vs legacy sin tocar la lógica de trading.
+
+### Sesión 36 — Sync de bankroll tras recarga manual
+
+- **Fecha:** 2026-03-30
+- **Versión activa al cerrar:** `v10.6.5` local y `origin/main` en `v10.6.5`
+- **Objetivo de la sesión:** alinear el fallback local de bankroll con la configuración real de Railway después de una recarga manual de fondos.
+
+- **Codex:**
+  - Confirmó que Railway sigue usando `BANKROLL=25.00`
+  - Actualizó el fallback de `bot.py` de `$15.00` a `$25.00` para que el entorno local no vuelva a desalinearse de producción
+  - Añadió un test en `verify_before_deploy.py` para fijar `BANKROLL default = 25.00`
+  - Actualizó `CONTEXTO.md` e `HISTORIAL_SESIONES.md` con la recarga manual `+$14.99` y el sync posterior
+
+- **Problemas detectados / matices:**
+  - La inconsistencia no afectaba a producción mientras Railway siguiera inyectando `BANKROLL=25.00`, pero sí podía inducir a errores de lectura o pruebas locales
+  - La recarga manual devuelve al bot a la zona de operación prevista para `MIN_BET=$1` y `MAX_EXPOSURE_PCT=40%`
+
+- **Estado final:**
+  `v10.6.5` sigue sin bump de versión, pero queda alineado entre código local, tests, contexto y configuración operativa real de Railway.
+
+### Sesión 37 — Playbook operativo + guardrails de scoreboard
+
+- **Fecha:** 2026-03-30
+- **Versión activa al cerrar:** `v10.6.5` local y `origin/main` en `v10.6.5`
+- **Objetivo de la sesión:** convertir el error de desalineación entre docs y scoreboard en una mejora estructural del proceso.
+
+- **Codex:**
+  - Creó `OPERATIONS_PLAYBOOK.md` como protocolo específico separado del estado vivo del proyecto
+  - Añadió `tools/append_agent_event.py` para registrar eventos del scoreboard sin editar `agent_events.jsonl` a mano
+  - Endureció `verify_before_deploy.py` con checks de playbook, helper y consistencia entre la sesión documentada más reciente y `agent_events.jsonl`
+  - Dejó `_sync_agent_events_seed()` con warning explícito si falla el merge del scoreboard en arranque
+  - Sincronizó el scoreboard live para que sesiones 32-36 queden reflejadas también en Railway
+
+- **Problema detectado:**
+  - `CONTEXTO.md` e `HISTORIAL_SESIONES.md` estaban bien, pero el Dashboard seguía leyendo un `agent_events.jsonl` desfasado porque el proceso de cierre de sesión no obligaba a actualizar la capa máquina del scoreboard
+
+- **Guardrails nuevos:**
+  - protocolo escrito de inicio/cierre multiagente
+  - helper seguro para eventos del scoreboard
+  - test que falla si la sesión más reciente en docs no existe también en `agent_events.jsonl`
+
+- **Estado final:**
+  el sistema ya no depende solo de memoria manual: estado, historial, scoreboard y tests quedan unidos por un protocolo explícito. `verify_before_deploy.py` queda en `396/396`.
 
 ---
 

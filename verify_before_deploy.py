@@ -67,12 +67,22 @@ def run_tests():
     trader_analyzer_path = os.path.join(os.path.dirname(__file__), "trader_analyzer.py")
     find_traders_path = os.path.join(os.path.dirname(__file__), "find_traders.py")
     requirements_path = os.path.join(os.path.dirname(__file__), "requirements.txt")
+    claude_md_path = os.path.join(os.path.dirname(__file__), "CLAUDE.md")
+    contexto_path = os.path.join(os.path.dirname(__file__), "CONTEXTO.md")
+    historial_path = os.path.join(os.path.dirname(__file__), "HISTORIAL_SESIONES.md")
+    operations_playbook_path = os.path.join(os.path.dirname(__file__), "OPERATIONS_PLAYBOOK.md")
+    append_agent_event_path = os.path.join(os.path.dirname(__file__), "tools", "append_agent_event.py")
     dashboard_template_path = os.path.join(os.path.dirname(__file__), "templates", "dashboard.html")
     dashboard_css_path = os.path.join(os.path.dirname(__file__), "static", "dashboard.css")
     agent_events_path = os.path.join(os.path.dirname(__file__), "agent_events.jsonl")
     trader_code = ""
     finder_code = ""
     requirements_code = ""
+    claude_md_code = ""
+    contexto_code = ""
+    historial_code = ""
+    operations_playbook_code = ""
+    append_agent_event_code = ""
     dashboard_template_code = ""
     dashboard_css_code = ""
     agent_event_rows = []
@@ -85,6 +95,21 @@ def run_tests():
     if os.path.exists(requirements_path):
         with open(requirements_path, "r", encoding="utf-8") as f:
             requirements_code = f.read()
+    if os.path.exists(claude_md_path):
+        with open(claude_md_path, "r", encoding="utf-8") as f:
+            claude_md_code = f.read()
+    if os.path.exists(contexto_path):
+        with open(contexto_path, "r", encoding="utf-8") as f:
+            contexto_code = f.read()
+    if os.path.exists(historial_path):
+        with open(historial_path, "r", encoding="utf-8") as f:
+            historial_code = f.read()
+    if os.path.exists(operations_playbook_path):
+        with open(operations_playbook_path, "r", encoding="utf-8") as f:
+            operations_playbook_code = f.read()
+    if os.path.exists(append_agent_event_path):
+        with open(append_agent_event_path, "r", encoding="utf-8") as f:
+            append_agent_event_code = f.read()
     if os.path.exists(dashboard_template_path):
         with open(dashboard_template_path, "r", encoding="utf-8") as f:
             dashboard_template_code = f.read()
@@ -127,6 +152,12 @@ def run_tests():
              f"encontrado: {match.group(1)}")
     else:
         test("MIN_BET definido con getenv", False)
+    bankroll_match = re.search(r'BANKROLL\s*=\s*float\(os\.getenv\("BANKROLL",\s*"([^"]+)"\)', code)
+    if bankroll_match:
+        test("BANKROLL default es 25.00", bankroll_match.group(1) == "25.00",
+             f"encontrado: {bankroll_match.group(1)}")
+    else:
+        test("BANKROLL definido con getenv", False)
 
     # ---- Test 3: Bug #12 — Resueltas no en keeping ----
     print("\n🔍 Bug #12: Resueltas excluidas de keeping")
@@ -336,6 +367,18 @@ def run_tests():
     test("template dashboard existe", os.path.exists(dashboard_template_path))
     test("css dashboard existe", os.path.exists(dashboard_css_path))
     test("agent_events.jsonl existe", os.path.exists(agent_events_path))
+    test("OPERATIONS_PLAYBOOK existe", os.path.exists(operations_playbook_path))
+    test("helper append_agent_event existe", os.path.exists(append_agent_event_path))
+    test("CLAUDE.md remite al playbook", "OPERATIONS_PLAYBOOK.md" in claude_md_code)
+    test("CONTEXTO remite al playbook", "OPERATIONS_PLAYBOOK.md" in contexto_code)
+    test("playbook define checklist inicio/cierre",
+         "Checklist de inicio" in operations_playbook_code and "Checklist de cierre" in operations_playbook_code)
+    test("playbook define regla de hardening",
+         "Todo error detectado debe dejar" in operations_playbook_code and "guardrail" in operations_playbook_code)
+    test("playbook cubre scoreboard y agent_events",
+         "agent_events.jsonl" in operations_playbook_code and "scoreboard" in operations_playbook_code.lower())
+    test("helper append_agent_event evita duplicados",
+         "Duplicate event blocked" in append_agent_event_code and 'row.get("session") == event["session"]' in append_agent_event_code)
     test("template dashboard usa cycle.series_display", "cycle.series_display" in dashboard_template_code)
     test("template dashboard muestra stages de eventos", "event.stage_label" in dashboard_template_code and "Prop." in dashboard_template_code)
     test("template dashboard usa estado waiting en checklist", "check-item-{{ item.status }}" in dashboard_template_code and "check-tag-{{ item.status }}" in dashboard_template_code)
@@ -357,6 +400,17 @@ def run_tests():
                 events_count = sum(1 for line in f if line.strip())
             test("agent_events.jsonl tiene eventos semilla", events_count >= 5, f"eventos={events_count}")
             test("agent_events.jsonl explicita stage en eventos", bool(agent_event_rows) and all(row.get("stage") for row in agent_event_rows))
+            latest_doc_session = max(
+                [int(v) for v in re.findall(r"Sesión\s+(\d+)", contexto_code + "\n" + historial_code)],
+                default=0,
+            )
+            latest_event_session = max(
+                [int(row.get("session", 0) or 0) for row in agent_event_rows],
+                default=0,
+            )
+            test("agent_events cubre la sesión documentada más reciente",
+                 latest_doc_session == latest_event_session,
+                 f"docs={latest_doc_session} events={latest_event_session}")
         except Exception as e:
             test("agent_events.jsonl legible", False, str(e))
 

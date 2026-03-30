@@ -25,7 +25,7 @@ load_dotenv()
 
 # =============================================================
 # bot.py v10.6.5 — dashboard NOAA observed quality
-# Sesión 35: bloque de calidad forecast observada sin tocar trading
+# Sesión 36: fallback BANKROLL sincronizado a $25 tras recarga manual
 # =============================================================
 #
 # Nuevo en v10.4.3:
@@ -91,7 +91,7 @@ load_dotenv()
 # =============================================================
 
 DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
-BANKROLL = float(os.getenv("BANKROLL", "15.00"))
+BANKROLL = float(os.getenv("BANKROLL", "25.00"))
 
 MIN_EDGE = float(os.getenv("MIN_EDGE", "7.0"))
 MIN_BET = float(os.getenv("MIN_BET", "1.00"))           # v10.4: default alineado con Railway
@@ -322,7 +322,7 @@ def _sync_agent_events_seed():
                 for e in new_events:
                     fh.write(json.dumps(e, ensure_ascii=False) + "\n")
     except Exception as exc:
-        pass  # No bloquear el arranque del bot por un fallo de sync del scoreboard
+        logging.getLogger(__name__).warning(f"agent_events sync failed: {exc}")
 
     return target
 

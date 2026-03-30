@@ -51,6 +51,8 @@ Comandos útiles:
 | 2026-03-30 | Explícita | Sesión 33 | `—` | Implementación local de `v10.6.3`: fix Dallas `KDAL`, `RESOLUTION_ICAO`, auditoría `forecast vs forecast posterior Open-Meteo` y suite en `358/358`. |
 | 2026-03-30 | Explícita | Sesión 34 | `—` | Implementación local de `v10.6.4`: `observed_vs_forecast` con NOAA NCEI, `noaa_station_id` para 4 activas, lag de 2 días y suite en `371/371`. |
 | 2026-03-30 | Explícita | Sesión 35 | `—` | Implementación local de `v10.6.5`: dashboard separa `Calidad Forecast Observada (NOAA)` del bloque legacy `Drift Open-Meteo`, con suite en `386/386`. |
+| 2026-03-30 | Explícita | Sesión 36 | `—` | Sync post-recarga: depósito manual `+$14.99`, fallback `BANKROLL` alineado a `$25` y test para fijar el default local. |
+| 2026-03-30 | Explícita | Sesión 37 | `—` | Playbook operativo multiagente, helper seguro para `agent_events.jsonl`, checks de consistencia docs-scoreboard y sync del scoreboard live. |
 
 ---
 
@@ -592,6 +594,67 @@ Investigación completa de trades, commits y lógica de trading desde v10.3 hast
   - snapshot tests para asegurar que ambos bloques llegan al dashboard.
 
 **Resultado:** `v10.6.5` queda listo en local con `386/386` tests. El dashboard ya separa claramente NOAA observado del drift legacy y deja intacta toda la capa de trading.
+
+---
+
+## Sesión 36 — sync de bankroll tras recarga manual (30 mar 2026, local)
+
+**Disparador:** tras una recarga manual de fondos en Polymarket, apareció una inconsistencia residual: Railway seguía operando con `BANKROLL=25.00`, pero el fallback local en `bot.py` todavía decía `15.00`.
+
+**Diagnóstico (Codex):**
+
+1. **La calibración operativa real seguía siendo $25.** Contexto, tests y Railway apuntaban a `BANKROLL=25.00`; el `15.00` en código era un remanente antiguo.
+
+2. **El bug no afectaba a producción mientras Railway inyectara la variable.** Pero sí podía inducir a errores al leer el código, correr el bot sin env vars o razonar sobre sizing local.
+
+3. **La recarga devolvía al bot a su zona objetivo.** Se registró un depósito manual de `+$14.99`, coherente con seguir operando alrededor del bankroll objetivo configurado.
+
+**Cambios realizados:**
+- `bot.py` sincroniza el fallback local `BANKROLL` de `$15.00` a `$25.00`;
+- `verify_before_deploy.py` añade un check explícito para fijar `BANKROLL default = 25.00`;
+- `CONTEXTO.md` se actualiza con:
+  - la recarga manual `+$14.99`;
+  - el nuevo estado de `origin/main` en `v10.6.5`;
+  - la trazabilidad de esta sincronización;
+- `HISTORIAL_SESIONES.md` registra la sesión como cierre de la inconsistencia post-recarga.
+
+**Resultado:** código local, tests, contexto y configuración real vuelven a quedar alineados alrededor de `BANKROLL=$25.00`, sin bump de versión y sin tocar lógica de trading.
+
+---
+
+## Sesión 37 — playbook operativo + guardrails de scoreboard (30 mar 2026, local)
+
+**Disparador:** apareció una desalineación de proceso: el estado humano (`CONTEXTO.md`, `HISTORIAL_SESIONES.md`) estaba actualizado, pero el scoreboard live seguía anclado en la sesión 31 porque `agent_events.jsonl` no formaba parte del cierre obligatorio de sesión.
+
+**Diagnóstico (Codex):**
+
+1. **El problema no era de estado, sino de protocolo.** `CONTEXTO.md` y `HISTORIAL_SESIONES.md` seguían bien; la capa máquina del Dashboard no estaba integrada en el checklist de cierre.
+
+2. **El scoreboard tiene una fuente distinta.** El Dashboard no lee docs; lee `agent_events.jsonl`, que luego se sincroniza al Volume con `_sync_agent_events_seed()`.
+
+3. **Faltaban guardrails.** Había memoria humana, pero no una regla verificable que obligara a cerrar docs y scoreboard juntos.
+
+**Cambios realizados:**
+- nuevo `OPERATIONS_PLAYBOOK.md` con:
+  - checklist de inicio;
+  - checklist de cierre;
+  - protocolo de deploy;
+  - reglas de scoreboard;
+  - workflow Pablo + Codex + Claude;
+  - regla de hardening: todo error deja guardrail;
+- nuevo helper `tools/append_agent_event.py` para registrar eventos del scoreboard sin editar JSONL a mano;
+- `CLAUDE.md` y `CONTEXTO.md` pasan a remitir explícitamente al playbook;
+- `verify_before_deploy.py` añade checks para:
+  - existencia del playbook;
+  - existencia del helper;
+  - referencia al playbook en `CONTEXTO.md` y `CLAUDE.md`;
+  - regla de hardening;
+  - helper con bloqueo de duplicados;
+  - consistencia entre la sesión documentada más reciente y `agent_events.jsonl`;
+- `_sync_agent_events_seed()` deja de fallar en silencio y ahora loggea warning si el merge del scoreboard falla;
+- se sincroniza el scoreboard live en Railway para añadir sesiones 32-36.
+
+**Resultado:** el sistema gana una capa nueva de robustez de proceso. A partir de aquí, estado, historial, scoreboard y tests quedan conectados por un playbook explícito en vez de depender de memoria manual. `verify_before_deploy.py` queda en `396/396`.
 
 ---
 

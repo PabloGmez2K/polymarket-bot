@@ -1,5 +1,15 @@
 # CLAUDE.md — Polymarket Weather Bot
 
+## Protocolo obligatorio antes de trabajar
+
+Leer también:
+
+- `CONTEXTO.md`
+- `OPERATIONS_PLAYBOOK.md`
+
+`CONTEXTO.md` da el estado actual.
+`OPERATIONS_PLAYBOOK.md` define el checklist de inicio/cierre, reglas de scoreboard y workflow multiagente.
+
 ## Qué es este proyecto
 Bot automatizado de arbitraje meteorológico en Polymarket. Detecta mercados donde las previsiones meteorológicas profesionales (Open-Meteo) difieren de los precios del mercado, calcula apuestas con Half-Kelly, y ejecuta órdenes automáticamente.
 
