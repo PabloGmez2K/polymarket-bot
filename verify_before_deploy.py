@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-verify_before_deploy.py v10 — Tests de comportamiento para bot.py v10.6.3
+verify_before_deploy.py v10 — Tests de comportamiento para bot.py v10.6.4
 
 Ejecutar ANTES de cada deploy:
   python verify_before_deploy.py
@@ -257,22 +257,28 @@ def run_tests():
     test("parse_market_date_iso definida", "def parse_market_date_iso(" in code)
     test("format_postmortem_label definida", "def format_postmortem_label(" in code)
 
-    # ---- Test 12b: v10.6.3 Resolution fidelity ----
-    print("\n🔍 v10.6.3: Resolution fidelity")
+    # ---- Test 12b: v10.6.4 Resolution fidelity ----
+    print("\n🔍 v10.6.4: Resolution fidelity")
     test("Dallas usa coords KDAL / Love Field",
          '"Dallas":         {"lat": 32.8459,  "lon": -96.8510,  "name": "Dallas Love Field"}' in code)
     test("RESOLUTION_ICAO existe", "RESOLUTION_ICAO = {" in code)
     test("RESOLUTION_ICAO Chicago -> KORD",
-         '"Chicago":        {"icao": "KORD", "wu_url": _wu_history_url("KORD")}' in code)
+         '"Chicago":        {"icao": "KORD", "wu_url": _wu_history_url("KORD"), "noaa_station_id": "72530094846"}' in code)
     test("RESOLUTION_ICAO Atlanta -> KATL",
-         '"Atlanta":        {"icao": "KATL", "wu_url": _wu_history_url("KATL")}' in code)
+         '"Atlanta":        {"icao": "KATL", "wu_url": _wu_history_url("KATL"), "noaa_station_id": "72219013874"}' in code)
     test("RESOLUTION_ICAO Buenos Aires -> SAEZ",
-         '"Buenos Aires":   {"icao": "SAEZ", "wu_url": _wu_history_url("SAEZ")}' in code)
+         '"Buenos Aires":   {"icao": "SAEZ", "wu_url": _wu_history_url("SAEZ"), "noaa_station_id": "87576099999"}' in code)
     test("RESOLUTION_ICAO Dallas -> KDAL",
-         '"Dallas":         {"icao": "KDAL", "wu_url": _wu_history_url("KDAL")}' in code)
+         '"Dallas":         {"icao": "KDAL", "wu_url": _wu_history_url("KDAL"), "noaa_station_id": "72258303927"}' in code)
     test("RESOLUTION_ICAO incluye ciudades bloqueadas",
          '"London":         {"icao": "EGLC", "wu_url": _wu_history_url("EGLC")}' in code
          and '"Madrid":         {"icao": "LEMD", "wu_url": _wu_history_url("LEMD")}' in code)
+    test("OBSERVED_AUDIT_KEY separado del legacy", 'OBSERVED_AUDIT_KEY = "observed_vs_forecast"' in code)
+    test("OBSERVED_AUDIT_CITIES solo contiene 4 activas",
+         'OBSERVED_AUDIT_CITIES = {"Chicago", "Atlanta", "Buenos Aires", "Dallas"}' in code)
+    test("fetch_noaa_observed_max definida", "def fetch_noaa_observed_max(" in code)
+    test("audit_check_resolution_truth definida", "def audit_check_resolution_truth(" in code)
+    test("audit NOAA usa source=noaa_ncei", '"source": "noaa_ncei"' in code)
     audit_fn_src = get_function_source(module_ast, code_lines, "audit_check_open_meteo_forecast_drift")
     test("Auditoría drift documenta que NO valida WU",
          "Weather Underground" in audit_fn_src and "NO valida" in audit_fn_src)
@@ -280,6 +286,9 @@ def run_tests():
          "forecast posterior Open-Meteo" in audit_fn_src)
     test("Auditoría drift no usa 'real=' en mensajes",
          " real=" not in audit_fn_src)
+    observed_audit_fn_src = get_function_source(module_ast, code_lines, "audit_check_resolution_truth")
+    test("Auditoría NOAA documenta observed proxy",
+         "Observed proxy audit" in observed_audit_fn_src and "source=noaa_ncei" in observed_audit_fn_src)
 
     print("\n🔍 Trader data en Volume")
     try:
@@ -351,7 +360,7 @@ def run_tests():
     test("CYCLES_HISTORY_FILE definido", "CYCLES_HISTORY_FILE" in code)
     test("cycles_history.jsonl append-only", "cycles_history.jsonl" in code)
     test("cycle_summary se guarda en main()", "cycle_data" in code and "CYCLE_SUMMARY_FILE" in code)
-    test("cycle_data incluye version v10.6.3", '"version"' in code and "v10.6.3" in code)
+    test("cycle_data incluye version v10.6.4", '"version"' in code and "v10.6.4" in code)
     test("cycle_data incluye logic_series", '"logic_series": LOGIC_SERIES' in code)
     test("cycle_data incluye logic_cycle_number", '"logic_cycle_number"' in code)
 
@@ -372,7 +381,7 @@ def run_tests():
     test("Bug #13: send_telegram_paged en cmd_log", "send_telegram_paged" in code and "cmd_log" in code)
     test("Bug #13: send_telegram_paged en cmd_cartera", "send_telegram_paged" in code)
     test("_parse_position_label usa centavos (¢)", "¢" in code)
-    test("cmd_estado versión correcta", "Bot v10.6.3" in code or "v10.6.3" in code)
+    test("cmd_estado versión correcta", "Bot v10.6.4" in code or "v10.6.4" in code)
 
     # ---- Test 14c: Zonas horarias reales v10.4.5 ----
     print("\n🔍 Zonas horarias reales")
@@ -492,8 +501,8 @@ def run_tests():
         with open(tmp_cycles, "w", encoding="utf-8") as f:
             f.write(json.dumps({"version": "v10.4.8", "cycle_number": 1}, ensure_ascii=False) + "\n")
             f.write(json.dumps({"version": "v10.5.1", "cycle_number": 2}, ensure_ascii=False) + "\n")
-            f.write(json.dumps({"logic_series": "10.6", "version": "v10.6.3", "cycle_number": 3}, ensure_ascii=False) + "\n")
-            f.write(json.dumps({"logic_series": "10.6", "version": "v10.6.3", "cycle_number": 4}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"logic_series": "10.6", "version": "v10.6.4", "cycle_number": 3}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"logic_series": "10.6", "version": "v10.6.4", "cycle_number": 4}, ensure_ascii=False) + "\n")
         cycle_ns = {
             "os": os,
             "json": json,
@@ -833,8 +842,8 @@ def run_tests():
             "datetime": datetime,
             "timezone": timezone,
             "_load_cycle_counts": lambda: (5, 1),
-            "load_cycle_summary_data": lambda: {"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.6.3"},
-            "load_cycle_history": lambda limit=None: [{"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.6.3", "timestamp_utc": "2026-03-29T11:08:00+00:00", "buys": [], "management": {"n_sold": 1}, "exposure_after": 2.94}],
+            "load_cycle_summary_data": lambda: {"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.6.4"},
+            "load_cycle_history": lambda limit=None: [{"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.6.4", "timestamp_utc": "2026-03-29T11:08:00+00:00", "buys": [], "management": {"n_sold": 1}, "exposure_after": 2.94}],
             "get_clean_closed_trade_stats": lambda: {"count": 18, "sell": 12, "loss_total": 6, "resolved_win": 0},
             "get_logic_series_clean_closed_trade_stats": lambda: {"count": 0, "sell": 0, "loss_total": 0, "resolved_win": 0},
             "get_validated_closed_postmortems": lambda: [],
@@ -854,7 +863,7 @@ def run_tests():
             "compute_agent_scorecard": lambda events: [],
             "build_agent_rivalry": lambda events: [],
             "_extract_logic_series": lambda value: "10.5" if "10.5" in str(value) else "10.4" if "10.4" in str(value) else None,
-            "BOT_VERSION": "v10.6.3",
+            "BOT_VERSION": "v10.6.4",
             "LOGIC_SERIES": "10.6",
             "DRY_RUN": False,
             "DASHBOARD_USER": "pablo",
@@ -999,7 +1008,7 @@ def run_tests():
         os.close(fd)
         with open(tmp_cycle_summary, "w", encoding="utf-8") as f:
             json.dump({
-                "version": "v10.6.3",
+                "version": "v10.6.4",
                 "cycle_number": 12,
                 "timestamp_utc": "2026-03-28T16:00:33.073674+00:00",
                 "management": {"n_kept": 0, "n_sold": 1, "n_resolved": 0},
@@ -1011,7 +1020,7 @@ def run_tests():
             "json": __import__("json"),
             "datetime": datetime,
             "send_telegram_paged": lambda text, with_menu=False, page_size=3800: info_messages.append(text),
-            "BOT_VERSION": "v10.6.3",
+            "BOT_VERSION": "v10.6.4",
             "LOGIC_SERIES": "10.6",
             "_extract_logic_series": cycle_ns["_extract_logic_series"],
             "DRY_RUN": False,
@@ -1030,7 +1039,7 @@ def run_tests():
         exec(get_function_source(module_ast, code_lines, "cmd_info"), info_ns)
         info_ns["cmd_info"]()
         info_msg = info_messages[-1] if info_messages else ""
-        test("info: versión visible correcta", "BOT POLYMARKET v10.6.3" in info_msg, info_msg[:120])
+        test("info: versión visible correcta", "BOT POLYMARKET v10.6.4" in info_msg, info_msg[:120])
         test("info: usa cycle_summary como fallback de último", "Último: 2026-03-28 16:00 UTC" in info_msg, info_msg[:220])
         test("info: muestra doble contador", "Ciclos completados: 12 total | 3 serie v10.6" in info_msg, info_msg[:240])
         test("info: muestra ciclo total y de serie", "Ciclo total #12 | serie v10.6 #3" in info_msg, info_msg[:260])
@@ -1135,6 +1144,102 @@ def run_tests():
         test("traders: análisis sin separador huérfano",
              "\n| Análisis:" not in traders_msg and "Análisis: 28/03 19:30 UTC" in traders_msg,
              traders_msg[:220])
+
+        noaa_date = (date.today() - timedelta(days=3)).isoformat()
+        noaa_request_urls = []
+
+        class _DummyNoaaRequest:
+            def __init__(self, url):
+                self.full_url = url
+                self.headers = {}
+
+            def add_header(self, key, value):
+                self.headers[key] = value
+
+        def _dummy_noaa_urlopen(req, timeout=0):
+            noaa_request_urls.append(req.full_url)
+            payload = [
+                {"TMP": "+0123,1"},
+                {"TMP": "+0156,1"},
+                {"TMP": "+9999,9"},
+            ]
+            return types.SimpleNamespace(read=lambda: json.dumps(payload).encode("utf-8"))
+
+        noaa_ns = {
+            "json": json,
+            "date": date,
+            "datetime": datetime,
+            "timezone": timezone,
+            "time": types.SimpleNamespace(sleep=lambda seconds: None),
+            "urllib": types.SimpleNamespace(
+                parse=types.SimpleNamespace(urlencode=lambda params: "stubbed=yes"),
+                request=types.SimpleNamespace(Request=_DummyNoaaRequest, urlopen=_dummy_noaa_urlopen),
+            ),
+            "NOAA_NCEI_ACCESS_URL": "https://example.test/noaa",
+            "NOAA_OBSERVED_LAG_DAYS": 2,
+            "log": type("L", (), {"warning": staticmethod(lambda *a, **k: None)})(),
+        }
+        exec(get_function_source(module_ast, code_lines, "_parse_noaa_tmp_c"), noaa_ns)
+        exec(get_function_source(module_ast, code_lines, "fetch_noaa_observed_max"), noaa_ns)
+        noaa_max = noaa_ns["fetch_noaa_observed_max"]("72258303927", noaa_date, retries=1, delay=0)
+        test("NOAA helper: parsea TMP y devuelve maxima observada", noaa_max == 15.6, noaa_max)
+        test("NOAA helper: construye request al endpoint NCEI", bool(noaa_request_urls) and "https://example.test/noaa?stubbed=yes" in noaa_request_urls[0], noaa_request_urls[:1])
+
+        fd, tmp_perf_noaa = tempfile.mkstemp(
+            dir=tempfile.gettempdir(),
+            prefix="_tmp_perf_noaa_test_",
+            suffix=".json",
+        )
+        os.close(fd)
+        observed_saved = {}
+        observed_calls = []
+        lagged_date = (date.today() - timedelta(days=1)).isoformat()
+        with open(tmp_perf_noaa, "w", encoding="utf-8") as f:
+            json.dump([
+                {"action": "BUY", "city": "Dallas", "date": noaa_date, "forecast_max": 18.0, "side": "YES", "edge_pct": 12.5},
+                {"action": "BUY", "city": "London", "date": noaa_date, "forecast_max": 11.0, "side": "NO", "edge_pct": 9.0},
+                {"action": "BUY", "city": "Atlanta", "date": lagged_date, "forecast_max": 20.0, "side": "YES", "edge_pct": 8.2},
+            ], f, ensure_ascii=False)
+
+        observed_ns = {
+            "os": os,
+            "json": json,
+            "date": date,
+            "datetime": datetime,
+            "timezone": timezone,
+            "PERFORMANCE_FILE": tmp_perf_noaa,
+            "OBSERVED_AUDIT_KEY": "observed_vs_forecast",
+            "OBSERVED_AUDIT_CITIES": {"Chicago", "Atlanta", "Buenos Aires", "Dallas"},
+            "NOAA_OBSERVED_LAG_DAYS": 2,
+            "RESOLUTION_ICAO": {
+                "Dallas": {"icao": "KDAL", "noaa_station_id": "72258303927"},
+                "Atlanta": {"icao": "KATL", "noaa_station_id": "72219013874"},
+                "London": {"icao": "EGLC", "noaa_station_id": "00000000000"},
+            },
+            "load_audit_data": lambda: {"pending_sells": [], "forecast_vs_real": [], "observed_vs_forecast": [], "errors": []},
+            "save_audit_data": lambda data: observed_saved.update(data),
+            "fetch_noaa_observed_max": lambda station_id, date_iso, retries=3, delay=5: observed_calls.append((station_id, date_iso)) or 19.4,
+        }
+        exec(get_function_source(module_ast, code_lines, "audit_check_resolution_truth"), observed_ns)
+        observed_dl = []
+        observed_ns["audit_check_resolution_truth"](observed_dl)
+        observed_records = observed_saved.get("observed_vs_forecast", [])
+        test("audit NOAA: guarda observed_vs_forecast separado del legacy",
+             len(observed_records) == 1 and observed_records[0]["city"] == "Dallas", observed_records)
+        test("audit NOAA: source=noaa_ncei en registros nuevos",
+             bool(observed_records) and observed_records[0]["source"] == "noaa_ncei", observed_records[:1])
+        test("audit NOAA: no toca ciudades bloqueadas",
+             all(rec["city"] != "London" for rec in observed_records) and all(call[0] != "00000000000" for call in observed_calls),
+             {"records": observed_records, "calls": observed_calls})
+        test("audit NOAA: respeta lag de 2 dias",
+             all(call[1] != lagged_date for call in observed_calls), observed_calls)
+        test("audit NOAA: log usa observado NOAA NCEI",
+             any("observado NOAA NCEI=19.4°C" in line for line in observed_dl), observed_dl[:3])
+        if os.path.exists(tmp_perf_noaa):
+            try:
+                os.remove(tmp_perf_noaa)
+            except PermissionError:
+                pass
 
         pm_empty_messages = []
         fd, tmp_perf_summary = tempfile.mkstemp(
@@ -1777,7 +1882,7 @@ def run_tests():
     test("/accuracy en MENU_KEYBOARD", '"callback_data": "accuracy"' in code)
     test("cmd_accuracy vuelve con menú", 'send_telegram("Sin datos de accuracy todavía.", with_menu=True)' in code and 'send_telegram_paged("\\n".join(lines), with_menu=True)' in code)
     test("Win rate en rendimiento", "WR:" in code)
-    test("Version v10.6.3", "v10.6.3" in code)
+    test("Version v10.6.4", "v10.6.4" in code)
 
     # ---- Resultado ----
     print(f"\n{'='*50}")

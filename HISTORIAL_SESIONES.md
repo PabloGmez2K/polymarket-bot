@@ -49,6 +49,7 @@ Comandos útiles:
 | 2026-03-29 | Explícita | Sesión 31 | `—` | Hardening local de `v10.6.2`: alerta de bankroll fiable, rearme con margen, scorecard actualizado y docs/tests alineados. |
 | 2026-03-30 | Explícita | Sesión 32 | `—` | Investigación estratégica Codex + Claude: Dallas `KDAL` como bug activo, auditoría mal nombrada, síntesis competitiva y preparación del alcance de `v10.6.3`. |
 | 2026-03-30 | Explícita | Sesión 33 | `—` | Implementación local de `v10.6.3`: fix Dallas `KDAL`, `RESOLUTION_ICAO`, auditoría `forecast vs forecast posterior Open-Meteo` y suite en `358/358`. |
+| 2026-03-30 | Explícita | Sesión 34 | `—` | Implementación local de `v10.6.4`: `observed_vs_forecast` con NOAA NCEI, `noaa_station_id` para 4 activas, lag de 2 días y suite en `371/371`. |
 
 ---
 
@@ -521,6 +522,43 @@ Investigación completa de trades, commits y lógica de trading desde v10.3 hast
 - el test funcional de `/traders` pasa a usar fechas relativas para no romperse con el calendario.
 
 **Resultado:** `v10.6.3` queda listo en local con `358/358` tests. Trading, sizing, ejecución y scheduling no se tocaron; el cambio queda acotado a resolución, nomenclatura honesta de auditoría y trazabilidad.
+
+---
+
+## Sesión 34 — v10.6.4 (30 mar 2026, local)
+
+**Disparador:** usar la base de `v10.6.3` para crear una capa observada separada con NOAA NCEI, evitando depender de Weather Underground scraping y sin tocar la lógica de trading.
+
+**Diagnóstico (Codex):**
+
+1. **La siguiente capa útil ya no era forecast-vs-forecast.** Hacía falta una auditoría observada separada que no reutilizara Open-Meteo y que no se presentara como “resolución real”.
+
+2. **El riesgo técnico estaba en los station IDs.** NOAA Access Data Service requiere station IDs explícitos; para las 4 activas había que añadir `noaa_station_id` en `RESOLUTION_ICAO` y evitar una resolución dinámica `ICAO -> NOAA`.
+
+3. **Buenos Aires seguía siendo el punto más incierto.** Se dejó `87576099999` como placeholder provisional hasta validar el spike NCEI, en vez de esconder la incertidumbre.
+
+**Cambios realizados:**
+- `BOT_VERSION` sube a `v10.6.4`;
+- `RESOLUTION_ICAO` añade `noaa_station_id` explícito para:
+  - Dallas `72258303927`
+  - Chicago `72530094846`
+  - Atlanta `72219013874`
+  - Buenos Aires `87576099999` (provisional);
+- nueva clave `OBSERVED_AUDIT_KEY = "observed_vs_forecast"` separada del legacy `forecast_vs_real`;
+- nuevo helper `_parse_noaa_tmp_c()` para convertir `TMP` de NOAA;
+- nuevo helper `fetch_noaa_observed_max()` contra NOAA NCEI Access Data Service;
+- nueva auditoría `audit_check_resolution_truth(dl)`:
+  - solo para las 4 ciudades activas;
+  - solo con lag mínimo de 2 días;
+  - guarda `city, date, icao_used, noaa_station_id, observed_temp_c, forecast_temp_c, error_c, abs_error_c, side, edge_pct, source="noaa_ncei", checked_at`;
+  - wording explícito de `observed proxy`;
+- `main()` ahora ejecuta esta auditoría junto a la legacy del paso `0.6`;
+- `verify_before_deploy.py` sube a `371/371` con:
+  - checks estructurales de `noaa_station_id`, `observed_vs_forecast`, funciones nuevas y `source=noaa_ncei`;
+  - test funcional del helper NOAA con respuesta simulada;
+  - test funcional de la auditoría para asegurar que no toca London y respeta el lag de 2 días.
+
+**Resultado:** `v10.6.4` queda listo en local con `371/371` tests. La nueva capa NOAA mejora la observabilidad, pero se mantiene correctamente etiquetada como `observed proxy`, no como fuente real de settlement.
 
 ---
 

@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 30 de marzo de 2026 (Sesión 33 — implementación local de `v10.6.3`)
-**Próxima sesión:** Validar/push/deploy de `v10.6.3` y decidir el siguiente paso de la truth layer de resolución sin tocar trading ni scheduling.
+**Última actualización:** 30 de marzo de 2026 (Sesión 34 — implementación local de `v10.6.4`)
+**Próxima sesión:** Validar/push/deploy de `v10.6.4`, dejar correr la auditoría NOAA 2+ días y comprobar primeras entradas `observed_vs_forecast`, especialmente Buenos Aires.
 
 ---
 
@@ -29,7 +29,7 @@ Para estado exacto: usar `/info` + `/cartera` + `/rendimiento` + `/accuracy` en 
 
 ---
 
-## Qué hace el bot v10.6.3 (paso a paso)
+## Qué hace el bot v10.6.4 (paso a paso)
 
 Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
@@ -83,6 +83,8 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Resolution fidelity hardening (v10.6.3):** Corrige Dallas a `Dallas Love Field / KDAL`, añade la capa declarativa `RESOLUTION_ICAO` con ICAO + URL de Weather Underground para ciudades activas/bloqueadas (y el resto de estaciones actuales), y deja explícito en código/logs que la pseudo-auditoría histórica `forecast_vs_real` sigue siendo solo `forecast original vs forecast posterior Open-Meteo`, no una validación de la fuente real de resolución. `verify_before_deploy.py` sube a `358/358` y añade checks específicos de Dallas, `RESOLUTION_ICAO` y nomenclatura honesta de auditoría.
 
+**Observed proxy layer NOAA (v10.6.4):** Añade `noaa_station_id` explícito en `RESOLUTION_ICAO` solo para las 4 ciudades activas y crea una auditoría separada `observed_vs_forecast` con `source="noaa_ncei"`. Esta capa compara forecast original vs observado NOAA NCEI con lag de 2 días y deja intacta la clave legacy `forecast_vs_real`. Importante: es `observed proxy`, no la fuente real de settlement de Polymarket. Buenos Aires queda con `87576099999` como placeholder provisional pendiente de spike/validación. `verify_before_deploy.py` sube a `371/371`.
+
 **City accuracy tracker (v10.5.2):** Calcula win rate por ciudad desde postmortem. Alerta por Telegram si una ciudad baja de 25% win rate con 3+ trades. Nuevo comando `/accuracy`. Win rate visible en `/rendimiento`.
 
 **Integración `/accuracy` + revisión crítica (v10.5.3):** `/accuracy` queda visible en el menú, responde siempre con menú, `/estado` muestra explícitamente el intervalo intra-SL y la trazabilidad de sesión 20 queda corregida para reflejar mejor lo que realmente introdujeron los commits de la mañana.
@@ -95,13 +97,13 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.1`)
 **Repositorio remoto (`origin/main`):** `v10.6.2` empujado con commit `29049a1`
-**Versión local / remoto GitHub:** local `v10.6.3` | `origin/main` en `v10.6.2`
+**Versión local / remoto GitHub:** local `v10.6.4` | `origin/main` en `v10.6.3`
 
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.6.3 |
-| `verify_before_deploy.py` | v10 — 358 tests de comportamiento |
+| `bot.py` | Script principal v10.6.4 |
+| `verify_before_deploy.py` | v10 — 371 tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |
@@ -144,7 +146,7 @@ MIN_BET="1.00"
 DATA_DIR="/app/data"
 ```
 
-### Configuración en código (defaults bot.py v10.6.3):
+### Configuración en código (defaults bot.py v10.6.4):
 ```python
 MIN_EDGE = 7.0%
 STOP_LOSS_PCT = -25.0%
@@ -167,7 +169,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 ---
 
-## Telegram — Comandos disponibles (v10.6.3)
+## Telegram — Comandos disponibles (v10.6.4)
 
 | Comando | Qué muestra |
 |---------|-------------|
@@ -186,7 +188,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 **Para iniciar una sesión de análisis en claude.ai:** pegar `/info` + `/cartera` + `/rendimiento`.
 
-## Dashboard web (v10.6.3)
+## Dashboard web (v10.6.4)
 
 - **Ruta principal:** `/`
 - **Healthcheck:** `/healthz`
@@ -228,9 +230,10 @@ Schedule: 08:00, 16:00, 23:00 UTC
 - **#14** ✅ Precio límite vs fill clarificado en Telegram
 
 ### Pendientes:
-- **Truth layer real pendiente:** `v10.6.3` ya corrigió Dallas a `KDAL` y añadió `RESOLUTION_ICAO` con URLs WU, pero todavía falta usar esa capa para una validación/postmortem real contra la fuente de resolución de Polymarket.
-- **Auditoría limitada aunque ya honesta:** `forecast_vs_real` sigue existiendo como nombre legacy en `audit.json`, pero los logs/código ya dejan claro que compara `forecast original vs forecast posterior Open-Meteo`, no “real” ni Weather Underground.
-- **Capa formal de resolución aún incompleta:** la base `ciudad -> ICAO -> URL WU` ya existe; faltan los siguientes campos operativos si se quiere cerrar bien la truth layer (`timezone`, `unit`, `finalization semantics`) y cablearla a un flujo de validación real.
+- **Observed proxy NOAA pendiente de validación en producción:** `v10.6.4` ya crea `observed_vs_forecast`, pero hay que dejar correr 2+ días y confirmar que `audit.json` empieza a poblarse con datos útiles para las 4 ciudades activas.
+- **Buenos Aires NOAA pendiente de spike:** `SAEZ` usa provisionalmente `87576099999` como `noaa_station_id`; es el punto técnico más incierto del mapping y conviene validarlo antes de confiar en esa ciudad.
+- **Fuente real de resolución sigue sin automatizarse:** NOAA mejora mucho la observabilidad, pero sigue siendo `observed proxy`, no la fuente real de settlement de Polymarket.
+- **Auditoría legacy sigue limitada aunque honesta:** `forecast_vs_real` sigue existiendo como nombre legacy en `audit.json`, pero los logs/código ya dejan claro que compara `forecast original vs forecast posterior Open-Meteo`, no “real” ni Weather Underground.
 - **Weather Underground vs Open-Meteo:** Polymarket resuelve con WU, no Open-Meteo. London sigue bloqueada en código desde `v10.4.7`. IBM Trial no accesible; la vía correcta a corto plazo es alinear resolución, no esperar una API oficial.
 
 ---
@@ -274,6 +277,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 | v10.6.1 | 29 mar | fix drawdown sort, alerta bankroll bajo ($5), unlock redundante eliminado, scoreboard sesión 30. 338 tests |
 | v10.6.2 | 29 mar | hardening alerta bankroll: exige `cash_ok` y ausencia de `api_error`, añade `LOW_BANKROLL_RESET_MARGIN`, tests funcionales dashboard/Telegram/reset. 348 tests |
 | v10.6.3 | 30 mar | fix Dallas `KDAL`, añade `RESOLUTION_ICAO` con URLs WU, renombra/documenta la pseudo-auditoría como `forecast vs forecast posterior Open-Meteo`, y sube a 358 tests |
+| v10.6.4 | 30 mar | añade `observed_vs_forecast` con NOAA NCEI, `noaa_station_id` explícito para las 4 activas, lag de 2 días, tests funcionales NOAA y 371 tests |
 
 ---
 
@@ -634,6 +638,27 @@ Usar esta plantilla al cerrar cada sesión relevante:
 
 - **Estado final:**
   `v10.6.3` local, `358/358` tests, trading/scheduling intactos y base de resolución más explícita para la siguiente iteración de truth layer.
+
+### Sesión 34 — Implementación local de v10.6.4
+
+- **Fecha:** 2026-03-30
+- **Versión activa al cerrar:** `v10.6.4` local (`origin/main` sigue en `v10.6.3`)
+- **Objetivo de la sesión:** convertir la capa declarativa de resolución en una auditoría observada separada usando NOAA NCEI, sin tocar trading ni scheduling.
+
+- **Codex:**
+  - Añadió `noaa_station_id` explícito en `RESOLUTION_ICAO` solo para Chicago, Atlanta, Buenos Aires y Dallas
+  - Implementó `fetch_noaa_observed_max()` contra NOAA NCEI Access Data Service usando station IDs ya resueltos, no ICAO dinámico
+  - Implementó `audit_check_resolution_truth(dl)` con clave nueva `observed_vs_forecast`
+  - Dejó el framing explícito de `observed proxy` con `source="noaa_ncei"` y mantuvo `forecast_vs_real` solo como auditoría legacy Open-Meteo
+  - Limitó la auditoría NOAA a las 4 ciudades activas y a fechas con lag mínimo de 2 días
+  - Amplió `verify_before_deploy.py` con checks estructurales nuevos y tests funcionales de NOAA
+
+- **Problemas detectados / matices:**
+  - NOAA mejora mucho la observabilidad, pero no debe confundirse con la fuente real de settlement de Polymarket
+  - Buenos Aires queda con `87576099999` como placeholder provisional hasta validar el spike NCEI
+
+- **Estado final:**
+  `v10.6.4` local, `371/371` tests, observabilidad NOAA añadida como capa separada y trading/scheduling intactos.
 
 ---
 

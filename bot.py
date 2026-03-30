@@ -24,8 +24,8 @@ from waitress import serve
 load_dotenv()
 
 # =============================================================
-# bot.py v10.6.3 — resolution fidelity hardening sin tocar trading
-# Sesión 33: Dallas KDAL + capa formal de resolucion + auditoria honesta
+# bot.py v10.6.4 — observed proxy layer con NOAA NCEI
+# Sesión 34: auditoria observed_vs_forecast sin tocar trading
 # =============================================================
 #
 # Nuevo en v10.4.3:
@@ -100,7 +100,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.3"
+BOT_VERSION = "v10.6.4"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -2905,19 +2905,20 @@ RESOLUTION_ICAO = {
     "Hong Kong":      {"icao": "VHHH", "wu_url": _wu_history_url("VHHH")},
     "Singapore":      {"icao": "WSSS", "wu_url": _wu_history_url("WSSS")},
     "Toronto":        {"icao": "CYYZ", "wu_url": _wu_history_url("CYYZ")},
-    "Chicago":        {"icao": "KORD", "wu_url": _wu_history_url("KORD")},
+    "Chicago":        {"icao": "KORD", "wu_url": _wu_history_url("KORD"), "noaa_station_id": "72530094846"},
     "Wellington":     {"icao": "NZWN", "wu_url": _wu_history_url("NZWN")},
     "Munich":         {"icao": "EDDM", "wu_url": _wu_history_url("EDDM")},
     "Warsaw":         {"icao": "EPWA", "wu_url": _wu_history_url("EPWA")},
     "Ankara":         {"icao": "LTAC", "wu_url": _wu_history_url("LTAC")},
-    "Atlanta":        {"icao": "KATL", "wu_url": _wu_history_url("KATL")},
+    "Atlanta":        {"icao": "KATL", "wu_url": _wu_history_url("KATL"), "noaa_station_id": "72219013874"},
     "Shenzhen":       {"icao": "ZGSZ", "wu_url": _wu_history_url("ZGSZ")},
     "Paris":          {"icao": "LFPG", "wu_url": _wu_history_url("LFPG")},
-    "Buenos Aires":   {"icao": "SAEZ", "wu_url": _wu_history_url("SAEZ")},
+    # SAEZ: usa 99999 como WBAN placeholder mientras se valida el spike NCEI.
+    "Buenos Aires":   {"icao": "SAEZ", "wu_url": _wu_history_url("SAEZ"), "noaa_station_id": "87576099999"},
     "Miami":          {"icao": "KMIA", "wu_url": _wu_history_url("KMIA")},
     "Madrid":         {"icao": "LEMD", "wu_url": _wu_history_url("LEMD")},
     "Seattle":        {"icao": "KSEA", "wu_url": _wu_history_url("KSEA")},
-    "Dallas":         {"icao": "KDAL", "wu_url": _wu_history_url("KDAL")},
+    "Dallas":         {"icao": "KDAL", "wu_url": _wu_history_url("KDAL"), "noaa_station_id": "72258303927"},
     "Lucknow":        {"icao": "VILK", "wu_url": _wu_history_url("VILK")},
     "Sao Paulo":      {"icao": "SBGR", "wu_url": _wu_history_url("SBGR")},
     "Taipei":         {"icao": "RCTP", "wu_url": _wu_history_url("RCTP")},
@@ -2926,6 +2927,8 @@ RESOLUTION_ICAO = {
     "Chengdu":        {"icao": "ZUUU", "wu_url": _wu_history_url("ZUUU")},
     "Wuhan":          {"icao": "ZHHH", "wu_url": _wu_history_url("ZHHH")},
 }
+
+OBSERVED_AUDIT_CITIES = {"Chicago", "Atlanta", "Buenos Aires", "Dallas"}
 
 # Zonas horarias reales por ciudad — evitan tener que tocar offsets en cada DST.
 # Si una ciudad no está aquí, get_min_days_for_city() cae a UTC como fallback seguro.
@@ -4825,6 +4828,9 @@ def intra_sl_loop(client):
 
 AUDIT_FILE = _data_path("audit.json")
 FORECAST_AUDIT_KEY = "forecast_vs_real"  # Legacy key: hoy guarda forecast original vs forecast posterior Open-Meteo.
+OBSERVED_AUDIT_KEY = "observed_vs_forecast"  # NOAA NCEI observed proxy vs forecast original.
+NOAA_NCEI_ACCESS_URL = "https://www.ncei.noaa.gov/access/services/data/v1"
+NOAA_OBSERVED_LAG_DAYS = 2
 
 def load_audit_data():
     """Carga datos de auditoría acumulativos."""
@@ -4836,17 +4842,18 @@ def load_audit_data():
                     data = {}
                 data.setdefault("pending_sells", [])
                 data.setdefault(FORECAST_AUDIT_KEY, [])
+                data.setdefault(OBSERVED_AUDIT_KEY, [])
                 data.setdefault("errors", [])
                 return data
         except Exception:
             pass
-    return {"pending_sells": [], FORECAST_AUDIT_KEY: [], "errors": []}
+    return {"pending_sells": [], FORECAST_AUDIT_KEY: [], OBSERVED_AUDIT_KEY: [], "errors": []}
 
 
 def save_audit_data(data):
     """Guarda datos de auditoría."""
     # Limitar tamaño
-    for key in ["pending_sells", FORECAST_AUDIT_KEY, "errors"]:
+    for key in ["pending_sells", FORECAST_AUDIT_KEY, OBSERVED_AUDIT_KEY, "errors"]:
         if key in data and len(data[key]) > 200:
             data[key] = data[key][-200:]
     try:
@@ -4993,6 +5000,187 @@ def audit_register_pending_sell(order_id, city, side, price, shares, return_est,
         "reason": reason,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
+    save_audit_data(audit)
+
+
+def _parse_noaa_tmp_c(raw_value):
+    """Convierte TMP de NOAA (+0123,1) a grados C o None si falta."""
+    if raw_value in (None, ""):
+        return None
+    value_str = str(raw_value).strip()
+    if not value_str:
+        return None
+    value_token = value_str.split(",", 1)[0].strip()
+    try:
+        value_tenths_c = int(value_token)
+    except ValueError:
+        return None
+    if abs(value_tenths_c) >= 9999:
+        return None
+    return round(value_tenths_c / 10.0, 1)
+
+
+def fetch_noaa_observed_max(noaa_station_id, date_iso, retries=3, delay=5):
+    """
+    Devuelve la maxima observada NOAA NCEI para una fecha.
+
+    Usa Access Data Service con station_id explicito (USAF+WBAN) ya resuelto en
+    RESOLUTION_ICAO. Si la fecha es demasiado reciente o la consulta falla,
+    devuelve None y deja solo warning en logs.
+    """
+    if not noaa_station_id or not date_iso:
+        return None
+
+    try:
+        market_date = date.fromisoformat(date_iso)
+    except ValueError:
+        return None
+
+    days_ago = (datetime.now(timezone.utc).date() - market_date).days
+    if days_ago < NOAA_OBSERVED_LAG_DAYS:
+        return None
+
+    params = urllib.parse.urlencode({
+        "dataset": "global-hourly",
+        "stations": noaa_station_id,
+        "startDate": f"{date_iso}T00:00:00",
+        "endDate": f"{date_iso}T23:59:59",
+        "dataTypes": "TMP",
+        "format": "json",
+    })
+    url = f"{NOAA_NCEI_ACCESS_URL}?{params}"
+
+    last_error = None
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(url)
+            req.add_header("User-Agent", "polymarket-bot/0.10")
+            resp = urllib.request.urlopen(req, timeout=30)
+            rows = json.loads(resp.read())
+            if not isinstance(rows, list):
+                return None
+
+            observed_temps = []
+            for row in rows:
+                temp_c = _parse_noaa_tmp_c(row.get("TMP"))
+                if temp_c is not None:
+                    observed_temps.append(temp_c)
+
+            if not observed_temps:
+                return None
+            return max(observed_temps)
+        except Exception as e:
+            last_error = e
+            if attempt < retries - 1:
+                log.warning(
+                    f"NOAA observed proxy error (intento {attempt+1}/{retries}) "
+                    f"{noaa_station_id} {date_iso}: {e} — reintentando en {delay}s"
+                )
+                time.sleep(delay)
+
+    if last_error:
+        log.warning(f"NOAA observed proxy error {noaa_station_id} {date_iso}: {last_error}")
+    return None
+
+
+def audit_check_resolution_truth(dl):
+    """
+    Observed proxy audit: forecast original vs observado NOAA NCEI.
+
+    Importante: NOAA no es la fuente real de settlement de Polymarket. Esta capa
+    vive separada de forecast_vs_real y se guarda como observed_vs_forecast con
+    source=noaa_ncei para no mezclar proxy observado con resolucion real.
+    """
+    if not os.path.exists(PERFORMANCE_FILE):
+        return
+
+    try:
+        with open(PERFORMANCE_FILE, "r", encoding="utf-8") as f:
+            perf = json.load(f)
+    except Exception:
+        return
+
+    audit = load_audit_data()
+    already_checked = set(
+        f"{v.get('city')}|{v.get('date')}"
+        for v in audit.get(OBSERVED_AUDIT_KEY, [])
+    )
+
+    to_check = []
+    for entry in perf:
+        if entry.get("action") != "BUY":
+            continue
+        city = entry.get("city", "")
+        market_date = entry.get("date", "")
+        if city not in OBSERVED_AUDIT_CITIES or not market_date:
+            continue
+
+        resolution_meta = RESOLUTION_ICAO.get(city, {})
+        if not resolution_meta.get("noaa_station_id"):
+            continue
+
+        key = f"{city}|{market_date}"
+        if key in already_checked:
+            continue
+
+        try:
+            days_ago = (datetime.now(timezone.utc).date() - date.fromisoformat(market_date)).days
+        except ValueError:
+            continue
+
+        if days_ago >= NOAA_OBSERVED_LAG_DAYS:
+            to_check.append(entry)
+            already_checked.add(key)
+
+    if not to_check:
+        return
+
+    n_checked = 0
+    for entry in to_check[:10]:
+        city = entry["city"]
+        market_date = entry["date"]
+        resolution_meta = RESOLUTION_ICAO.get(city, {})
+        noaa_station_id = resolution_meta.get("noaa_station_id", "")
+        observed_temp_c = fetch_noaa_observed_max(noaa_station_id, market_date)
+        if observed_temp_c is None:
+            continue
+
+        forecast_temp_c = entry.get("forecast_max", 0)
+        error = round(observed_temp_c - forecast_temp_c, 1)
+        record = {
+            "city": city,
+            "date": market_date,
+            "icao_used": resolution_meta.get("icao", ""),
+            "noaa_station_id": noaa_station_id,
+            "observed_temp_c": observed_temp_c,
+            "forecast_temp_c": forecast_temp_c,
+            "error_c": error,
+            "abs_error_c": abs(error),
+            "side": entry.get("side", "?"),
+            "edge_pct": entry.get("edge_pct", 0),
+            "source": "noaa_ncei",
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+        audit[OBSERVED_AUDIT_KEY].append(record)
+        n_checked += 1
+
+        emoji = "✅" if abs(error) <= 1.0 else "⚠️" if abs(error) <= 2.0 else "❌"
+        dl.append(
+            f"  {emoji} {city} {market_date}: "
+            f"observado NOAA NCEI={observed_temp_c:.1f}°C | "
+            f"prevision={forecast_temp_c:.1f}°C | "
+            f"error={error:+.1f}°C"
+        )
+
+    if n_checked > 0:
+        all_errors = [v["abs_error_c"] for v in audit.get(OBSERVED_AUDIT_KEY, []) if v.get("source") == "noaa_ncei"]
+        if all_errors:
+            avg_error = sum(all_errors) / len(all_errors)
+            dl.append(
+                f"  📊 Error medio observed proxy NOAA vs forecast: "
+                f"{avg_error:.1f}°C ({len(all_errors)} mercados)"
+            )
+
     save_audit_data(audit)
 
 
@@ -5415,6 +5603,12 @@ def main(client):
         audit_check_open_meteo_forecast_drift(dl)
     except Exception as e:
         log.warning(f"Error audit forecast drift Open-Meteo: {e}")
+
+    # Observed proxy audit: NOAA NCEI para las 4 ciudades activas.
+    try:
+        audit_check_resolution_truth(dl)
+    except Exception as e:
+        log.warning(f"Error audit observed proxy NOAA: {e}")
 
     # ---- PASO 1: Mercados ----
     try:
