@@ -24,7 +24,7 @@ from waitress import serve
 load_dotenv()
 
 # =============================================================
-# bot.py v10.6.6 — allowlist de ciudades activas para entradas nuevas
+# bot.py v10.6.7 — dashboard de estado por ciudad de observación
 # Sesión 36: fallback BANKROLL sincronizado a $25 tras recarga manual
 # =============================================================
 #
@@ -100,7 +100,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.6"
+BOT_VERSION = "v10.6.7"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -2394,6 +2394,200 @@ def build_dashboard_forecast_quality(audit=None):
     }
 
 
+def build_dashboard_city_observation(audit=None, city_accuracy=None):
+    """Resume el estado operativo/observacional por ciudad sin promocionar nada automaticamente."""
+    if audit is None:
+        audit = load_audit_data()
+    if city_accuracy is None:
+        city_accuracy = get_city_accuracy()
+
+    observed_counts = {}
+    observed_last_date = {}
+    for raw in audit.get(OBSERVED_AUDIT_KEY, []):
+        if not isinstance(raw, dict) or raw.get("source") != "noaa_ncei":
+            continue
+        city = raw.get("city")
+        if not city:
+            continue
+        observed_counts[city] = observed_counts.get(city, 0) + 1
+        market_date = str(raw.get("date") or "").strip()
+        if market_date and market_date > observed_last_date.get(city, ""):
+            observed_last_date[city] = market_date
+
+    tracked_cities = set(ACTIVE_TRADING_CITIES) | set(OBSERVED_AUDIT_CITIES) | set(city_accuracy.keys())
+    tracked_cities |= {city for city in RESOLUTION_ICAO if is_city_blocked(city)}
+
+    rows = []
+    active_count = 0
+    blocked_count = 0
+    observed_ready_count = 0
+    observed_configured_count = 0
+
+    for city in tracked_cities:
+        active = city in ACTIVE_TRADING_CITIES
+        blocked = is_city_blocked(city)
+        resolution_meta = RESOLUTION_ICAO.get(city, {})
+        noaa_configured = city in OBSERVED_AUDIT_CITIES or bool(resolution_meta.get("noaa_station_id"))
+        observed_count = int(observed_counts.get(city, 0) or 0)
+        observed_last = observed_last_date.get(city, "n/d")
+        interpretable = noaa_configured and observed_count >= OBSERVED_FORECAST_MIN_SAMPLE
+
+        stats = city_accuracy.get(city, {})
+        trades = int(stats.get("trades", 0) or 0)
+        wins = int(stats.get("wins", 0) or 0)
+        win_rate = float(stats.get("win_rate", 0.0) or 0.0)
+        pnl = round(float(stats.get("pnl", 0.0) or 0.0), 2)
+
+        if active:
+            active_count += 1
+        if blocked:
+            blocked_count += 1
+        if noaa_configured:
+            observed_configured_count += 1
+        if interpretable:
+            observed_ready_count += 1
+
+        if active:
+            trading_label = "Activa"
+            trading_badge = "good"
+            trading_detail = "BUY habilitado en el scan"
+        elif blocked:
+            trading_label = "Bloqueada"
+            trading_badge = "bad"
+            trading_detail = "solo referencia; no abrir nuevas entradas"
+        else:
+            trading_label = "Fuera allowlist"
+            trading_badge = "muted"
+            trading_detail = "sin BUY real; seguir solo para aprendizaje"
+
+        if noaa_configured:
+            if interpretable:
+                noaa_label = "Interpretable"
+                noaa_badge = "good"
+                noaa_detail = f"{observed_count} casos | ultimo {observed_last}"
+            elif observed_count > 0:
+                noaa_label = "Acumulando"
+                noaa_badge = "warn"
+                noaa_detail = f"{observed_count}/{OBSERVED_FORECAST_MIN_SAMPLE} casos | ultimo {observed_last}"
+            else:
+                noaa_label = "Sin muestra"
+                noaa_badge = "bad"
+                noaa_detail = "NOAA configurado pero todavia sin casos"
+        else:
+            noaa_label = "Sin NOAA"
+            noaa_badge = "muted"
+            noaa_detail = "sin observed proxy para esta ciudad"
+
+        if trades == 0:
+            history_label = "Sin cierres"
+            history_badge = "muted"
+            history_detail = "sin muestra real validada todavia"
+        elif trades >= CITY_MIN_TRADES_FOR_BLOCK and win_rate <= CITY_BLOCK_WIN_RATE:
+            history_label = f"{wins}/{trades} | WR {win_rate:.1f}%"
+            history_badge = "bad"
+            history_detail = f"${pnl:+.2f} | bajo review / riesgo alto"
+        elif pnl > 0 or win_rate >= 50.0:
+            history_label = f"{wins}/{trades} | WR {win_rate:.1f}%"
+            history_badge = "good"
+            history_detail = f"${pnl:+.2f} | historial por ahora favorable"
+        else:
+            history_label = f"{wins}/{trades} | WR {win_rate:.1f}%"
+            history_badge = "warn"
+            history_detail = f"${pnl:+.2f} | historial mixto o flojo"
+
+        if active and interpretable:
+            state_label = "Operando con observabilidad"
+            state_badge = "good"
+            state_detail = "allowlist activa + NOAA interpretable"
+        elif active and noaa_configured:
+            state_label = "Activa con muestra incipiente"
+            state_badge = "warn"
+            state_detail = f"NOAA {observed_count}/{OBSERVED_FORECAST_MIN_SAMPLE} antes de leer bias"
+        elif blocked:
+            state_label = "Bloqueada"
+            state_badge = "bad"
+            state_detail = "revisar solo si aparece evidencia nueva mejor"
+        elif noaa_configured and interpretable:
+            state_label = "Lista para revisar"
+            state_badge = "accent"
+            state_detail = "proxy observado util, pero aun sin activar BUY"
+        elif noaa_configured:
+            state_label = "Observacion"
+            state_badge = "accent"
+            state_detail = "proxy activo; falta muestra antes de decidir"
+        elif trades > 0:
+            state_label = "Referencia historica"
+            state_badge = "muted"
+            state_detail = "tuvo operaciones, pero hoy falta observabilidad"
+        else:
+            state_label = "Sin observabilidad"
+            state_badge = "muted"
+            state_detail = "no hay NOAA ni evidencia suficiente para promover"
+
+        if active:
+            sort_rank = 0
+        elif noaa_configured and (observed_count > 0 or trades > 0):
+            sort_rank = 1
+        elif trades > 0:
+            sort_rank = 2
+        elif blocked:
+            sort_rank = 3
+        else:
+            sort_rank = 4
+
+        rows.append({
+            "city": city,
+            "trading_label": trading_label,
+            "trading_badge": trading_badge,
+            "trading_detail": trading_detail,
+            "noaa_label": noaa_label,
+            "noaa_badge": noaa_badge,
+            "noaa_detail": noaa_detail,
+            "history_label": history_label,
+            "history_badge": history_badge,
+            "history_detail": history_detail,
+            "state_label": state_label,
+            "state_badge": state_badge,
+            "state_detail": state_detail,
+            "_sort": (
+                sort_rank,
+                0 if active else 1,
+                0 if interpretable else 1 if observed_count > 0 else 2,
+                -observed_count,
+                -trades,
+                city,
+            ),
+        })
+
+    rows.sort(key=lambda item: item["_sort"])
+    for row in rows:
+        row.pop("_sort", None)
+
+    observed_target_display = observed_configured_count if observed_configured_count else 0
+    summary = (
+        f"{active_count} activas | "
+        f"{observed_ready_count}/{observed_target_display} NOAA interpretables | "
+        f"{blocked_count} bloqueadas"
+    )
+    note = (
+        "Esta tabla no promociona ciudades automaticamente: resume allowlist actual, "
+        "cobertura NOAA y cierres validados para saber que es operativa real, "
+        "que es solo referencia y que sigue sin observabilidad."
+    )
+
+    return {
+        "tracked_count": len(rows),
+        "active_count": active_count,
+        "blocked_count": blocked_count,
+        "observed_ready_count": observed_ready_count,
+        "observed_configured_count": observed_configured_count,
+        "summary": summary,
+        "note": note,
+        "note_level": "muted" if observed_ready_count < observed_configured_count else "good",
+        "rows": rows,
+    }
+
+
 def build_dashboard_legacy_forecast_drift(audit=None):
     """Resume el bloque legacy forecast_vs_real, dejando claro que es historico y no comparable."""
     if audit is None:
@@ -2910,6 +3104,7 @@ def build_dashboard_snapshot():
         logic_series=LOGIC_SERIES,
     )
     forecast_quality = build_dashboard_forecast_quality(audit=audit)
+    city_observation = build_dashboard_city_observation(audit=audit, city_accuracy=city_accuracy)
     legacy_forecast_drift = build_dashboard_legacy_forecast_drift(audit=audit)
     agent_events = []
     stage_labels = {
@@ -3032,6 +3227,7 @@ def build_dashboard_snapshot():
         "progress": progress,
         "exit_breakdown": exit_breakdown,
         "forecast_quality": forecast_quality,
+        "city_observation": city_observation,
         "legacy_forecast_drift": legacy_forecast_drift,
         "trophies": trophies,
         "unlocks": unlocks,

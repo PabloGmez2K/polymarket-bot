@@ -245,22 +245,51 @@
 
         <div class="card-head">
           <div>
-            <p class="section-kicker">Cobertura por ciudad activa</p>
+            <p class="section-kicker">Estado por ciudad</p>
+            <h2>Estado de observacion por ciudad</h2>
           </div>
+          <span class="badge badge-accent">{{ dashboard.city_observation.tracked_count }} seguidas</span>
         </div>
-        <div class="list-stack compact">
-          {% for row in dashboard.forecast_quality.city_rows %}
-          <div class="list-row">
-            <div class="check-body">
-              <strong>{{ row.city }}</strong>
-              <span>{{ row.detail }}</span>
-            </div>
-            <div class="event-meta">
-              <span class="badge badge-muted">{{ row.count_display }}</span>
-              <span class="badge badge-{{ 'good' if row.status == 'good' else 'warn' if row.status == 'waiting' else 'bad' }}">{{ row.bias_display }}</span>
-            </div>
-          </div>
-          {% endfor %}
+        <div class="notice notice-{{ dashboard.city_observation.note_level }}">
+          <strong>{{ dashboard.city_observation.summary }}</strong><br>
+          {{ dashboard.city_observation.note }}
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Ciudad</th>
+                <th>Trading</th>
+                <th>NOAA</th>
+                <th>Historico</th>
+                <th>Estado actual</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in dashboard.city_observation.rows %}
+              <tr>
+                <td><strong>{{ row.city }}</strong></td>
+                <td>
+                  <span class="badge badge-{{ row.trading_badge }}">{{ row.trading_label }}</span>
+                  <span class="table-note">{{ row.trading_detail }}</span>
+                </td>
+                <td>
+                  <span class="badge badge-{{ row.noaa_badge }}">{{ row.noaa_label }}</span>
+                  <span class="table-note">{{ row.noaa_detail }}</span>
+                </td>
+                <td>
+                  <span class="badge badge-{{ row.history_badge }}">{{ row.history_label }}</span>
+                  <span class="table-note">{{ row.history_detail }}</span>
+                </td>
+                <td>
+                  <span class="badge badge-{{ row.state_badge }}">{{ row.state_label }}</span>
+                  <span class="table-note">{{ row.state_detail }}</span>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
         </div>
 
         <div class="card-head">

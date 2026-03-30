@@ -57,6 +57,7 @@ Comandos útiles:
 | 2026-03-30 | Explícita | Sesión 39 | `—` | Research final Lean Six Sigma: no adoptar salvo FMEA-lite y definiciones mínimas; playbook mínimo, hitos NOAA one-shot y nueva vista Telegram `/noaa`. |
 | 2026-03-30 | Explícita | Sesión 40 | `—` | Diagnóstico pérdidas NYC/Munich/Atlanta: bot entraba en ciudades sin validación (Seoul, Tokyo, NYC, Munich no bloqueadas). Ventas manuales NYC. Identificado bug #15 — allowlist `ACTIVE_TRADING_CITIES` pendiente en v10.6.6. |
 | 2026-03-30 | Explícita | Sesión 41 | `—` | Implementación local de `v10.6.6`: allowlist `ACTIVE_TRADING_CITIES`, skip claro en `decisions.log`, bump de versión y suite en `419/419`. |
+| 2026-03-30 | Explícita | Sesión 42 | `—` | Implementación local de `v10.6.7`: tabla `Estado de observacion por ciudad` en el dashboard, cruzando allowlist, NOAA e histórico validado, con suite en `426/426`. |
 
 ---
 
@@ -752,6 +753,36 @@ Investigación completa de trades, commits y lógica de trading desde v10.3 hast
 - la suite sube a `419/419`.
 
 **Resultado:** el bot deja de abrir posiciones nuevas en ciudades no validadas sin tocar la gestión de posiciones existentes. `v10.6.6` queda lista para push/deploy como fix quirúrgico del bug #15.
+
+---
+
+## Sesión 42 — v10.6.7 dashboard estado por ciudad (30 mar 2026, local)
+
+**Disparador:** tras cerrar el allowlist de entradas nuevas, faltaba una vista clara para saber si una ciudad está operando de verdad, bloqueada, solo como referencia histórica o todavía sin observabilidad suficiente.
+
+**Diagnóstico (Codex):**
+
+1. **El dashboard NOAA era demasiado estrecho.** Mostraba cobertura de las 4 activas, pero no dejaba claro qué pasaba con ciudades bloqueadas, fuera del allowlist o con histórico útil.
+
+2. **Aún no toca automatizar promociones.** La necesidad inmediata no era construir ya `watchlist / shadow / canary`, sino ver la foto actual por ciudad con datos honestos.
+
+3. **La tabla correcta debía cruzar tres capas.** Operativa real (`ACTIVE_TRADING_CITIES` / `BLOCKED_CITIES`), observabilidad NOAA y cierres validados por ciudad.
+
+**Cambios realizados:**
+- `bot.py` sube a `v10.6.7`;
+- nuevo builder `build_dashboard_city_observation()`:
+  - cruza allowlist, bloqueo, `observed_vs_forecast` y `get_city_accuracy()`;
+  - clasifica por ciudad `Trading`, `NOAA`, `Historico` y `Estado actual`;
+  - distingue estados como `Activa`, `Bloqueada`, `Fuera allowlist`, `Operando con observabilidad`, `Referencia historica` y `Sin observabilidad`;
+- `build_dashboard_snapshot()` incorpora `city_observation` sin mezclarlo con el bloque NOAA puro;
+- `templates/dashboard.html` sustituye la lista simple de cobertura por la tabla `Estado de observacion por ciudad`;
+- `verify_before_deploy.py` sube a `426/426` con:
+  - check estructural del builder nuevo;
+  - check del bloque nuevo en el template;
+  - test funcional para `Chicago`, `London` y `New York City`;
+  - test de snapshot para asegurar que `city_observation` llega al dashboard.
+
+**Resultado:** el dashboard ya enseña de un vistazo qué ciudades están en operativa real, cuáles siguen bloqueadas y cuáles solo tienen valor como referencia mientras falta una capa futura de `watchlist / shadow / canary`. `v10.6.7` queda validada en local con `426/426`.
 
 ---
 

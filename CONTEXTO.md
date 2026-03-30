@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 30 de marzo de 2026 (Sesión 41 — v10.6.6 allowlist ACTIVE_TRADING_CITIES)
-**Próxima sesión:** verificar en Railway que el arranque queda limpio, que el próximo ciclo no intenta entrar en ciudades fuera del allowlist y que `observed_vs_forecast` sigue poblando la muestra NOAA con normalidad.
+**Última actualización:** 30 de marzo de 2026 (Sesión 42 — v10.6.7 dashboard estado por ciudad)
+**Próxima sesión:** decidir si la tabla nueva del dashboard basta como capa de seguimiento o si el siguiente paso debe ser un sistema real de `watchlist / shadow / canary` por ciudad, y desplegar `v10.6.7` si no aparece feedback adverso.
 
 ---
 
@@ -30,7 +30,7 @@ Para estado exacto: usar `/info` + `/cartera` + `/rendimiento` + `/accuracy` en 
 
 ---
 
-## Qué hace el bot v10.6.6 (paso a paso)
+## Qué hace el bot v10.6.7 (paso a paso)
 
 Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
@@ -92,6 +92,8 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Allowlist de ciudades activas (v10.6.6):** Añade `ACTIVE_TRADING_CITIES` como allowlist explícita para entradas nuevas, con default `Chicago,Atlanta,Dallas,Buenos Aires`. El scan de mercados ya no depende solo de `BLOCKED_CITIES`: si una ciudad no está en el allowlist, se salta con log `SKIP {city}: fuera de ACTIVE_TRADING_CITIES`. Importante: esto solo afecta BUYs nuevos; `manage_positions` sigue gestionando SL/TP/reeval en posiciones ya abiertas de cualquier ciudad. `verify_before_deploy.py` sube a `419/419`.
 
+**Dashboard estado por ciudad (v10.6.7):** El dashboard añade una tabla nueva `Estado de observacion por ciudad` que cruza `ACTIVE_TRADING_CITIES`, `BLOCKED_CITIES`, muestra NOAA y cierres validados por ciudad. La tabla distingue entre `Activa`, `Bloqueada`, `Fuera allowlist`, `Operando con observabilidad`, `Referencia historica` y `Sin observabilidad`. Importante: es una capa descriptiva para seguimiento, no una promocion automatica de ciudades.
+
 **City accuracy tracker (v10.5.2):** Calcula win rate por ciudad desde postmortem. Alerta por Telegram si una ciudad baja de 25% win rate con 3+ trades. Nuevo comando `/accuracy`. Win rate visible en `/rendimiento`.
 
 **Integración `/accuracy` + revisión crítica (v10.5.3):** `/accuracy` queda visible en el menú, responde siempre con menú, `/estado` muestra explícitamente el intervalo intra-SL y la trazabilidad de sesión 20 queda corregida para reflejar mejor lo que realmente introdujeron los commits de la mañana.
@@ -102,14 +104,14 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
-**Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.5`)
-**Estado de despliegue esperado tras sesión 41:** `main` y Railway deben quedar alineados en `v10.6.6`, con allowlist de entradas nuevas y observabilidad NOAA intacta.
-**Versión local / remoto GitHub:** `v10.6.6` con `419/419` tests antes de push/deploy de la sesión 41.
+**Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.6`)
+**Estado local tras sesión 42:** `v10.6.7` en local con tabla de `estado por ciudad` en el dashboard y `426/426` tests, pendiente de push/deploy.
+**Versión local / remoto GitHub:** local `v10.6.7` validada con `426/426`; último commit desplegado/verificado `e734470` (`v10.6.6`).
 
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.6.6 |
+| `bot.py` | Script principal v10.6.7 |
 | `verify_before_deploy.py` | v10 — 419 tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
@@ -178,7 +180,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 ---
 
-## Telegram — Comandos disponibles (v10.6.6)
+## Telegram — Comandos disponibles (v10.6.7)
 
 | Comando | Qué muestra |
 |---------|-------------|
@@ -198,7 +200,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 **Para iniciar una sesión de análisis en claude.ai:** pegar `/info` + `/cartera` + `/rendimiento`.
 
-## Dashboard web (v10.6.5)
+## Dashboard web (v10.6.7)
 
 - **Ruta principal:** `/`
 - **Healthcheck:** `/healthz`
@@ -221,6 +223,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 - bloque `Trofeos` con hitos del bot calculados solo desde cierres validados (`mejor operación`, `mayor edge ejecutado`, `ciudad más rentable`, etc.)
 - bloque `Desbloqueos` con evidencias/confirmaciones pendientes antes de revisar lógica o evaluar subir bankroll
 - bloque `Calidad Forecast Observada (NOAA)` separado del PnL/trading, con `n`, `MAE`, `bias`, cobertura por ciudad activa y últimos 20 casos de `observed_vs_forecast`
+- tabla `Estado de observacion por ciudad`, que cruza allowlist actual, bloqueo, muestra NOAA e histórico validado para distinguir operativa real vs referencia historica vs falta de observabilidad
 - bloque legacy `Drift Open-Meteo (historico - no comparable con NOAA)` con `n=` y fecha del último registro para no mezclar la serie nueva con la auditoría vieja
 
 ---
@@ -244,6 +247,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 ### Pendientes:
 - **#15** ✅ **Corregido en v10.6.6:** `ACTIVE_TRADING_CITIES` añade allowlist explícita para entradas nuevas y restringe BUYs a Chicago, Atlanta, Dallas y Buenos Aires. El bug original venía de depender solo de `BLOCKED_CITIES`, lo que dejaba pasar ciudades sin validación NOAA/WU como Seoul, Tokyo, NYC y Munich. La gestión de posiciones existentes (`manage_positions`) no se toca.
 - **Observed proxy NOAA pendiente de validación en producción:** `v10.6.5` ya expone `observed_vs_forecast` en el dashboard, pero hay que dejar correr 2+ días y confirmar que `audit.json` empieza a poblarse con datos útiles para las 4 ciudades activas.
+- **Seguimiento de ciudades aún descriptivo:** `v10.6.7` ya muestra por dashboard qué ciudades están activas, bloqueadas, fuera del allowlist o sin observabilidad, pero todavía no existe promoción automática tipo `watchlist / shadow / canary`.
 - **Buenos Aires NOAA spike cerrado:** `SAEZ` usa `87576099999`, confirmado con NOAA HOMR y una consulta real al endpoint `global-hourly`.
 - **Fuente real de resolución sigue sin automatizarse:** NOAA mejora mucho la observabilidad, pero sigue siendo `observed proxy`, no la fuente real de settlement de Polymarket.
 - **Auditoría legacy sigue limitada aunque honesta:** `forecast_vs_real` sigue existiendo como nombre legacy en `audit.json`, pero los logs/código ya dejan claro que compara `forecast original vs forecast posterior Open-Meteo`, no “real” ni Weather Underground.
@@ -293,6 +297,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 | v10.6.4 | 30 mar | añade `observed_vs_forecast` con NOAA NCEI, `noaa_station_id` explícito para las 4 activas, lag de 2 días, tests funcionales NOAA y 371 tests |
 | v10.6.5 | 30 mar | dashboard añade bloque `Calidad Forecast Observada (NOAA)` + bloque legacy `Drift Open-Meteo`, separados de performance/trading, y sube a 386 tests |
 | **v10.6.6** | **30 mar** | **allowlist `ACTIVE_TRADING_CITIES` — entradas nuevas solo en Chicago/Atlanta/Dallas/Buenos Aires; gestión de posiciones existentes no afectada; suite en 419 tests** |
+| **v10.6.7** | **30 mar** | **dashboard añade tabla `Estado de observacion por ciudad`, cruzando allowlist, bloqueo, NOAA e histórico validado para distinguir operativa real vs referencia; suite en 426 tests** |
 
 ---
 
@@ -811,6 +816,29 @@ Usar esta plantilla al cerrar cada sesión relevante:
   - el universo de entradas nuevas queda restringido a las 4 ciudades con monitoreo NOAA;
   - el bug de NYC/Munich/Seoul/Tokyo por blacklist incompleta queda corregido;
   - la suite sube a `419/419`.
+
+### Sesión 42 — v10.6.7 dashboard estado por ciudad
+
+- **Fecha:** 2026-03-30
+- **Versión activa al cerrar:** `v10.6.7` local validada, pendiente de push/deploy
+- **Objetivo de la sesión:** hacer visible en el dashboard, sin tocar la lógica de trading, en qué estado está cada ciudad desde el punto de vista de operativa real, cobertura NOAA y evidencia histórica.
+
+- **Codex:**
+  - añadió `build_dashboard_city_observation()` para cruzar `ACTIVE_TRADING_CITIES`, `BLOCKED_CITIES`, `observed_vs_forecast` y `get_city_accuracy()`;
+  - incorporó el bloque nuevo al snapshot del dashboard sin mezclarlo con el builder NOAA puro;
+  - sustituyó la lista simple de cobertura por una tabla `Estado de observacion por ciudad` con columnas de `Trading`, `NOAA`, `Historico` y `Estado actual`;
+  - dejó la tabla deliberadamente descriptiva: muestra `Activa`, `Bloqueada`, `Fuera allowlist`, `Operando con observabilidad`, `Referencia historica` o `Sin observabilidad`, pero no promociona ciudades automáticamente;
+  - endureció `verify_before_deploy.py` con:
+    - check estructural del builder nuevo;
+    - check del bloque nuevo en `dashboard.html`;
+    - test funcional de la tabla para `Chicago`, `London` y `New York City`;
+    - test de snapshot para asegurar que `city_observation` llega al dashboard;
+  - subió la versión a `v10.6.7`.
+
+- **Resultado operativo:**
+  - el dashboard ya permite ver de un vistazo qué ciudades están realmente operando, cuáles siguen bloqueadas, cuáles solo tienen valor histórico y cuáles siguen sin observabilidad;
+  - esto no desbloquea ciudades ni cambia BUY/SELL, pero prepara mejor la decisión futura sobre `watchlist / shadow / canary`;
+  - la suite sube a `426/426`.
 
 ---
 
