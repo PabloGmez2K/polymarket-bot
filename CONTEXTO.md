@@ -111,8 +111,8 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.7`)
-**Estado actual tras sesión 45:** local en `v10.6.10` con `Mission HUD` refinado para legibilidad, tabs `Overview / Progress / Cities`, agrupacion operativa de ciudades y `/focus` como primera lectura en Telegram; produccion y `origin/main` siguen en `v10.6.7` hasta el deploy de esta iteracion.
-**Versión local / remoto GitHub:** local `v10.6.10` validada con `449/449` tests; remoto/desplegado sigue en commit `14c3152` (`v10.6.7`) hasta el siguiente push.
+**Estado actual tras sesión 45:** `v10.6.10` ya está desplegada y verificada en Railway con `Mission HUD` refinado para legibilidad, tabs `Overview / Progress / Cities`, agrupacion operativa de ciudades y `/focus` como primera lectura en Telegram.
+**Versión local / remoto GitHub:** `origin/main` y producción quedaron en commit `7eb8f7f` (`v10.6.10`), validado con `449/449` tests y verificación live por `healthz` + snapshot autenticado del dashboard el `30 mar 2026 21:03 UTC`.
 
 ### Archivos del proyecto:
 | Archivo | Función |
