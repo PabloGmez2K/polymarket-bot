@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
 **Última actualización:** 30 de marzo de 2026 (Sesión 42 — v10.6.7 dashboard estado por ciudad)
-**Próxima sesión:** decidir si la tabla nueva del dashboard basta como capa de seguimiento o si el siguiente paso debe ser un sistema real de `watchlist / shadow / canary` por ciudad, y desplegar `v10.6.7` si no aparece feedback adverso.
+**Próxima sesión:** decidir si la tabla nueva del dashboard basta como capa de seguimiento o si el siguiente paso debe ser un sistema real de `watchlist / shadow / canary` por ciudad usando ya la vista live de `v10.6.7`.
 
 ---
 
@@ -104,9 +104,9 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
-**Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.6`)
-**Estado local tras sesión 42:** `v10.6.7` en local con tabla de `estado por ciudad` en el dashboard y `426/426` tests, pendiente de push/deploy.
-**Versión local / remoto GitHub:** local `v10.6.7` validada con `426/426`; último commit desplegado/verificado `e734470` (`v10.6.6`).
+**Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.7`)
+**Estado actual tras sesión 42:** `v10.6.7` en `main` y Railway, con tabla de `estado por ciudad` en el dashboard y `426/426` tests antes de push.
+**Versión local / remoto GitHub:** `v10.6.7` desplegada/verificada en commit `14c3152`.
 
 ### Archivos del proyecto:
 | Archivo | Función |
