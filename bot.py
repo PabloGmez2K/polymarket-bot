@@ -2913,7 +2913,7 @@ RESOLUTION_ICAO = {
     "Atlanta":        {"icao": "KATL", "wu_url": _wu_history_url("KATL"), "noaa_station_id": "72219013874"},
     "Shenzhen":       {"icao": "ZGSZ", "wu_url": _wu_history_url("ZGSZ")},
     "Paris":          {"icao": "LFPG", "wu_url": _wu_history_url("LFPG")},
-    # SAEZ: usa 99999 como WBAN placeholder mientras se valida el spike NCEI.
+    # SAEZ confirmado via NOAA HOMR + probe real en global-hourly: 87576 + 99999.
     "Buenos Aires":   {"icao": "SAEZ", "wu_url": _wu_history_url("SAEZ"), "noaa_station_id": "87576099999"},
     "Miami":          {"icao": "KMIA", "wu_url": _wu_history_url("KMIA")},
     "Madrid":         {"icao": "LEMD", "wu_url": _wu_history_url("LEMD")},

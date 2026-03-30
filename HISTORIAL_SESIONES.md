@@ -535,7 +535,7 @@ Investigación completa de trades, commits y lógica de trading desde v10.3 hast
 
 2. **El riesgo técnico estaba en los station IDs.** NOAA Access Data Service requiere station IDs explícitos; para las 4 activas había que añadir `noaa_station_id` en `RESOLUTION_ICAO` y evitar una resolución dinámica `ICAO -> NOAA`.
 
-3. **Buenos Aires seguía siendo el punto más incierto.** Se dejó `87576099999` como placeholder provisional hasta validar el spike NCEI, en vez de esconder la incertidumbre.
+3. **Buenos Aires era el punto más incierto.** Se dejó `87576099999` como candidato explícito hasta validar el spike NCEI, en vez de esconder la incertidumbre.
 
 **Cambios realizados:**
 - `BOT_VERSION` sube a `v10.6.4`;
@@ -543,7 +543,7 @@ Investigación completa de trades, commits y lógica de trading desde v10.3 hast
   - Dallas `72258303927`
   - Chicago `72530094846`
   - Atlanta `72219013874`
-  - Buenos Aires `87576099999` (provisional);
+  - Buenos Aires `87576099999`;
 - nueva clave `OBSERVED_AUDIT_KEY = "observed_vs_forecast"` separada del legacy `forecast_vs_real`;
 - nuevo helper `_parse_noaa_tmp_c()` para convertir `TMP` de NOAA;
 - nuevo helper `fetch_noaa_observed_max()` contra NOAA NCEI Access Data Service;
@@ -559,6 +559,8 @@ Investigación completa de trades, commits y lógica de trading desde v10.3 hast
   - test funcional de la auditoría para asegurar que no toca London y respeta el lag de 2 días.
 
 **Resultado:** `v10.6.4` queda listo en local con `371/371` tests. La nueva capa NOAA mejora la observabilidad, pero se mantiene correctamente etiquetada como `observed proxy`, no como fuente real de settlement.
+
+**Post-scriptum del spike Buenos Aires:** NOAA HOMR devolvió el registro vigente de `SAEZ` como `MINISTRO PISTARINI` (`ncdcStnId=30132405`, WMO `87576`) y una prueba directa contra `global-hourly` confirmó que el identificador operativo para el bot es `87576099999`; `30132405` y `ARI0000SAEZ` no devolvieron filas en ese endpoint.
 
 ---
 

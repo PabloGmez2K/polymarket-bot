@@ -83,7 +83,7 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Resolution fidelity hardening (v10.6.3):** Corrige Dallas a `Dallas Love Field / KDAL`, añade la capa declarativa `RESOLUTION_ICAO` con ICAO + URL de Weather Underground para ciudades activas/bloqueadas (y el resto de estaciones actuales), y deja explícito en código/logs que la pseudo-auditoría histórica `forecast_vs_real` sigue siendo solo `forecast original vs forecast posterior Open-Meteo`, no una validación de la fuente real de resolución. `verify_before_deploy.py` sube a `358/358` y añade checks específicos de Dallas, `RESOLUTION_ICAO` y nomenclatura honesta de auditoría.
 
-**Observed proxy layer NOAA (v10.6.4):** Añade `noaa_station_id` explícito en `RESOLUTION_ICAO` solo para las 4 ciudades activas y crea una auditoría separada `observed_vs_forecast` con `source="noaa_ncei"`. Esta capa compara forecast original vs observado NOAA NCEI con lag de 2 días y deja intacta la clave legacy `forecast_vs_real`. Importante: es `observed proxy`, no la fuente real de settlement de Polymarket. Buenos Aires queda con `87576099999` como placeholder provisional pendiente de spike/validación. `verify_before_deploy.py` sube a `371/371`.
+**Observed proxy layer NOAA (v10.6.4):** Añade `noaa_station_id` explícito en `RESOLUTION_ICAO` solo para las 4 ciudades activas y crea una auditoría separada `observed_vs_forecast` con `source="noaa_ncei"`. Esta capa compara forecast original vs observado NOAA NCEI con lag de 2 días y deja intacta la clave legacy `forecast_vs_real`. Importante: es `observed proxy`, no la fuente real de settlement de Polymarket. El spike de Buenos Aires quedó cerrado: `SAEZ` usa `87576099999`, confirmado vía NOAA HOMR + probe real sobre `global-hourly`. `verify_before_deploy.py` sube a `371/371`.
 
 **City accuracy tracker (v10.5.2):** Calcula win rate por ciudad desde postmortem. Alerta por Telegram si una ciudad baja de 25% win rate con 3+ trades. Nuevo comando `/accuracy`. Win rate visible en `/rendimiento`.
 
@@ -96,8 +96,8 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.1`)
-**Repositorio remoto (`origin/main`):** `v10.6.2` empujado con commit `29049a1`
-**Versión local / remoto GitHub:** local `v10.6.4` | `origin/main` en `v10.6.3`
+**Repositorio remoto (`origin/main`):** `v10.6.4` empujado con commit `a08c68b`
+**Versión local / remoto GitHub:** local `v10.6.4` | `origin/main` en `v10.6.4`
 
 ### Archivos del proyecto:
 | Archivo | Función |
@@ -231,7 +231,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 ### Pendientes:
 - **Observed proxy NOAA pendiente de validación en producción:** `v10.6.4` ya crea `observed_vs_forecast`, pero hay que dejar correr 2+ días y confirmar que `audit.json` empieza a poblarse con datos útiles para las 4 ciudades activas.
-- **Buenos Aires NOAA pendiente de spike:** `SAEZ` usa provisionalmente `87576099999` como `noaa_station_id`; es el punto técnico más incierto del mapping y conviene validarlo antes de confiar en esa ciudad.
+- **Buenos Aires NOAA spike cerrado:** `SAEZ` usa `87576099999`, confirmado con NOAA HOMR y una consulta real al endpoint `global-hourly`.
 - **Fuente real de resolución sigue sin automatizarse:** NOAA mejora mucho la observabilidad, pero sigue siendo `observed proxy`, no la fuente real de settlement de Polymarket.
 - **Auditoría legacy sigue limitada aunque honesta:** `forecast_vs_real` sigue existiendo como nombre legacy en `audit.json`, pero los logs/código ya dejan claro que compara `forecast original vs forecast posterior Open-Meteo`, no “real” ni Weather Underground.
 - **Weather Underground vs Open-Meteo:** Polymarket resuelve con WU, no Open-Meteo. London sigue bloqueada en código desde `v10.4.7`. IBM Trial no accesible; la vía correcta a corto plazo es alinear resolución, no esperar una API oficial.
@@ -655,7 +655,7 @@ Usar esta plantilla al cerrar cada sesión relevante:
 
 - **Problemas detectados / matices:**
   - NOAA mejora mucho la observabilidad, pero no debe confundirse con la fuente real de settlement de Polymarket
-  - Buenos Aires queda con `87576099999` como placeholder provisional hasta validar el spike NCEI
+  - Buenos Aires quedó confirmado con `87576099999` tras consultar NOAA HOMR y probar el endpoint `global-hourly`
 
 - **Estado final:**
   `v10.6.4` local, `371/371` tests, observabilidad NOAA añadida como capa separada y trading/scheduling intactos.

@@ -266,7 +266,7 @@ def run_tests():
          '"Chicago":        {"icao": "KORD", "wu_url": _wu_history_url("KORD"), "noaa_station_id": "72530094846"}' in code)
     test("RESOLUTION_ICAO Atlanta -> KATL",
          '"Atlanta":        {"icao": "KATL", "wu_url": _wu_history_url("KATL"), "noaa_station_id": "72219013874"}' in code)
-    test("RESOLUTION_ICAO Buenos Aires -> SAEZ",
+    test("RESOLUTION_ICAO Buenos Aires -> SAEZ / 87576099999",
          '"Buenos Aires":   {"icao": "SAEZ", "wu_url": _wu_history_url("SAEZ"), "noaa_station_id": "87576099999"}' in code)
     test("RESOLUTION_ICAO Dallas -> KDAL",
          '"Dallas":         {"icao": "KDAL", "wu_url": _wu_history_url("KDAL"), "noaa_station_id": "72258303927"}' in code)
