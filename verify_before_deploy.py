@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-verify_before_deploy.py v10 — Tests de comportamiento para bot.py v10.6.2
+verify_before_deploy.py v10 — Tests de comportamiento para bot.py v10.6.3
 
 Ejecutar ANTES de cada deploy:
   python verify_before_deploy.py
@@ -23,7 +23,7 @@ import types
 import json
 import base64
 import tempfile
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 
 passed = 0
 failed = 0
@@ -257,6 +257,30 @@ def run_tests():
     test("parse_market_date_iso definida", "def parse_market_date_iso(" in code)
     test("format_postmortem_label definida", "def format_postmortem_label(" in code)
 
+    # ---- Test 12b: v10.6.3 Resolution fidelity ----
+    print("\n🔍 v10.6.3: Resolution fidelity")
+    test("Dallas usa coords KDAL / Love Field",
+         '"Dallas":         {"lat": 32.8459,  "lon": -96.8510,  "name": "Dallas Love Field"}' in code)
+    test("RESOLUTION_ICAO existe", "RESOLUTION_ICAO = {" in code)
+    test("RESOLUTION_ICAO Chicago -> KORD",
+         '"Chicago":        {"icao": "KORD", "wu_url": _wu_history_url("KORD")}' in code)
+    test("RESOLUTION_ICAO Atlanta -> KATL",
+         '"Atlanta":        {"icao": "KATL", "wu_url": _wu_history_url("KATL")}' in code)
+    test("RESOLUTION_ICAO Buenos Aires -> SAEZ",
+         '"Buenos Aires":   {"icao": "SAEZ", "wu_url": _wu_history_url("SAEZ")}' in code)
+    test("RESOLUTION_ICAO Dallas -> KDAL",
+         '"Dallas":         {"icao": "KDAL", "wu_url": _wu_history_url("KDAL")}' in code)
+    test("RESOLUTION_ICAO incluye ciudades bloqueadas",
+         '"London":         {"icao": "EGLC", "wu_url": _wu_history_url("EGLC")}' in code
+         and '"Madrid":         {"icao": "LEMD", "wu_url": _wu_history_url("LEMD")}' in code)
+    audit_fn_src = get_function_source(module_ast, code_lines, "audit_check_open_meteo_forecast_drift")
+    test("Auditoría drift documenta que NO valida WU",
+         "Weather Underground" in audit_fn_src and "NO valida" in audit_fn_src)
+    test("Auditoría drift habla de forecast posterior",
+         "forecast posterior Open-Meteo" in audit_fn_src)
+    test("Auditoría drift no usa 'real=' en mensajes",
+         " real=" not in audit_fn_src)
+
     print("\n🔍 Trader data en Volume")
     try:
         if trader_code:
@@ -327,7 +351,7 @@ def run_tests():
     test("CYCLES_HISTORY_FILE definido", "CYCLES_HISTORY_FILE" in code)
     test("cycles_history.jsonl append-only", "cycles_history.jsonl" in code)
     test("cycle_summary se guarda en main()", "cycle_data" in code and "CYCLE_SUMMARY_FILE" in code)
-    test("cycle_data incluye version v10.6.2", '"version"' in code and "v10.6.2" in code)
+    test("cycle_data incluye version v10.6.3", '"version"' in code and "v10.6.3" in code)
     test("cycle_data incluye logic_series", '"logic_series": LOGIC_SERIES' in code)
     test("cycle_data incluye logic_cycle_number", '"logic_cycle_number"' in code)
 
@@ -348,7 +372,7 @@ def run_tests():
     test("Bug #13: send_telegram_paged en cmd_log", "send_telegram_paged" in code and "cmd_log" in code)
     test("Bug #13: send_telegram_paged en cmd_cartera", "send_telegram_paged" in code)
     test("_parse_position_label usa centavos (¢)", "¢" in code)
-    test("cmd_estado versión correcta", "Bot v10.6.2" in code or "v10.6.2" in code)
+    test("cmd_estado versión correcta", "Bot v10.6.3" in code or "v10.6.3" in code)
 
     # ---- Test 14c: Zonas horarias reales v10.4.5 ----
     print("\n🔍 Zonas horarias reales")
@@ -468,8 +492,8 @@ def run_tests():
         with open(tmp_cycles, "w", encoding="utf-8") as f:
             f.write(json.dumps({"version": "v10.4.8", "cycle_number": 1}, ensure_ascii=False) + "\n")
             f.write(json.dumps({"version": "v10.5.1", "cycle_number": 2}, ensure_ascii=False) + "\n")
-            f.write(json.dumps({"logic_series": "10.6", "version": "v10.6.2", "cycle_number": 3}, ensure_ascii=False) + "\n")
-            f.write(json.dumps({"logic_series": "10.6", "version": "v10.6.2", "cycle_number": 4}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"logic_series": "10.6", "version": "v10.6.3", "cycle_number": 3}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"logic_series": "10.6", "version": "v10.6.3", "cycle_number": 4}, ensure_ascii=False) + "\n")
         cycle_ns = {
             "os": os,
             "json": json,
@@ -809,8 +833,8 @@ def run_tests():
             "datetime": datetime,
             "timezone": timezone,
             "_load_cycle_counts": lambda: (5, 1),
-            "load_cycle_summary_data": lambda: {"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.6.2"},
-            "load_cycle_history": lambda limit=None: [{"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.6.2", "timestamp_utc": "2026-03-29T11:08:00+00:00", "buys": [], "management": {"n_sold": 1}, "exposure_after": 2.94}],
+            "load_cycle_summary_data": lambda: {"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.6.3"},
+            "load_cycle_history": lambda limit=None: [{"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.6.3", "timestamp_utc": "2026-03-29T11:08:00+00:00", "buys": [], "management": {"n_sold": 1}, "exposure_after": 2.94}],
             "get_clean_closed_trade_stats": lambda: {"count": 18, "sell": 12, "loss_total": 6, "resolved_win": 0},
             "get_logic_series_clean_closed_trade_stats": lambda: {"count": 0, "sell": 0, "loss_total": 0, "resolved_win": 0},
             "get_validated_closed_postmortems": lambda: [],
@@ -830,7 +854,7 @@ def run_tests():
             "compute_agent_scorecard": lambda events: [],
             "build_agent_rivalry": lambda events: [],
             "_extract_logic_series": lambda value: "10.5" if "10.5" in str(value) else "10.4" if "10.4" in str(value) else None,
-            "BOT_VERSION": "v10.6.2",
+            "BOT_VERSION": "v10.6.3",
             "LOGIC_SERIES": "10.6",
             "DRY_RUN": False,
             "DASHBOARD_USER": "pablo",
@@ -975,7 +999,7 @@ def run_tests():
         os.close(fd)
         with open(tmp_cycle_summary, "w", encoding="utf-8") as f:
             json.dump({
-                "version": "v10.6.2",
+                "version": "v10.6.3",
                 "cycle_number": 12,
                 "timestamp_utc": "2026-03-28T16:00:33.073674+00:00",
                 "management": {"n_kept": 0, "n_sold": 1, "n_resolved": 0},
@@ -987,7 +1011,7 @@ def run_tests():
             "json": __import__("json"),
             "datetime": datetime,
             "send_telegram_paged": lambda text, with_menu=False, page_size=3800: info_messages.append(text),
-            "BOT_VERSION": "v10.6.2",
+            "BOT_VERSION": "v10.6.3",
             "LOGIC_SERIES": "10.6",
             "_extract_logic_series": cycle_ns["_extract_logic_series"],
             "DRY_RUN": False,
@@ -1006,7 +1030,7 @@ def run_tests():
         exec(get_function_source(module_ast, code_lines, "cmd_info"), info_ns)
         info_ns["cmd_info"]()
         info_msg = info_messages[-1] if info_messages else ""
-        test("info: versión visible correcta", "BOT POLYMARKET v10.6.2" in info_msg, info_msg[:120])
+        test("info: versión visible correcta", "BOT POLYMARKET v10.6.3" in info_msg, info_msg[:120])
         test("info: usa cycle_summary como fallback de último", "Último: 2026-03-28 16:00 UTC" in info_msg, info_msg[:220])
         test("info: muestra doble contador", "Ciclos completados: 12 total | 3 serie v10.6" in info_msg, info_msg[:240])
         test("info: muestra ciclo total y de serie", "Ciclo total #12 | serie v10.6 #3" in info_msg, info_msg[:260])
@@ -1059,6 +1083,13 @@ def run_tests():
         )
         os.close(fd)
         traders_messages = []
+        traders_match_date = (date.today() + timedelta(days=2)).isoformat()
+        traders_other_date = (date.today() + timedelta(days=1)).isoformat()
+        traders_match_label = (
+            datetime.fromisoformat(traders_match_date)
+            .strftime("%B %d")
+            .replace(" 0", " ")
+        )
         traders_ns = {
             "os": os,
             "json": json,
@@ -1068,7 +1099,7 @@ def run_tests():
             "SIGNALS_FILE": tmp_signals,
             "_get_portfolio_and_positions": lambda: {
                 "active": [{
-                    "title": "Will the temperature in London be 11°C on March 29?",
+                    "title": f"Will the temperature in London be 11°C on {traders_match_label}?",
                     "outcome": "NO",
                 }]
             },
@@ -1090,8 +1121,8 @@ def run_tests():
                 "quality_traders": [],
                 "n_skipped_low_quality": 10,
                 "signals": [
-                    {"city": "London", "outcome": "No", "date": "2026-03-28", "avg_price": 0.43, "is_reference": False, "has_consensus": False},
-                    {"city": "London", "outcome": "No", "date": "2026-03-29", "avg_price": 0.44, "is_reference": False, "has_consensus": False},
+                    {"city": "London", "outcome": "No", "date": traders_other_date, "avg_price": 0.43, "is_reference": False, "has_consensus": False},
+                    {"city": "London", "outcome": "No", "date": traders_match_date, "avg_price": 0.44, "is_reference": False, "has_consensus": False},
                 ],
             }, f, ensure_ascii=False)
         exec(get_function_source(module_ast, code_lines, "cmd_traders"), traders_ns)
@@ -1099,7 +1130,7 @@ def run_tests():
         traders_msg = traders_messages[-1] if traders_messages else ""
         aligned_section = traders_msg.split("<b>Señales activas", 1)[0]
         test("traders: alinea solo fecha exacta de cartera",
-             "London No 2026-03-29" in aligned_section and "London No 2026-03-28" not in aligned_section,
+             f"London No {traders_match_date}" in aligned_section and f"London No {traders_other_date}" not in aligned_section,
              aligned_section[:260])
         test("traders: análisis sin separador huérfano",
              "\n| Análisis:" not in traders_msg and "Análisis: 28/03 19:30 UTC" in traders_msg,
@@ -1746,7 +1777,7 @@ def run_tests():
     test("/accuracy en MENU_KEYBOARD", '"callback_data": "accuracy"' in code)
     test("cmd_accuracy vuelve con menú", 'send_telegram("Sin datos de accuracy todavía.", with_menu=True)' in code and 'send_telegram_paged("\\n".join(lines), with_menu=True)' in code)
     test("Win rate en rendimiento", "WR:" in code)
-    test("Version v10.6.2", "v10.6.2" in code)
+    test("Version v10.6.3", "v10.6.3" in code)
 
     # ---- Resultado ----
     print(f"\n{'='*50}")

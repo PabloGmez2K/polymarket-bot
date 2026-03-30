@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 30 de marzo de 2026 (Sesión 32 — investigación estratégica + preparación de v10.6.3)
-**Próxima sesión:** Implementar `v10.6.3` en una sesión limpia: fix Dallas `KDAL`, capa formal de resolución (`RESOLUTION_ICAO` + URLs WU), renombrar/documentar la pseudo-auditoría actual y ampliar tests. No tocar lógica de trading ni scheduling hasta cerrar esa base.
+**Última actualización:** 30 de marzo de 2026 (Sesión 33 — implementación local de `v10.6.3`)
+**Próxima sesión:** Validar/push/deploy de `v10.6.3` y decidir el siguiente paso de la truth layer de resolución sin tocar trading ni scheduling.
 
 ---
 
@@ -29,7 +29,7 @@ Para estado exacto: usar `/info` + `/cartera` + `/rendimiento` + `/accuracy` en 
 
 ---
 
-## Qué hace el bot v10.6.2 (paso a paso)
+## Qué hace el bot v10.6.3 (paso a paso)
 
 Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
@@ -81,6 +81,8 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Investigación estratégica Codex + Claude (30 mar):** La comparación cruzada dejó tres conclusiones de alta prioridad: (1) `resolution fidelity first` sigue siendo la dirección correcta; (2) Dallas está mal mapeada en producción lógica (`KDFW` en código vs `KDAL` en reglas reales de Polymarket); y (3) la auditoría `forecast_vs_real` actual no compara contra la fuente real de resolución y debe renombrarse/documentarse antes de confiar en esa señal. Se añadieron tres artefactos al repo: `RESEARCH_CODEX_HANDOFF_2026-03-30.md`, `RESEARCH_CLAUDE_2026-03-30.md` y `RESEARCH_SYNTHESIS_CODEX_CLAUDE_2026-03-30.md`.
 
+**Resolution fidelity hardening (v10.6.3):** Corrige Dallas a `Dallas Love Field / KDAL`, añade la capa declarativa `RESOLUTION_ICAO` con ICAO + URL de Weather Underground para ciudades activas/bloqueadas (y el resto de estaciones actuales), y deja explícito en código/logs que la pseudo-auditoría histórica `forecast_vs_real` sigue siendo solo `forecast original vs forecast posterior Open-Meteo`, no una validación de la fuente real de resolución. `verify_before_deploy.py` sube a `358/358` y añade checks específicos de Dallas, `RESOLUTION_ICAO` y nomenclatura honesta de auditoría.
+
 **City accuracy tracker (v10.5.2):** Calcula win rate por ciudad desde postmortem. Alerta por Telegram si una ciudad baja de 25% win rate con 3+ trades. Nuevo comando `/accuracy`. Win rate visible en `/rendimiento`.
 
 **Integración `/accuracy` + revisión crítica (v10.5.3):** `/accuracy` queda visible en el menú, responde siempre con menú, `/estado` muestra explícitamente el intervalo intra-SL y la trazabilidad de sesión 20 queda corregida para reflejar mejor lo que realmente introdujeron los commits de la mañana.
@@ -93,13 +95,13 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.1`)
 **Repositorio remoto (`origin/main`):** `v10.6.2` empujado con commit `29049a1`
-**Versión local / remoto GitHub:** v10.6.2
+**Versión local / remoto GitHub:** local `v10.6.3` | `origin/main` en `v10.6.2`
 
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.6.2 |
-| `verify_before_deploy.py` | v10 — 348 tests de comportamiento |
+| `bot.py` | Script principal v10.6.3 |
+| `verify_before_deploy.py` | v10 — 358 tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |
@@ -142,7 +144,7 @@ MIN_BET="1.00"
 DATA_DIR="/app/data"
 ```
 
-### Configuración en código (defaults bot.py v10.6.2):
+### Configuración en código (defaults bot.py v10.6.3):
 ```python
 MIN_EDGE = 7.0%
 STOP_LOSS_PCT = -25.0%
@@ -165,7 +167,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 ---
 
-## Telegram — Comandos disponibles (v10.6.2)
+## Telegram — Comandos disponibles (v10.6.3)
 
 | Comando | Qué muestra |
 |---------|-------------|
@@ -184,7 +186,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 **Para iniciar una sesión de análisis en claude.ai:** pegar `/info` + `/cartera` + `/rendimiento`.
 
-## Dashboard web (v10.6.2)
+## Dashboard web (v10.6.3)
 
 - **Ruta principal:** `/`
 - **Healthcheck:** `/healthz`
@@ -226,9 +228,9 @@ Schedule: 08:00, 16:00, 23:00 UTC
 - **#14** ✅ Precio límite vs fill clarificado en Telegram
 
 ### Pendientes:
-- **Dallas mal mapeada:** el bot usa `Dallas Fort Worth / KDFW`, pero los mercados reales verificados de Polymarket resuelven con `Dallas Love Field / KDAL`. Es una de las 4 ciudades activas y el fix debe entrar en `v10.6.3`.
-- **Auditoría mal nombrada / poco fiable:** `forecast_vs_real` no valida contra la fuente real de resolución. Usa la misma vía de Open-Meteo y debe renombrarse/documentarse antes de seguir interpretando esa métrica como “real”.
-- **Capa formal de resolución pendiente:** falta materializar en código un mapping `ciudad/mercado -> ICAO -> URL WU -> timezone -> semántica de finalización`, empezando por las 4 activas y manteniendo también las bloqueadas.
+- **Truth layer real pendiente:** `v10.6.3` ya corrigió Dallas a `KDAL` y añadió `RESOLUTION_ICAO` con URLs WU, pero todavía falta usar esa capa para una validación/postmortem real contra la fuente de resolución de Polymarket.
+- **Auditoría limitada aunque ya honesta:** `forecast_vs_real` sigue existiendo como nombre legacy en `audit.json`, pero los logs/código ya dejan claro que compara `forecast original vs forecast posterior Open-Meteo`, no “real” ni Weather Underground.
+- **Capa formal de resolución aún incompleta:** la base `ciudad -> ICAO -> URL WU` ya existe; faltan los siguientes campos operativos si se quiere cerrar bien la truth layer (`timezone`, `unit`, `finalization semantics`) y cablearla a un flujo de validación real.
 - **Weather Underground vs Open-Meteo:** Polymarket resuelve con WU, no Open-Meteo. London sigue bloqueada en código desde `v10.4.7`. IBM Trial no accesible; la vía correcta a corto plazo es alinear resolución, no esperar una API oficial.
 
 ---
@@ -271,6 +273,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 | **v10.6.0** | **29 mar** | **revert sigma a v10.3, intra-cycle off, MIN_EDGE_EXACT eliminado. Mantiene toda observabilidad. 335 tests** |
 | v10.6.1 | 29 mar | fix drawdown sort, alerta bankroll bajo ($5), unlock redundante eliminado, scoreboard sesión 30. 338 tests |
 | v10.6.2 | 29 mar | hardening alerta bankroll: exige `cash_ok` y ausencia de `api_error`, añade `LOW_BANKROLL_RESET_MARGIN`, tests funcionales dashboard/Telegram/reset. 348 tests |
+| v10.6.3 | 30 mar | fix Dallas `KDAL`, añade `RESOLUTION_ICAO` con URLs WU, renombra/documenta la pseudo-auditoría como `forecast vs forecast posterior Open-Meteo`, y sube a 358 tests |
 
 ---
 
@@ -609,6 +612,28 @@ Usar esta plantilla al cerrar cada sesión relevante:
 
 - **Estado final:**
   Repo documentado para arrancar una sesión nueva de implementación con contexto limpio y alcance acotado (`v10.6.3` sin tocar la lógica de trading).
+
+### Sesión 33 — Implementación local de v10.6.3
+
+- **Fecha:** 2026-03-30
+- **Versión activa al cerrar:** `v10.6.3` local (`origin/main` sigue en `v10.6.2`)
+- **Objetivo de la sesión:** ejecutar el bloque técnico acordado tras la investigación: Dallas `KDAL`, capa formal de resolución, honestidad explícita en la pseudo-auditoría y tests.
+
+- **Codex:**
+  - Corrigió `RESOLUTION_STATIONS["Dallas"]` de `KDFW`/Fort Worth a `KDAL`/Love Field
+  - Añadió `RESOLUTION_ICAO` con `icao + wu_url` para las ciudades activas, las bloqueadas y el resto del mapping actual
+  - Renombró la función de auditoría a `audit_check_open_meteo_forecast_drift()` y dejó explícito en docstrings/logs que compara forecast original vs forecast posterior de Open-Meteo
+  - Mantuvo la clave legacy `forecast_vs_real` en `audit.json` por compatibilidad, pero dejó de registrar campos/mensajes como si fueran “real”
+  - Amplió `verify_before_deploy.py` con checks específicos de Dallas, `RESOLUTION_ICAO`, y mensajes de auditoría sin `real=`
+  - Aprovechó para hacer estable un test funcional viejo de `/traders` que dependía de fechas fijas ya pasadas
+
+- **Problemas detectados en trabajo previo:**
+  - Dallas seguía apuntando a la estación equivocada para una de las 4 ciudades activas
+  - La nomenclatura `forecast_vs_real` inducía a interpretar como observación real algo que seguía viniendo del forecast endpoint de Open-Meteo
+  - Faltaba una base declarativa mínima para empezar a alinear resolución sin tocar todavía la lógica de trading
+
+- **Estado final:**
+  `v10.6.3` local, `358/358` tests, trading/scheduling intactos y base de resolución más explícita para la siguiente iteración de truth layer.
 
 ---
 

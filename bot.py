@@ -24,8 +24,8 @@ from waitress import serve
 load_dotenv()
 
 # =============================================================
-# bot.py v10.6.2 — revert trading logic a v10.3 + observabilidad reforzada
-# Sesión 31: alerta de bankroll endurecida, sin falsos positivos por API
+# bot.py v10.6.3 — resolution fidelity hardening sin tocar trading
+# Sesión 33: Dallas KDAL + capa formal de resolucion + auditoria honesta
 # =============================================================
 #
 # Nuevo en v10.4.3:
@@ -100,7 +100,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.2"
+BOT_VERSION = "v10.6.3"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -2874,7 +2874,7 @@ RESOLUTION_STATIONS = {
     "Miami":          {"lat": 25.7954,  "lon": -80.2901,  "name": "Miami Intl"},
     "Madrid":         {"lat": 40.4936,  "lon": -3.5668,   "name": "Barajas"},
     "Seattle":        {"lat": 47.4499,  "lon": -122.3118, "name": "Sea-Tac"},
-    "Dallas":         {"lat": 32.8972,  "lon": -97.0377,  "name": "Dallas Fort Worth"},
+    "Dallas":         {"lat": 32.8459,  "lon": -96.8510,  "name": "Dallas Love Field"},
     "Lucknow":        {"lat": 26.7606,  "lon": 80.8893,   "name": "Chaudhary Charan Singh"},
     "Sao Paulo":      {"lat": -23.4355, "lon": -46.4730,  "name": "Guarulhos"},
     "Taipei":         {"lat": 25.0777,  "lon": 121.2330,  "name": "Taoyuan Intl"},
@@ -2883,6 +2883,48 @@ RESOLUTION_STATIONS = {
     "Chongqing":      {"lat": 29.7123,  "lon": 106.6519, "name": "Jiangbei"},
     "Chengdu":        {"lat": 30.5737,  "lon": 103.9415, "name": "Shuangliu"},
     "Wuhan":          {"lat": 30.7748,  "lon": 114.2137, "name": "Tianhe"},
+}
+
+
+def _wu_history_url(icao, market_date="{date}"):
+    """Plantilla de Weather Underground para la estacion de resolucion."""
+    return f"https://www.wunderground.com/history/daily/{icao}/date/{market_date}"
+
+
+# Capa formal de resolucion: referencia declarativa de la estacion que Polymarket
+# usa para settlement/revision manual. Incluye ciudades activas, bloqueadas y el
+# resto de ciudades que hoy existen en RESOLUTION_STATIONS.
+RESOLUTION_ICAO = {
+    "Seoul":          {"icao": "RKSI", "wu_url": _wu_history_url("RKSI")},
+    "London":         {"icao": "EGLC", "wu_url": _wu_history_url("EGLC")},
+    "Tel Aviv":       {"icao": "LLBG", "wu_url": _wu_history_url("LLBG")},
+    "Shanghai":       {"icao": "ZSPD", "wu_url": _wu_history_url("ZSPD")},
+    "Tokyo":          {"icao": "RJTT", "wu_url": _wu_history_url("RJTT")},
+    "New York City":  {"icao": "KLGA", "wu_url": _wu_history_url("KLGA")},
+    "Beijing":        {"icao": "ZBAA", "wu_url": _wu_history_url("ZBAA")},
+    "Hong Kong":      {"icao": "VHHH", "wu_url": _wu_history_url("VHHH")},
+    "Singapore":      {"icao": "WSSS", "wu_url": _wu_history_url("WSSS")},
+    "Toronto":        {"icao": "CYYZ", "wu_url": _wu_history_url("CYYZ")},
+    "Chicago":        {"icao": "KORD", "wu_url": _wu_history_url("KORD")},
+    "Wellington":     {"icao": "NZWN", "wu_url": _wu_history_url("NZWN")},
+    "Munich":         {"icao": "EDDM", "wu_url": _wu_history_url("EDDM")},
+    "Warsaw":         {"icao": "EPWA", "wu_url": _wu_history_url("EPWA")},
+    "Ankara":         {"icao": "LTAC", "wu_url": _wu_history_url("LTAC")},
+    "Atlanta":        {"icao": "KATL", "wu_url": _wu_history_url("KATL")},
+    "Shenzhen":       {"icao": "ZGSZ", "wu_url": _wu_history_url("ZGSZ")},
+    "Paris":          {"icao": "LFPG", "wu_url": _wu_history_url("LFPG")},
+    "Buenos Aires":   {"icao": "SAEZ", "wu_url": _wu_history_url("SAEZ")},
+    "Miami":          {"icao": "KMIA", "wu_url": _wu_history_url("KMIA")},
+    "Madrid":         {"icao": "LEMD", "wu_url": _wu_history_url("LEMD")},
+    "Seattle":        {"icao": "KSEA", "wu_url": _wu_history_url("KSEA")},
+    "Dallas":         {"icao": "KDAL", "wu_url": _wu_history_url("KDAL")},
+    "Lucknow":        {"icao": "VILK", "wu_url": _wu_history_url("VILK")},
+    "Sao Paulo":      {"icao": "SBGR", "wu_url": _wu_history_url("SBGR")},
+    "Taipei":         {"icao": "RCTP", "wu_url": _wu_history_url("RCTP")},
+    "Milan":          {"icao": "LIMC", "wu_url": _wu_history_url("LIMC")},
+    "Chongqing":      {"icao": "ZUCK", "wu_url": _wu_history_url("ZUCK")},
+    "Chengdu":        {"icao": "ZUUU", "wu_url": _wu_history_url("ZUUU")},
+    "Wuhan":          {"icao": "ZHHH", "wu_url": _wu_history_url("ZHHH")},
 }
 
 # Zonas horarias reales por ciudad — evitan tener que tocar offsets en cada DST.
@@ -4782,22 +4824,29 @@ def intra_sl_loop(client):
 
 
 AUDIT_FILE = _data_path("audit.json")
+FORECAST_AUDIT_KEY = "forecast_vs_real"  # Legacy key: hoy guarda forecast original vs forecast posterior Open-Meteo.
 
 def load_audit_data():
     """Carga datos de auditoría acumulativos."""
     if os.path.exists(AUDIT_FILE):
         try:
             with open(AUDIT_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                if not isinstance(data, dict):
+                    data = {}
+                data.setdefault("pending_sells", [])
+                data.setdefault(FORECAST_AUDIT_KEY, [])
+                data.setdefault("errors", [])
+                return data
         except Exception:
             pass
-    return {"pending_sells": [], "forecast_vs_real": [], "errors": []}
+    return {"pending_sells": [], FORECAST_AUDIT_KEY: [], "errors": []}
 
 
 def save_audit_data(data):
     """Guarda datos de auditoría."""
     # Limitar tamaño
-    for key in ["pending_sells", "forecast_vs_real", "errors"]:
+    for key in ["pending_sells", FORECAST_AUDIT_KEY, "errors"]:
         if key in data and len(data[key]) > 200:
             data[key] = data[key][-200:]
     try:
@@ -4947,13 +4996,17 @@ def audit_register_pending_sell(order_id, city, side, price, shares, return_est,
     save_audit_data(audit)
 
 
-def audit_check_forecasts(dl):
+def audit_check_open_meteo_forecast_drift(dl):
     """
-    Compara previsiones pasadas con temperatura REAL observada.
+    Pseudo-auditoria: forecast original vs forecast posterior de Open-Meteo.
 
-    Open-Meteo devuelve datos observados para fechas pasadas.
-    Si ayer predijimos 16°C para Paris y hoy Open-Meteo dice que
-    fue 15°C, registramos el error (1°C) para calibrar sigma.
+    Importante: esto NO valida contra la fuente real de resolucion de
+    Polymarket (Weather Underground). Solo mide cuanto deriva nuestro forecast
+    original cuando volvemos a consultar el forecast endpoint de Open-Meteo
+    para una fecha ya pasada.
+
+    Se conserva la clave audit["forecast_vs_real"] por compatibilidad con el
+    audit.json historico, pero sus registros nuevos son forecast-vs-forecast.
     """
     if not os.path.exists(PERFORMANCE_FILE):
         return
@@ -4968,7 +5021,7 @@ def audit_check_forecasts(dl):
     audit = load_audit_data()
     already_checked = set(
         f"{v.get('city')}|{v.get('date')}"
-        for v in audit.get("forecast_vs_real", [])
+        for v in audit.get(FORECAST_AUDIT_KEY, [])
     )
 
     to_check = []
@@ -4994,7 +5047,7 @@ def audit_check_forecasts(dl):
     if not to_check:
         return
 
-    # Consultar temperatura real para cada ciudad/fecha
+    # Reconsultar forecast Open-Meteo para cada ciudad/fecha pasada.
     checked_cities = {}
     n_checked = 0
 
@@ -5002,7 +5055,7 @@ def audit_check_forecasts(dl):
         city = entry["city"]
         market_date = entry["date"]
 
-        # Obtener previsión (que para fechas pasadas es dato real)
+        # Reusar el mismo forecast endpoint de Open-Meteo; esto no es WU.
         if city not in checked_cities:
             station = RESOLUTION_STATIONS.get(city)
             if not station:
@@ -5016,33 +5069,42 @@ def audit_check_forecasts(dl):
         if not fc or market_date not in fc:
             continue
 
-        real_temp = fc[market_date]["temp_max"]
+        posterior_forecast_temp = fc[market_date]["temp_max"]
         forecast_temp = entry.get("forecast_max", 0)
-        error = round(real_temp - forecast_temp, 1)
+        error = round(posterior_forecast_temp - forecast_temp, 1)
 
         record = {
             "city": city,
             "date": market_date,
-            "forecast": forecast_temp,
-            "real": real_temp,
+            "forecast_original": forecast_temp,
+            "forecast_posterior": posterior_forecast_temp,
+            "comparison_type": "forecast_vs_forecast_posterior_open_meteo",
             "error_c": error,
             "abs_error_c": abs(error),
             "side": entry.get("side", "?"),
             "edge_pct": entry.get("edge_pct", 0),
             "checked_at": datetime.now(timezone.utc).isoformat(),
         }
-        audit["forecast_vs_real"].append(record)
+        audit[FORECAST_AUDIT_KEY].append(record)
         n_checked += 1
 
         emoji = "✅" if abs(error) <= 1.0 else "⚠️" if abs(error) <= 2.0 else "❌"
-        dl.append(f"  {emoji} {city} {market_date}: previsión={forecast_temp:.1f}°C real={real_temp:.1f}°C error={error:+.1f}°C")
+        dl.append(
+            f"  {emoji} {city} {market_date}: "
+            f"prevision original={forecast_temp:.1f}°C | "
+            f"forecast posterior Open-Meteo={posterior_forecast_temp:.1f}°C | "
+            f"deriva={error:+.1f}°C"
+        )
 
     if n_checked > 0:
         # Calcular error medio global
-        all_errors = [v["abs_error_c"] for v in audit.get("forecast_vs_real", [])]
+        all_errors = [v["abs_error_c"] for v in audit.get(FORECAST_AUDIT_KEY, [])]
         if all_errors:
             avg_error = sum(all_errors) / len(all_errors)
-            dl.append(f"  📊 Error medio acumulado: {avg_error:.1f}°C ({len(all_errors)} mercados)")
+            dl.append(
+                f"  📊 Deriva media forecast original vs forecast posterior Open-Meteo: "
+                f"{avg_error:.1f}°C ({len(all_errors)} mercados)"
+            )
 
     save_audit_data(audit)
 
@@ -5348,11 +5410,11 @@ def main(client):
     except Exception as e:
         log.warning(f"Error audit fills: {e}")
 
-    # Comparar previsiones pasadas con temperatura real
+    # Comparar forecast original vs forecast posterior Open-Meteo (no WU).
     try:
-        audit_check_forecasts(dl)
+        audit_check_open_meteo_forecast_drift(dl)
     except Exception as e:
-        log.warning(f"Error audit forecasts: {e}")
+        log.warning(f"Error audit forecast drift Open-Meteo: {e}")
 
     # ---- PASO 1: Mercados ----
     try:
@@ -5570,6 +5632,7 @@ def main(client):
 
         edge_analysis.append(f"  ✓ {city} {side} {temp_label} {c['date_iso']} | forecast={forecast_max:.1f}°C | nuestro={our_prob*100:.1f}% mercado={mkt_price*100:.1f}% | edge={edge_pct:.1f}% | ${position['amount']:.2f} EV=${position['expected_value']:+.2f}{trader_confirm}")
 
+        resolution_meta = RESOLUTION_ICAO.get(city, {})
         trades.append({
             "question": c["question"], "city": city, "date": c["date_iso"],
             "days_ahead": c["days_ahead"], "forecast_max": forecast_max,
@@ -5580,6 +5643,8 @@ def main(client):
             "position": position, "volume_24h": c["volume_24h"],
             "liquidity": c["liquidity"],
             "station": RESOLUTION_STATIONS.get(city, {}).get("name", "?"),
+            "resolution_icao": resolution_meta.get("icao", "?"),
+            "resolution_wu_url": resolution_meta.get("wu_url", ""),
             "token_id": token_id,
             "trader_confirmed": [s["trader"] for s in matching_traders],  # v9
         })
