@@ -83,6 +83,31 @@ Despues de `git push`:
 
 ---
 
+## Higiene Railway CLI
+
+Regla operativa: el problema reciente de auth no fue solo Railway. Se mezclaron:
+
+- proxies de proceso contaminados (`127.0.0.1:9`)
+- refresh de OAuth que necesita escribir en `%USERPROFILE%\.railway\config.json`
+
+Guardrail minimo desde ahora:
+
+1. Para uso manual, ejecutar Railway con:
+   - `powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 status`
+   - `powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 logs -s polymarket-bot -n 80`
+   - `powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 ssh "ls -l /app/data"`
+2. `railway login` se hace solo en una terminal interactiva del usuario.
+3. Si Codex necesita usar Railway despues del login, hacerlo fuera del sandbox cuando pueda tocar auth o refrescar tokens.
+4. No perseguir el origen del proxy durante una incidencia si el wrapper ya desbloquea la operativa. El origen del proxy es deuda tecnica secundaria mientras no vuelva a bloquear.
+
+Si Railway vuelve a responder `invalid_grant`:
+
+1. repetir login manual interactivo
+2. reintentar con `tools/railway_safe.ps1`
+3. no asumir que el problema es del bot ni del deploy
+
+---
+
 ## Scoreboard
 
 ### Como se actualiza

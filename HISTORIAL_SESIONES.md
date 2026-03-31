@@ -65,6 +65,7 @@ Comandos útiles:
 | 2026-03-31 | Explícita | Sesión 47 | `—` | Nueva capa `trade_lifecycle`: trazabilidad completa por posición con backfill desde `performance+postmortem`, snapshots en gestión e intra-ciclo, observación post-exit y suite final en `467/467`, sin tocar trading. |
 | 2026-03-31 | Explícita | Sesión 48 | `—` | Hardening fase 1 de `trade_lifecycle`: matching por `id` reconstruido, coalescing defensivo, bloque `integrity`, fix del caso real de cierres huérfanos y suite en `470/470`; validación live demuestra `92 -> 80` records únicos al reconstruir. |
 | 2026-03-31 | Explícita | Sesión 49 | `—` | Hotfix del coalescing de `trade_lifecycle` tras detectar en Railway `unhashable type: 'list'`; se sustituye la comparación inválida con sets `{None, "", [], {}}` por `_lifecycle_is_empty()`, se añade regresión del merge de contextos duplicados, se normaliza `agent_events.jsonl` a UTF-8 y la suite queda en `472/472`. |
+| 2026-03-31 | Explícita | Sesión 50 | `—` | Recap operativo + hardening Railway CLI: validación live del hotfix (`87` records, `0` ids duplicados) y nuevo wrapper `tools/railway_safe.ps1` para limpiar proxies de proceso, junto con regla operativa en el playbook para no repetir el bucle de auth/`invalid_grant`. |
 
 ---
 
@@ -1057,6 +1058,58 @@ Investigación completa de trades, commits y lógica de trading desde v10.3 hast
   - `observed_vs_forecast` live ya mostraba `2` casos reales en Chicago.
 
 **Resultado:** el problema queda acotado y corregido localmente sin tocar reglas de trading. El siguiente paso correcto es desplegar este hotfix, revalidar Railway y confirmar que desaparecen los warnings de `trade_lifecycle` antes de seguir con la fase 2 analítica del dashboard.
+
+---
+
+## Sesión 50 — recap + Railway CLI hygiene (31 mar 2026)
+
+**Disparador:** tras cerrar el hotfix de `trade_lifecycle`, el siguiente bloqueo real ya no era el bot sino la operativa del Railway CLI: la sesion acababa mezclando producto, auth OAuth y el proxy `127.0.0.1:9`, y hacia falta dejar un guardrail practico para no volver a perder tiempo en el mismo bucle.
+
+**Diagnóstico (Codex + validación previa con Claude):**
+
+1. **El problema de auth quedo suficientemente entendido.** No era un bug del bot ni del deploy. La secuencia mas plausible era:
+   - token de acceso expirado;
+   - intento de refresh desde un contexto sandboxed;
+   - fallo al persistir `%USERPROFILE%\.railway\config.json` (`os error 5`);
+   - refresh token local stale;
+   - siguiente intento => `invalid_grant`.
+
+2. **El proxy seguia existiendo, pero ya no era el bloqueo principal.** En esta shell seguian entrando:
+   - `HTTP_PROXY=http://127.0.0.1:9`
+   - `HTTPS_PROXY=http://127.0.0.1:9`
+   - `ALL_PROXY=http://127.0.0.1:9`
+   - `GIT_HTTP_PROXY=http://127.0.0.1:9`
+   - `GIT_HTTPS_PROXY=http://127.0.0.1:9`
+   Ya estaba descartado que vinieran de `PowerShell profile`, `HKCU/HKLM`, `winhttp` o settings normales de VS Code. Se decide no seguir persiguiendo el origen durante esta incidencia porque habia una solucion practica mejor.
+
+3. **El hotfix de lifecycle ya estaba bueno en Railway.** Una vez empujado `47c68ee`, Railway redeployo y el arranque nuevo confirmo:
+   - `trade_lifecycle listo al arrancar: 87 registros`
+   - sin repetir `unhashable type: 'list'`
+   - validacion live posterior:
+     - `tracked_positions=87`
+     - `open_positions=18`
+     - `closed_positions=69`
+     - `partial_historical_records=12`
+     - `analysis_ready_records=75`
+     - `duplicate_id_collisions_resolved=12`
+     - `duplicate_ids_live=0`
+
+**Cambios realizados:**
+- Nuevo wrapper repo-local `tools/railway_safe.ps1`.
+  - limpia `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/GIT_*` solo para el proceso actual;
+  - ejecuta `railway.cmd`;
+  - restaura el entorno al salir;
+  - deja mensaje explicito cuando se usa `login`.
+- `OPERATIONS_PLAYBOOK.md` gana la seccion `Higiene Railway CLI` con la regla operativa nueva:
+  - `railway login` solo en shell interactiva del usuario;
+  - uso diario de Railway con el wrapper;
+  - desde Codex, Railway fuera del sandbox cuando la CLI pueda refrescar auth.
+- `CONTEXTO.md` se actualiza para reflejar que:
+  - el hotfix de lifecycle ya esta validado live;
+  - la infraestructura vuelve a estar bajo control practico;
+  - el siguiente paso correcto regresa a analytics/dashboard.
+
+**Resultado:** la sesion deja un guardrail operativo claro para Railway CLI sin volver a abrir una investigacion larga del proxy. El sistema queda otra vez orientado al roadmap principal: capa analitica de operativa en dashboard y snapshot para Claude Code Opus.
 
 ---
 

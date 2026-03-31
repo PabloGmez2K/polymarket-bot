@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 31 de marzo de 2026 (Sesión 49 — hotfix de coalescing para `trade_lifecycle`)
-**Próxima sesión:** desplegar el hotfix de `trade_lifecycle`, validar en Railway que desaparecen los warnings `unhashable type: 'list'`, confirmar que el lifecycle vuelve a sincronizar en vivo y retomar la fase 2: capa analítica de operativa para dashboard y snapshot congelado para Claude Code Opus.
+**Última actualización:** 31 de marzo de 2026 (Sesión 50 — Railway CLI hygiene + recap)
+**Próxima sesión:** retomar la fase 2: capa analítica de operativa para dashboard y snapshot congelado para Claude Code Opus, ya con `trade_lifecycle` live saneado y Railway CLI envuelto por el wrapper seguro.
 
 ---
 
@@ -108,6 +108,8 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Hotfix `trade_lifecycle` + normalización `agent_events` (31 mar, sin bump):** Al validar en Railway el despliegue de la fase 1 apareció un bug real en live: `trade_lifecycle` empezó a loguear `Error sincronizando trade_lifecycle: unhashable type: 'list'` tanto en startup como durante el ciclo de las `16:00 UTC`. La causa raíz no era un dato extraño sino una comparación inválida en Python dentro de `_merge_trade_lifecycle_context()` y `_merge_trade_lifecycle_record()`, que usaba sets literales del tipo `{None, "", [], {}}`; eso explota en cuanto la ruta de coalescing se ejecuta sobre records duplicados. El hotfix introduce `_lifecycle_is_empty()` para hacer esas comprobaciones de forma segura, añade una regresión funcional que coalesce dos records con el mismo `id` y `entry_context` no vacío, y normaliza `agent_events.jsonl` del repo a `utf-8` para eliminar el warning de seed corrupta en la suite. `verify_before_deploy.py` sube a `472/472`. Importante: NOAA sigue bien (`observed_vs_forecast` ya mostraba 2 casos reales en Chicago); lo roto es solo el sync incremental del lifecycle en Railway hasta desplegar este hotfix.
 
+**Railway CLI hygiene wrapper (31 mar, sin bump):** Tras el recap operativo se deja un guardrail practico para no repetir el bucle `proxy contaminado -> auth rota -> invalid_grant`. Se añade `tools/railway_safe.ps1`, que limpia `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/GIT_*` solo para el proceso actual, ejecuta `railway.cmd` y restaura el entorno al salir. El playbook queda actualizado con una regla explicita: `railway login` solo en shell interactiva del usuario; uso diario de Railway con el wrapper; y desde Codex, Railway fuera del sandbox cuando la CLI pueda refrescar/escribir `%USERPROFILE%\.railway\config.json`.
+
 **City accuracy tracker (v10.5.2):** Calcula win rate por ciudad desde postmortem. Alerta por Telegram si una ciudad baja de 25% win rate con 3+ trades. Nuevo comando `/accuracy`. Win rate visible en `/rendimiento`.
 
 **Integración `/accuracy` + revisión crítica (v10.5.3):** `/accuracy` queda visible en el menú, responde siempre con menú, `/estado` muestra explícitamente el intervalo intra-SL y la trazabilidad de sesión 20 queda corregida para reflejar mejor lo que realmente introdujeron los commits de la mañana.
@@ -119,8 +121,8 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.10`)
-**Estado actual tras sesión 49:** Railway ya ejecuta el fix NOAA y sigue mostrando `observed_vs_forecast = 2` casos NOAA reales en Chicago, pero el deploy live más reciente de `trade_lifecycle` quedó parcialmente degradado: al arrancar y durante el ciclo de las `16:00 UTC` aparecieron warnings `unhashable type: 'list'` en el sync del lifecycle, así que la capa observacional de posiciones necesita este hotfix antes de seguir construyendo analytics encima. El raw live sigue sirviendo para diagnóstico y el problema no toca trading, NOAA ni scheduler.
-**Versión local / remoto GitHub:** `origin/main`/Railway están hoy en la base con NOAA hardening + `trade_lifecycle` fase 1 desplegados, pero producción necesita un hotfix inmediato para el coalescing del lifecycle. El workspace local ya lo tiene resuelto con helper seguro `_lifecycle_is_empty()`, regresión añadida y seed `agent_events.jsonl` normalizada. `verify_before_deploy.py` queda en `472/472`. El siguiente paso correcto es desplegar este hotfix y revalidar Railway.
+**Estado actual tras sesión 50:** Railway ya corre el hotfix de coalescing y el arranque nuevo confirmó `trade_lifecycle listo al arrancar: 87 registros`, sin repetir el warning `unhashable type: 'list'`. Validación live posterior: `tracked_positions=87`, `open_positions=18`, `closed_positions=69`, `partial_historical_records=12`, `analysis_ready_records=75`, `duplicate_id_collisions_resolved=12` y `duplicate_ids_live=0`. NOAA sigue sano con muestra real en Chicago.
+**Versión local / remoto GitHub:** `origin/main` y Railway ya incluyen NOAA hardening, `trade_lifecycle`, fase 1 de integridad y el hotfix de coalescing (`47c68ee`). Además, el repo local deja ahora un wrapper operativo para Railway CLI (`tools/railway_safe.ps1`) y el playbook actualizado para evitar repetir incidencias de auth/proxy. `verify_before_deploy.py` queda en `472/472`. El siguiente paso correcto vuelve a ser producto/analytics, no reparar infra.
 
 ### Archivos del proyecto:
 | Archivo | Función |
@@ -987,10 +989,15 @@ Con ~15 trades cerrados no hay suficiente evidencia estadística para cambiar la
 
 ### Acceso SSH:
 ```bash
-railway ssh                          # shell interactivo
-railway ssh "comando"                # comando directo
-railway ssh "ls /app/data/"         # ver archivos del volume
+powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 ssh
+powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 ssh "comando"
+powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 ssh "ls -l /app/data"
 ```
+
+### Higiene Railway CLI:
+- Usar `tools/railway_safe.ps1` para `status`, `logs`, `ssh`, `domain` y lecturas del Volume.
+- Hacer `railway login` solo en una shell interactiva del usuario.
+- Si Codex necesita ejecutar Railway despues del login y la CLI puede refrescar auth, usar permisos fuera del sandbox para que pueda tocar `%USERPROFILE%\.railway\config.json`.
 
 ### Claude Code:
 - Instalado en `C:\Projects\polymarket-bot`
