@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 31 de marzo de 2026 (Sesión 46 — auditoría NOAA `observed_vs_forecast` + fix mínimo local)
-**Próxima sesión:** desplegar y validar en Railway el fix NOAA, confirmar que aparece el primer caso útil en `observed_vs_forecast` y decidir después, ya con el pipeline sano, si merece la pena una futura capa `shadow sample` solo observacional.
+**Última actualización:** 31 de marzo de 2026 (Sesión 47 — capa `trade_lifecycle` para trazabilidad operativa completa)
+**Próxima sesión:** pasar revisión adversarial con Claude Code Sonnet sobre la nueva capa `trade_lifecycle` y el hardening NOAA, luego desplegar en Railway y validar el backfill automático del historial real. La revisión estratégica de cambios de trading queda para Claude Code Opus el viernes, con evidencia ya estructurada.
 
 ---
 
@@ -102,6 +102,8 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Auditoría NOAA + hardening local (31 mar, sin bump):** La revisión operativa sobre Railway `v10.6.10` confirmó que `NOAA 0/10` no era solo “falta de tiempo”. El pipeline que llena `audit.json -> observed_vs_forecast` sí tenía casos elegibles, pero el fetch NOAA quedaba ciego porque dependía de `global-hourly`, que devolvía vacío para varios casos 2026 donde `daily-summaries` sí ofrecía `TMAX`. Se añaden `noaa_daily_station_id` para Chicago/Atlanta/Dallas, un helper `fetch_noaa_daily_tmax()`, un wrapper que prioriza `daily-summaries/TMAX` y luego cae a `global-hourly`, y trazabilidad extra (`noaa_daily_station_id`, `observed_dataset`) en cada caso guardado. Tras review adversarial adicional se endurece también el guard de lag en el helper diario y se recupera un test explícito del fallback `daily vacío -> hourly`. Evidencia mínima reconstruida: al menos `7` casos `city|date` elegibles ya existían frente a `0` guardados en producción. `verify_before_deploy.py` sube a `453/453`.
 
+**Trade lifecycle observability layer (31 mar, sin bump):** Se añade una nueva capa derivada `trade_lifecycle.json` para convertir cada posición en una traza completa y legible: `entry_context`, `latest_entry_context`, lista de `buys`, `timeline`, `exit_attempts`, `position_snapshots`, `market_observations`, `close_context`, `post_exit_analysis` y un `summary` agregado con `top_upside_left`. La capa se reconstruye desde `performance.json` + `postmortem.json`, se actualiza automáticamente en cada `BUY/SELL_PENDING/SELL/SELL_FAILED/LOSS_TOTAL/RESOLVED_WIN`, captura snapshots tanto en `manage_positions()` como en el monitor intra-ciclo y registra qué hizo el mercado tras la salida para medir upside perdido o drawdown evitado. No toca ninguna regla de trading. Tras una pasada de higiene se elimina un bloque duplicado de checks y el runner queda limpio; `verify_before_deploy.py` cierra en `467/467`.
+
 **City accuracy tracker (v10.5.2):** Calcula win rate por ciudad desde postmortem. Alerta por Telegram si una ciudad baja de 25% win rate con 3+ trades. Nuevo comando `/accuracy`. Win rate visible en `/rendimiento`.
 
 **Integración `/accuracy` + revisión crítica (v10.5.3):** `/accuracy` queda visible en el menú, responde siempre con menú, `/estado` muestra explícitamente el intervalo intra-SL y la trazabilidad de sesión 20 queda corregida para reflejar mejor lo que realmente introdujeron los commits de la mañana.
@@ -113,14 +115,14 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.10`)
-**Estado actual tras sesión 46:** Railway sigue en `v10.6.10` y el dashboard live mostraba `NOAA 0/10` y `0/4` ciudades interpretables el `31 mar 2026`. La auditoría local confirmó un bug real de observabilidad NOAA: no era solo falta de muestra. Queda listo en local un fix mínimo que prioriza `daily-summaries/TMAX` para Chicago/Atlanta/Dallas y mantiene fallback a `global-hourly` para compatibilidad y para Buenos Aires mientras no haya estación diaria validada.
-**Versión local / remoto GitHub:** `origin/main` y producción siguen en commit `7eb8f7f` (`v10.6.10`), validado en Railway por `healthz` + snapshot autenticado. El workspace local añade encima un hardening NOAA no desplegado todavía, validado con `453/453` tests.
+**Estado actual tras sesión 47:** Railway sigue en `v10.6.10` y el dashboard live mostraba `NOAA 0/10` y `0/4` ciudades interpretables el `31 mar 2026`, pero el diagnóstico local ya descartó que fuese solo falta de muestra. Encima del fix NOAA queda lista una nueva capa observacional `trade_lifecycle.json` que backfillea desde `performance.json` + `postmortem.json` y seguirá alimentándose con nuevos BUYs, intentos de salida, fills, snapshots en vida y observaciones post-salida sin tocar trading.
+**Versión local / remoto GitHub:** `origin/main` y producción siguen en commit `7eb8f7f` (`v10.6.10`), validado en Railway por `healthz` + snapshot autenticado. El workspace local añade encima hardening NOAA + `trade_lifecycle`, todo sin desplegar todavía y validado con `467/467` tests. Limitación operativa actual: no se ha podido descargar el `performance.json/postmortem.json` live desde Railway para materializar localmente el histórico real porque el login OAuth de Railway quedó caducado; tras el próximo deploy el propio arranque del bot generará el backfill automáticamente en el Volume.
 
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.6.10 con hardening NOAA local pendiente de deploy |
-| `verify_before_deploy.py` | Suite local de `453` tests de comportamiento |
+| `bot.py` | Script principal v10.6.10 con hardening NOAA + capa `trade_lifecycle` local pendiente de deploy |
+| `verify_before_deploy.py` | Suite local de `467` tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |
@@ -135,6 +137,7 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 | `static/dashboard.css` | Estilos del dashboard web |
 | `static/dashboard.js` | Interaccion ligera para tabs del Mission HUD |
 | `agent_events.jsonl` | Eventos semilla para el scoreboard de agentes |
+| `trade_lifecycle.json` | Nueva capa derivada por posición: entrada, snapshots, salida y observación post-exit (se genera automáticamente donde exista histórico) |
 | `tools/append_agent_event.py` | Helper seguro para añadir eventos al scoreboard sin editar JSONL a mano |
 | `signals.json` | Copia bootstrap local; producción usa la copia persistente del Volume |
 | `traders_db.json` | Copia bootstrap local; producción usa la copia persistente del Volume |
@@ -154,6 +157,7 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 | `cycle_summary.json` | Último ciclo (se sobreescribe) |
 | `cycles_history.jsonl` | Historial acumulativo de todos los ciclos |
 | `audit.json` | Ventas pendientes + auditoría legacy `forecast vs forecast posterior` + `observed_vs_forecast` NOAA |
+| `trade_lifecycle.json` | Trazabilidad completa derivada por posición: buys, exit_attempts, snapshots, mercado post-salida y summary agregado |
 | `decisions.log` | Log detallado por ciclo |
 | `trades.log` | Log compacto de órdenes |
 
@@ -281,6 +285,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 ### Pendientes:
 - **#15** ✅ **Corregido en v10.6.6:** `ACTIVE_TRADING_CITIES` añade allowlist explícita para entradas nuevas y restringe BUYs a Chicago, Atlanta, Dallas y Buenos Aires. El bug original venía de depender solo de `BLOCKED_CITIES`, lo que dejaba pasar ciudades sin validación NOAA/WU como Seoul, Tokyo, NYC y Munich. La gestión de posiciones existentes (`manage_positions`) no se toca.
 - **Observed proxy NOAA / bug de observabilidad detectado:** la auditoría de `31 mar 2026` encontró al menos `7` casos `city|date` elegibles para NOAA en las 4 activas, mientras Railway seguía mostrando `observed_vs_forecast = 0`. No era solo falta de muestra. Causa raíz: `global-hourly` devolvía vacío en varios casos 2026 que sí estaban en `daily-summaries`. Fix local listo: priorizar `daily-summaries/TMAX` para Chicago/Atlanta/Dallas, guardar `observed_dataset`, añadir guard de lag al helper diario y cubrir el fallback `daily -> hourly`; falta desplegar y validar en Railway.
+- **Nueva trazabilidad operativa lista para análisis, aún sin poblar localmente con live data:** `trade_lifecycle.json` ya está implementado y validado con tests; medirá contexto de entrada, intentos de salida, snapshots de posición y comportamiento del mercado tras el cierre. El backfill real de la cuenta se generará en el próximo arranque desplegado. No se pudo materializar localmente desde Railway en esta sesión porque el login OAuth del CLI estaba caducado.
 - **Seguimiento de ciudades aún descriptivo:** `v10.6.7` ya muestra por dashboard qué ciudades están activas, bloqueadas, fuera del allowlist o sin observabilidad, pero todavía no existe promoción automática tipo `watchlist / shadow / canary`.
 - **Buenos Aires NOAA spike cerrado:** `SAEZ` usa `87576099999`, confirmado con NOAA HOMR y una consulta real al endpoint `global-hourly`.
 - **Buenos Aires daily station aún no validada:** el fix local resuelve el cuello de botella principal en US con `daily-summaries`, pero Buenos Aires sigue temporalmente en fallback `global-hourly` hasta encontrar y validar un `daily_station_id` fiable.

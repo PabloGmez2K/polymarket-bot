@@ -44,6 +44,61 @@ def test(name, condition, detail=""):
         failed += 1
 
 
+def _clean_display_text(value):
+    """Normaliza mojibake frecuente en la salida del runner."""
+    text = str(value)
+    replacements = {
+        "ÃƒÂ³": "ó",
+        "ÃƒÂ¡": "á",
+        "ÃƒÂ©": "é",
+        "ÃƒÂ­": "í",
+        "ÃƒÂº": "ú",
+        "ÃƒÂ±": "ñ",
+        "Ã³": "ó",
+        "Ã¡": "á",
+        "Ã©": "é",
+        "Ã­": "í",
+        "Ãº": "ú",
+        "Ã±": "ñ",
+        "Â°F": "°F",
+    }
+    for wrong, right in replacements.items():
+        text = text.replace(wrong, right)
+    return text
+
+
+def test(name, condition, detail=""):
+    global passed, failed
+    clean_name = _clean_display_text(name)
+    clean_detail = _clean_display_text(detail)
+    if condition:
+        print(f"  âœ… {clean_name}")
+        passed += 1
+    else:
+        msg = f"   {clean_name}"
+        if clean_detail:
+            msg += f" â€” {clean_detail}"
+        print(msg)
+        errors.append(clean_name)
+        failed += 1
+
+
+def test(name, condition, detail=""):
+    global passed, failed
+    clean_name = _clean_display_text(name)
+    clean_detail = _clean_display_text(detail)
+    if condition:
+        print(f"  [OK] {clean_name}")
+        passed += 1
+    else:
+        msg = f"   {clean_name}"
+        if clean_detail:
+            msg += f" -- {clean_detail}"
+        print(msg)
+        errors.append(clean_name)
+        failed += 1
+
+
 def get_function_source(module_ast, code_lines, name):
     """Extrae el source exacto de una función definida en bot.py."""
     for node in module_ast.body:
@@ -1784,6 +1839,274 @@ def run_tests():
                 pass
     except Exception as e:
         test("Postmortem funcional ejecuta sin excepción", False, str(e))
+
+    # ---- Test 20b: trade_lifecycle.json ----
+    print("\n Trade lifecycle")
+    test("trade_lifecycle usa archivo dedicado", 'TRADE_LIFECYCLE_FILE = _data_path("trade_lifecycle.json")' in code)
+    test("trade_lifecycle sincroniza desde performance+postmortem", "def _sync_trade_lifecycle_from_sources(" in code)
+    test("trade_lifecycle toma snapshots durante gestiÃ³n", 'record_trade_lifecycle_position_snapshots(temp_positions, source="manage_positions", stage="pre_checks")' in code)
+    test("trade_lifecycle observa mercado tras cierre", "def record_trade_lifecycle_market_observations(" in code)
+
+    try:
+        fd, tmp_perf_lifecycle = tempfile.mkstemp(
+            dir=tempfile.gettempdir(),
+            prefix="_tmp_trade_lifecycle_perf_",
+            suffix=".json",
+        )
+        os.close(fd)
+        fd, tmp_pm_lifecycle = tempfile.mkstemp(
+            dir=tempfile.gettempdir(),
+            prefix="_tmp_trade_lifecycle_pm_",
+            suffix=".json",
+        )
+        os.close(fd)
+        fd, tmp_trade_lifecycle = tempfile.mkstemp(
+            dir=tempfile.gettempdir(),
+            prefix="_tmp_trade_lifecycle_",
+            suffix=".json",
+        )
+        os.close(fd)
+
+        question_atl = "Will the highest temperature in Atlanta be between 72-73°F on March 30?"
+        buy_ts = "2026-03-30T08:00:00+00:00"
+        sell_pending_ts = "2026-03-30T12:00:00+00:00"
+        sell_fill_ts = "2026-03-30T12:05:00+00:00"
+
+        with open(tmp_perf_lifecycle, "w", encoding="utf-8") as f:
+            json.dump([
+                {
+                    "timestamp": buy_ts,
+                    "action": "BUY",
+                    "city": "Atlanta",
+                    "side": "YES",
+                    "date": "2026-03-30",
+                    "question": question_atl,
+                    "token_id": "tok-atl-yes",
+                    "amount": 1.85,
+                    "shares": 3.3,
+                    "price": 0.56,
+                    "edge_pct": 21.0,
+                    "forecast_max": 22.7,
+                    "our_prob": 0.61,
+                    "mkt_price": 0.40,
+                    "days_ahead": 1,
+                    "trader_confirmed": ["Entire-Hood"],
+                    "cycle_number": 14,
+                    "logic_cycle_number": 8,
+                    "bot_version": "v10.6.10",
+                },
+                {
+                    "timestamp": sell_pending_ts,
+                    "action": "SELL_PENDING",
+                    "city": "Atlanta",
+                    "side": "YES",
+                    "date": "2026-03-30",
+                    "question": question_atl,
+                    "token_id": "tok-atl-yes",
+                    "reason": "take_profit",
+                    "decision_note": "TAKE-PROFIT (+44.0% > +40.0%)",
+                    "decision_source": "manage_positions",
+                    "price": 0.79,
+                    "trigger_price": 0.81,
+                    "shares": 3.3,
+                    "return_est": 2.61,
+                    "pnl_pct": 44.0,
+                    "pnl_cash": 0.75,
+                    "current_value": 2.67,
+                    "order_id": "oid-atl-1",
+                    "bot_version": "v10.6.10",
+                },
+                {
+                    "timestamp": sell_pending_ts,
+                    "fill_confirmed": sell_fill_ts,
+                    "action": "SELL",
+                    "city": "Atlanta",
+                    "side": "YES",
+                    "date": "2026-03-30",
+                    "question": question_atl,
+                    "token_id": "tok-atl-yes",
+                    "reason": "take_profit",
+                    "price": 0.79,
+                    "shares": 3.3,
+                    "return_est": 2.61,
+                    "pnl_pct": 44.0,
+                    "pnl_cash": 0.75,
+                    "order_id": "oid-atl-1",
+                    "bot_version": "v10.6.10",
+                },
+            ], f, ensure_ascii=False)
+
+        with open(tmp_pm_lifecycle, "w", encoding="utf-8") as f:
+            json.dump([
+                {
+                    "id": "tok-atl-yes|YES|2026-03-30|2026-03-30T08:00:00+00:00",
+                    "status": "closed",
+                    "token_id": "tok-atl-yes",
+                    "question": question_atl,
+                    "city": "Atlanta",
+                    "side": "YES",
+                    "date": "2026-03-30",
+                    "condition": "between",
+                    "opened_at": buy_ts,
+                    "last_buy_at": buy_ts,
+                    "closed_at": sell_fill_ts,
+                    "buy_count": 1,
+                    "total_amount": 1.85,
+                    "total_shares": 3.3,
+                    "avg_entry_price": 0.5606,
+                    "trader_confirmed": ["Entire-Hood"],
+                    "bot_version_opened": "v10.6.10",
+                    "bot_version_closed": "v10.6.10",
+                    "buys": [
+                        {
+                            "timestamp": buy_ts,
+                            "amount": 1.85,
+                            "shares": 3.3,
+                            "price": 0.56,
+                            "edge_pct": 21.0,
+                            "forecast_max": 22.7,
+                            "our_prob": 0.61,
+                            "mkt_price": 0.40,
+                            "bot_version": "v10.6.10",
+                        }
+                    ],
+                    "close_action": "SELL",
+                    "close_reason": "take_profit",
+                    "close_subtype": "take_profit",
+                    "close_price": 0.79,
+                    "close_shares": 3.3,
+                    "return_est": 2.61,
+                    "pnl_cash": 0.76,
+                    "pnl_pct": 41.08,
+                    "order_id": "oid-atl-1",
+                }
+            ], f, ensure_ascii=False)
+
+        lifecycle_ns = {
+            "os": os,
+            "json": json,
+            "re": re,
+            "datetime": datetime,
+            "timezone": timezone,
+            "TRADE_LIFECYCLE_FILE": tmp_trade_lifecycle,
+            "PERFORMANCE_FILE": tmp_perf_lifecycle,
+            "POSTMORTEM_FILE": tmp_pm_lifecycle,
+            "log": types.SimpleNamespace(warning=lambda *args, **kwargs: None),
+        }
+        for fn_name in [
+            "load_performance_history",
+            "load_postmortem_data",
+            "load_trade_lifecycle_data",
+            "save_trade_lifecycle_data",
+            "_lifecycle_clone",
+            "_parse_lifecycle_timestamp",
+            "_to_lifecycle_float",
+            "_trade_lifecycle_label",
+            "_find_trade_lifecycle_record",
+            "_new_trade_lifecycle_record",
+            "_copy_trade_lifecycle_dynamic_fields",
+            "_timeline_event_from_entry",
+            "_append_trade_lifecycle_event",
+            "_append_trade_lifecycle_buy",
+            "_append_trade_lifecycle_exit_attempt",
+            "_update_trade_lifecycle_exit_attempt",
+            "_apply_trade_lifecycle_close",
+            "_append_synthetic_postmortem_close_event",
+            "_build_trade_lifecycle_summary",
+            "_sync_trade_lifecycle_from_sources",
+            "record_trade_lifecycle_position_snapshots",
+            "record_trade_lifecycle_market_observations",
+        ]:
+            exec(get_function_source(module_ast, code_lines, fn_name), lifecycle_ns)
+
+        lifecycle_ns["parse_temperature_question"] = lambda title: {"date_str": "2026-03-30", "condition": "between"}
+        lifecycle_ns["date_text_to_iso"] = lambda value: value
+        lifecycle_ns["parse_city_from_title"] = lambda title: "Atlanta"
+
+        lifecycle_payload = lifecycle_ns["_sync_trade_lifecycle_from_sources"]()
+        lifecycle_records = lifecycle_payload.get("records", [])
+        lifecycle_record = lifecycle_records[0] if lifecycle_records else {}
+
+        test("trade_lifecycle funcional: reconstruye un registro histÃ³rico",
+             len(lifecycle_records) == 1 and lifecycle_record.get("token_id") == "tok-atl-yes",
+             lifecycle_records)
+        test("trade_lifecycle funcional: entry_context conserva ciclo y traders",
+             lifecycle_record.get("entry_context", {}).get("cycle_number") == 14
+             and lifecycle_record.get("entry_context", {}).get("logic_cycle_number") == 8
+             and lifecycle_record.get("entry_context", {}).get("trader_confirmed") == ["Entire-Hood"],
+             lifecycle_record.get("entry_context"))
+        test("trade_lifecycle funcional: SELL_PENDING preserva decision/trigger/current_value",
+             bool(lifecycle_record.get("exit_attempts"))
+             and lifecycle_record["exit_attempts"][0].get("decision_source") == "manage_positions"
+             and lifecycle_record["exit_attempts"][0].get("trigger_price") == 0.81
+             and lifecycle_record["exit_attempts"][0].get("current_value") == 2.67,
+             lifecycle_record.get("exit_attempts"))
+        test("trade_lifecycle funcional: SELL queda como cierre filled",
+             lifecycle_record.get("close_context", {}).get("close_action") == "SELL"
+             and lifecycle_record.get("exit_attempts", [{}])[0].get("status") == "filled",
+             {"close": lifecycle_record.get("close_context"), "exit_attempts": lifecycle_record.get("exit_attempts")})
+        test("trade_lifecycle funcional: summary cuenta take_profit",
+             lifecycle_payload.get("summary", {}).get("take_profit_closes") == 1,
+             lifecycle_payload.get("summary"))
+
+        lifecycle_ns["record_trade_lifecycle_position_snapshots"]([
+            {
+                "title": question_atl,
+                "asset": "tok-atl-yes",
+                "outcome": "YES",
+                "curPrice": 0.83,
+                "currentValue": 2.74,
+                "percentPnl": 47.9,
+                "cashPnl": 0.89,
+                "size": 3.3,
+                "avgPrice": 0.56,
+            }
+        ], source="manage_positions", stage="pre_checks")
+
+        after_snapshot = lifecycle_ns["load_trade_lifecycle_data"]()
+        snapshot_record = after_snapshot.get("records", [])[0] if after_snapshot.get("records") else {}
+        test("trade_lifecycle funcional: guarda snapshot de posiciÃ³n viva",
+             len(snapshot_record.get("position_snapshots", [])) == 1
+             and snapshot_record.get("position_snapshots", [])[0].get("cur_price") == 0.83,
+             snapshot_record.get("position_snapshots"))
+        test("trade_lifecycle funcional: actualiza position_stats",
+             snapshot_record.get("position_stats", {}).get("max_cur_price_open") == 0.83
+             and snapshot_record.get("position_stats", {}).get("max_current_value_open") == 2.74,
+             snapshot_record.get("position_stats"))
+
+        lifecycle_ns["record_trade_lifecycle_market_observations"]([
+            {
+                "question": question_atl,
+                "outcomePrices": "[\"1.00\",\"0.00\"]",
+                "clobTokenIds": "[\"tok-atl-yes\",\"tok-atl-no\"]",
+                "liquidity": 1250.0,
+                "volume24hr": 410.0,
+            }
+        ], source="cycle_market_scan")
+
+        after_market = lifecycle_ns["load_trade_lifecycle_data"]()
+        market_record = after_market.get("records", [])[0] if after_market.get("records") else {}
+        post_exit = market_record.get("post_exit_analysis", {})
+        test("trade_lifecycle funcional: guarda observaciÃ³n de mercado post-salida",
+             len(market_record.get("market_observations", [])) == 1
+             and post_exit.get("market_seen_after_close") is True,
+             {"market": market_record.get("market_observations"), "post_exit": post_exit})
+        test("trade_lifecycle funcional: detecta upside_left hasta 100c",
+             post_exit.get("reached_98_after_close") is True
+             and post_exit.get("upside_left_cash_peak") == 0.69,
+             post_exit)
+        test("trade_lifecycle funcional: summary refleja casos con upside_left",
+             after_market.get("summary", {}).get("with_upside_left_after_close") == 1,
+             after_market.get("summary"))
+
+        for tmp_path in [tmp_perf_lifecycle, tmp_pm_lifecycle, tmp_trade_lifecycle]:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+    except Exception as e:
+        test("trade_lifecycle funcional ejecuta sin excepciÃ³n", False, str(e))
 
     # ---- Test 21: alertas de observabilidad ----
     print("\n Alertas de observabilidad")

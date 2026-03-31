@@ -62,6 +62,7 @@ Comandos útiles:
 | 2026-03-30 | Explícita | Sesión 44 | `—` | Implementación local de `v10.6.9`: `Mission HUD` para discovery/stabilization con estilo videojuego operacional, tabs `Overview / Progress / Cities`, barras de progreso, `city race`, `dashboard.js` y suite en `447/447`. |
 | 2026-03-30 | Explícita | Sesión 45 | `7eb8f7f` | Refinamiento y despliegue de `v10.6.10`: modo claro por defecto, ciudades agrupadas por prioridad operativa, repetición de `signals stale` reducida cuando NOAA es el cuello de botella, suite en `449/449` y validación en Railway. |
 | 2026-03-31 | Explícita | Sesión 46 | `—` | Auditoría NOAA `observed_vs_forecast`: se demuestra bug real de observabilidad, no solo falta de muestra. Fix local con `daily-summaries/TMAX` prioritario, fallback `global-hourly`, guard de lag coherente, trazabilidad extra y suite en `453/453`. |
+| 2026-03-31 | Explícita | Sesión 47 | `—` | Nueva capa `trade_lifecycle`: trazabilidad completa por posición con backfill desde `performance+postmortem`, snapshots en gestión e intra-ciclo, observación post-exit y suite final en `467/467`, sin tocar trading. |
 
 ---
 
@@ -932,6 +933,46 @@ Investigación completa de trades, commits y lógica de trading desde v10.3 hast
   - la suite queda en `453/453`.
 
 **Resultado:** el diagnóstico correcto al cierre de la sesión es **bug real de observabilidad NOAA**, no mera falta de tiempo. Sí faltaba muestra para algunas fechas recientes, pero ya existían casos elegibles suficientes como para esperar `n > 0` en producción. El fix queda validado en local con `453/453` tests, sin tocar trading, sigma/Kelly, exits, scheduler ni gestión de posiciones. Buenos Aires queda temporalmente en fallback `global-hourly` porque todavía no se validó una estación diaria fiable. La idea de una futura capa `shadow sample` queda solo como propuesta segura para más adelante, no como cambio aplicado hoy.
+
+---
+
+## Sesión 47 — capa `trade_lifecycle` para trazabilidad operativa completa (31 mar 2026)
+
+**Disparador:** al revisar ventas como el take-profit de Atlanta que luego terminó en `100c`, quedó claro que `performance.json` y `postmortem.json` ya explicaban por qué se entró y por qué se intentó salir, pero no dejaban una historia completa por posición para analizar después cuánto upside se dejó encima de la mesa o qué ocurrió tras salir.
+
+**Diagnóstico (Codex):**
+
+1. **La observabilidad actual estaba fragmentada.** `performance.json` registra eventos; `postmortem.json` agrega estado y cierre; `audit.json` cubre NOAA. Pero faltaba una capa única orientada a análisis por trade, no por evento.
+
+2. **El análisis futuro de trading necesitaba evidencia, no intuición.** Antes de pedir a Claude Code Opus que decida cambios de operativa, hacía falta poder responder con datos a preguntas como “¿este TP fue prematuro?”, “¿el mercado llegó a `0.98/1.00` después de vender?” o “¿qué drawdown se evitó realmente?”.
+
+3. **Se podía instrumentar sin tocar trading.** La lógica de entrada/salida no necesitaba cambiar; bastaba con enganchar los puntos correctos del ciclo de vida y reconstruir el histórico desde las fuentes ya existentes.
+
+**Cambios realizados:**
+- `bot.py` añade `TRADE_LIFECYCLE_FILE = _data_path("trade_lifecycle.json")` y una nueva capa derivada con:
+  - carga/guardado dedicados;
+  - helper `_sync_trade_lifecycle_from_sources()` para reconstruir desde `performance.json` + `postmortem.json`;
+  - campos por posición: `entry_context`, `latest_entry_context`, `buys`, `timeline`, `exit_attempts`, `position_snapshots`, `market_observations`, `close_context`, `post_exit_analysis` y `summary` global;
+  - enriquecimiento de duplicados históricos para no perder `cycle_number`, `logic_cycle_number`, `trader_confirmed`, `decision_note`, `decision_source`, `trigger_price` o `current_value` cuando el backfill parte de `postmortem` y luego se completa con `performance`.
+- La capa se actualiza automáticamente:
+  - en cada `track_trade()` (`BUY`, `SELL_PENDING`, `SELL`, `SELL_FAILED`, `LOSS_TOTAL`, `RESOLVED_WIN`);
+  - al arrancar, tras el backfill de `postmortem`;
+  - en `manage_positions()` con snapshots previos a checks;
+  - en el monitor intra-ciclo con snapshots entre ciclos;
+  - durante el scan principal con observaciones de mercado para medir qué pasa tras el cierre.
+- `record_trade_lifecycle_market_observations()` calcula también señales de análisis post-salida:
+  - `market_seen_after_close`;
+  - `max/min_price_after_close`;
+  - `reached_98_after_close`;
+  - `upside_left_cash_peak / pct`;
+  - `drawdown_avoided_cash_peak / pct`.
+- `verify_before_deploy.py` cierra en `467/467` con:
+  - checks estructurales de la nueva capa;
+  - test funcional de reconstrucción histórica desde `performance+postmortem`;
+  - test de snapshots de posición viva;
+  - test de observación post-exit con detección explícita de upside dejado hasta `100c`.
+
+**Resultado:** queda lista una capa de trazabilidad completa, pensada para revisión rápida por Claude Code Sonnet y análisis estratégico posterior por Claude Code Opus, sin tocar ni una regla de trading. Limitación conocida al cierre: el backfill real de la cuenta no pudo materializarse localmente en esta sesión porque el CLI de Railway tenía el login OAuth caducado, pero el código ya deja el `trade_lifecycle.json` preparado para reconstruirse automáticamente desde el Volume en el próximo arranque desplegado.
 
 ---
 
