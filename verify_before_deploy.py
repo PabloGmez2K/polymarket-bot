@@ -1847,6 +1847,7 @@ def run_tests():
     test("trade_lifecycle toma snapshots durante gestiÃ³n", 'record_trade_lifecycle_position_snapshots(temp_positions, source="manage_positions", stage="pre_checks")' in code)
     test("trade_lifecycle observa mercado tras cierre", "def record_trade_lifecycle_market_observations(" in code)
     test("trade_lifecycle expone bloque de integridad", "def _build_trade_lifecycle_integrity(" in code)
+    test("trade_lifecycle usa helper seguro de vacio", "def _lifecycle_is_empty(" in code)
 
     try:
         fd, tmp_perf_lifecycle = tempfile.mkstemp(
@@ -2000,6 +2001,7 @@ def run_tests():
             "load_trade_lifecycle_data",
             "save_trade_lifecycle_data",
             "_lifecycle_clone",
+            "_lifecycle_is_empty",
             "_parse_lifecycle_timestamp",
             "_to_lifecycle_float",
             "_trade_lifecycle_label",
@@ -2177,6 +2179,66 @@ def run_tests():
              orphan_integrity.get("partial_historical_record") is True
              and orphan_payload.get("integrity", {}).get("partial_historical_records") == 1,
              {"record": orphan_record, "integrity": orphan_payload.get("integrity")})
+
+        merged_records, merged_collisions = lifecycle_ns["_coalesce_trade_lifecycle_records"]([
+            {
+                "id": "dup-ctx-1",
+                "label": "dup-ctx-1",
+                "token_id": "token-1",
+                "question": "Question 1",
+                "city": "Chicago",
+                "side": "YES",
+                "date": "2026-03-31",
+                "status": "open",
+                "entry_context": {
+                    "timestamp": "2026-03-31T08:00:00+00:00",
+                    "trader_confirmed": ["Alpha"],
+                },
+                "latest_entry_context": {},
+                "close_context": {},
+                "buys": [],
+                "timeline": [],
+                "exit_attempts": [],
+                "position_snapshots": [],
+                "market_observations": [],
+                "position_stats": {},
+                "post_exit_analysis": {},
+                "history_sources": {},
+            },
+            {
+                "id": "dup-ctx-1",
+                "label": "dup-ctx-1",
+                "token_id": "token-1",
+                "question": "Question 1",
+                "city": "Chicago",
+                "side": "YES",
+                "date": "2026-03-31",
+                "status": "open",
+                "entry_context": {
+                    "price": 0.19,
+                    "trader_confirmed": ["Beta"],
+                },
+                "latest_entry_context": {},
+                "close_context": {},
+                "buys": [],
+                "timeline": [],
+                "exit_attempts": [],
+                "position_snapshots": [],
+                "market_observations": [],
+                "position_stats": {},
+                "post_exit_analysis": {},
+                "history_sources": {},
+            },
+        ])
+        merged_record = merged_records[0] if merged_records else {}
+        merged_entry_context = merged_record.get("entry_context", {})
+        test("trade_lifecycle funcional: coalesce de contextos duplicados no rompe",
+             len(merged_records) == 1
+             and merged_collisions == 1
+             and merged_entry_context.get("timestamp") == "2026-03-31T08:00:00+00:00"
+             and merged_entry_context.get("price") == 0.19
+             and merged_entry_context.get("trader_confirmed") == ["Alpha", "Beta"],
+             {"records": merged_records, "collisions": merged_collisions})
 
         for tmp_path in [tmp_perf_lifecycle, tmp_pm_lifecycle, tmp_trade_lifecycle]:
             if os.path.exists(tmp_path):

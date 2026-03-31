@@ -64,6 +64,7 @@ Comandos útiles:
 | 2026-03-31 | Explícita | Sesión 46 | `—` | Auditoría NOAA `observed_vs_forecast`: se demuestra bug real de observabilidad, no solo falta de muestra. Fix local con `daily-summaries/TMAX` prioritario, fallback `global-hourly`, guard de lag coherente, trazabilidad extra y suite en `453/453`. |
 | 2026-03-31 | Explícita | Sesión 47 | `—` | Nueva capa `trade_lifecycle`: trazabilidad completa por posición con backfill desde `performance+postmortem`, snapshots en gestión e intra-ciclo, observación post-exit y suite final en `467/467`, sin tocar trading. |
 | 2026-03-31 | Explícita | Sesión 48 | `—` | Hardening fase 1 de `trade_lifecycle`: matching por `id` reconstruido, coalescing defensivo, bloque `integrity`, fix del caso real de cierres huérfanos y suite en `470/470`; validación live demuestra `92 -> 80` records únicos al reconstruir. |
+| 2026-03-31 | Explícita | Sesión 49 | `—` | Hotfix del coalescing de `trade_lifecycle` tras detectar en Railway `unhashable type: 'list'`; se sustituye la comparación inválida con sets `{None, "", [], {}}` por `_lifecycle_is_empty()`, se añade regresión del merge de contextos duplicados, se normaliza `agent_events.jsonl` a UTF-8 y la suite queda en `472/472`. |
 
 ---
 
@@ -1017,6 +1018,45 @@ Investigación completa de trades, commits y lógica de trading desde v10.3 hast
   - `68` records `analysis_ready`.
 
 **Resultado:** queda cerrada la fase 1 de saneamiento de `trade_lifecycle`: el dataset ya no duplica cierres huérfanos antiguos y además declara explícitamente qué parte del histórico es parcial. No se toca ninguna regla de trading. El siguiente paso natural es desplegar este hardening y construir encima la fase 2: capa analítica de operativa para dashboard y paquete congelado para Claude Code Opus.
+
+---
+
+## Sesión 49 — hotfix de coalescing para `trade_lifecycle` (31 mar 2026)
+
+**Disparador:** al validar en Railway el despliegue de la fase 1, el contenedor arrancó correctamente pero empezó a loguear `Error sincronizando trade_lifecycle: unhashable type: 'list'` tanto en startup como durante el ciclo de las `16:00 UTC`. El problema aparecía justo cuando `track_trade()` registraba varios `LOSS_TOTAL` y el lifecycle intentaba resincronizarse.
+
+**Diagnóstico (Codex):**
+
+1. **El fallo no estaba en trading ni en datos NOAA.** `status`, `logs` y el dashboard live confirmaron que el servicio estaba arriba, que NOAA seguía poblando muestra real y que el error afectaba únicamente a la capa derivada `trade_lifecycle`.
+
+2. **La pista clave era el mensaje Python exacto.** Se revisó el hot path de coalescing y apareció una construcción inválida en Python:
+   - `_merge_trade_lifecycle_context()` usaba `if target.get(key) in {None, "", [], {}} ...`
+   - `_merge_trade_lifecycle_record()` usaba `existing not in {None, "", [], {}}`
+   Eso dispara `TypeError: unhashable type: 'list'` en cuanto la expresión se evalúa, porque `[]` y `{}` no pueden ser elementos de un set.
+
+3. **La razón por la que no saltó antes:** el bug solo se manifiesta cuando la ruta de coalescing se ejecuta de verdad sobre records duplicados/ambiguos. En Railway, esa condición sí se daba tras la fase 1, porque el lifecycle live todavía arrastraba duplicados históricos y el ciclo de las `16:00` volvió a empujar eventos `LOSS_TOTAL`.
+
+**Cambios realizados:**
+- `bot.py` añade `_lifecycle_is_empty()` para encapsular de forma segura la noción de “vacío” (`None`, `""`, listas/dicts/tuplas/sets vacíos).
+- `_merge_trade_lifecycle_context()` deja de usar sets inválidos con `[]/{}` y pasa a `if _lifecycle_is_empty(...)`.
+- `_merge_trade_lifecycle_record()` cambia `_prefer()` para reutilizar el mismo helper seguro.
+- `verify_before_deploy.py` añade:
+  - check estructural de `_lifecycle_is_empty()`;
+  - regresión funcional que coalesce dos records con el mismo `id` y `entry_context` no vacío para asegurar que:
+    - no rompe;
+    - fusiona `timestamp + price`;
+    - une `trader_confirmed` en `["Alpha", "Beta"]`.
+- Se normaliza `agent_events.jsonl` del repo a `utf-8`, porque la suite seguía detectando un seed local en `cp1252` que ensuciaba el runner con un warning ajeno al bug de lifecycle.
+
+**Validación:**
+- Se confirma el síntoma live en logs de Railway:
+  - startup: `Error sincronizando trade_lifecycle al arrancar: unhashable type: 'list'`
+  - ciclo `16:00 UTC`: múltiples `Error sincronizando trade_lifecycle: unhashable type: 'list'`
+- El hotfix local queda validado con `verify_before_deploy.py` en `472/472`.
+- NOAA sigue sano y no está afectado por este bug:
+  - `observed_vs_forecast` live ya mostraba `2` casos reales en Chicago.
+
+**Resultado:** el problema queda acotado y corregido localmente sin tocar reglas de trading. El siguiente paso correcto es desplegar este hotfix, revalidar Railway y confirmar que desaparecen los warnings de `trade_lifecycle` antes de seguir con la fase 2 analítica del dashboard.
 
 ---
 

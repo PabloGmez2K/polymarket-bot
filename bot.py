@@ -856,6 +856,14 @@ def _lifecycle_clone(value):
         return value
 
 
+def _lifecycle_is_empty(value):
+    if value is None or value == "":
+        return True
+    if isinstance(value, (list, dict, tuple, set)):
+        return len(value) == 0
+    return False
+
+
 def _parse_lifecycle_timestamp(value):
     text = str(value or "").strip()
     if not text:
@@ -1013,7 +1021,7 @@ def _merge_trade_lifecycle_context(target, incoming):
             if merged:
                 target[key] = merged
             continue
-        if target.get(key) in {None, "", [], {}} and value not in {None, "", [], {}}:
+        if _lifecycle_is_empty(target.get(key)) and not _lifecycle_is_empty(value):
             target[key] = _lifecycle_clone(value)
     return target
 
@@ -1023,7 +1031,7 @@ def _merge_trade_lifecycle_record(target, incoming):
         return target
 
     def _prefer(existing, candidate):
-        return existing if existing not in {None, "", [], {}} else candidate
+        return existing if not _lifecycle_is_empty(existing) else candidate
 
     def _merge_max(existing, candidate):
         if candidate is None:
