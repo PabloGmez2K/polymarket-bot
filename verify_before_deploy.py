@@ -475,7 +475,7 @@ def run_tests():
     test("css dashboard define mission HUD", ".focus-tab-bar" in dashboard_css_code and ".mission-track-grid" in dashboard_css_code and ".city-race-list" in dashboard_css_code)
     test("css dashboard define city grouping cards", ".city-zone-grid" in dashboard_css_code and ".city-card-grid" in dashboard_css_code and ".blocked-pill-list" in dashboard_css_code)
     test("css dashboard define layer toggle", ".layer-toggle" in dashboard_css_code and ".layer-toggle-content" in dashboard_css_code)
-    test("js dashboard define tabs focus", "data-panel-target" in dashboard_js_code and "activate(\"overview\")" in dashboard_js_code)
+    test("js dashboard soporta multiples tab shells", "data-tab-shell" in dashboard_js_code and "defaultPanel" in dashboard_js_code)
     if os.path.exists(agent_events_path):
         try:
             with open(agent_events_path, "r", encoding="utf-8") as f:
@@ -1271,6 +1271,13 @@ def run_tests():
              trade_analytics["breakdown_rows"][0]["label"] == "Take-profit"
              and len(trade_analytics["timeline_points"]) == 2,
              {"breakdown": trade_analytics["breakdown_rows"], "timeline": trade_analytics["timeline_points"]})
+        test("trade analytics: expone totales y detalle por trade",
+             trade_analytics["total_cards"][0]["label"] == "Operaciones totales"
+             and any(card["label"] == "Dejado de ganar" for card in trade_analytics["total_cards"])
+             and any(row["label"] == "Atlanta TP" and "TP mecanico" in row["exit_condition"] for row in trade_analytics["trade_rows"])
+             and any(row["label"] == "Dallas SL" and "SL mecanico" in row["exit_condition"] for row in trade_analytics["trade_rows"])
+             and any(row["entry_condition"] == "Historico parcial: faltan datos claros de entrada." for row in trade_analytics["trade_rows"]),
+             {"totals": trade_analytics["total_cards"], "trade_rows": trade_analytics["trade_rows"][:2]})
 
         snapshot_ns = {
             "datetime": datetime,

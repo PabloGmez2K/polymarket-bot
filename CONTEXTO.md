@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 31 de marzo de 2026 (Sesión 51 — trade analytics dashboard phase 2)
-**Próxima sesión:** validar la fase 2 en live, usar el panel operativo para revisar `take_profit / reeval / stop_loss` con evidencia post-salida real y congelar un snapshot analítico para Claude Code Opus.
+**Última actualización:** 31 de marzo de 2026 (Sesión 52 — trade console dashboard)
+**Próxima sesión:** validar en live el nuevo `trade console`, revisar con datos reales los casos `take_profit / reeval / stop_loss` y congelar un snapshot analítico completo para Claude Code Opus.
 
 ---
 
@@ -112,6 +112,8 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Trade analytics dashboard phase 2 (31 mar, sin bump):** Sobre la base ya saneada de `trade_lifecycle`, se añade una capa analítica nueva `build_dashboard_trade_analytics()` que solo cuenta cierres con `market_seen_after_close` y `close_price * close_shares` utilizables. La nueva vista resume: `sample observado`, `score` de eficiencia observada, `harvest efficiency`, `upside_left_total_cash`, `drawdown_avoided_total_cash`, breakdown por `take_profit / reeval / stop_loss`, timeline corto de exits observados y dos colas de revisión (`top_upside_rows`, `top_protection_rows`). El dashboard gana una sección visible para seguir activamente qué está capturando el bot, qué upside deja y qué downside evita, sin tocar ninguna regla de trading. `verify_before_deploy.py` sube a `477/477`.
 
+**Trade console dashboard (31 mar, sin bump):** La primera capa analítica de exits resultó demasiado estrecha para uso diario: respondía bien a `¿estamos capturando bien los exits observados?`, pero no a `¿qué hizo exactamente el bot en cada operación?`. Sobre la misma base de `trade_lifecycle`, el dashboard añade ahora una pestaña separada tipo consola con dos vistas: `Resumen` y `Trades`. Esta nueva capa expone `Operaciones totales`, `TP`, `SL`, `Ganadas`, `Perdidas`, `PnL neto`, `Dejado de ganar` y `Protegido`, además de una tabla por trade con: mercado, condición de entrada del bot, condición de salida, resultado, valor, centavos por share y evidencia observada post-salida. Importante: no depende del CSV local; usa exclusivamente `trade_lifecycle`/`postmortem` para que la misma lectura exista también en Railway. `verify_before_deploy.py` sube a `478/478`.
+
 **City accuracy tracker (v10.5.2):** Calcula win rate por ciudad desde postmortem. Alerta por Telegram si una ciudad baja de 25% win rate con 3+ trades. Nuevo comando `/accuracy`. Win rate visible en `/rendimiento`.
 
 **Integración `/accuracy` + revisión crítica (v10.5.3):** `/accuracy` queda visible en el menú, responde siempre con menú, `/estado` muestra explícitamente el intervalo intra-SL y la trazabilidad de sesión 20 queda corregida para reflejar mejor lo que realmente introdujeron los commits de la mañana.
@@ -123,14 +125,14 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.10`)
-**Estado actual tras sesión 51:** la base operativa queda saneada: NOAA ya genera muestra real, `trade_lifecycle` está sin duplicados activos en live y el Railway CLI tiene wrapper seguro. Encima de eso, el repo local ya añade la capa analítica de exits observados y una nueva sección del dashboard para seguir eficiencia operativa con evidencia post-salida real. La muestra seguirá siendo pequeña al principio, pero ahora ya existe una lectura estructurada y visible para no depender solo de intuición.
-**Versión local / remoto GitHub:** `origin/main` ya incluye NOAA hardening, `trade_lifecycle`, fase 1 de integridad, hotfix de coalescing (`47c68ee`) y el wrapper Railway (`6b07f25`). Esta sesión añade en local la fase 2 analítica del dashboard; `verify_before_deploy.py` queda en `477/477`. La validación live de esta nueva capa es el siguiente paso natural.
+**Estado actual tras sesión 52:** la base operativa queda saneada: NOAA ya genera muestra real, `trade_lifecycle` está sin duplicados activos en live y el Railway CLI tiene wrapper seguro. Encima de eso, el dashboard local ya no muestra solo eficiencia observada de exits, sino también una consola de trades orientada a preguntas operativas reales: por qué entró el bot, por qué salió, cuánto ganó/perdió y qué dejó sobre la mesa. La muestra post-salida seguirá siendo parcial al principio, pero el dashboard ya separa claramente `lectura global` de `detalle por trade`.
+**Versión local / remoto GitHub:** `origin/main` ya incluye NOAA hardening, `trade_lifecycle`, fase 1 de integridad, hotfix de coalescing (`47c68ee`), el wrapper Railway (`6b07f25`) y la fase 2 analítica base del dashboard (`4f3deda`). Esta sesión añade en local el `trade console` y deja `verify_before_deploy.py` en `478/478`. El siguiente paso natural es validar live esta ampliación del panel.
 
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.6.10 con NOAA hardening, `trade_lifecycle` saneado y nueva analítica de exits para dashboard |
-| `verify_before_deploy.py` | Suite local de `477` tests de comportamiento |
+| `bot.py` | Script principal v10.6.10 con NOAA hardening, `trade_lifecycle` saneado y dashboard ampliado con analítica + consola de trades |
+| `verify_before_deploy.py` | Suite local de `478` tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |

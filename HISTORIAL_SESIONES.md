@@ -1153,6 +1153,43 @@ Investigación completa de trades, commits y lógica de trading desde v10.3 hast
 
 ---
 
+## Sesión 52 — trade console dashboard (31 mar 2026)
+
+**Disparador:** tras ver la primera capa `Operativa observada` en pantalla, quedó claro que respondía bien a la pregunta de eficiencia observada de exits, pero seguía siendo poco práctica para revisar la operativa trade por trade.
+
+**Objetivo:** ampliar el dashboard con una vista más accionable que permita responder:
+- cuántas operaciones totales hay;
+- cuántos TP/SL se ejecutaron;
+- cuántas operaciones acabaron ganadas/perdidas;
+- cuánto cash se ganó, perdió o se dejó de ganar;
+- y, para cada trade, por qué entró el bot, por qué salió y qué pasó después.
+
+**Cambios realizados:**
+- `build_dashboard_trade_analytics()` se amplía en `bot.py` con una capa tipo `trade console`.
+  - añade `total_cards` con `Operaciones totales`, `TP`, `SL`, `Ganadas`, `Perdidas`, `PnL neto`, `Dejado de ganar` y `Protegido`;
+  - añade `trade_rows` con detalle por posición:
+    - mercado;
+    - condición de entrada;
+    - condición de salida;
+    - resultado;
+    - valor del trade;
+    - centavos por share;
+    - upside dejado;
+    - y estado de observación/integridad.
+- `templates/dashboard.html` gana una nueva pestaña separada `Trade console / Operaciones del bot` con dos vistas:
+  - `Resumen`;
+  - `Trades`.
+- `static/dashboard.js` se generaliza para soportar múltiples shells de tabs (`data-tab-shell`) sin romper el Mission HUD original.
+- La fuente de verdad sigue siendo `trade_lifecycle` + `postmortem`; el CSV local se deja solo como referencia manual, no como dependencia del dashboard live.
+
+**Tests:**
+- Se ajusta la validación funcional de `trade_analytics` para comprobar totales y detalle por trade sin depender de un orden artificial.
+- `verify_before_deploy.py` sube a `478/478`.
+
+**Resultado:** el dashboard ya no se queda en una lectura abstracta de eficiencia. Ahora también ofrece una consola de operaciones pensada para seguimiento activo del bot y para preparar, más adelante, una revisión profunda con Claude Code Opus usando una vista más legible y más cercana a cómo se piensa la operativa real.
+
+---
+
 ## Sesiones aún no reconstruidas con certeza
 
 Las sesiones 4 a 8, y las 10 a 18, no aparecen nombradas explícitamente en los commits que tenemos a mano. El trabajo de esas sesiones sí existe, pero hoy está representado como:

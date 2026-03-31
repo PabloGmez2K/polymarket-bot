@@ -4481,6 +4481,12 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
             return "n/d"
         return f"{number:.1f}%"
 
+    def _fmt_cents(value):
+        number = _to_lifecycle_float(value, 1)
+        if number is None:
+            return "n/d"
+        return f"{number:+.1f}c"
+
     def _fmt_ts(value):
         text = str(value or "").strip()
         if not text:
@@ -4505,6 +4511,116 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
         if action == "RESOLVED_WIN":
             return "resolved_win"
         return "other"
+
+    def _effective_exit_price(record):
+        close_context = record.get("close_context") or {}
+        close_price = _to_lifecycle_float(close_context.get("close_price"))
+        if close_price is not None:
+            return close_price
+
+        action = str(close_context.get("close_action", "") or "")
+        if action == "RESOLVED_WIN":
+            return 1.0
+        if action == "LOSS_TOTAL":
+            return 0.0
+
+        snapshots = record.get("position_snapshots", []) or []
+        if snapshots:
+            return _to_lifecycle_float(snapshots[-1].get("cur_price"))
+        return None
+
+    def _entry_condition(record):
+        entry = record.get("latest_entry_context") or record.get("entry_context") or {}
+        if not entry.get("timestamp"):
+            return "Historico parcial: faltan datos claros de entrada."
+
+        parts = []
+        entry_price = _to_lifecycle_float(entry.get("price"))
+        if entry_price is not None:
+            parts.append(f"entrada {entry_price * 100:.1f}c")
+        edge_pct = _to_lifecycle_float(entry.get("edge_pct"), 1)
+        if edge_pct is not None:
+            parts.append(f"edge {edge_pct:.1f}%")
+        forecast_max = _to_lifecycle_float(entry.get("forecast_max"), 1)
+        if forecast_max is not None:
+            parts.append(f"forecast {forecast_max:.1f}C")
+        our_prob = _to_lifecycle_float(entry.get("our_prob"), 1)
+        mkt_price = _to_lifecycle_float(entry.get("mkt_price"), 1)
+        if our_prob is not None and mkt_price is not None:
+            parts.append(f"nuestro {our_prob:.1f}% vs mercado {mkt_price:.1f}c")
+        elif our_prob is not None:
+            parts.append(f"nuestro {our_prob:.1f}%")
+        elif mkt_price is not None:
+            parts.append(f"mercado {mkt_price:.1f}c")
+
+        traders = entry.get("trader_confirmed") or record.get("trader_confirmed") or []
+        if traders:
+            suffix = "..." if len(traders) > 2 else ""
+            parts.append(f"traders {', '.join(traders[:2])}{suffix}")
+
+        cycle_number = entry.get("cycle_number")
+        logic_cycle_number = entry.get("logic_cycle_number")
+        if cycle_number is not None and logic_cycle_number is not None:
+            parts.append(f"ciclo {cycle_number} / serie {logic_cycle_number}")
+        elif cycle_number is not None:
+            parts.append(f"ciclo {cycle_number}")
+
+        return " | ".join(parts) if parts else "Entrada registrada sin detalle adicional."
+
+    def _exit_condition(record):
+        status = str(record.get("status", "") or "")
+        close_context = record.get("close_context") or {}
+        reason = str(close_context.get("close_reason", "") or "")
+        action = str(close_context.get("close_action", "") or "")
+        attempts = record.get("exit_attempts", []) or []
+        last_attempt = attempts[-1] if attempts else {}
+
+        if status == "open":
+            snapshots = record.get("position_snapshots", []) or []
+            if snapshots:
+                last_snapshot = snapshots[-1]
+                cur_price = _to_lifecycle_float(last_snapshot.get("cur_price"))
+                pct_pnl = _to_lifecycle_float(last_snapshot.get("pct_pnl"), 1)
+                parts = ["Posicion abierta"]
+                if cur_price is not None:
+                    parts.append(f"cur {cur_price * 100:.1f}c")
+                if pct_pnl is not None:
+                    parts.append(f"PnL {pct_pnl:+.1f}%")
+                return " | ".join(parts)
+            return "Posicion abierta; aun sin salida."
+
+        rule_map = {
+            "take_profit": "TP mecanico: PnL >= +40%",
+            "take_profit_intra": "TP intra: PnL >= +40%",
+            "stop_loss": "SL mecanico: PnL <= -25%",
+            "stop_loss_intra": "SL intra: PnL <= -25%",
+            "reeval": "Re-eval: edge recalculado < -3%",
+            "micro_position_unsellable": "Micro posicion incanjeable / perdida total",
+        }
+        action_map = {
+            "SELL": "Salida vendida",
+            "SELL_FAILED": "Salida fallida",
+            "LOSS_TOTAL": "Perdida total",
+            "RESOLVED_WIN": "Cobro / resolucion",
+        }
+
+        parts = []
+        if reason:
+            parts.append(rule_map.get(reason, reason))
+        elif action:
+            parts.append(action_map.get(action, action))
+
+        trigger_price = _to_lifecycle_float(last_attempt.get("trigger_price"))
+        if trigger_price is not None:
+            parts.append(f"trigger {trigger_price * 100:.1f}c")
+        limit_price = _to_lifecycle_float(last_attempt.get("limit_price"))
+        if limit_price is not None:
+            parts.append(f"limite {limit_price * 100:.1f}c")
+        decision_note = str(last_attempt.get("decision_note", "") or "").strip()
+        if decision_note:
+            parts.append(decision_note)
+
+        return " | ".join(parts) if parts else "Salida cerrada sin detalle adicional."
 
     bucket_meta = {
         "take_profit": {"label": "Take-profit", "tag": "TP"},
@@ -4749,6 +4865,137 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
             "reason_tag": item["close_reason_tag"],
         })
 
+    trade_rows = []
+    won_count = 0
+    lost_count = 0
+    open_count = 0
+    pending_count = 0
+    won_cash_total = 0.0
+    lost_cash_total = 0.0
+    net_pnl_total = 0.0
+
+    for record in records:
+        integrity = record.get("integrity") or _build_trade_lifecycle_record_integrity(record)
+        status = str(record.get("status", "") or "")
+        close_context = record.get("close_context") or {}
+        post_exit = record.get("post_exit_analysis") or {}
+        bucket = _close_bucket(record)
+        bucket_label = bucket_meta.get(bucket, {"label": "Otro"})["label"]
+        avg_entry_price = _to_lifecycle_float(record.get("avg_entry_price"))
+        effective_exit_price = _effective_exit_price(record)
+        cents_result = (
+            round((effective_exit_price - avg_entry_price) * 100, 1)
+            if effective_exit_price is not None and avg_entry_price is not None
+            else None
+        )
+
+        close_price = _to_lifecycle_float(close_context.get("close_price"))
+        close_shares = _to_lifecycle_float(close_context.get("close_shares"))
+        close_value = (
+            round(close_price * close_shares, 2)
+            if close_price is not None and close_shares is not None and close_shares > 0
+            else None
+        )
+        snapshots = record.get("position_snapshots", []) or []
+        latest_snapshot = snapshots[-1] if snapshots else {}
+        current_value = _to_lifecycle_float(latest_snapshot.get("current_value"), 2)
+        trade_value = close_value if close_value is not None else current_value
+        if trade_value is None:
+            trade_value = _to_lifecycle_float(record.get("total_amount"), 2)
+
+        pnl_cash = _to_lifecycle_float(close_context.get("pnl_cash"), 2)
+        pnl_pct = _to_lifecycle_float(close_context.get("pnl_pct"), 2)
+        if status == "open":
+            pnl_cash = _to_lifecycle_float(latest_snapshot.get("cash_pnl"), 2)
+            pnl_pct = _to_lifecycle_float(latest_snapshot.get("pct_pnl"), 2)
+
+        if status == "open":
+            result_label = "Abierta"
+            result_badge = "accent"
+            open_count += 1
+        elif status == "pending_exit":
+            result_label = "Pending exit"
+            result_badge = "warn"
+            pending_count += 1
+        elif pnl_cash is not None and pnl_cash > 0:
+            result_label = "Ganada"
+            result_badge = "good"
+            won_count += 1
+            won_cash_total += pnl_cash
+            net_pnl_total += pnl_cash
+        elif pnl_cash is not None and pnl_cash < 0:
+            result_label = "Perdida"
+            result_badge = "bad"
+            lost_count += 1
+            lost_cash_total += abs(pnl_cash)
+            net_pnl_total += pnl_cash
+        elif str(close_context.get("close_action", "") or "") == "LOSS_TOTAL":
+            result_label = "Perdida"
+            result_badge = "bad"
+            lost_count += 1
+        else:
+            result_label = "Neutral"
+            result_badge = "muted"
+            if pnl_cash is not None:
+                net_pnl_total += pnl_cash
+
+        if status == "closed" and pnl_cash is None and str(close_context.get("close_action", "") or "") == "RESOLVED_WIN":
+            result_label = "Ganada"
+            result_badge = "good"
+            won_count += 1
+
+        trade_rows.append({
+            "id": record.get("id"),
+            "label": _trade_lifecycle_label(record),
+            "status": status,
+            "status_badge": result_badge if status != "open" else "accent",
+            "status_label": result_label,
+            "bucket_label": bucket_label,
+            "entry_condition": _entry_condition(record),
+            "exit_condition": _exit_condition(record),
+            "opened_at_display": _fmt_ts(record.get("opened_at")),
+            "closed_at_display": _fmt_ts(record.get("closed_at") or close_context.get("timestamp")),
+            "pnl_cash": pnl_cash,
+            "pnl_cash_display": _fmt_cash(pnl_cash),
+            "pnl_pct": pnl_pct,
+            "pnl_pct_display": _fmt_pct(pnl_pct),
+            "trade_value_display": _fmt_cash_plain(trade_value),
+            "cents_result": cents_result,
+            "cents_result_display": _fmt_cents(cents_result),
+            "left_to_gain_display": _fmt_cash_plain(_to_lifecycle_float(post_exit.get("upside_left_cash_peak"), 2)),
+            "downside_avoided_display": _fmt_cash_plain(_to_lifecycle_float(post_exit.get("drawdown_avoided_cash_peak"), 2)),
+            "observed_after_close": bool(post_exit.get("market_seen_after_close")),
+            "observed_after_close_display": (
+                f"{int(post_exit.get('observations_after_close', 0) or 0)} obs"
+                if post_exit.get("market_seen_after_close")
+                else "sin obs"
+            ),
+            "analysis_ready": bool(integrity.get("analysis_ready")),
+            "integrity_note": (
+                "Completa" if integrity.get("analysis_ready") else "Parcial"
+            ),
+            "sort_key": (
+                record.get("last_activity_at")
+                or record.get("closed_at")
+                or close_context.get("timestamp")
+                or record.get("opened_at")
+                or ""
+            ),
+        })
+
+    trade_rows.sort(key=lambda item: item.get("sort_key") or "", reverse=True)
+    trade_rows.sort(key=lambda item: 0 if item.get("analysis_ready") else 1)
+    total_cards = [
+        {"label": "Operaciones totales", "value": str(tracked_positions), "detail": f"{total_closed} cerradas | {open_count} abiertas"},
+        {"label": "TP", "value": str(int(summary.get("take_profit_closes", 0) or 0)), "detail": "cierres por take-profit"},
+        {"label": "SL", "value": str(int(summary.get("stop_loss_closes", 0) or 0)), "detail": "cierres por stop-loss"},
+        {"label": "Ganadas", "value": str(won_count), "detail": _fmt_cash_plain(won_cash_total)},
+        {"label": "Perdidas", "value": str(lost_count), "detail": _fmt_cash_plain(lost_cash_total)},
+        {"label": "PnL neto", "value": _fmt_cash(net_pnl_total), "detail": "cash realizado/estimado por trade"},
+        {"label": "Dejado de ganar", "value": _fmt_cash_plain(upside_left_total), "detail": "solo muestra observada"},
+        {"label": "Protegido", "value": _fmt_cash_plain(drawdown_avoided_total), "detail": "solo muestra observada"},
+    ]
+
     return {
         "headline": headline,
         "summary": summary_text,
@@ -4783,6 +5030,8 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
         "breakdown_rows": breakdown_rows,
         "top_upside_rows": top_upside_rows,
         "top_protection_rows": top_protection_rows,
+        "total_cards": total_cards,
+        "trade_rows": trade_rows[:40],
         "recent_rows": observed_rows[:12],
         "timeline_points": timeline_points,
         "note": (

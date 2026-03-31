@@ -33,7 +33,7 @@
     </section>
     {% endif %}
 
-    <section class="layer-block layer-block-focus" data-focus-shell>
+    <section class="layer-block layer-block-focus" data-focus-shell data-tab-shell data-default-panel="overview">
       <div class="layer-header layer-header-focus">
         <div>
           <p class="section-kicker">Capa 1</p>
@@ -766,6 +766,157 @@
         <div class="notice notice-muted">Todavia no hay cierres con muestra post-salida util para analisis operativo.</div>
         {% endif %}
       </article>
+    </section>
+
+    <section class="layer-block layer-block-secondary" data-tab-shell data-default-panel="ops-summary">
+      <div class="layer-header">
+        <div>
+          <p class="section-kicker">Trade console</p>
+          <h2>Operaciones del bot</h2>
+        </div>
+        <span class="badge badge-accent">Vista operativa</span>
+      </div>
+      <p class="layer-copy">
+        Panel pensado para responder trade por trade que hizo el bot, por qué entró, por qué salió,
+        qué resultado dejó y cuánto upside o downside quedó observado después.
+      </p>
+
+      <div class="focus-tab-bar">
+        <button type="button" class="focus-tab is-active" data-panel-target="ops-summary">Resumen</button>
+        <button type="button" class="focus-tab" data-panel-target="ops-trades">Trades</button>
+      </div>
+
+      <section class="focus-panel is-active" data-panel="ops-summary">
+        <section class="grid cards-4">
+          {% for item in dashboard.trade_analytics.total_cards %}
+          <article class="card mini-card">
+            <span class="stat-label">{{ item.label }}</span>
+            <strong class="stat-value">{{ item.value }}</strong>
+            <span class="stat-sub">{{ item.detail }}</span>
+          </article>
+          {% endfor %}
+        </section>
+
+        <section class="grid layout-main">
+          <article class="card">
+            <div class="card-head">
+              <div>
+                <p class="section-kicker">Buckets</p>
+                <h2>Que tipo de salida estamos haciendo</h2>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Tipo</th>
+                    <th>Muestra</th>
+                    <th>Eficiencia</th>
+                    <th>Dejado</th>
+                    <th>Protegido</th>
+                    <th>Lectura</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in dashboard.trade_analytics.breakdown_rows %}
+                  <tr>
+                    <td><strong>{{ row.label }}</strong></td>
+                    <td>{{ row.coverage_display }}</td>
+                    <td>{{ row.avg_efficiency_display }}</td>
+                    <td>{{ row.upside_left_display }}</td>
+                    <td>{{ row.drawdown_avoided_display }}</td>
+                    <td><span class="badge badge-{{ row.signal_badge }}">{{ row.signal_label }}</span></td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="card-head">
+              <div>
+                <p class="section-kicker">Lectura rapida</p>
+                <h2>Como interpretar este bloque</h2>
+              </div>
+            </div>
+            <div class="list-stack compact">
+              <div class="list-row">
+                <div class="check-body">
+                  <strong>Operaciones totales / TP / SL</strong>
+                  <span>Conteo operativo completo desde `trade_lifecycle`, no solo la muestra observada.</span>
+                </div>
+              </div>
+              <div class="list-row">
+                <div class="check-body">
+                  <strong>Ganadas / Perdidas / PnL neto</strong>
+                  <span>Sale del `close_context.pnl_cash` cuando existe; posiciones parciales siguen marcadas como tales.</span>
+                </div>
+              </div>
+              <div class="list-row">
+                <div class="check-body">
+                  <strong>Dejado de ganar / Protegido</strong>
+                  <span>Solo se calcula cuando el mercado se volvió a observar tras salir; no todos los trades tienen esa evidencia aún.</span>
+                </div>
+              </div>
+              <div class="list-row">
+                <div class="check-body">
+                  <strong>Entrada / Salida del bot</strong>
+                  <span>Cada trade explica con texto corto qué condición disparó la entrada y qué regla cerró la posición.</span>
+                </div>
+              </div>
+            </div>
+          </article>
+        </section>
+      </section>
+
+      <section class="focus-panel" data-panel="ops-trades" hidden>
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <p class="section-kicker">Trades</p>
+              <h2>Detalle operativo por operación</h2>
+            </div>
+            <span class="badge badge-{{ dashboard.trade_analytics.confidence_badge }}">{{ dashboard.trade_analytics.sample_display }}</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Operación</th>
+                  <th>Entrada del bot</th>
+                  <th>Salida del bot</th>
+                  <th>Resultado</th>
+                  <th>Valor</th>
+                  <th>c/share</th>
+                  <th>Dejado</th>
+                  <th>Obs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in dashboard.trade_analytics.trade_rows %}
+                <tr>
+                  <td>
+                    <strong>{{ row.label }}</strong>
+                    <span class="table-note">{{ row.bucket_label }} · abierto {{ row.opened_at_display }} · cerrado {{ row.closed_at_display }}</span>
+                  </td>
+                  <td><span class="table-note">{{ row.entry_condition }}</span></td>
+                  <td><span class="table-note">{{ row.exit_condition }}</span></td>
+                  <td>
+                    <span class="badge badge-{{ row.status_badge }}">{{ row.status_label }}</span>
+                    <span class="table-note">{{ row.pnl_cash_display }} · {{ row.pnl_pct_display }}</span>
+                  </td>
+                  <td>{{ row.trade_value_display }}</td>
+                  <td>{{ row.cents_result_display }}</td>
+                  <td>{{ row.left_to_gain_display }}</td>
+                  <td><span class="table-note">{{ row.observed_after_close_display }} · {{ row.integrity_note }}</span></td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </section>
     </section>
 
     <section class="grid layout-main">
