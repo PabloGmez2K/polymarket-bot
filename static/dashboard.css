@@ -828,6 +828,26 @@ body {
   border-radius: 999px;
 }
 
+.progress-fill-good {
+  background: linear-gradient(90deg, rgba(99, 210, 159, 0.92), rgba(134, 234, 180, 0.92));
+}
+
+.progress-fill-accent {
+  background: linear-gradient(90deg, rgba(21, 126, 189, 0.92), rgba(99, 210, 159, 0.82));
+}
+
+.progress-fill-warn {
+  background: linear-gradient(90deg, rgba(240, 183, 104, 0.94), rgba(255, 214, 102, 0.94));
+}
+
+.progress-fill-bad {
+  background: linear-gradient(90deg, rgba(255, 139, 125, 0.94), rgba(255, 99, 99, 0.94));
+}
+
+.progress-fill-muted {
+  background: linear-gradient(90deg, rgba(157, 169, 184, 0.84), rgba(157, 169, 184, 0.52));
+}
+
 .checklist {
   display: grid;
   gap: 10px;
@@ -1119,6 +1139,74 @@ th {
   gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.efficiency-timeline {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(74px, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+  align-items: end;
+}
+
+.efficiency-point {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  text-align: center;
+}
+
+.efficiency-point-rail {
+  width: 100%;
+  min-height: 132px;
+  border-radius: 18px;
+  background: rgba(157, 169, 184, 0.1);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 10px;
+}
+
+.efficiency-point-bar {
+  width: 100%;
+  border-radius: 16px 16px 10px 10px;
+  min-height: 12px;
+  background: linear-gradient(180deg, #168aad 0%, #63d29f 100%);
+  box-shadow: 0 10px 18px rgba(22, 138, 173, 0.18);
+}
+
+.efficiency-point-bar-good {
+  background: linear-gradient(180deg, rgba(99, 210, 159, 0.96), rgba(134, 234, 180, 0.92));
+}
+
+.efficiency-point-bar-accent {
+  background: linear-gradient(180deg, rgba(21, 126, 189, 0.96), rgba(99, 210, 159, 0.88));
+}
+
+.efficiency-point-bar-warn {
+  background: linear-gradient(180deg, rgba(240, 183, 104, 0.98), rgba(255, 214, 102, 0.92));
+  box-shadow: 0 10px 18px rgba(240, 183, 104, 0.22);
+}
+
+.efficiency-point-bar-bad {
+  background: linear-gradient(180deg, rgba(255, 139, 125, 0.98), rgba(255, 99, 99, 0.92));
+  box-shadow: 0 10px 18px rgba(255, 139, 125, 0.22);
+}
+
+.efficiency-point-bar-muted {
+  background: linear-gradient(180deg, rgba(157, 169, 184, 0.88), rgba(157, 169, 184, 0.56));
+  box-shadow: none;
+}
+
+.efficiency-point-value {
+  font-size: 0.92rem;
+  line-height: 1;
+}
+
+.efficiency-point-label {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.3;
 }
 
 @media (max-width: 1120px) {

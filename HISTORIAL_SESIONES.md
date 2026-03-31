@@ -66,6 +66,7 @@ Comandos útiles:
 | 2026-03-31 | Explícita | Sesión 48 | `—` | Hardening fase 1 de `trade_lifecycle`: matching por `id` reconstruido, coalescing defensivo, bloque `integrity`, fix del caso real de cierres huérfanos y suite en `470/470`; validación live demuestra `92 -> 80` records únicos al reconstruir. |
 | 2026-03-31 | Explícita | Sesión 49 | `—` | Hotfix del coalescing de `trade_lifecycle` tras detectar en Railway `unhashable type: 'list'`; se sustituye la comparación inválida con sets `{None, "", [], {}}` por `_lifecycle_is_empty()`, se añade regresión del merge de contextos duplicados, se normaliza `agent_events.jsonl` a UTF-8 y la suite queda en `472/472`. |
 | 2026-03-31 | Explícita | Sesión 50 | `—` | Recap operativo + hardening Railway CLI: validación live del hotfix (`87` records, `0` ids duplicados) y nuevo wrapper `tools/railway_safe.ps1` para limpiar proxies de proceso, junto con regla operativa en el playbook para no repetir el bucle de auth/`invalid_grant`. |
+| 2026-03-31 | Explícita | Sesión 51 | `—` | Fase 2 analítica de operativa: `build_dashboard_trade_analytics()`, score de exits observados, breakdown por `take_profit / reeval / stop_loss`, timeline corto y sección nueva en dashboard para seguir upside dejado vs downside evitado. Suite local `477/477`. |
 
 ---
 
@@ -1110,6 +1111,45 @@ Investigación completa de trades, commits y lógica de trading desde v10.3 hast
   - el siguiente paso correcto regresa a analytics/dashboard.
 
 **Resultado:** la sesion deja un guardrail operativo claro para Railway CLI sin volver a abrir una investigacion larga del proxy. El sistema queda otra vez orientado al roadmap principal: capa analitica de operativa en dashboard y snapshot para Claude Code Opus.
+
+---
+
+## Sesión 51 — fase 2 analítica de operativa (31 mar 2026)
+
+**Disparador:** con `trade_lifecycle` ya saneado y el wrapper de Railway en su sitio, el siguiente paso lógico era dejar de mirar los exits solo como PnL agregado y pasar a medir con evidencia post-salida qué estaba capturando realmente el bot.
+
+**Objetivo:** añadir una capa analítica derivada, visible en dashboard, que permita seguir activamente:
+- cuántos cierres tienen muestra post-exit útil;
+- cuánto upside se dejó tras salir;
+- cuánto downside se evitó;
+- qué buckets (`take_profit`, `reeval`, `stop_loss`) merecen revisión antes de tocar reglas.
+
+**Cambios realizados:**
+- Se añade `build_dashboard_trade_analytics()` en `bot.py`.
+  - filtra solo `status=closed` con `market_seen_after_close=True`, `close_price` usable, `close_shares > 0` y `integrity.analysis_ready`;
+  - calcula `score_pct`, `harvest_efficiency_pct`, `upside_left_total_cash`, `drawdown_avoided_total_cash` y `maturity_pct`;
+  - genera `breakdown_rows` por `take_profit / reeval / stop_loss`;
+  - construye `recent_rows`, `top_upside_rows`, `top_protection_rows` y `timeline_points`.
+- `build_dashboard_snapshot()` pasa a cargar `trade_lifecycle` y a exponer `trade_analytics` en `/api/dashboard.json`.
+- El dashboard web gana una nueva sección visible `Operativa observada` con:
+  - medidor principal de eficiencia;
+  - badges de confianza / muestra;
+  - timeline corto de exits observados;
+  - cola de revisión con `top upside dejado` y `casos donde salir ayudó`;
+  - tabla de últimos cierres con evidencia post-salida.
+- La capa evita contaminar el análisis con histórico parcial:
+  - los `close_only` o records sin precio/cantidad de salida usable quedan fuera;
+  - no se toca ninguna regla de `manage_positions`, sizing, scheduler ni exits.
+
+**Tests:**
+- Nuevo bloque funcional para `build_dashboard_trade_analytics()`:
+  - cuenta solo cierres observados utilizables;
+  - calcula score y rankings de upside/protección;
+  - genera breakdown y timeline.
+- `build_dashboard_snapshot()` queda cubierto para asegurar que incluye `trade_analytics`.
+- `verify_before_deploy.py` sube a `477/477`.
+
+**Resultado:** queda implementada la fase 2 de observabilidad operativa. El bot sigue igual en trading, pero el dashboard ya tiene una base estructurada para seguir si las salidas están capturando valor o dejando dinero encima de la mesa. El siguiente paso correcto es validarlo en Railway y usar esa evidencia para preparar el análisis profundo con Claude Code Opus.
 
 ---
 

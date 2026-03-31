@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 31 de marzo de 2026 (Sesión 50 — Railway CLI hygiene + recap)
-**Próxima sesión:** retomar la fase 2: capa analítica de operativa para dashboard y snapshot congelado para Claude Code Opus, ya con `trade_lifecycle` live saneado y Railway CLI envuelto por el wrapper seguro.
+**Última actualización:** 31 de marzo de 2026 (Sesión 51 — trade analytics dashboard phase 2)
+**Próxima sesión:** validar la fase 2 en live, usar el panel operativo para revisar `take_profit / reeval / stop_loss` con evidencia post-salida real y congelar un snapshot analítico para Claude Code Opus.
 
 ---
 
@@ -110,6 +110,8 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Railway CLI hygiene wrapper (31 mar, sin bump):** Tras el recap operativo se deja un guardrail practico para no repetir el bucle `proxy contaminado -> auth rota -> invalid_grant`. Se añade `tools/railway_safe.ps1`, que limpia `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/GIT_*` solo para el proceso actual, ejecuta `railway.cmd` y restaura el entorno al salir. El playbook queda actualizado con una regla explicita: `railway login` solo en shell interactiva del usuario; uso diario de Railway con el wrapper; y desde Codex, Railway fuera del sandbox cuando la CLI pueda refrescar/escribir `%USERPROFILE%\.railway\config.json`.
 
+**Trade analytics dashboard phase 2 (31 mar, sin bump):** Sobre la base ya saneada de `trade_lifecycle`, se añade una capa analítica nueva `build_dashboard_trade_analytics()` que solo cuenta cierres con `market_seen_after_close` y `close_price * close_shares` utilizables. La nueva vista resume: `sample observado`, `score` de eficiencia observada, `harvest efficiency`, `upside_left_total_cash`, `drawdown_avoided_total_cash`, breakdown por `take_profit / reeval / stop_loss`, timeline corto de exits observados y dos colas de revisión (`top_upside_rows`, `top_protection_rows`). El dashboard gana una sección visible para seguir activamente qué está capturando el bot, qué upside deja y qué downside evita, sin tocar ninguna regla de trading. `verify_before_deploy.py` sube a `477/477`.
+
 **City accuracy tracker (v10.5.2):** Calcula win rate por ciudad desde postmortem. Alerta por Telegram si una ciudad baja de 25% win rate con 3+ trades. Nuevo comando `/accuracy`. Win rate visible en `/rendimiento`.
 
 **Integración `/accuracy` + revisión crítica (v10.5.3):** `/accuracy` queda visible en el menú, responde siempre con menú, `/estado` muestra explícitamente el intervalo intra-SL y la trazabilidad de sesión 20 queda corregida para reflejar mejor lo que realmente introdujeron los commits de la mañana.
@@ -121,14 +123,14 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.10`)
-**Estado actual tras sesión 50:** Railway ya corre el hotfix de coalescing y el arranque nuevo confirmó `trade_lifecycle listo al arrancar: 87 registros`, sin repetir el warning `unhashable type: 'list'`. Validación live posterior: `tracked_positions=87`, `open_positions=18`, `closed_positions=69`, `partial_historical_records=12`, `analysis_ready_records=75`, `duplicate_id_collisions_resolved=12` y `duplicate_ids_live=0`. NOAA sigue sano con muestra real en Chicago.
-**Versión local / remoto GitHub:** `origin/main` y Railway ya incluyen NOAA hardening, `trade_lifecycle`, fase 1 de integridad y el hotfix de coalescing (`47c68ee`). Además, el repo local deja ahora un wrapper operativo para Railway CLI (`tools/railway_safe.ps1`) y el playbook actualizado para evitar repetir incidencias de auth/proxy. `verify_before_deploy.py` queda en `472/472`. El siguiente paso correcto vuelve a ser producto/analytics, no reparar infra.
+**Estado actual tras sesión 51:** la base operativa queda saneada: NOAA ya genera muestra real, `trade_lifecycle` está sin duplicados activos en live y el Railway CLI tiene wrapper seguro. Encima de eso, el repo local ya añade la capa analítica de exits observados y una nueva sección del dashboard para seguir eficiencia operativa con evidencia post-salida real. La muestra seguirá siendo pequeña al principio, pero ahora ya existe una lectura estructurada y visible para no depender solo de intuición.
+**Versión local / remoto GitHub:** `origin/main` ya incluye NOAA hardening, `trade_lifecycle`, fase 1 de integridad, hotfix de coalescing (`47c68ee`) y el wrapper Railway (`6b07f25`). Esta sesión añade en local la fase 2 analítica del dashboard; `verify_before_deploy.py` queda en `477/477`. La validación live de esta nueva capa es el siguiente paso natural.
 
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.6.10 con NOAA hardening desplegado y hotfix local listo para el coalescing de `trade_lifecycle` |
-| `verify_before_deploy.py` | Suite local de `472` tests de comportamiento |
+| `bot.py` | Script principal v10.6.10 con NOAA hardening, `trade_lifecycle` saneado y nueva analítica de exits para dashboard |
+| `verify_before_deploy.py` | Suite local de `477` tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |

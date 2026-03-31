@@ -4453,6 +4453,345 @@ def build_dashboard_legacy_forecast_drift(audit=None):
     }
 
 
+def build_dashboard_trade_analytics(trade_lifecycle=None):
+    """Resume la eficiencia observada de las salidas sin tocar reglas de trading."""
+    if trade_lifecycle is None:
+        trade_lifecycle = load_trade_lifecycle_data()
+
+    payload = trade_lifecycle if isinstance(trade_lifecycle, dict) else {}
+    records = payload.get("records", []) if isinstance(payload.get("records"), list) else []
+    summary = payload.get("summary", {}) if isinstance(payload.get("summary"), dict) else {}
+    integrity_summary = payload.get("integrity", {}) if isinstance(payload.get("integrity"), dict) else {}
+
+    def _fmt_cash(value):
+        number = _to_lifecycle_float(value, 2)
+        if number is None:
+            return "n/d"
+        return f"${number:+.2f}"
+
+    def _fmt_cash_plain(value):
+        number = _to_lifecycle_float(value, 2)
+        if number is None:
+            return "n/d"
+        return f"${number:.2f}"
+
+    def _fmt_pct(value):
+        number = _to_lifecycle_float(value, 1)
+        if number is None:
+            return "n/d"
+        return f"{number:.1f}%"
+
+    def _fmt_ts(value):
+        text = str(value or "").strip()
+        if not text:
+            return "n/d"
+        text = text.replace("T", " ")
+        if text.endswith("+00:00"):
+            return f"{text[:16]} UTC"
+        return text[:16]
+
+    def _close_bucket(record):
+        close_context = record.get("close_context") or {}
+        reason = str(close_context.get("close_reason", "") or "")
+        action = str(close_context.get("close_action", "") or "")
+        if reason in {"take_profit", "take_profit_intra"}:
+            return "take_profit"
+        if reason in {"stop_loss", "stop_loss_intra"}:
+            return "stop_loss"
+        if reason == "reeval":
+            return "reeval"
+        if action == "LOSS_TOTAL":
+            return "loss_total"
+        if action == "RESOLVED_WIN":
+            return "resolved_win"
+        return "other"
+
+    bucket_meta = {
+        "take_profit": {"label": "Take-profit", "tag": "TP"},
+        "reeval": {"label": "Re-eval", "tag": "Reeval"},
+        "stop_loss": {"label": "Stop-loss", "tag": "SL"},
+    }
+
+    observed_rows = []
+    for record in records:
+        integrity = record.get("integrity") or _build_trade_lifecycle_record_integrity(record)
+        if record.get("status") != "closed" or not integrity.get("analysis_ready"):
+            continue
+
+        close_context = record.get("close_context") or {}
+        post_exit = record.get("post_exit_analysis") or {}
+        close_price = _to_lifecycle_float(close_context.get("close_price"))
+        close_shares = _to_lifecycle_float(close_context.get("close_shares"))
+        if (
+            not post_exit.get("market_seen_after_close")
+            or close_price is None
+            or close_shares is None
+            or close_shares <= 0
+        ):
+            continue
+
+        close_value = round(close_price * close_shares, 2)
+        upside_left = _to_lifecycle_float(post_exit.get("upside_left_cash_peak"), 2) or 0.0
+        drawdown_avoided = _to_lifecycle_float(post_exit.get("drawdown_avoided_cash_peak"), 2) or 0.0
+        opportunity_total = close_value + upside_left + drawdown_avoided
+        efficiency_pct = (
+            round(((close_value + drawdown_avoided) / opportunity_total) * 100, 1)
+            if opportunity_total > 0
+            else None
+        )
+        harvest_pct = (
+            round((close_value / (close_value + upside_left)) * 100, 1)
+            if (close_value + upside_left) > 0
+            else None
+        )
+        protection_pct = (
+            round((drawdown_avoided / (close_value + drawdown_avoided)) * 100, 1)
+            if (close_value + drawdown_avoided) > 0 and drawdown_avoided > 0
+            else None
+        )
+        bucket = _close_bucket(record)
+        reason_meta = bucket_meta.get(bucket, {"label": "Otro", "tag": "Otro"})
+        net_delta_cash = round(drawdown_avoided - upside_left, 2)
+        if upside_left > 0 and drawdown_avoided <= 0:
+            verdict_label = "Upside dejado"
+            verdict_badge = "bad"
+        elif drawdown_avoided > 0 and upside_left <= 0:
+            verdict_label = "Downside evitado"
+            verdict_badge = "good"
+        elif upside_left > 0 and drawdown_avoided > 0:
+            verdict_label = "Mixto"
+            verdict_badge = "warn"
+        else:
+            verdict_label = "Neutral"
+            verdict_badge = "muted"
+
+        short_label = str(record.get("city", "?") or "?")
+        if bucket == "take_profit":
+            short_label = f"{short_label} TP"
+        elif bucket == "reeval":
+            short_label = f"{short_label} RV"
+        elif bucket == "stop_loss":
+            short_label = f"{short_label} SL"
+
+        observed_rows.append({
+            "id": record.get("id"),
+            "label": _trade_lifecycle_label(record),
+            "short_label": short_label[:18],
+            "city": record.get("city", "?"),
+            "close_bucket": bucket,
+            "close_reason_label": reason_meta["label"],
+            "close_reason_tag": reason_meta["tag"],
+            "closed_at": record.get("closed_at") or close_context.get("timestamp") or "",
+            "closed_at_display": _fmt_ts(record.get("closed_at") or close_context.get("timestamp")),
+            "close_value": close_value,
+            "close_value_display": _fmt_cash_plain(close_value),
+            "close_price": close_price,
+            "close_price_display": f"{close_price:.2f}",
+            "close_shares": close_shares,
+            "upside_left_cash_peak": upside_left,
+            "upside_left_display": _fmt_cash_plain(upside_left),
+            "drawdown_avoided_cash_peak": drawdown_avoided,
+            "drawdown_avoided_display": _fmt_cash_plain(drawdown_avoided),
+            "efficiency_pct": efficiency_pct,
+            "efficiency_display": _fmt_pct(efficiency_pct),
+            "harvest_pct": harvest_pct,
+            "harvest_display": _fmt_pct(harvest_pct),
+            "protection_pct": protection_pct,
+            "protection_display": _fmt_pct(protection_pct),
+            "net_delta_cash": net_delta_cash,
+            "net_delta_display": _fmt_cash(net_delta_cash),
+            "reached_98_after_close": bool(post_exit.get("reached_98_after_close")),
+            "verdict_label": verdict_label,
+            "verdict_badge": verdict_badge,
+            "score_badge": (
+                "good" if efficiency_pct is not None and efficiency_pct >= 85
+                else "accent" if efficiency_pct is not None and efficiency_pct >= 70
+                else "warn" if efficiency_pct is not None and efficiency_pct >= 55
+                else "bad" if efficiency_pct is not None
+                else "muted"
+            ),
+        })
+
+    observed_rows.sort(key=lambda item: item.get("closed_at") or "", reverse=True)
+
+    observed_count = len(observed_rows)
+    total_closed = int(summary.get("closed_positions", 0) or 0)
+    tracked_positions = int(summary.get("tracked_positions", len(records)) or len(records))
+    analysis_ready_records = int(integrity_summary.get("analysis_ready_records", 0) or 0)
+    close_value_total = round(sum(item["close_value"] for item in observed_rows), 2)
+    upside_left_total = round(sum(item["upside_left_cash_peak"] for item in observed_rows), 2)
+    drawdown_avoided_total = round(sum(item["drawdown_avoided_cash_peak"] for item in observed_rows), 2)
+    opportunity_total = close_value_total + upside_left_total + drawdown_avoided_total
+    score_pct = (
+        round(((close_value_total + drawdown_avoided_total) / opportunity_total) * 100, 1)
+        if opportunity_total > 0
+        else None
+    )
+    harvest_candidates = [item for item in observed_rows if item["close_bucket"] in {"take_profit", "reeval"} or item["upside_left_cash_peak"] > 0]
+    harvest_value_total = round(sum(item["close_value"] for item in harvest_candidates), 2)
+    harvest_upside_total = round(sum(item["upside_left_cash_peak"] for item in harvest_candidates), 2)
+    harvest_efficiency_pct = (
+        round((harvest_value_total / (harvest_value_total + harvest_upside_total)) * 100, 1)
+        if (harvest_value_total + harvest_upside_total) > 0
+        else None
+    )
+    protection_candidates = [item for item in observed_rows if item["close_bucket"] in {"stop_loss", "reeval"} or item["drawdown_avoided_cash_peak"] > 0]
+    protection_value_total = round(sum(item["close_value"] for item in protection_candidates), 2)
+    protection_drawdown_total = round(sum(item["drawdown_avoided_cash_peak"] for item in protection_candidates), 2)
+    protection_efficiency_pct = (
+        round((protection_drawdown_total / (protection_value_total + protection_drawdown_total)) * 100, 1)
+        if (protection_value_total + protection_drawdown_total) > 0 and protection_drawdown_total > 0
+        else None
+    )
+
+    maturity_goal = 12
+    maturity_pct = min(100, round((observed_count / maturity_goal) * 100)) if maturity_goal > 0 else 0
+    if observed_count >= 12:
+        confidence_label = "Alta"
+        confidence_badge = "good"
+    elif observed_count >= 6:
+        confidence_label = "Media"
+        confidence_badge = "accent"
+    elif observed_count >= 3:
+        confidence_label = "Baja"
+        confidence_badge = "warn"
+    else:
+        confidence_label = "Muy baja"
+        confidence_badge = "muted"
+
+    if observed_count == 0:
+        headline = "Sin cierres observados todavia"
+        summary_text = (
+            "trade_lifecycle ya esta listo, pero aun no hay cierres con trayectoria post-salida "
+            "y precio util para medir si el bot capturo valor o dejo upside."
+        )
+        score_badge = "muted"
+    else:
+        net_delta_total = round(drawdown_avoided_total - upside_left_total, 2)
+        if upside_left_total > drawdown_avoided_total + 0.5:
+            headline = "La muestra observada sugiere salidas prematuras"
+        elif drawdown_avoided_total > upside_left_total + 0.5:
+            headline = "La muestra observada sugiere buena proteccion"
+        else:
+            headline = "La muestra observada esta equilibrada"
+
+        summary_text = (
+            f"{observed_count} cierre(s) con mercado observado despues de salir. "
+            f"Upside dejado { _fmt_cash_plain(upside_left_total) } | downside evitado { _fmt_cash_plain(drawdown_avoided_total) } | "
+            f"neto { _fmt_cash(net_delta_total) }. "
+            "Usa esto como evidencia operativa; aun no equivale a una orden de cambiar reglas."
+        )
+        score_badge = (
+            "good" if score_pct is not None and score_pct >= 85
+            else "accent" if score_pct is not None and score_pct >= 70
+            else "warn" if score_pct is not None and score_pct >= 55
+            else "bad"
+        )
+
+    breakdown_rows = []
+    for bucket in ["take_profit", "reeval", "stop_loss"]:
+        meta = bucket_meta[bucket]
+        bucket_rows = [item for item in observed_rows if item["close_bucket"] == bucket]
+        total_bucket = sum(1 for record in records if record.get("status") == "closed" and _close_bucket(record) == bucket)
+        bucket_upside = round(sum(item["upside_left_cash_peak"] for item in bucket_rows), 2)
+        bucket_drawdown = round(sum(item["drawdown_avoided_cash_peak"] for item in bucket_rows), 2)
+        avg_eff = (
+            round(sum(item["efficiency_pct"] for item in bucket_rows if item["efficiency_pct"] is not None) / len(bucket_rows), 1)
+            if bucket_rows
+            else None
+        )
+        if not bucket_rows:
+            signal_label = "Sin muestra"
+            signal_badge = "muted"
+        elif bucket_upside > bucket_drawdown + 0.25:
+            signal_label = "Revisar captura"
+            signal_badge = "bad"
+        elif bucket_drawdown > bucket_upside + 0.25:
+            signal_label = "Protege bien"
+            signal_badge = "good"
+        else:
+            signal_label = "Mixto"
+            signal_badge = "warn"
+        breakdown_rows.append({
+            "label": meta["label"],
+            "tag": meta["tag"],
+            "total_count": total_bucket,
+            "observed_count": len(bucket_rows),
+            "coverage_display": f"{len(bucket_rows)}/{total_bucket}" if total_bucket else f"{len(bucket_rows)}/0",
+            "avg_efficiency_display": _fmt_pct(avg_eff),
+            "upside_left_display": _fmt_cash_plain(bucket_upside),
+            "drawdown_avoided_display": _fmt_cash_plain(bucket_drawdown),
+            "signal_label": signal_label,
+            "signal_badge": signal_badge,
+        })
+
+    top_upside_rows = sorted(
+        [item for item in observed_rows if item["upside_left_cash_peak"] > 0],
+        key=lambda item: item["upside_left_cash_peak"],
+        reverse=True,
+    )[:5]
+    top_protection_rows = sorted(
+        [item for item in observed_rows if item["drawdown_avoided_cash_peak"] > 0],
+        key=lambda item: item["drawdown_avoided_cash_peak"],
+        reverse=True,
+    )[:5]
+
+    timeline_points = []
+    for item in reversed(observed_rows[:8]):
+        height_pct = 12 if item["efficiency_pct"] is None else max(12, min(100, round(item["efficiency_pct"])))
+        timeline_points.append({
+            "label": item["label"],
+            "short_label": item["short_label"],
+            "score_display": item["efficiency_display"],
+            "height_pct": height_pct,
+            "badge": item["score_badge"],
+            "closed_at_display": item["closed_at_display"],
+            "reason_tag": item["close_reason_tag"],
+        })
+
+    return {
+        "headline": headline,
+        "summary": summary_text,
+        "score_pct": score_pct or 0,
+        "score_display": _fmt_pct(score_pct) if score_pct is not None else "n/d",
+        "score_badge": score_badge,
+        "sample_size": observed_count,
+        "sample_display": f"{observed_count} cierre observado" if observed_count == 1 else f"{observed_count} cierres observados",
+        "sample_detail": f"{observed_count}/{total_closed} cierres cerrados con trayectoria post-salida util",
+        "confidence_label": confidence_label,
+        "confidence_badge": confidence_badge,
+        "maturity_pct": maturity_pct,
+        "tracked_positions": tracked_positions,
+        "closed_positions": total_closed,
+        "analysis_ready_records": analysis_ready_records,
+        "harvest_efficiency_pct": harvest_efficiency_pct,
+        "harvest_efficiency_display": _fmt_pct(harvest_efficiency_pct),
+        "protection_efficiency_pct": protection_efficiency_pct,
+        "protection_efficiency_display": _fmt_pct(protection_efficiency_pct),
+        "upside_left_total_cash": upside_left_total,
+        "upside_left_total_display": _fmt_cash_plain(upside_left_total),
+        "drawdown_avoided_total_cash": drawdown_avoided_total,
+        "drawdown_avoided_total_display": _fmt_cash_plain(drawdown_avoided_total),
+        "close_value_total_cash": close_value_total,
+        "close_value_total_display": _fmt_cash_plain(close_value_total),
+        "quick_stats": [
+            {"label": "Sample observado", "value": f"{observed_count}/{total_closed}", "detail": "cierres con mercado visto despues de salir"},
+            {"label": "Eficiencia captura", "value": _fmt_pct(harvest_efficiency_pct), "detail": "cash realizado vs upside observado"},
+            {"label": "Valor dejado", "value": _fmt_cash_plain(upside_left_total), "detail": "upside pico tras salir"},
+            {"label": "Valor protegido", "value": _fmt_cash_plain(drawdown_avoided_total), "detail": "downside evitado tras salir"},
+        ],
+        "breakdown_rows": breakdown_rows,
+        "top_upside_rows": top_upside_rows,
+        "top_protection_rows": top_protection_rows,
+        "recent_rows": observed_rows[:12],
+        "timeline_points": timeline_points,
+        "note": (
+            "Solo cuenta cierres con precio de salida util y observacion de mercado despues del cierre. "
+            "La muestra historica parcial queda fuera de esta capa para no contaminar el analisis."
+        ),
+    }
+
+
 def get_bankroll_level_context():
     """Calcula el nivel actual y el siguiente escalón de bankroll."""
     levels = sorted({float(v) for v in BANKROLL_LEVELS})
@@ -4856,6 +5195,7 @@ def build_dashboard_snapshot():
     cycle_summary = load_cycle_summary_data()
     cycle_history = load_cycle_history(limit=8)
     audit = load_audit_data()
+    trade_lifecycle = load_trade_lifecycle_data()
     clean_stats = get_clean_closed_trade_stats()
     series_clean_stats = get_logic_series_clean_closed_trade_stats()
     validated_closed = get_validated_closed_postmortems()
@@ -4890,6 +5230,7 @@ def build_dashboard_snapshot():
     forecast_quality = build_dashboard_forecast_quality(audit=audit)
     city_observation = build_dashboard_city_observation(audit=audit, city_accuracy=city_accuracy)
     legacy_forecast_drift = build_dashboard_legacy_forecast_drift(audit=audit)
+    trade_analytics = build_dashboard_trade_analytics(trade_lifecycle=trade_lifecycle)
     agent_events = []
     stage_labels = {
         "proposed": "Propuesta",
@@ -5028,6 +5369,7 @@ def build_dashboard_snapshot():
         "forecast_quality": forecast_quality,
         "city_observation": city_observation,
         "legacy_forecast_drift": legacy_forecast_drift,
+        "trade_analytics": trade_analytics,
         "trophies": trophies,
         "unlocks": unlocks,
         "clean_stats": clean_stats,

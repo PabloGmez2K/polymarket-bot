@@ -427,6 +427,7 @@ def run_tests():
     test("build_dashboard_city_observation definida", "def build_dashboard_city_observation(" in code)
     test("build_dashboard_focus_center definida", "def build_dashboard_focus_center(" in code)
     test("build_dashboard_legacy_forecast_drift definida", "def build_dashboard_legacy_forecast_drift(" in code)
+    test("build_dashboard_trade_analytics definida", "def build_dashboard_trade_analytics(" in code)
     test("build_promotion_checklist definida", "def build_promotion_checklist(" in code)
     test("build_dashboard_snapshot definida", "def build_dashboard_snapshot(" in code)
     test("create_dashboard_app definida", "def create_dashboard_app(" in code)
@@ -1182,6 +1183,95 @@ def run_tests():
              legacy_dashboard["last_record_display"] == "2026-03-28 09:15 UTC" and legacy_dashboard["mae_display"] == "0.8C",
              legacy_dashboard)
 
+        trade_analytics_ns = {
+            "_to_lifecycle_float": lambda value, digits=4: (
+                None if value in (None, "") else round(float(value), digits)
+            ),
+            "_trade_lifecycle_label": lambda record: record.get("label") or record.get("question") or "label",
+            "_build_trade_lifecycle_record_integrity": lambda record: record.get("integrity", {}),
+            "load_trade_lifecycle_data": lambda: {},
+        }
+        exec(get_function_source(module_ast, code_lines, "build_dashboard_trade_analytics"), trade_analytics_ns)
+        trade_analytics = trade_analytics_ns["build_dashboard_trade_analytics"](
+            trade_lifecycle={
+                "summary": {"tracked_positions": 3, "closed_positions": 3},
+                "integrity": {"analysis_ready_records": 3},
+                "records": [
+                    {
+                        "label": "Atlanta TP",
+                        "city": "Atlanta",
+                        "status": "closed",
+                        "closed_at": "2026-03-30T11:05:26+00:00",
+                        "close_context": {
+                            "close_reason": "take_profit",
+                            "close_action": "SELL",
+                            "close_price": 0.79,
+                            "close_shares": 3.3,
+                            "timestamp": "2026-03-30T11:05:26+00:00",
+                        },
+                        "post_exit_analysis": {
+                            "market_seen_after_close": True,
+                            "upside_left_cash_peak": 0.69,
+                            "drawdown_avoided_cash_peak": 0.0,
+                            "reached_98_after_close": True,
+                        },
+                        "integrity": {"analysis_ready": True},
+                    },
+                    {
+                        "label": "Dallas SL",
+                        "city": "Dallas",
+                        "status": "closed",
+                        "closed_at": "2026-03-30T12:05:26+00:00",
+                        "close_context": {
+                            "close_reason": "stop_loss",
+                            "close_action": "SELL",
+                            "close_price": 0.24,
+                            "close_shares": 5.0,
+                            "timestamp": "2026-03-30T12:05:26+00:00",
+                        },
+                        "post_exit_analysis": {
+                            "market_seen_after_close": True,
+                            "upside_left_cash_peak": 0.0,
+                            "drawdown_avoided_cash_peak": 0.6,
+                            "reached_98_after_close": False,
+                        },
+                        "integrity": {"analysis_ready": True},
+                    },
+                    {
+                        "label": "Legacy close-only",
+                        "city": "Chicago",
+                        "status": "closed",
+                        "closed_at": "2026-03-30T13:05:26+00:00",
+                        "close_context": {
+                            "close_reason": "take_profit",
+                            "close_action": "SELL",
+                            "close_price": None,
+                            "close_shares": 0.0,
+                            "timestamp": "2026-03-30T13:05:26+00:00",
+                        },
+                        "post_exit_analysis": {
+                            "market_seen_after_close": True,
+                            "upside_left_cash_peak": 1.4,
+                            "drawdown_avoided_cash_peak": 0.0,
+                        },
+                        "integrity": {"analysis_ready": False},
+                    },
+                ],
+            }
+        )
+        test("trade analytics: cuenta solo cierres observados utilizables",
+             trade_analytics["sample_size"] == 2 and trade_analytics["tracked_positions"] == 3,
+             trade_analytics)
+        test("trade analytics: calcula score y queue de upside/proteccion",
+             trade_analytics["score_pct"] > 80
+             and trade_analytics["top_upside_rows"][0]["label"] == "Atlanta TP"
+             and trade_analytics["top_protection_rows"][0]["label"] == "Dallas SL",
+             trade_analytics)
+        test("trade analytics: genera breakdown y timeline",
+             trade_analytics["breakdown_rows"][0]["label"] == "Take-profit"
+             and len(trade_analytics["timeline_points"]) == 2,
+             {"breakdown": trade_analytics["breakdown_rows"], "timeline": trade_analytics["timeline_points"]})
+
         snapshot_ns = {
             "datetime": datetime,
             "timezone": timezone,
@@ -1189,6 +1279,7 @@ def run_tests():
             "load_cycle_summary_data": lambda: {"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.6.10"},
             "load_cycle_history": lambda limit=None: [{"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.6.10", "timestamp_utc": "2026-03-29T11:08:00+00:00", "buys": [], "management": {"n_sold": 1}, "exposure_after": 2.94}],
             "load_audit_data": lambda: {"pending_sells": [], "forecast_vs_real": [], "observed_vs_forecast": [], "errors": []},
+            "load_trade_lifecycle_data": lambda: {"summary": {"tracked_positions": 2}, "records": []},
             "get_clean_closed_trade_stats": lambda: {"count": 18, "sell": 12, "loss_total": 6, "resolved_win": 0},
             "get_logic_series_clean_closed_trade_stats": lambda: {"count": 0, "sell": 0, "loss_total": 0, "resolved_win": 0},
             "get_validated_closed_postmortems": lambda: [],
@@ -1203,6 +1294,7 @@ def run_tests():
             "build_dashboard_city_observation": lambda **kwargs: {"tracked_count": 4, "active_count": 4, "blocked_count": 0, "observed_ready_count": 0, "observed_configured_count": 4, "summary": "4 activas", "note": "watch", "note_level": "muted", "rows": []},
             "build_dashboard_focus_center": lambda **kwargs: {"status_label": "Sano con limitaciones", "status_badge": "accent", "headline": "sample", "summary": "watch", "answers": [], "action": {"title": "No tocar trading", "detail": "NOAA", "badge": "accent"}, "incidents": [], "quick_stats": [], "drivers": [], "detail_routes": []},
             "build_dashboard_legacy_forecast_drift": lambda **kwargs: {"sample_size": 0, "sample_display": "0 mercados", "mae_display": "n/d", "bias_display": "n/d", "last_record_display": "n/d", "latest_case": "", "note": "legacy"},
+            "build_dashboard_trade_analytics": lambda **kwargs: {"sample_size": 1, "score_display": "81.0%", "headline": "sample exits"},
             "build_dashboard_trophies": lambda **kwargs: [{"label": "Mejor operación", "value": "n/d"}],
             "build_dashboard_unlocks": lambda **kwargs: [{"label": "Activar win rate", "status": "waiting"}],
             "_get_portfolio_and_positions": lambda: None,
@@ -1230,6 +1322,7 @@ def run_tests():
         test("snapshot: incluye city_observation", "city_observation" in snapshot and snapshot["city_observation"]["tracked_count"] == 4, snapshot)
         test("snapshot: incluye focus", "focus" in snapshot and snapshot["focus"]["action"]["title"] == "No tocar trading", snapshot)
         test("snapshot: incluye legacy_forecast_drift", "legacy_forecast_drift" in snapshot and snapshot["legacy_forecast_drift"]["last_record_display"] == "n/d", snapshot)
+        test("snapshot: incluye trade_analytics", "trade_analytics" in snapshot and snapshot["trade_analytics"]["sample_size"] == 1, snapshot)
         test("snapshot: incluye trophies", "trophies" in snapshot and snapshot["trophies"][0]["label"] == "Mejor operación", snapshot)
         test("snapshot: incluye unlocks", "unlocks" in snapshot and snapshot["unlocks"][0]["label"] == "Activar win rate", snapshot)
 
