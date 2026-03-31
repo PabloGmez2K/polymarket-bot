@@ -4049,12 +4049,12 @@ RESOLUTION_ICAO = {
     "Hong Kong":      {"icao": "VHHH", "wu_url": _wu_history_url("VHHH")},
     "Singapore":      {"icao": "WSSS", "wu_url": _wu_history_url("WSSS")},
     "Toronto":        {"icao": "CYYZ", "wu_url": _wu_history_url("CYYZ")},
-    "Chicago":        {"icao": "KORD", "wu_url": _wu_history_url("KORD"), "noaa_station_id": "72530094846"},
+    "Chicago":        {"icao": "KORD", "wu_url": _wu_history_url("KORD"), "noaa_station_id": "72530094846", "noaa_daily_station_id": "USW00094846"},
     "Wellington":     {"icao": "NZWN", "wu_url": _wu_history_url("NZWN")},
     "Munich":         {"icao": "EDDM", "wu_url": _wu_history_url("EDDM")},
     "Warsaw":         {"icao": "EPWA", "wu_url": _wu_history_url("EPWA")},
     "Ankara":         {"icao": "LTAC", "wu_url": _wu_history_url("LTAC")},
-    "Atlanta":        {"icao": "KATL", "wu_url": _wu_history_url("KATL"), "noaa_station_id": "72219013874"},
+    "Atlanta":        {"icao": "KATL", "wu_url": _wu_history_url("KATL"), "noaa_station_id": "72219013874", "noaa_daily_station_id": "USW00013874"},
     "Shenzhen":       {"icao": "ZGSZ", "wu_url": _wu_history_url("ZGSZ")},
     "Paris":          {"icao": "LFPG", "wu_url": _wu_history_url("LFPG")},
     # SAEZ confirmado via NOAA HOMR + probe real en global-hourly: 87576 + 99999.
@@ -4062,7 +4062,7 @@ RESOLUTION_ICAO = {
     "Miami":          {"icao": "KMIA", "wu_url": _wu_history_url("KMIA")},
     "Madrid":         {"icao": "LEMD", "wu_url": _wu_history_url("LEMD")},
     "Seattle":        {"icao": "KSEA", "wu_url": _wu_history_url("KSEA")},
-    "Dallas":         {"icao": "KDAL", "wu_url": _wu_history_url("KDAL"), "noaa_station_id": "72258303927"},
+    "Dallas":         {"icao": "KDAL", "wu_url": _wu_history_url("KDAL"), "noaa_station_id": "72258303927", "noaa_daily_station_id": "USW00013960"},
     "Lucknow":        {"icao": "VILK", "wu_url": _wu_history_url("VILK")},
     "Sao Paulo":      {"icao": "SBGR", "wu_url": _wu_history_url("SBGR")},
     "Taipei":         {"icao": "RCTP", "wu_url": _wu_history_url("RCTP")},
@@ -6289,8 +6289,67 @@ def _parse_noaa_tmp_c(raw_value):
         return None
     return round(value_tenths_c / 10.0, 1)
 
+def fetch_noaa_daily_tmax(noaa_daily_station_id, date_iso, retries=3, delay=5):
+    """
+    Devuelve TMAX diaria NOAA NCEI si existe en daily-summaries.
 
-def fetch_noaa_observed_max(noaa_station_id, date_iso, retries=3, delay=5):
+    Esta ruta es mas honesta para comparar forecast vs maxima diaria, pero la
+    disponibilidad puede ir con mas lag que NOAA_OBSERVED_LAG_DAYS.
+    """
+    if not noaa_daily_station_id or not date_iso:
+        return None
+
+    try:
+        market_date = date.fromisoformat(date_iso)
+    except ValueError:
+        return None
+
+    days_ago = (datetime.now(timezone.utc).date() - market_date).days
+    if days_ago < NOAA_OBSERVED_LAG_DAYS:
+        return None
+
+    params = urllib.parse.urlencode({
+        "dataset": "daily-summaries",
+        "stations": noaa_daily_station_id,
+        "startDate": date_iso,
+        "endDate": date_iso,
+        "dataTypes": "TMAX",
+        "format": "json",
+        "units": "metric",
+    })
+    url = f"{NOAA_NCEI_ACCESS_URL}?{params}"
+
+    last_error = None
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(url)
+            req.add_header("User-Agent", "polymarket-bot/0.10")
+            resp = urllib.request.urlopen(req, timeout=30)
+            rows = json.loads(resp.read())
+            if not isinstance(rows, list):
+                return None
+
+            for row in rows:
+                try:
+                    return round(float(row.get("TMAX")), 1)
+                except (TypeError, ValueError):
+                    continue
+            return None
+        except Exception as e:
+            last_error = e
+            if attempt < retries - 1:
+                log.warning(
+                    f"NOAA daily-summaries error (intento {attempt+1}/{retries}) "
+                    f"{noaa_daily_station_id} {date_iso}: {e} - reintentando en {delay}s"
+                )
+                time.sleep(delay)
+
+    if last_error:
+        log.warning(f"NOAA daily-summaries error {noaa_daily_station_id} {date_iso}: {last_error}")
+    return None
+
+
+def _fetch_noaa_observed_max_hourly(noaa_station_id, date_iso, retries=3, delay=5):
     """
     Devuelve la maxima observada NOAA NCEI para una fecha.
 
@@ -6353,6 +6412,34 @@ def fetch_noaa_observed_max(noaa_station_id, date_iso, retries=3, delay=5):
     return None
 
 
+def fetch_noaa_observed_max(noaa_station_id, date_iso, daily_station_id="", retries=3, delay=5):
+    """
+    Devuelve la maxima observada NOAA NCEI para una fecha y el dataset usado.
+
+    Orden de preferencia:
+      1. daily-summaries con TMAX si existe noaa_daily_station_id
+      2. fallback a global-hourly reconstruyendo el maximo desde TMP
+    """
+    observed_daily_tmax = fetch_noaa_daily_tmax(
+        daily_station_id,
+        date_iso,
+        retries=retries,
+        delay=delay,
+    )
+    if observed_daily_tmax is not None:
+        return observed_daily_tmax, "daily-summaries_tmax"
+
+    observed_hourly_tmax = _fetch_noaa_observed_max_hourly(
+        noaa_station_id,
+        date_iso,
+        retries=retries,
+        delay=delay,
+    )
+    if observed_hourly_tmax is not None:
+        return observed_hourly_tmax, "global-hourly_tmp_max"
+    return None, None
+
+
 def audit_check_resolution_truth(dl):
     """
     Observed proxy audit: forecast original vs observado NOAA NCEI.
@@ -6411,7 +6498,12 @@ def audit_check_resolution_truth(dl):
         market_date = entry["date"]
         resolution_meta = RESOLUTION_ICAO.get(city, {})
         noaa_station_id = resolution_meta.get("noaa_station_id", "")
-        observed_temp_c = fetch_noaa_observed_max(noaa_station_id, market_date)
+        noaa_daily_station_id = resolution_meta.get("noaa_daily_station_id", "")
+        observed_temp_c, observed_dataset = fetch_noaa_observed_max(
+            noaa_station_id,
+            market_date,
+            daily_station_id=noaa_daily_station_id,
+        )
         if observed_temp_c is None:
             continue
 
@@ -6422,6 +6514,7 @@ def audit_check_resolution_truth(dl):
             "date": market_date,
             "icao_used": resolution_meta.get("icao", ""),
             "noaa_station_id": noaa_station_id,
+            "noaa_daily_station_id": noaa_daily_station_id,
             "observed_temp_c": observed_temp_c,
             "forecast_temp_c": forecast_temp_c,
             "error_c": error,
@@ -6429,6 +6522,7 @@ def audit_check_resolution_truth(dl):
             "side": entry.get("side", "?"),
             "edge_pct": entry.get("edge_pct", 0),
             "source": "noaa_ncei",
+            "observed_dataset": observed_dataset or "unknown",
             "checked_at": datetime.now(timezone.utc).isoformat(),
         }
         audit[OBSERVED_AUDIT_KEY].append(record)
@@ -7580,4 +7674,3 @@ if __name__ == "__main__":
         except Exception as e:
             log.error(f"Error: {e}")
             send_telegram(f" <b>Error</b>\n<code>{str(e)[:200]}</code>")
-

@@ -61,6 +61,7 @@ Comandos útiles:
 | 2026-03-30 | Explícita | Sesión 43 | `—` | Implementación local de `v10.6.8`: nueva capa 1 `Control Center Discovery/Stabilization` en dashboard + `/focus` en Telegram, con detalle relegado a capas inferiores y suite en `440/440`. |
 | 2026-03-30 | Explícita | Sesión 44 | `—` | Implementación local de `v10.6.9`: `Mission HUD` para discovery/stabilization con estilo videojuego operacional, tabs `Overview / Progress / Cities`, barras de progreso, `city race`, `dashboard.js` y suite en `447/447`. |
 | 2026-03-30 | Explícita | Sesión 45 | `7eb8f7f` | Refinamiento y despliegue de `v10.6.10`: modo claro por defecto, ciudades agrupadas por prioridad operativa, repetición de `signals stale` reducida cuando NOAA es el cuello de botella, suite en `449/449` y validación en Railway. |
+| 2026-03-31 | Explícita | Sesión 46 | `—` | Auditoría NOAA `observed_vs_forecast`: se demuestra bug real de observabilidad, no solo falta de muestra. Fix local con `daily-summaries/TMAX` prioritario, fallback `global-hourly`, guard de lag coherente, trazabilidad extra y suite en `453/453`. |
 
 ---
 
@@ -898,6 +899,39 @@ Investigación completa de trades, commits y lógica de trading desde v10.3 hast
 - se añade `tools/preview_dashboard.py` para levantar solo el dashboard local sin arrancar todo el bot y sin depender de auth.
 
 **Resultado:** la capa 1 conserva el enfoque de misión, pero gana legibilidad operativa real. El dashboard ya no repite tanto una alerta secundaria, las ciudades se entienden como `operativas / seguimiento / bloqueadas` y `v10.6.10` quedó validada también en Railway: `healthz` respondió `200` con `version=v10.6.10` y el snapshot live confirmó modo `REAL`, próxima ejecución `23:00 UTC`, `signals ok`, `141` señales accionables, `0/10` casos NOAA y una única alerta activa de `accuracy` por ciudades.
+
+---
+
+## Sesión 46 — auditoría NOAA `observed_vs_forecast` + fix mínimo local (31 mar 2026)
+
+**Disparador:** Railway `v10.6.10` seguía mostrando `NOAA 0/10` y `0/4` ciudades interpretables pese a que ya había actividad real en Chicago, Atlanta, Dallas y Buenos Aires. Había que distinguir con honestidad entre “todavía no hay muestra” y “el pipeline NOAA está roto”.
+
+**Diagnóstico (Codex):**
+
+1. **La entrada en `observed_vs_forecast` estaba bien definida, pero demasiado exigente para depurarla a ojo.** Un caso solo entra si en `performance.json` existe un `BUY`, la ciudad está en `OBSERVED_AUDIT_CITIES`, la fecha se puede parsear, hay `noaa_station_id`, el `city|date` no está duplicado y han pasado al menos `2` días (`NOAA_OBSERVED_LAG_DAYS`).
+
+2. **No era solo falta de muestra.** La auditoría reconstruyó al menos `7` casos `city|date` ya elegibles frente a `0` registros reales en `audit.json -> observed_vs_forecast`. Evidencia mínima: `Chicago|2026-03-25`, `Chicago|2026-03-26`, `Chicago|2026-03-28`, `Atlanta|2026-03-27`, `Dallas|2026-03-22`, `Dallas|2026-03-28`, `Buenos Aires|2026-03-28`.
+
+3. **El cuello de botella real estaba en la fuente NOAA elegida.** El código dependía de `global-hourly` reconstruyendo el máximo desde `TMP`, pero probes reales sobre fechas 2026 devolvían vacío en varios casos donde `daily-summaries` sí devolvía `TMAX`. Se comprobó, por ejemplo, que `Dallas 2026-03-22`, `Chicago 2026-03-25/26` y `Atlanta 2026-03-27` ya estaban disponibles por `daily-summaries`.
+
+**Cambios realizados:**
+- `bot.py` mantiene intacta la lógica de trading y endurece solo NOAA/observabilidad:
+  - añade `noaa_daily_station_id` en `RESOLUTION_ICAO` para Chicago, Atlanta y Dallas;
+  - incorpora `fetch_noaa_daily_tmax()` para `daily-summaries`;
+  - renombra el fetch original a `_fetch_noaa_observed_max_hourly()`;
+  - crea un wrapper `fetch_noaa_observed_max()` que prueba primero `daily-summaries/TMAX` y cae a `global-hourly` si no hay dato;
+  - `audit_check_resolution_truth()` ahora guarda también `noaa_daily_station_id` y `observed_dataset` para dejar trazabilidad de qué dataset produjo el observado.
+- `verify_before_deploy.py` sube a `451/451` con:
+  - checks estructurales para `noaa_daily_station_id`;
+  - test del helper `fetch_noaa_daily_tmax()`;
+  - actualización del test funcional del wrapper NOAA para esperar `daily-summaries_tmax`;
+  - test del pipeline de auditoría asegurando persistencia de `observed_dataset`.
+- tras review adversarial adicional:
+  - `fetch_noaa_daily_tmax()` añade el mismo guard de lag que ya usaba el path hourly para no hacer requests innecesarios si se invoca de forma directa;
+  - `verify_before_deploy.py` recupera un test explícito del fallback `daily vacío -> hourly`;
+  - la suite queda en `453/453`.
+
+**Resultado:** el diagnóstico correcto al cierre de la sesión es **bug real de observabilidad NOAA**, no mera falta de tiempo. Sí faltaba muestra para algunas fechas recientes, pero ya existían casos elegibles suficientes como para esperar `n > 0` en producción. El fix queda validado en local con `453/453` tests, sin tocar trading, sigma/Kelly, exits, scheduler ni gestión de posiciones. Buenos Aires queda temporalmente en fallback `global-hourly` porque todavía no se validó una estación diaria fiable. La idea de una futura capa `shadow sample` queda solo como propuesta segura para más adelante, no como cambio aplicado hoy.
 
 ---
 

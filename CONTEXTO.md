@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 30 de marzo de 2026 (Sesión 45 — v10.6.10 focus readability / Railway validation)
-**Próxima sesión:** validar en Railway si la capa 1 refleja bien la realidad operativa con datos live y decidir si la siguiente iteración debe ser una capa temporal de tendencias NOAA por dia o un drill-down interactivo por ciudad.
+**Última actualización:** 31 de marzo de 2026 (Sesión 46 — auditoría NOAA `observed_vs_forecast` + fix mínimo local)
+**Próxima sesión:** desplegar y validar en Railway el fix NOAA, confirmar que aparece el primer caso útil en `observed_vs_forecast` y decidir después, ya con el pipeline sano, si merece la pena una futura capa `shadow sample` solo observacional.
 
 ---
 
@@ -100,6 +100,8 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Focus readability pass (v10.6.10):** Refinamiento de la capa 1 tras la primera previsualizacion real. El dashboard pasa a modo claro por defecto para lectura prolongada, agrupa las ciudades en `universo operativo`, `seguimiento/referencia` y `archivo bloqueado`, y deja de repetir la alerta `signals.json stale` como bloqueo principal cuando el cuello de botella real es `NOAA / muestra / cobertura`. La prioridad operativa no cambia: sigue siendo discovery / stabilization, pero con menos ruido y lectura mas directa. `verify_before_deploy.py` sube a `449/449`.
 
+**Auditoría NOAA + hardening local (31 mar, sin bump):** La revisión operativa sobre Railway `v10.6.10` confirmó que `NOAA 0/10` no era solo “falta de tiempo”. El pipeline que llena `audit.json -> observed_vs_forecast` sí tenía casos elegibles, pero el fetch NOAA quedaba ciego porque dependía de `global-hourly`, que devolvía vacío para varios casos 2026 donde `daily-summaries` sí ofrecía `TMAX`. Se añaden `noaa_daily_station_id` para Chicago/Atlanta/Dallas, un helper `fetch_noaa_daily_tmax()`, un wrapper que prioriza `daily-summaries/TMAX` y luego cae a `global-hourly`, y trazabilidad extra (`noaa_daily_station_id`, `observed_dataset`) en cada caso guardado. Tras review adversarial adicional se endurece también el guard de lag en el helper diario y se recupera un test explícito del fallback `daily vacío -> hourly`. Evidencia mínima reconstruida: al menos `7` casos `city|date` elegibles ya existían frente a `0` guardados en producción. `verify_before_deploy.py` sube a `453/453`.
+
 **City accuracy tracker (v10.5.2):** Calcula win rate por ciudad desde postmortem. Alerta por Telegram si una ciudad baja de 25% win rate con 3+ trades. Nuevo comando `/accuracy`. Win rate visible en `/rendimiento`.
 
 **Integración `/accuracy` + revisión crítica (v10.5.3):** `/accuracy` queda visible en el menú, responde siempre con menú, `/estado` muestra explícitamente el intervalo intra-SL y la trazabilidad de sesión 20 queda corregida para reflejar mejor lo que realmente introdujeron los commits de la mañana.
@@ -110,15 +112,15 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
-**Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.7`)
-**Estado actual tras sesión 45:** `v10.6.10` ya está desplegada y verificada en Railway con `Mission HUD` refinado para legibilidad, tabs `Overview / Progress / Cities`, agrupacion operativa de ciudades y `/focus` como primera lectura en Telegram.
-**Versión local / remoto GitHub:** `origin/main` y producción quedaron en commit `7eb8f7f` (`v10.6.10`), validado con `449/449` tests y verificación live por `healthz` + snapshot autenticado del dashboard el `30 mar 2026 21:03 UTC`.
+**Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.10`)
+**Estado actual tras sesión 46:** Railway sigue en `v10.6.10` y el dashboard live mostraba `NOAA 0/10` y `0/4` ciudades interpretables el `31 mar 2026`. La auditoría local confirmó un bug real de observabilidad NOAA: no era solo falta de muestra. Queda listo en local un fix mínimo que prioriza `daily-summaries/TMAX` para Chicago/Atlanta/Dallas y mantiene fallback a `global-hourly` para compatibilidad y para Buenos Aires mientras no haya estación diaria validada.
+**Versión local / remoto GitHub:** `origin/main` y producción siguen en commit `7eb8f7f` (`v10.6.10`), validado en Railway por `healthz` + snapshot autenticado. El workspace local añade encima un hardening NOAA no desplegado todavía, validado con `453/453` tests.
 
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.6.10 |
-| `verify_before_deploy.py` | v10 — 447 tests de comportamiento |
+| `bot.py` | Script principal v10.6.10 con hardening NOAA local pendiente de deploy |
+| `verify_before_deploy.py` | Suite local de `453` tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |
@@ -151,7 +153,7 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 | `trader_history.json` | Historial auxiliar del pipeline de traders |
 | `cycle_summary.json` | Último ciclo (se sobreescribe) |
 | `cycles_history.jsonl` | Historial acumulativo de todos los ciclos |
-| `audit.json` | Ventas pendientes + pseudo-auditoría `forecast vs forecast posterior` con Open-Meteo |
+| `audit.json` | Ventas pendientes + auditoría legacy `forecast vs forecast posterior` + `observed_vs_forecast` NOAA |
 | `decisions.log` | Log detallado por ciclo |
 | `trades.log` | Log compacto de órdenes |
 
@@ -164,7 +166,7 @@ MIN_BET="1.00"
 DATA_DIR="/app/data"
 ```
 
-### Configuración en código (defaults bot.py v10.6.4):
+### Configuración en código (defaults bot.py v10.6.10):
 ```python
 MIN_EDGE = 7.0%
 STOP_LOSS_PCT = -25.0%
@@ -278,9 +280,10 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 ### Pendientes:
 - **#15** ✅ **Corregido en v10.6.6:** `ACTIVE_TRADING_CITIES` añade allowlist explícita para entradas nuevas y restringe BUYs a Chicago, Atlanta, Dallas y Buenos Aires. El bug original venía de depender solo de `BLOCKED_CITIES`, lo que dejaba pasar ciudades sin validación NOAA/WU como Seoul, Tokyo, NYC y Munich. La gestión de posiciones existentes (`manage_positions`) no se toca.
-- **Observed proxy NOAA pendiente de validación en producción:** `v10.6.5` ya expone `observed_vs_forecast` en el dashboard, pero hay que dejar correr 2+ días y confirmar que `audit.json` empieza a poblarse con datos útiles para las 4 ciudades activas.
+- **Observed proxy NOAA / bug de observabilidad detectado:** la auditoría de `31 mar 2026` encontró al menos `7` casos `city|date` elegibles para NOAA en las 4 activas, mientras Railway seguía mostrando `observed_vs_forecast = 0`. No era solo falta de muestra. Causa raíz: `global-hourly` devolvía vacío en varios casos 2026 que sí estaban en `daily-summaries`. Fix local listo: priorizar `daily-summaries/TMAX` para Chicago/Atlanta/Dallas, guardar `observed_dataset`, añadir guard de lag al helper diario y cubrir el fallback `daily -> hourly`; falta desplegar y validar en Railway.
 - **Seguimiento de ciudades aún descriptivo:** `v10.6.7` ya muestra por dashboard qué ciudades están activas, bloqueadas, fuera del allowlist o sin observabilidad, pero todavía no existe promoción automática tipo `watchlist / shadow / canary`.
 - **Buenos Aires NOAA spike cerrado:** `SAEZ` usa `87576099999`, confirmado con NOAA HOMR y una consulta real al endpoint `global-hourly`.
+- **Buenos Aires daily station aún no validada:** el fix local resuelve el cuello de botella principal en US con `daily-summaries`, pero Buenos Aires sigue temporalmente en fallback `global-hourly` hasta encontrar y validar un `daily_station_id` fiable.
 - **Fuente real de resolución sigue sin automatizarse:** NOAA mejora mucho la observabilidad, pero sigue siendo `observed proxy`, no la fuente real de settlement de Polymarket.
 - **Auditoría legacy sigue limitada aunque honesta:** `forecast_vs_real` sigue existiendo como nombre legacy en `audit.json`, pero los logs/código ya dejan claro que compara `forecast original vs forecast posterior Open-Meteo`, no “real” ni Weather Underground.
 - **Weather Underground vs Open-Meteo:** Polymarket resuelve con WU, no Open-Meteo. London sigue bloqueada en código desde `v10.4.7`. IBM Trial no accesible; la vía correcta a corto plazo es alinear resolución, no esperar una API oficial.

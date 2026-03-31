@@ -305,14 +305,14 @@ def run_tests():
     test("Dallas usa coords KDAL / Love Field",
          '"Dallas":         {"lat": 32.8459,  "lon": -96.8510,  "name": "Dallas Love Field"}' in code)
     test("RESOLUTION_ICAO existe", "RESOLUTION_ICAO = {" in code)
-    test("RESOLUTION_ICAO Chicago -> KORD",
-         '"Chicago":        {"icao": "KORD", "wu_url": _wu_history_url("KORD"), "noaa_station_id": "72530094846"}' in code)
-    test("RESOLUTION_ICAO Atlanta -> KATL",
-         '"Atlanta":        {"icao": "KATL", "wu_url": _wu_history_url("KATL"), "noaa_station_id": "72219013874"}' in code)
+    test("RESOLUTION_ICAO Chicago -> KORD + NOAA daily",
+         '"Chicago":        {"icao": "KORD", "wu_url": _wu_history_url("KORD"), "noaa_station_id": "72530094846", "noaa_daily_station_id": "USW00094846"}' in code)
+    test("RESOLUTION_ICAO Atlanta -> KATL + NOAA daily",
+         '"Atlanta":        {"icao": "KATL", "wu_url": _wu_history_url("KATL"), "noaa_station_id": "72219013874", "noaa_daily_station_id": "USW00013874"}' in code)
     test("RESOLUTION_ICAO Buenos Aires -> SAEZ / 87576099999",
          '"Buenos Aires":   {"icao": "SAEZ", "wu_url": _wu_history_url("SAEZ"), "noaa_station_id": "87576099999"}' in code)
-    test("RESOLUTION_ICAO Dallas -> KDAL",
-         '"Dallas":         {"icao": "KDAL", "wu_url": _wu_history_url("KDAL"), "noaa_station_id": "72258303927"}' in code)
+    test("RESOLUTION_ICAO Dallas -> KDAL + NOAA daily",
+         '"Dallas":         {"icao": "KDAL", "wu_url": _wu_history_url("KDAL"), "noaa_station_id": "72258303927", "noaa_daily_station_id": "USW00013960"}' in code)
     test("RESOLUTION_ICAO incluye ciudades bloqueadas",
          '"London":         {"icao": "EGLC", "wu_url": _wu_history_url("EGLC")}' in code
          and '"Madrid":         {"icao": "LEMD", "wu_url": _wu_history_url("LEMD")}' in code)
@@ -321,6 +321,7 @@ def run_tests():
          'OBSERVED_AUDIT_CITIES = {"Chicago", "Atlanta", "Buenos Aires", "Dallas"}' in code)
     test("OBSERVED_FORECAST_MIN_SAMPLE es 3", "OBSERVED_FORECAST_MIN_SAMPLE = 3" in code)
     test("OBSERVED_FORECAST_GLOBAL_TARGET es 10", "OBSERVED_FORECAST_GLOBAL_TARGET = 10" in code)
+    test("fetch_noaa_daily_tmax definida", "def fetch_noaa_daily_tmax(" in code)
     test("fetch_noaa_observed_max definida", "def fetch_noaa_observed_max(" in code)
     test("audit_check_resolution_truth definida", "def audit_check_resolution_truth(" in code)
     test("audit NOAA usa source=noaa_ncei", '"source": "noaa_ncei"' in code)
@@ -1534,11 +1535,17 @@ def run_tests():
 
         def _dummy_noaa_urlopen(req, timeout=0):
             noaa_request_urls.append(req.full_url)
-            payload = [
-                {"TMP": "+0123,1"},
-                {"TMP": "+0156,1"},
-                {"TMP": "+9999,9"},
-            ]
+            if "daily-summaries" in req.full_url:
+                if "stations=USWEMPTY" in req.full_url:
+                    payload = []
+                else:
+                    payload = [{"TMAX": "33.9"}]
+            else:
+                payload = [
+                    {"TMP": "+0123,1"},
+                    {"TMP": "+0156,1"},
+                    {"TMP": "+9999,9"},
+                ]
             return types.SimpleNamespace(read=lambda: json.dumps(payload).encode("utf-8"))
 
         noaa_ns = {
@@ -1548,7 +1555,9 @@ def run_tests():
             "timezone": timezone,
             "time": types.SimpleNamespace(sleep=lambda seconds: None),
             "urllib": types.SimpleNamespace(
-                parse=types.SimpleNamespace(urlencode=lambda params: "stubbed=yes"),
+                parse=types.SimpleNamespace(
+                    urlencode=lambda params: "&".join(f"{key}={params[key]}" for key in sorted(params))
+                ),
                 request=types.SimpleNamespace(Request=_DummyNoaaRequest, urlopen=_dummy_noaa_urlopen),
             ),
             "NOAA_NCEI_ACCESS_URL": "https://example.test/noaa",
@@ -1556,10 +1565,19 @@ def run_tests():
             "log": type("L", (), {"warning": staticmethod(lambda *a, **k: None)})(),
         }
         exec(get_function_source(module_ast, code_lines, "_parse_noaa_tmp_c"), noaa_ns)
+        exec(get_function_source(module_ast, code_lines, "fetch_noaa_daily_tmax"), noaa_ns)
+        exec(get_function_source(module_ast, code_lines, "_fetch_noaa_observed_max_hourly"), noaa_ns)
         exec(get_function_source(module_ast, code_lines, "fetch_noaa_observed_max"), noaa_ns)
-        noaa_max = noaa_ns["fetch_noaa_observed_max"]("72258303927", noaa_date, retries=1, delay=0)
-        test("NOAA helper: parsea TMP y devuelve maxima observada", noaa_max == 15.6, noaa_max)
-        test("NOAA helper: construye request al endpoint NCEI", bool(noaa_request_urls) and "https://example.test/noaa?stubbed=yes" in noaa_request_urls[0], noaa_request_urls[:1])
+        noaa_max = noaa_ns["fetch_noaa_observed_max"]("72258303927", noaa_date, daily_station_id="USW00013960", retries=1, delay=0)
+        test("NOAA helper: prioriza TMAX diaria cuando existe", noaa_max == (33.9, "daily-summaries_tmax"), noaa_max)
+        test("NOAA helper: construye request daily-summaries al endpoint NCEI", bool(noaa_request_urls) and "daily-summaries" in noaa_request_urls[0], noaa_request_urls[:1])
+        noaa_fallback = noaa_ns["fetch_noaa_observed_max"]("72258303927", noaa_date, daily_station_id="USWEMPTY", retries=1, delay=0)
+        test("NOAA helper: fallback a hourly si daily viene vacio", noaa_fallback == (15.6, "global-hourly_tmp_max"), noaa_fallback)
+        recent_noaa_date = date.today().isoformat()
+        requests_before_lag = len(noaa_request_urls)
+        noaa_daily_recent = noaa_ns["fetch_noaa_daily_tmax"]("USW00013960", recent_noaa_date, retries=1, delay=0)
+        test("NOAA helper daily: respeta lag y evita request innecesario", noaa_daily_recent is None and len(noaa_request_urls) == requests_before_lag,
+             {"value": noaa_daily_recent, "requests_before": requests_before_lag, "requests_after": len(noaa_request_urls)})
 
         fd, tmp_perf_noaa = tempfile.mkstemp(
             dir=tempfile.gettempdir(),
@@ -1588,13 +1606,13 @@ def run_tests():
             "OBSERVED_AUDIT_CITIES": {"Chicago", "Atlanta", "Buenos Aires", "Dallas"},
             "NOAA_OBSERVED_LAG_DAYS": 2,
             "RESOLUTION_ICAO": {
-                "Dallas": {"icao": "KDAL", "noaa_station_id": "72258303927"},
-                "Atlanta": {"icao": "KATL", "noaa_station_id": "72219013874"},
+                "Dallas": {"icao": "KDAL", "noaa_station_id": "72258303927", "noaa_daily_station_id": "USW00013960"},
+                "Atlanta": {"icao": "KATL", "noaa_station_id": "72219013874", "noaa_daily_station_id": "USW00013874"},
                 "London": {"icao": "EGLC", "noaa_station_id": "00000000000"},
             },
             "load_audit_data": lambda: {"pending_sells": [], "forecast_vs_real": [], "observed_vs_forecast": [], "errors": []},
             "save_audit_data": lambda data: observed_saved.update(data),
-            "fetch_noaa_observed_max": lambda station_id, date_iso, retries=3, delay=5: observed_calls.append((station_id, date_iso)) or 19.4,
+            "fetch_noaa_observed_max": lambda station_id, date_iso, daily_station_id="", retries=3, delay=5: observed_calls.append((station_id, date_iso, daily_station_id)) or (19.4, "daily-summaries_tmax"),
         }
         exec(get_function_source(module_ast, code_lines, "audit_check_resolution_truth"), observed_ns)
         observed_dl = []
@@ -1604,6 +1622,8 @@ def run_tests():
              len(observed_records) == 1 and observed_records[0]["city"] == "Dallas", observed_records)
         test("audit NOAA: source=noaa_ncei en registros nuevos",
              bool(observed_records) and observed_records[0]["source"] == "noaa_ncei", observed_records[:1])
+        test("audit NOAA: deja trazabilidad del dataset observado",
+             bool(observed_records) and observed_records[0]["observed_dataset"] == "daily-summaries_tmax", observed_records[:1])
         test("audit NOAA: no toca ciudades bloqueadas",
              all(rec["city"] != "London" for rec in observed_records) and all(call[0] != "00000000000" for call in observed_calls),
              {"records": observed_records, "calls": observed_calls})
@@ -2499,4 +2519,3 @@ def run_tests():
 if __name__ == "__main__":
     success = run_tests()
     sys.exit(0 if success else 1)
-
