@@ -813,6 +813,7 @@ def load_trade_lifecycle_data():
     return {
         "generated_at": "",
         "summary": {},
+        "integrity": {},
         "note": (
             "trade_lifecycle es una capa de observabilidad derivada. "
             "El histórico viejo puede tener campos reconstruidos de forma parcial "
@@ -884,15 +885,34 @@ def _trade_lifecycle_label(record):
     return f"{city} {side}".strip()
 
 
+def _trade_lifecycle_record_id(entry):
+    timestamp = (
+        entry.get("fill_confirmed")
+        or entry.get("failed_at")
+        or entry.get("closed_at")
+        or entry.get("opened_at")
+        or entry.get("last_buy_at")
+        or entry.get("timestamp")
+        or datetime.now(timezone.utc).isoformat()
+    )
+    token_id = entry.get("token_id", "")
+    city = entry.get("city", "?")
+    side = str(entry.get("side", "")).upper()
+    market_date = entry.get("date", "")
+    return entry.get("id") or f"{token_id or city}|{side}|{market_date}|{timestamp}"
+
+
 def _find_trade_lifecycle_record(records, entry):
     """
     Busca el record de lifecycle más probable.
 
     Prioridad:
-      1. token_id
-      2. question + side
-      3. city + side + date
+      1. id reconstruido
+      2. token_id
+      3. question + side
+      4. city + side + date
     """
+    record_id = _trade_lifecycle_record_id(entry)
     token_id = entry.get("token_id", "")
     question = entry.get("question", "")
     city = entry.get("city", "")
@@ -900,6 +920,8 @@ def _find_trade_lifecycle_record(records, entry):
     market_date = entry.get("date", "")
 
     for record in reversed(records):
+        if record_id and record.get("id") == record_id:
+            return record
         if token_id and record.get("token_id") == token_id:
             return record
         if question and record.get("question") == question and record.get("side") == side:
@@ -923,7 +945,7 @@ def _new_trade_lifecycle_record(entry):
     city = entry.get("city", "?")
     side = str(entry.get("side", "")).upper()
     market_date = entry.get("date", "")
-    record_id = entry.get("id") or f"{token_id or city}|{side}|{market_date}|{timestamp}"
+    record_id = _trade_lifecycle_record_id(entry)
     return {
         "id": record_id,
         "label": entry.get("question") or f"{city} {market_date} {side}".strip(),
@@ -979,6 +1001,263 @@ def _new_trade_lifecycle_record(entry):
             "reconstructed": True,
         },
         "last_activity_at": timestamp,
+    }
+
+
+def _merge_trade_lifecycle_context(target, incoming):
+    target = target if isinstance(target, dict) else {}
+    incoming = incoming if isinstance(incoming, dict) else {}
+    for key, value in incoming.items():
+        if key == "trader_confirmed":
+            merged = sorted(set(target.get(key, []) or []) | set(value or []))
+            if merged:
+                target[key] = merged
+            continue
+        if target.get(key) in {None, "", [], {}} and value not in {None, "", [], {}}:
+            target[key] = _lifecycle_clone(value)
+    return target
+
+
+def _merge_trade_lifecycle_record(target, incoming):
+    if not isinstance(target, dict) or not isinstance(incoming, dict):
+        return target
+
+    def _prefer(existing, candidate):
+        return existing if existing not in {None, "", [], {}} else candidate
+
+    def _merge_max(existing, candidate):
+        if candidate is None:
+            return existing
+        if existing is None:
+            return candidate
+        return max(existing, candidate)
+
+    def _merge_min(existing, candidate):
+        if candidate is None:
+            return existing
+        if existing is None:
+            return candidate
+        return min(existing, candidate)
+
+    status_rank = {"open": 0, "pending_exit": 1, "exit_failed": 2, "closed": 3}
+    if status_rank.get(incoming.get("status", ""), -1) > status_rank.get(target.get("status", ""), -1):
+        target["status"] = incoming.get("status", target.get("status", "open"))
+
+    for key in [
+        "token_id",
+        "question",
+        "city",
+        "side",
+        "date",
+        "condition",
+        "opened_at",
+        "last_buy_at",
+        "closed_at",
+        "avg_entry_price",
+        "bot_version_opened",
+        "bot_version_closed",
+        "last_activity_at",
+    ]:
+        target[key] = _prefer(target.get(key), incoming.get(key))
+
+    target["buy_count"] = max(int(target.get("buy_count", 0) or 0), int(incoming.get("buy_count", 0) or 0))
+    target["total_amount"] = max(
+        _to_lifecycle_float(target.get("total_amount"), 2) or 0.0,
+        _to_lifecycle_float(incoming.get("total_amount"), 2) or 0.0,
+    )
+    target["total_shares"] = max(
+        _to_lifecycle_float(target.get("total_shares")) or 0.0,
+        _to_lifecycle_float(incoming.get("total_shares")) or 0.0,
+    )
+    target["trader_confirmed"] = sorted(
+        set(target.get("trader_confirmed", []) or []) | set(incoming.get("trader_confirmed", []) or [])
+    )
+
+    target["entry_context"] = _merge_trade_lifecycle_context(
+        target.get("entry_context"),
+        incoming.get("entry_context"),
+    )
+    target["latest_entry_context"] = _merge_trade_lifecycle_context(
+        target.get("latest_entry_context"),
+        incoming.get("latest_entry_context"),
+    )
+    target["close_context"] = _merge_trade_lifecycle_context(
+        target.get("close_context"),
+        incoming.get("close_context"),
+    )
+
+    for buy in incoming.get("buys", []) or []:
+        _append_trade_lifecycle_buy(target, buy)
+    for event in incoming.get("timeline", []) or []:
+        _append_trade_lifecycle_event(target, event)
+
+    attempts = target.setdefault("exit_attempts", [])
+    for attempt in incoming.get("exit_attempts", []) or []:
+        marker = (attempt.get("order_id", ""), attempt.get("placed_at", ""), attempt.get("reason", ""))
+        existing_attempt = None
+        for candidate in attempts:
+            candidate_marker = (
+                candidate.get("order_id", ""),
+                candidate.get("placed_at", ""),
+                candidate.get("reason", ""),
+            )
+            if candidate_marker == marker:
+                existing_attempt = candidate
+                break
+        if existing_attempt is None:
+            attempts.append(_lifecycle_clone(attempt))
+        else:
+            for key, value in (attempt or {}).items():
+                if existing_attempt.get(key) in {None, ""} and value not in {None, ""}:
+                    existing_attempt[key] = _lifecycle_clone(value)
+            if existing_attempt.get("status") == "pending" and attempt.get("status") in {"filled", "failed"}:
+                existing_attempt["status"] = attempt.get("status")
+
+    for list_key, marker_keys in [
+        ("position_snapshots", ["timestamp", "source", "stage", "cur_price", "current_value", "pct_pnl", "cash_pnl"]),
+        ("market_observations", ["timestamp", "source", "price", "liquidity", "volume_24h", "question"]),
+    ]:
+        target_list = target.setdefault(list_key, [])
+        known = {
+            tuple(item.get(key) for key in marker_keys)
+            for item in target_list
+            if isinstance(item, dict)
+        }
+        for item in incoming.get(list_key, []) or []:
+            marker = tuple(item.get(key) for key in marker_keys)
+            if marker in known:
+                continue
+            target_list.append(_lifecycle_clone(item))
+            known.add(marker)
+
+    target_stats = target.setdefault("position_stats", {})
+    incoming_stats = incoming.get("position_stats") or {}
+    for key in ["max_cur_price_open", "max_pct_pnl_open", "max_current_value_open"]:
+        target_stats[key] = _merge_max(target_stats.get(key), incoming_stats.get(key))
+    for key in ["min_cur_price_open", "min_pct_pnl_open"]:
+        target_stats[key] = _merge_min(target_stats.get(key), incoming_stats.get(key))
+    last_snapshot_target = target_stats.get("last_snapshot_at", "")
+    last_snapshot_incoming = incoming_stats.get("last_snapshot_at", "")
+    if last_snapshot_incoming and last_snapshot_incoming > last_snapshot_target:
+        target_stats["last_snapshot_at"] = last_snapshot_incoming
+
+    target_post = target.setdefault("post_exit_analysis", {})
+    incoming_post = incoming.get("post_exit_analysis") or {}
+    target_post["market_seen_after_close"] = bool(
+        target_post.get("market_seen_after_close") or incoming_post.get("market_seen_after_close")
+    )
+    target_post["observations_after_close"] = max(
+        int(target_post.get("observations_after_close", 0) or 0),
+        int(incoming_post.get("observations_after_close", 0) or 0),
+    )
+    target_post["last_price_after_close"] = _prefer(
+        target_post.get("last_price_after_close"),
+        incoming_post.get("last_price_after_close"),
+    )
+    target_post["max_price_after_close"] = _merge_max(
+        target_post.get("max_price_after_close"),
+        incoming_post.get("max_price_after_close"),
+    )
+    target_post["min_price_after_close"] = _merge_min(
+        target_post.get("min_price_after_close"),
+        incoming_post.get("min_price_after_close"),
+    )
+    target_post["reached_98_after_close"] = bool(
+        target_post.get("reached_98_after_close") or incoming_post.get("reached_98_after_close")
+    )
+    first_hit_target = target_post.get("first_reached_98_after_close_at", "")
+    first_hit_incoming = incoming_post.get("first_reached_98_after_close_at", "")
+    if first_hit_incoming and (not first_hit_target or first_hit_incoming < first_hit_target):
+        target_post["first_reached_98_after_close_at"] = first_hit_incoming
+    for key in [
+        "upside_left_cash_peak",
+        "upside_left_pct_peak",
+        "drawdown_avoided_cash_peak",
+        "drawdown_avoided_pct_peak",
+    ]:
+        target_post[key] = _merge_max(target_post.get(key), incoming_post.get(key))
+
+    target_sources = target.setdefault("history_sources", {})
+    incoming_sources = incoming.get("history_sources") or {}
+    for key in ["performance", "postmortem", "reconstructed"]:
+        target_sources[key] = bool(target_sources.get(key) or incoming_sources.get(key))
+
+    target["label"] = _trade_lifecycle_label(target)
+    return target
+
+
+def _coalesce_trade_lifecycle_records(records):
+    merged = []
+    merged_by_id = {}
+    collisions = 0
+
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        record_id = record.get("id") or _trade_lifecycle_record_id(record)
+        candidate = _lifecycle_clone(record)
+        candidate["id"] = record_id
+        if record_id and record_id in merged_by_id:
+            _merge_trade_lifecycle_record(merged_by_id[record_id], candidate)
+            collisions += 1
+            continue
+        merged.append(candidate)
+        if record_id:
+            merged_by_id[record_id] = candidate
+
+    for record in merged:
+        record["integrity"] = _build_trade_lifecycle_record_integrity(record)
+        record["integrity"] = _build_trade_lifecycle_record_integrity(record)
+        record["integrity"] = _build_trade_lifecycle_record_integrity(record)
+        record["label"] = _trade_lifecycle_label(record)
+    return merged, collisions
+
+
+def _build_trade_lifecycle_record_integrity(record):
+    token_id = str(record.get("token_id", "") or "").strip()
+    question = str(record.get("question", "") or "").strip()
+    total_amount = _to_lifecycle_float(record.get("total_amount"), 2) or 0.0
+    total_shares = _to_lifecycle_float(record.get("total_shares")) or 0.0
+    buys = record.get("buys", []) or []
+    entry_context = record.get("entry_context") or {}
+    close_context = record.get("close_context") or {}
+
+    partial_historical = (
+        not token_id
+        and not question
+        and not buys
+        and not entry_context.get("timestamp")
+        and abs(total_amount) < 1e-9
+        and abs(total_shares) < 1e-9
+    )
+    close_only = not buys and bool(close_context.get("close_action"))
+    return {
+        "missing_token_id": not bool(token_id),
+        "missing_question": not bool(question),
+        "missing_entry_context": not bool(entry_context.get("timestamp")),
+        "missing_buy_history": not bool(buys),
+        "zero_amount": abs(total_amount) < 1e-9,
+        "zero_shares": abs(total_shares) < 1e-9,
+        "partial_historical_record": partial_historical,
+        "close_only_record": close_only,
+        "analysis_ready": not partial_historical,
+    }
+
+
+def _build_trade_lifecycle_integrity(records, duplicate_collisions=0):
+    flags = [_build_trade_lifecycle_record_integrity(record) for record in records]
+    return {
+        "records_total": len(records),
+        "analysis_ready_records": sum(1 for item in flags if item.get("analysis_ready")),
+        "partial_historical_records": sum(1 for item in flags if item.get("partial_historical_record")),
+        "close_only_records": sum(1 for item in flags if item.get("close_only_record")),
+        "records_missing_token_id": sum(1 for item in flags if item.get("missing_token_id")),
+        "records_missing_question": sum(1 for item in flags if item.get("missing_question")),
+        "records_missing_entry_context": sum(1 for item in flags if item.get("missing_entry_context")),
+        "records_without_buy_history": sum(1 for item in flags if item.get("missing_buy_history")),
+        "zero_amount_records": sum(1 for item in flags if item.get("zero_amount")),
+        "zero_share_records": sum(1 for item in flags if item.get("zero_shares")),
+        "duplicate_id_collisions_resolved": int(duplicate_collisions or 0),
     }
 
 
@@ -1321,6 +1600,7 @@ def _sync_trade_lifecycle_from_sources():
     """
     existing = load_trade_lifecycle_data()
     existing_records = existing.get("records", []) if isinstance(existing, dict) else []
+    existing_records, existing_duplicate_collisions = _coalesce_trade_lifecycle_records(existing_records)
     existing_map = {
         record.get("id"): record
         for record in existing_records
@@ -1510,6 +1790,7 @@ def _sync_trade_lifecycle_from_sources():
                 or ""
             )
 
+    records, built_duplicate_collisions = _coalesce_trade_lifecycle_records(records)
     for record in records:
         record["timeline"].sort(key=lambda item: str(item.get("timestamp", "")))
         record["exit_attempts"].sort(key=lambda item: str(item.get("placed_at", "")))
@@ -1530,8 +1811,10 @@ def _sync_trade_lifecycle_from_sources():
                 "cycle_number": first_buy.get("cycle_number"),
                 "logic_cycle_number": first_buy.get("logic_cycle_number"),
             }
+        record["integrity"] = _build_trade_lifecycle_record_integrity(record)
         record["label"] = _trade_lifecycle_label(record)
 
+    duplicate_collisions = existing_duplicate_collisions + built_duplicate_collisions
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "note": (
@@ -1540,6 +1823,7 @@ def _sync_trade_lifecycle_from_sources():
             "reconstruidos parcialmente si faltan snapshots históricos."
         ),
         "summary": _build_trade_lifecycle_summary(records),
+        "integrity": _build_trade_lifecycle_integrity(records, duplicate_collisions=duplicate_collisions),
         "records": records,
     }
     save_trade_lifecycle_data(payload)
@@ -1614,7 +1898,13 @@ def record_trade_lifecycle_position_snapshots(positions, source="manage_position
         changed = True
 
     if changed:
+        for record in records:
+            record["integrity"] = _build_trade_lifecycle_record_integrity(record)
         data["summary"] = _build_trade_lifecycle_summary(records)
+        data["integrity"] = _build_trade_lifecycle_integrity(
+            records,
+            duplicate_collisions=(data.get("integrity") or {}).get("duplicate_id_collisions_resolved", 0),
+        )
         save_trade_lifecycle_data(data)
 
 
@@ -1710,7 +2000,13 @@ def record_trade_lifecycle_market_observations(markets, source="cycle_market_sca
                         post_exit["drawdown_avoided_pct_peak"] = round((1.0 - (min_after / close_price)) * 100, 2)
 
     if changed:
+        for record in records:
+            record["integrity"] = _build_trade_lifecycle_record_integrity(record)
         data["summary"] = _build_trade_lifecycle_summary(records)
+        data["integrity"] = _build_trade_lifecycle_integrity(
+            records,
+            duplicate_collisions=(data.get("integrity") or {}).get("duplicate_id_collisions_resolved", 0),
+        )
         save_trade_lifecycle_data(data)
 
 

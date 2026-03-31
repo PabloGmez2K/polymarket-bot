@@ -63,6 +63,7 @@ Comandos útiles:
 | 2026-03-30 | Explícita | Sesión 45 | `7eb8f7f` | Refinamiento y despliegue de `v10.6.10`: modo claro por defecto, ciudades agrupadas por prioridad operativa, repetición de `signals stale` reducida cuando NOAA es el cuello de botella, suite en `449/449` y validación en Railway. |
 | 2026-03-31 | Explícita | Sesión 46 | `—` | Auditoría NOAA `observed_vs_forecast`: se demuestra bug real de observabilidad, no solo falta de muestra. Fix local con `daily-summaries/TMAX` prioritario, fallback `global-hourly`, guard de lag coherente, trazabilidad extra y suite en `453/453`. |
 | 2026-03-31 | Explícita | Sesión 47 | `—` | Nueva capa `trade_lifecycle`: trazabilidad completa por posición con backfill desde `performance+postmortem`, snapshots en gestión e intra-ciclo, observación post-exit y suite final en `467/467`, sin tocar trading. |
+| 2026-03-31 | Explícita | Sesión 48 | `—` | Hardening fase 1 de `trade_lifecycle`: matching por `id` reconstruido, coalescing defensivo, bloque `integrity`, fix del caso real de cierres huérfanos y suite en `470/470`; validación live demuestra `92 -> 80` records únicos al reconstruir. |
 
 ---
 
@@ -973,6 +974,49 @@ Investigación completa de trades, commits y lógica de trading desde v10.3 hast
   - test de observación post-exit con detección explícita de upside dejado hasta `100c`.
 
 **Resultado:** queda lista una capa de trazabilidad completa, pensada para revisión rápida por Claude Code Sonnet y análisis estratégico posterior por Claude Code Opus, sin tocar ni una regla de trading. Limitación conocida al cierre: el backfill real de la cuenta no pudo materializarse localmente en esta sesión porque el CLI de Railway tenía el login OAuth caducado, pero el código ya deja el `trade_lifecycle.json` preparado para reconstruirse automáticamente desde el Volume en el próximo arranque desplegado.
+
+---
+
+## Sesión 48 — hardening fase 1 de `trade_lifecycle` (31 mar 2026)
+
+**Disparador:** tras validar en Railway que `trade_lifecycle.json` ya existía y era útil para analizar exits, la inspección del raw live reveló ruido histórico real: `92` filas visibles, pero varias operaciones antiguas aparecían duplicadas por `id` y con `token_id` vacío, `total_amount = 0` y `total_shares = 0`.
+
+**Diagnóstico (Codex):**
+
+1. **La duplicación no venía de trading, sino del replay histórico.** Algunos cierres viejos de `performance.json` solo guardaban `city/side/precio/razón`, sin `token_id`, `question` ni `date`. Al reconstruir desde `postmortem + performance`, `_find_trade_lifecycle_record()` no conseguía emparejar esos eventos “pobres” con su record previo de `postmortem`.
+
+2. **El síntoma era una pareja `postmortem-only` + `performance-only` con el mismo `id`.** En live esto afectaba a `12` casos y contaminaba el conteo de `tracked_positions/closed_positions`, además de mezclar ruido parcial en futuros rankings de eficiencia operativa.
+
+3. **Se podía sanear sin tocar trading.** Bastaba con endurecer el matching de la capa derivada, coalescer duplicados por `id` y dejar explícito qué records son solo parciales para análisis.
+
+**Cambios realizados:**
+- `bot.py` añade `_trade_lifecycle_record_id()` y hace que `_find_trade_lifecycle_record()` pruebe primero el `id` reconstruido antes de caer a `token_id/question/city+side+date`.
+- Se añade coalescing defensivo por `id` mediante `_coalesce_trade_lifecycle_records()` y merge controlado de contexto/listas para evitar que una misma posición salga dos veces en el payload final.
+- Cada record recibe ahora un bloque `integrity` con flags como:
+  - `partial_historical_record`
+  - `analysis_ready`
+  - `missing_token_id`
+  - `missing_question`
+  - `missing_entry_context`
+  - `missing_buy_history`
+  - `zero_amount`
+  - `zero_shares`
+- El payload global añade también `integrity` agregado para auditar el estado del dataset antes de usarlo en métricas o dashboard.
+- `record_trade_lifecycle_position_snapshots()` y `record_trade_lifecycle_market_observations()` refrescan también la integridad global para no dejar el JSON desalineado tras cada update incremental.
+- `verify_before_deploy.py` sube a `470/470` con:
+  - check estructural del bloque `integrity`;
+  - test funcional del caso real de “cierre huérfano” para asegurar que un `SELL` histórico sin `token/question/date` ya no duplica el record y queda marcado como parcial.
+
+**Validación con datos reales:**
+- Se descargan `performance.json` y `postmortem.json` live desde Railway y se reconstruye el lifecycle con el código nuevo.
+- Resultado:
+  - `92` filas visibles en el raw live anterior;
+  - `80` records únicos tras reconstrucción endurecida;
+  - `0` duplicados residuales;
+  - `12` `partial_historical_records` explícitamente marcados;
+  - `68` records `analysis_ready`.
+
+**Resultado:** queda cerrada la fase 1 de saneamiento de `trade_lifecycle`: el dataset ya no duplica cierres huérfanos antiguos y además declara explícitamente qué parte del histórico es parcial. No se toca ninguna regla de trading. El siguiente paso natural es desplegar este hardening y construir encima la fase 2: capa analítica de operativa para dashboard y paquete congelado para Claude Code Opus.
 
 ---
 

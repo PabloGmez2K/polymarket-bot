@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 31 de marzo de 2026 (Sesión 47 — capa `trade_lifecycle` para trazabilidad operativa completa)
-**Próxima sesión:** pasar revisión adversarial con Claude Code Sonnet sobre la nueva capa `trade_lifecycle` y el hardening NOAA, luego desplegar en Railway y validar el backfill automático del historial real. La revisión estratégica de cambios de trading queda para Claude Code Opus el viernes, con evidencia ya estructurada.
+**Última actualización:** 31 de marzo de 2026 (Sesión 48 — hardening fase 1 de `trade_lifecycle`)
+**Próxima sesión:** desplegar el hardening fase 1 de `trade_lifecycle`, validar en Railway la desaparición de duplicados/orphans contaminantes y arrancar la fase 2: capa analítica de operativa para dashboard y snapshot congelado para Claude Code Opus.
 
 ---
 
@@ -104,6 +104,8 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Trade lifecycle observability layer (31 mar, sin bump):** Se añade una nueva capa derivada `trade_lifecycle.json` para convertir cada posición en una traza completa y legible: `entry_context`, `latest_entry_context`, lista de `buys`, `timeline`, `exit_attempts`, `position_snapshots`, `market_observations`, `close_context`, `post_exit_analysis` y un `summary` agregado con `top_upside_left`. La capa se reconstruye desde `performance.json` + `postmortem.json`, se actualiza automáticamente en cada `BUY/SELL_PENDING/SELL/SELL_FAILED/LOSS_TOTAL/RESOLVED_WIN`, captura snapshots tanto en `manage_positions()` como en el monitor intra-ciclo y registra qué hizo el mercado tras la salida para medir upside perdido o drawdown evitado. No toca ninguna regla de trading. Tras una pasada de higiene se elimina un bloque duplicado de checks y el runner queda limpio; `verify_before_deploy.py` cierra en `467/467`.
 
+**Trade lifecycle hardening fase 1 (31 mar, sin bump):** La primera revisión del raw live de `trade_lifecycle.json` reveló ruido histórico real: `92` filas en producción, de las que `12` eran duplicados por `id` y correspondían a cierres huérfanos reconstruidos dos veces (par `postmortem` + `performance`) cuando el evento histórico no tenía `token_id/question/date`. Se endurece la capa derivada con matching por `id` reconstruido, coalescing defensivo por `id`, bloque explícito `integrity` tanto global como por record (`partial_historical_record`, `analysis_ready`, faltas de token/question/entry/buys, etc.) y test funcional del caso real de “cierre huérfano” para evitar regresiones. Validación con datos live descargados de Railway: reconstruyendo desde `performance.json + postmortem.json`, el lifecycle queda en `80` records únicos, `0` duplicados residuales y `12` `partial_historical_records`. La suite local sube a `470/470`.
+
 **City accuracy tracker (v10.5.2):** Calcula win rate por ciudad desde postmortem. Alerta por Telegram si una ciudad baja de 25% win rate con 3+ trades. Nuevo comando `/accuracy`. Win rate visible en `/rendimiento`.
 
 **Integración `/accuracy` + revisión crítica (v10.5.3):** `/accuracy` queda visible en el menú, responde siempre con menú, `/estado` muestra explícitamente el intervalo intra-SL y la trazabilidad de sesión 20 queda corregida para reflejar mejor lo que realmente introdujeron los commits de la mañana.
@@ -115,14 +117,14 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.10`)
-**Estado actual tras sesión 47:** Railway sigue en `v10.6.10` y el dashboard live mostraba `NOAA 0/10` y `0/4` ciudades interpretables el `31 mar 2026`, pero el diagnóstico local ya descartó que fuese solo falta de muestra. Encima del fix NOAA queda lista una nueva capa observacional `trade_lifecycle.json` que backfillea desde `performance.json` + `postmortem.json` y seguirá alimentándose con nuevos BUYs, intentos de salida, fills, snapshots en vida y observaciones post-salida sin tocar trading.
-**Versión local / remoto GitHub:** `origin/main` y producción siguen en commit `7eb8f7f` (`v10.6.10`), validado en Railway por `healthz` + snapshot autenticado. El workspace local añade encima hardening NOAA + `trade_lifecycle`, todo sin desplegar todavía y validado con `467/467` tests. Limitación operativa actual: no se ha podido descargar el `performance.json/postmortem.json` live desde Railway para materializar localmente el histórico real porque el login OAuth de Railway quedó caducado; tras el próximo deploy el propio arranque del bot generará el backfill automáticamente en el Volume.
+**Estado actual tras sesión 48:** Railway ya ejecuta el fix NOAA y la primera capa `trade_lifecycle`; el live real muestra `observed_vs_forecast = 2` casos NOAA en Chicago y un `trade_lifecycle.json` operativo. Al auditar ese raw live se detectó que el lifecycle tenía `92` filas, pero `12` eran duplicados/orphans históricos por reconstrucción ambigua de cierres antiguos sin `token_id/question/date`. El hardening local de fase 1 ya corrige esa contaminación sin tocar trading: reconstruyendo desde `performance + postmortem` live, el archivo queda en `80` records únicos, `0` duplicados residuales y `12` `partial_historical_records` explícitamente marcados.
+**Versión local / remoto GitHub:** `origin/main` y producción ya están en la base con NOAA hardening + `trade_lifecycle` desplegados; el workspace local añade ahora encima el hardening fase 1 de integridad para `trade_lifecycle`, pendiente de deploy. `verify_before_deploy.py` queda en `470/470`. El siguiente paso correcto es desplegar este saneamiento antes de construir la capa analítica de operativa del dashboard.
 
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.6.10 con hardening NOAA + capa `trade_lifecycle` local pendiente de deploy |
-| `verify_before_deploy.py` | Suite local de `467` tests de comportamiento |
+| `bot.py` | Script principal v10.6.10 con NOAA hardening desplegado y hardening fase 1 de `trade_lifecycle` pendiente de deploy |
+| `verify_before_deploy.py` | Suite local de `470` tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |

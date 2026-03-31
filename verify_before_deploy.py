@@ -193,7 +193,7 @@ def run_tests():
         test("Python válido", True)
     except SyntaxError as e:
         test("Python válido", False, str(e))
-        print("\n⛔ Sintaxis inválida — no se pueden ejecutar más tests")
+        print("\n[ERROR] Sintaxis invalida - no se pueden ejecutar mas tests")
         sys.exit(1)
 
     code_lines = code.splitlines()
@@ -1846,6 +1846,7 @@ def run_tests():
     test("trade_lifecycle sincroniza desde performance+postmortem", "def _sync_trade_lifecycle_from_sources(" in code)
     test("trade_lifecycle toma snapshots durante gestiÃ³n", 'record_trade_lifecycle_position_snapshots(temp_positions, source="manage_positions", stage="pre_checks")' in code)
     test("trade_lifecycle observa mercado tras cierre", "def record_trade_lifecycle_market_observations(" in code)
+    test("trade_lifecycle expone bloque de integridad", "def _build_trade_lifecycle_integrity(" in code)
 
     try:
         fd, tmp_perf_lifecycle = tempfile.mkstemp(
@@ -2002,8 +2003,14 @@ def run_tests():
             "_parse_lifecycle_timestamp",
             "_to_lifecycle_float",
             "_trade_lifecycle_label",
+            "_trade_lifecycle_record_id",
             "_find_trade_lifecycle_record",
             "_new_trade_lifecycle_record",
+            "_merge_trade_lifecycle_context",
+            "_merge_trade_lifecycle_record",
+            "_coalesce_trade_lifecycle_records",
+            "_build_trade_lifecycle_record_integrity",
+            "_build_trade_lifecycle_integrity",
             "_copy_trade_lifecycle_dynamic_fields",
             "_timeline_event_from_entry",
             "_append_trade_lifecycle_event",
@@ -2098,6 +2105,78 @@ def run_tests():
         test("trade_lifecycle funcional: summary refleja casos con upside_left",
              after_market.get("summary", {}).get("with_upside_left_after_close") == 1,
              after_market.get("summary"))
+
+        orphan_fill_ts = "2026-03-27T08:00:26.261032+00:00"
+        with open(tmp_perf_lifecycle, "w", encoding="utf-8") as f:
+            json.dump([
+                {
+                    "timestamp": "2026-03-27T08:00:26.233834+00:00",
+                    "fill_confirmed": orphan_fill_ts,
+                    "action": "SELL",
+                    "city": "Atlanta",
+                    "side": "Yes",
+                    "price": 0.20,
+                    "shares": 30.51,
+                    "return_est": 6.10,
+                    "pnl_pct": 63.31,
+                    "pnl_cash": 2.60,
+                    "order_id": "oid-orphan-1",
+                    "reason": "take_profit",
+                }
+            ], f, ensure_ascii=False)
+
+        with open(tmp_pm_lifecycle, "w", encoding="utf-8") as f:
+            json.dump([
+                {
+                    "id": "Atlanta|YES||2026-03-27T08:00:26.261032+00:00",
+                    "status": "closed",
+                    "token_id": "",
+                    "question": "",
+                    "city": "Atlanta",
+                    "side": "YES",
+                    "date": "",
+                    "condition": "",
+                    "opened_at": orphan_fill_ts,
+                    "closed_at": orphan_fill_ts,
+                    "buy_count": 0,
+                    "total_amount": 0.0,
+                    "total_shares": 0.0,
+                    "avg_entry_price": 0.134709,
+                    "trader_confirmed": [],
+                    "bot_version_opened": "",
+                    "bot_version_closed": "",
+                    "buys": [],
+                    "close_action": "SELL",
+                    "close_reason": "take_profit",
+                    "close_subtype": "take_profit",
+                    "close_price": 0.20,
+                    "close_shares": 30.51,
+                    "return_est": 6.10,
+                    "pnl_cash": 2.60,
+                    "pnl_pct": 63.31,
+                    "order_id": "oid-orphan-1",
+                }
+            ], f, ensure_ascii=False)
+
+        with open(tmp_trade_lifecycle, "w", encoding="utf-8") as f:
+            json.dump({
+                "generated_at": "",
+                "summary": {},
+                "integrity": {},
+                "records": [],
+            }, f, ensure_ascii=False)
+
+        orphan_payload = lifecycle_ns["_sync_trade_lifecycle_from_sources"]()
+        orphan_records = orphan_payload.get("records", [])
+        orphan_record = orphan_records[0] if orphan_records else {}
+        orphan_integrity = orphan_record.get("integrity", {})
+        test("trade_lifecycle funcional: cierre huÃ©rfano no se duplica entre postmortem y performance",
+             len(orphan_records) == 1 and len(orphan_record.get("timeline", [])) == 1,
+             orphan_records)
+        test("trade_lifecycle funcional: cierre huÃ©rfano queda marcado como parcial",
+             orphan_integrity.get("partial_historical_record") is True
+             and orphan_payload.get("integrity", {}).get("partial_historical_records") == 1,
+             {"record": orphan_record, "integrity": orphan_payload.get("integrity")})
 
         for tmp_path in [tmp_perf_lifecycle, tmp_pm_lifecycle, tmp_trade_lifecycle]:
             if os.path.exists(tmp_path):
@@ -2826,14 +2905,14 @@ def run_tests():
     print(f"\n{'='*50}")
     total = passed + failed
     if failed == 0:
-        print(f"✅ TODOS LOS TESTS PASARON ({passed}/{total})")
+        print(f"[OK] TODOS LOS TESTS PASARON ({passed}/{total})")
         print("Puedes hacer deploy con confianza.")
     else:
         print(f" {failed} TESTS FALLARON de {total}")
         print("Errores:")
         for e in errors:
             print(f"  - {e}")
-        print("\n⛔ NO hacer deploy hasta corregir los errores.")
+        print("\n[STOP] NO hacer deploy hasta corregir los errores.")
     print(f"{'='*50}")
 
     return failed == 0
