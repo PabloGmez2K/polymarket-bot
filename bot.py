@@ -4512,6 +4512,70 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
             return "resolved_win"
         return "other"
 
+    bucket_meta = {
+        "take_profit": {"label": "Take-profit", "tag": "TP", "badge": "good"},
+        "reeval": {"label": "Re-eval", "tag": "RV", "badge": "accent"},
+        "stop_loss": {"label": "Stop-loss", "tag": "SL", "badge": "warn"},
+        "loss_total": {"label": "LOSS_TOTAL", "tag": "LT", "badge": "bad"},
+        "resolved_win": {"label": "Resolucion", "tag": "WIN", "badge": "good"},
+        "other": {"label": "Otro cierre", "tag": "Otro", "badge": "muted"},
+    }
+
+    def _bucket_meta(record):
+        bucket = _close_bucket(record)
+        return bucket, bucket_meta.get(bucket, bucket_meta["other"])
+
+    def _quality_meta(integrity):
+        if integrity.get("partial_historical_record"):
+            return {
+                "label": "Historico parcial",
+                "note": "faltan token, buys y entrada",
+                "badge": "muted",
+                "sort_key": 2,
+            }
+        if integrity.get("close_only_record"):
+            return {
+                "label": "Cierre heredado",
+                "note": "solo se conserva la salida",
+                "badge": "warn",
+                "sort_key": 1,
+            }
+        if integrity.get("missing_entry_context") or integrity.get("missing_buy_history"):
+            return {
+                "label": "Incompleta",
+                "note": "falta parte del contexto de entrada",
+                "badge": "warn",
+                "sort_key": 1,
+            }
+        return {
+            "label": "Completa",
+            "note": "lista para lectura operativa",
+            "badge": "good",
+            "sort_key": 0,
+        }
+
+    def _result_meta(status, close_context, pnl_cash, integrity):
+        action = str(close_context.get("close_action", "") or "")
+        if status == "open":
+            return {"label": "Abierta", "badge": "accent", "kind": "open"}
+        if status == "pending_exit":
+            return {"label": "Pending exit", "badge": "warn", "kind": "pending"}
+        if status == "exit_failed":
+            return {"label": "Exit failed", "badge": "bad", "kind": "failed"}
+        if action == "LOSS_TOTAL":
+            return {"label": "Perdida total", "badge": "bad", "kind": "loss_total"}
+        if action == "RESOLVED_WIN":
+            return {"label": "Ganada por resolucion", "badge": "good", "kind": "win"}
+        if pnl_cash is not None and pnl_cash > 0:
+            return {"label": "Ganada", "badge": "good", "kind": "win"}
+        if pnl_cash is not None and pnl_cash < 0:
+            if integrity.get("partial_historical_record") or integrity.get("close_only_record"):
+                return {"label": "Perdida legacy", "badge": "warn", "kind": "legacy_loss"}
+            return {"label": "Perdida SELL", "badge": "bad", "kind": "sell_loss"}
+        if integrity.get("partial_historical_record") or integrity.get("close_only_record"):
+            return {"label": "Legacy parcial", "badge": "warn", "kind": "legacy"}
+        return {"label": "Neutral", "badge": "muted", "kind": "neutral"}
+
     def _effective_exit_price(record):
         close_context = record.get("close_context") or {}
         close_price = _to_lifecycle_float(close_context.get("close_price"))
@@ -4529,10 +4593,14 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
             return _to_lifecycle_float(snapshots[-1].get("cur_price"))
         return None
 
-    def _entry_condition(record):
+    def _entry_condition(record, integrity):
         entry = record.get("latest_entry_context") or record.get("entry_context") or {}
+        if integrity.get("partial_historical_record"):
+            return "Historico parcial: faltan token, buys y datos de entrada."
+        if integrity.get("close_only_record"):
+            return "Cierre heredado: solo se conserva la salida, no la entrada completa."
         if not entry.get("timestamp"):
-            return "Historico parcial: faltan datos claros de entrada."
+            return "Entrada reconstruida sin timestamp claro."
 
         parts = []
         entry_price = _to_lifecycle_float(entry.get("price"))
@@ -4567,7 +4635,7 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
 
         return " | ".join(parts) if parts else "Entrada registrada sin detalle adicional."
 
-    def _exit_condition(record):
+    def _exit_condition(record, integrity):
         status = str(record.get("status", "") or "")
         close_context = record.get("close_context") or {}
         reason = str(close_context.get("close_reason", "") or "")
@@ -4620,13 +4688,12 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
         if decision_note:
             parts.append(decision_note)
 
-        return " | ".join(parts) if parts else "Salida cerrada sin detalle adicional."
+        if integrity.get("close_only_record") and not attempts:
+            parts.append("registro heredado")
 
-    bucket_meta = {
-        "take_profit": {"label": "Take-profit", "tag": "TP"},
-        "reeval": {"label": "Re-eval", "tag": "Reeval"},
-        "stop_loss": {"label": "Stop-loss", "tag": "SL"},
-    }
+        if not parts and integrity.get("partial_historical_record"):
+            return "Cierre parcial heredado sin regla explicitada."
+        return " | ".join(parts) if parts else "Salida cerrada sin detalle adicional."
 
     observed_rows = []
     for record in records:
@@ -4665,8 +4732,7 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
             if (close_value + drawdown_avoided) > 0 and drawdown_avoided > 0
             else None
         )
-        bucket = _close_bucket(record)
-        reason_meta = bucket_meta.get(bucket, {"label": "Otro", "tag": "Otro"})
+        bucket, reason_meta = _bucket_meta(record)
         net_delta_cash = round(drawdown_avoided - upside_left, 2)
         if upside_left > 0 and drawdown_avoided <= 0:
             verdict_label = "Upside dejado"
@@ -4688,6 +4754,10 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
             short_label = f"{short_label} RV"
         elif bucket == "stop_loss":
             short_label = f"{short_label} SL"
+        elif bucket == "loss_total":
+            short_label = f"{short_label} LT"
+        elif bucket == "resolved_win":
+            short_label = f"{short_label} WIN"
 
         observed_rows.append({
             "id": record.get("id"),
@@ -4734,6 +4804,10 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
     total_closed = int(summary.get("closed_positions", 0) or 0)
     tracked_positions = int(summary.get("tracked_positions", len(records)) or len(records))
     analysis_ready_records = int(integrity_summary.get("analysis_ready_records", 0) or 0)
+    partial_historical_records = int(integrity_summary.get("partial_historical_records", 0) or 0)
+    close_only_records = int(integrity_summary.get("close_only_records", 0) or 0)
+    close_only_only_records = max(0, close_only_records - partial_historical_records)
+    legacy_review_records = partial_historical_records + close_only_only_records
     close_value_total = round(sum(item["close_value"] for item in observed_rows), 2)
     upside_left_total = round(sum(item["upside_left_cash_peak"] for item in observed_rows), 2)
     drawdown_avoided_total = round(sum(item["drawdown_avoided_cash_peak"] for item in observed_rows), 2)
@@ -4873,14 +4947,18 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
     won_cash_total = 0.0
     lost_cash_total = 0.0
     net_pnl_total = 0.0
+    sell_loss_count = 0
+    sell_loss_cash_total = 0.0
+    loss_total_count = 0
+    loss_total_cash_total = 0.0
 
     for record in records:
         integrity = record.get("integrity") or _build_trade_lifecycle_record_integrity(record)
+        quality_meta = _quality_meta(integrity)
         status = str(record.get("status", "") or "")
         close_context = record.get("close_context") or {}
         post_exit = record.get("post_exit_analysis") or {}
-        bucket = _close_bucket(record)
-        bucket_label = bucket_meta.get(bucket, {"label": "Otro"})["label"]
+        bucket, bucket_display_meta = _bucket_meta(record)
         avg_entry_price = _to_lifecycle_float(record.get("avg_entry_price"))
         effective_exit_price = _effective_exit_price(record)
         cents_result = (
@@ -4908,41 +4986,47 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
         if status == "open":
             pnl_cash = _to_lifecycle_float(latest_snapshot.get("cash_pnl"), 2)
             pnl_pct = _to_lifecycle_float(latest_snapshot.get("pct_pnl"), 2)
+        result_meta = _result_meta(status, close_context, pnl_cash, integrity)
+        result_label = result_meta["label"]
+        result_badge = result_meta["badge"]
+        result_kind = result_meta["kind"]
 
         if status == "open":
-            result_label = "Abierta"
-            result_badge = "accent"
-            open_count += 1
+            bucket_label = "Abierta"
         elif status == "pending_exit":
-            result_label = "Pending exit"
-            result_badge = "warn"
-            pending_count += 1
-        elif pnl_cash is not None and pnl_cash > 0:
-            result_label = "Ganada"
-            result_badge = "good"
-            won_count += 1
-            won_cash_total += pnl_cash
-            net_pnl_total += pnl_cash
-        elif pnl_cash is not None and pnl_cash < 0:
-            result_label = "Perdida"
-            result_badge = "bad"
-            lost_count += 1
-            lost_cash_total += abs(pnl_cash)
-            net_pnl_total += pnl_cash
-        elif str(close_context.get("close_action", "") or "") == "LOSS_TOTAL":
-            result_label = "Perdida"
-            result_badge = "bad"
-            lost_count += 1
+            bucket_label = "Pending exit"
+        elif status == "exit_failed":
+            bucket_label = "Exit failed"
         else:
-            result_label = "Neutral"
-            result_badge = "muted"
-            if pnl_cash is not None:
-                net_pnl_total += pnl_cash
+            bucket_label = bucket_display_meta["label"]
 
-        if status == "closed" and pnl_cash is None and str(close_context.get("close_action", "") or "") == "RESOLVED_WIN":
-            result_label = "Ganada"
-            result_badge = "good"
+        if result_kind == "open":
+            open_count += 1
+        elif result_kind == "pending":
+            pending_count += 1
+        elif result_kind == "win":
             won_count += 1
+            if pnl_cash is not None and pnl_cash > 0:
+                won_cash_total += pnl_cash
+        elif result_kind == "sell_loss":
+            lost_count += 1
+            sell_loss_count += 1
+            if pnl_cash is not None and pnl_cash < 0:
+                lost_cash_total += abs(pnl_cash)
+                sell_loss_cash_total += abs(pnl_cash)
+        elif result_kind == "loss_total":
+            lost_count += 1
+            loss_total_count += 1
+            if pnl_cash is not None and pnl_cash < 0:
+                lost_cash_total += abs(pnl_cash)
+                loss_total_cash_total += abs(pnl_cash)
+        elif result_kind == "legacy_loss":
+            lost_count += 1
+            if pnl_cash is not None and pnl_cash < 0:
+                lost_cash_total += abs(pnl_cash)
+
+        if pnl_cash is not None:
+            net_pnl_total += pnl_cash
 
         trade_rows.append({
             "id": record.get("id"),
@@ -4951,8 +5035,8 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
             "status_badge": result_badge if status != "open" else "accent",
             "status_label": result_label,
             "bucket_label": bucket_label,
-            "entry_condition": _entry_condition(record),
-            "exit_condition": _exit_condition(record),
+            "entry_condition": _entry_condition(record, integrity),
+            "exit_condition": _exit_condition(record, integrity),
             "opened_at_display": _fmt_ts(record.get("opened_at")),
             "closed_at_display": _fmt_ts(record.get("closed_at") or close_context.get("timestamp")),
             "pnl_cash": pnl_cash,
@@ -4971,9 +5055,9 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
                 else "sin obs"
             ),
             "analysis_ready": bool(integrity.get("analysis_ready")),
-            "integrity_note": (
-                "Completa" if integrity.get("analysis_ready") else "Parcial"
-            ),
+            "integrity_note": quality_meta["label"],
+            "integrity_badge": quality_meta["badge"],
+            "quality_sort": quality_meta["sort_key"],
             "sort_key": (
                 record.get("last_activity_at")
                 or record.get("closed_at")
@@ -4984,13 +5068,15 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
         })
 
     trade_rows.sort(key=lambda item: item.get("sort_key") or "", reverse=True)
-    trade_rows.sort(key=lambda item: 0 if item.get("analysis_ready") else 1)
+    trade_rows.sort(key=lambda item: item.get("quality_sort", 0))
     total_cards = [
-        {"label": "Operaciones totales", "value": str(tracked_positions), "detail": f"{total_closed} cerradas | {open_count} abiertas"},
+        {"label": "Operaciones totales", "value": str(tracked_positions), "detail": f"{total_closed} cerradas | {open_count} abiertas | {pending_count} pending"},
         {"label": "TP", "value": str(int(summary.get("take_profit_closes", 0) or 0)), "detail": "cierres por take-profit"},
-        {"label": "SL", "value": str(int(summary.get("stop_loss_closes", 0) or 0)), "detail": "cierres por stop-loss"},
+        {"label": "SL", "value": str(int(summary.get("stop_loss_closes", 0) or 0)), "detail": "solo SELL por stop-loss"},
+        {"label": "LOSS_TOTAL", "value": str(loss_total_count), "detail": _fmt_cash_plain(loss_total_cash_total) if loss_total_cash_total > 0 else "posiciones muertas/no vendibles"},
         {"label": "Ganadas", "value": str(won_count), "detail": _fmt_cash_plain(won_cash_total)},
-        {"label": "Perdidas", "value": str(lost_count), "detail": _fmt_cash_plain(lost_cash_total)},
+        {"label": "SELL negativos", "value": str(sell_loss_count), "detail": _fmt_cash_plain(sell_loss_cash_total) if sell_loss_count else "sin SELL cerrados en negativo"},
+        {"label": "Legacy/parcial", "value": str(legacy_review_records), "detail": f"{partial_historical_records} parciales | {close_only_only_records} close-only"},
         {"label": "PnL neto", "value": _fmt_cash(net_pnl_total), "detail": "cash realizado/estimado por trade"},
         {"label": "Dejado de ganar", "value": _fmt_cash_plain(upside_left_total), "detail": "solo muestra observada"},
         {"label": "Protegido", "value": _fmt_cash_plain(drawdown_avoided_total), "detail": "solo muestra observada"},
@@ -5011,6 +5097,9 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
         "tracked_positions": tracked_positions,
         "closed_positions": total_closed,
         "analysis_ready_records": analysis_ready_records,
+        "legacy_review_records": legacy_review_records,
+        "loss_total_closes": loss_total_count,
+        "sell_loss_closes": sell_loss_count,
         "harvest_efficiency_pct": harvest_efficiency_pct,
         "harvest_efficiency_display": _fmt_pct(harvest_efficiency_pct),
         "protection_efficiency_pct": protection_efficiency_pct,
@@ -5036,7 +5125,7 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
         "timeline_points": timeline_points,
         "note": (
             "Solo cuenta cierres con precio de salida util y observacion de mercado despues del cierre. "
-            "La muestra historica parcial queda fuera de esta capa para no contaminar el analisis."
+            "La muestra historica parcial queda fuera de esta capa y la consola separa SL, LOSS_TOTAL y legacy/parcial para no mezclar semanticas."
         ),
     }
 

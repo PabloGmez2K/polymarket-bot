@@ -843,14 +843,20 @@
             <div class="list-stack compact">
               <div class="list-row">
                 <div class="check-body">
-                  <strong>Operaciones totales / TP / SL</strong>
-                  <span>Conteo operativo completo desde `trade_lifecycle`, no solo la muestra observada.</span>
+                  <strong>Operaciones / TP / SL / LOSS_TOTAL</strong>
+                  <span>`LOSS_TOTAL` no es un `SELL`: marca posiciones muertas o no vendibles, separadas de los stop-loss normales.</span>
                 </div>
               </div>
               <div class="list-row">
                 <div class="check-body">
-                  <strong>Ganadas / Perdidas / PnL neto</strong>
-                  <span>Sale del `close_context.pnl_cash` cuando existe; posiciones parciales siguen marcadas como tales.</span>
+                  <strong>Ganadas / SELL negativos / PnL neto</strong>
+                  <span>Los `SELL` cerrados en rojo se leen aparte para no mezclar p&eacute;rdidas de ejecuci&oacute;n con `LOSS_TOTAL` o legado hist&oacute;rico.</span>
+                </div>
+              </div>
+              <div class="list-row">
+                <div class="check-body">
+                  <strong>Legacy / parcial</strong>
+                  <span>Son registros reconstruidos con contexto incompleto: sirven para trazabilidad, pero no pesan igual que un trade completo de la serie actual.</span>
                 </div>
               </div>
               <div class="list-row">

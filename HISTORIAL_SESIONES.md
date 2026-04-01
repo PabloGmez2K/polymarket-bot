@@ -67,6 +67,9 @@ Comandos útiles:
 | 2026-03-31 | Explícita | Sesión 49 | `—` | Hotfix del coalescing de `trade_lifecycle` tras detectar en Railway `unhashable type: 'list'`; se sustituye la comparación inválida con sets `{None, "", [], {}}` por `_lifecycle_is_empty()`, se añade regresión del merge de contextos duplicados, se normaliza `agent_events.jsonl` a UTF-8 y la suite queda en `472/472`. |
 | 2026-03-31 | Explícita | Sesión 50 | `—` | Recap operativo + hardening Railway CLI: validación live del hotfix (`87` records, `0` ids duplicados) y nuevo wrapper `tools/railway_safe.ps1` para limpiar proxies de proceso, junto con regla operativa en el playbook para no repetir el bucle de auth/`invalid_grant`. |
 | 2026-03-31 | Explícita | Sesión 51 | `—` | Fase 2 analítica de operativa: `build_dashboard_trade_analytics()`, score de exits observados, breakdown por `take_profit / reeval / stop_loss`, timeline corto y sección nueva en dashboard para seguir upside dejado vs downside evitado. Suite local `477/477`. |
+| 2026-03-31 | Explícita | Sesión 52 | `—` | Trade console dashboard: nueva pestaña separada con `Resumen / Trades`, KPIs de operativa real y tabla por posición basada en `trade_lifecycle/postmortem`, pensada para seguimiento activo sin tocar trading. |
+| 2026-04-01 | Explícita | Sesión 53 | `—` | Snapshot analítico live + refinamiento semántico local: acceso live reabierto vía dashboard, foto congelada de producción (`101` operaciones, `85` cerradas, `16` abiertas, `LOSS_TOTAL=60`, `sample observado=7/85`) y handoff limpio del bug de auth Railway. |
+| 2026-04-01 | Explícita | Sesión 54 | `—` | Cierre del bug de Railway auth: wrapper endurecido (`HTTP_PROXY`/minúsculas/`npm_config_*`), nuevo helper `tools/railway_auth_repair.ps1` con `doctor/reset/launch-login/restore-links`, login browserless validado y re-enlace del proyecto restaurado desde backup; `whoami/status/logs` vuelven a funcionar. |
 
 ---
 
@@ -1187,6 +1190,147 @@ Investigación completa de trades, commits y lógica de trading desde v10.3 hast
 - `verify_before_deploy.py` sube a `478/478`.
 
 **Resultado:** el dashboard ya no se queda en una lectura abstracta de eficiencia. Ahora también ofrece una consola de operaciones pensada para seguimiento activo del bot y para preparar, más adelante, una revisión profunda con Claude Code Opus usando una vista más legible y más cercana a cómo se piensa la operativa real.
+
+---
+
+## Sesión 53 — snapshot analítico live + refinamiento semántico local (1 abr 2026)
+
+**Disparador:** el siguiente paso pendiente ya no era añadir más panel, sino usar producción como fuente de verdad para revisar casos reales `take_profit / reeval / stop_loss` y congelar una foto analítica útil antes de seguir tocando semántica o reglas.
+
+**Objetivo:** reabrir acceso live, revisar la consola de trades contra datos reales de Railway y dejar un snapshot congelado que sirva tanto para la próxima iteración local como para un handoff limpio a Claude Code Opus.
+
+**Acceso live recuperado:**
+- El Railway CLI seguía bloqueado por auth expirada (`invalid_grant`) y el wrapper confirmó que `railway login` no puede completarse desde una shell no interactiva de Codex.
+- Se encontró una vía alternativa suficiente para análisis: el dashboard live ya estaba protegido con auth básica y las credenciales existían en `.env`.
+- Con eso se pudo acceder a:
+  - `https://polymarket-bot-production-4deb.up.railway.app/healthz`
+  - `https://polymarket-bot-production-4deb.up.railway.app/api/dashboard.json`
+
+**Foto live congelada (`2026-04-01 20:13 UTC`):**
+- versión: `v10.6.10`
+- `portfolio_total = $31.91`
+- `signals ok`
+- sin `pending_exit` atascadas
+- `101` operaciones
+- `85` cerradas
+- `16` abiertas
+- `TP = 5`
+- `SL = 13`
+- `LOSS_TOTAL = 60`
+- `PnL neto = $-37.53`
+- muestra observada post-salida: `7/85`
+- focus live:
+  - `Sano con limitaciones`
+  - `La operativa parece estable; el cuello de botella ahora es learning / measurement`
+  - acción: `No tocar trading: priorizar crecimiento de muestra NOAA`
+  - NOAA: `2/10` casos, `0/4` ciudades interpretables
+
+**Casos revisados en live:**
+- `Re-eval` observado:
+  - `Will the highest temperature in New York City be 74°F or higher on March 31?`
+  - `PnL = $+0.06`
+  - `trade_value = $1.32`
+  - `2 obs`
+  - salida por `edge recalculado < -3%`
+- `Stop-loss` observados:
+  - Dallas `82-83°F Apr 1`:
+    - `PnL = $-0.56`
+    - `trade_value = $0.41`
+    - `3 obs`
+  - Atlanta `80-81°F Apr 1`:
+    - `PnL = $-1.30`
+    - `trade_value = $0.77`
+    - sin observación post-salida todavía
+    - conserva `trigger 10.5c | limite 8.0c`
+- `Take-profit` identificados en live:
+  - `Chicago YES` como `Mejor operacion` (`SELL · take_profit`, `+$3.96`)
+  - `Atlanta Mar30 YES` como `Mejor retorno %` (`v10.6.10 · serie v10.6 · SELL · take_profit`, `+302.5%`)
+  - importante: en este snapshot no aparece aún muestra observada post-salida de TP (`coverage 0/5`)
+
+**Hallazgo clave del snapshot:**
+
+1. **La consola live seguía mezclando semánticas.** En la tabla visible del snapshot muchos cierres seguían cayendo en bucket `Otro`, aunque el breakdown validado ya reconocía `60 LOSS_TOTAL`. No era un problema teórico: seguía costando leer de un vistazo qué era `SELL negativo`, qué era `LOSS_TOTAL` y qué era ruido legacy/parcial.
+
+2. **La evidencia observada de exits sigue siendo pequeña pero ya útil.** `Re-eval` aparece con señal de `revisar captura`; `Stop-loss` sale `mixto`; y `Take-profit` aún no tiene muestra observada útil en este snapshot aunque sí muestra balance agregado claramente positivo.
+
+3. **El bloqueo principal no es trading, sino measurement.** El propio `focus` live sigue recomendando no tocar reglas y priorizar NOAA, porque `0/4` ciudades activas siguen sin llegar a zona interpretable.
+
+**Cambios realizados en local durante la misma sesión:**
+- `build_dashboard_trade_analytics()` queda endurecido para separar:
+  - motivo de salida;
+  - resultado económico;
+  - calidad/integridad del registro.
+- El `trade console` local pasa a distinguir explícitamente:
+  - `SELL negativos`
+  - `LOSS_TOTAL`
+  - `Legacy/parcial`
+- `templates/dashboard.html` se ajusta para explicar esa nueva lectura.
+- `verify_before_deploy.py` gana cobertura funcional de:
+  - `LOSS_TOTAL`
+  - `close-only`
+  - `partial_historical`
+- La suite local sube a `479/479`.
+
+**Artefactos congelados:**
+- `SNAPSHOT_DASHBOARD_LIVE_2026-04-01T2013Z.json`
+- `SNAPSHOT_ANALITICO_LIVE_2026-04-01.md`
+
+**Resultado:** queda reabierto el acceso live suficiente para análisis, congelada una foto real de producción y cerrada en local la semántica que faltaba para que la próxima validación live no vuelva a colapsar `SL / LOSS_TOTAL / legacy` en una lectura ambigua. El siguiente paso correcto ya no es investigar, sino desplegar esta mejora semántica y revalidar la consola sobre el mismo flujo live.
+
+---
+
+## Sesión 54 — cierre del bug de Railway auth (1 abr 2026)
+
+**Disparador:** el usuario pidió una sesión limpia dedicada solo al bug de Railway auth que obligaba a reloguearse continuamente, sin tocar trading ni dashboard.
+
+**Diagnóstico confirmado:**
+
+1. **Había dos capas distintas del fallo.**
+   - Sin wrapper, `railway.cmd` seguía intentando salir por `127.0.0.1:9` y fallaba al conectar.
+   - Con wrapper, la red quedaba bien, pero `whoami/status` devolvían `Unauthorized`, así que el problema real restante era de credenciales locales degradadas.
+
+2. **Los proxies no eran persistentes de Windows.**
+   - `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/GIT_*` estaban presentes en la shell actual.
+   - No aparecían ni en variables `User/Machine` ni en perfiles normales de PowerShell.
+   - Conclusión operativa: el wrapper seguía siendo la defensa correcta para uso diario.
+
+3. **El `config.json` de Railway estaba enlazado pero roto a nivel de auth.**
+   - Existían `accessToken`, `refreshToken` y el link del proyecto.
+   - Aun así, en entorno limpio la CLI respondía `Unauthorized`.
+   - Esto confirmó que el siguiente paso no era tocar el bot, sino sanear la auth local.
+
+**Cambios implementados:**
+
+- `tools/railway_safe.ps1` se endurece para limpiar también proxies en minúsculas, `NO_PROXY` y variantes `npm_config_*`, no solo `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/GIT_*`.
+- Se añade `tools/railway_auth_repair.ps1` con cuatro acciones operativas:
+  - `doctor`: diagnostica proxies, estado del `config.json` y auth real vía `whoami`.
+  - `reset`: hace backup del config y limpia solo los tokens stale.
+  - `launch-login -Browserless`: abre una shell limpia para login interactivo del usuario.
+  - `restore-links`: restaura el bloque `projects` desde el último backup sin tocar los tokens nuevos.
+- `OPERATIONS_PLAYBOOK.md`, `CONTEXTO.md` y esta bitácora quedan actualizados con el flujo correcto.
+
+**Incidencia real descubierta durante la reparación:**
+
+- El login browserless sí autenticó correctamente al usuario (`pablogomez.eu@gmail.com`), pero Railway regeneró `config.json` con `projects = {}` y `status` pasó a responder `No linked project found`.
+- Para cerrar ese hueco se añadió `restore-links`, que copia únicamente el bloque `projects` desde `config.backup.*.json`.
+- También se corrigió la escritura del helper a `UTF-8` sin BOM para no volver a provocar `Unable to parse config file, regenerating` en futuros `reset`.
+
+**Validación final del 1 de abril de 2026:**
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 whoami`
+  - `Logged in as pablogomez.eu@gmail.com`
+- `powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 status`
+  - `Project: enchanting-respect`
+  - `Environment: production`
+  - `Service: polymarket-bot`
+- `powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 logs -s polymarket-bot -n 20`
+  - vuelve a responder correctamente
+
+**Límite de alcance respetado:**
+
+- no se tocó trading;
+- no se tocó dashboard;
+- la lectura de logs live fue solo para validar que la CLI había quedado operativa otra vez.
 
 ---
 

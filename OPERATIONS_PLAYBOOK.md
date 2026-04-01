@@ -87,24 +87,37 @@ Despues de `git push`:
 
 Regla operativa: el problema reciente de auth no fue solo Railway. Se mezclaron:
 
-- proxies de proceso contaminados (`127.0.0.1:9`)
+- proxies de proceso contaminados (`127.0.0.1:9`) inyectados en la shell actual
 - refresh de OAuth que necesita escribir en `%USERPROFILE%\.railway\config.json`
 
 Guardrail minimo desde ahora:
 
 1. Para uso manual, ejecutar Railway con:
    - `powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 status`
+   - `powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 whoami`
    - `powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 logs -s polymarket-bot -n 80`
    - `powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 ssh "ls -l /app/data"`
-2. `railway login` se hace solo en una terminal interactiva del usuario.
-3. Si Codex necesita usar Railway despues del login, hacerlo fuera del sandbox cuando pueda tocar auth o refrescar tokens.
-4. No perseguir el origen del proxy durante una incidencia si el wrapper ya desbloquea la operativa. El origen del proxy es deuda tecnica secundaria mientras no vuelva a bloquear.
+2. `tools/railway_safe.ps1` limpia proxies en mayusculas/minusculas y tambien variantes `npm_config_*`, para que Railway no herede un proxy roto aunque la shell venga contaminada.
+3. `railway login` se hace solo en una terminal interactiva del usuario.
+4. Si `whoami` o `status` vuelven a pedir login de forma persistente, usar primero:
+   - `powershell -ExecutionPolicy Bypass -File .\tools\railway_auth_repair.ps1 doctor`
+   - `powershell -ExecutionPolicy Bypass -File .\tools\railway_auth_repair.ps1 reset`
+   - `powershell -ExecutionPolicy Bypass -File .\tools\railway_auth_repair.ps1 launch-login -Browserless`
+   El reset hace backup del `config.json`, limpia solo los tokens stale y preserva el enlace del proyecto.
+5. Tras el login limpio, validar con:
+   - `powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 whoami`
+   - `powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 status`
+   - `powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 logs -s polymarket-bot -n 20`
+6. Si Codex necesita usar Railway despues del login, hacerlo fuera del sandbox cuando pueda tocar auth o refrescar tokens.
+7. No perseguir el origen del proxy durante una incidencia si el wrapper ya desbloquea la operativa. El origen del proxy es deuda tecnica secundaria mientras no vuelva a bloquear.
 
 Si Railway vuelve a responder `invalid_grant`:
 
-1. repetir login manual interactivo
-2. reintentar con `tools/railway_safe.ps1`
-3. no asumir que el problema es del bot ni del deploy
+1. ejecutar `tools/railway_auth_repair.ps1 doctor`
+2. hacer `reset` para eliminar tokens incoherentes, no el enlace del proyecto
+3. relanzar login limpio con `launch-login -Browserless`
+4. reintentar con `tools/railway_safe.ps1`
+5. no asumir que el problema es del bot ni del deploy
 
 ---
 

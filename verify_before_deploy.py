@@ -1194,23 +1194,27 @@ def run_tests():
         exec(get_function_source(module_ast, code_lines, "build_dashboard_trade_analytics"), trade_analytics_ns)
         trade_analytics = trade_analytics_ns["build_dashboard_trade_analytics"](
             trade_lifecycle={
-                "summary": {"tracked_positions": 3, "closed_positions": 3},
-                "integrity": {"analysis_ready_records": 3},
+                "summary": {"tracked_positions": 5, "closed_positions": 5, "take_profit_closes": 1, "stop_loss_closes": 1},
+                "integrity": {"analysis_ready_records": 4, "partial_historical_records": 1, "close_only_records": 2},
                 "records": [
                     {
                         "label": "Atlanta TP",
                         "city": "Atlanta",
                         "status": "closed",
                         "closed_at": "2026-03-30T11:05:26+00:00",
+                        "entry_context": {"timestamp": "2026-03-30T08:05:26+00:00", "price": 0.41, "edge_pct": 14.2},
                         "close_context": {
                             "close_reason": "take_profit",
                             "close_action": "SELL",
                             "close_price": 0.79,
                             "close_shares": 3.3,
+                            "pnl_cash": 1.26,
+                            "pnl_pct": 92.0,
                             "timestamp": "2026-03-30T11:05:26+00:00",
                         },
                         "post_exit_analysis": {
                             "market_seen_after_close": True,
+                            "observations_after_close": 3,
                             "upside_left_cash_peak": 0.69,
                             "drawdown_avoided_cash_peak": 0.0,
                             "reached_98_after_close": True,
@@ -1222,18 +1226,45 @@ def run_tests():
                         "city": "Dallas",
                         "status": "closed",
                         "closed_at": "2026-03-30T12:05:26+00:00",
+                        "entry_context": {"timestamp": "2026-03-30T09:05:26+00:00", "price": 0.45, "edge_pct": 9.1},
                         "close_context": {
                             "close_reason": "stop_loss",
                             "close_action": "SELL",
                             "close_price": 0.24,
                             "close_shares": 5.0,
+                            "pnl_cash": -1.05,
+                            "pnl_pct": -46.7,
                             "timestamp": "2026-03-30T12:05:26+00:00",
                         },
                         "post_exit_analysis": {
                             "market_seen_after_close": True,
+                            "observations_after_close": 2,
                             "upside_left_cash_peak": 0.0,
                             "drawdown_avoided_cash_peak": 0.6,
                             "reached_98_after_close": False,
+                        },
+                        "integrity": {"analysis_ready": True},
+                    },
+                    {
+                        "label": "Chicago LT",
+                        "city": "Chicago",
+                        "status": "closed",
+                        "closed_at": "2026-03-30T12:40:00+00:00",
+                        "entry_context": {"timestamp": "2026-03-30T10:10:00+00:00", "price": 0.29},
+                        "avg_entry_price": 0.29,
+                        "close_context": {
+                            "close_reason": "micro_position_unsellable",
+                            "close_action": "LOSS_TOTAL",
+                            "close_price": 0.0,
+                            "close_shares": 4.0,
+                            "pnl_cash": -1.16,
+                            "pnl_pct": -100.0,
+                            "timestamp": "2026-03-30T12:40:00+00:00",
+                        },
+                        "post_exit_analysis": {
+                            "market_seen_after_close": False,
+                            "upside_left_cash_peak": 0.0,
+                            "drawdown_avoided_cash_peak": 0.0,
                         },
                         "integrity": {"analysis_ready": True},
                     },
@@ -1243,24 +1274,54 @@ def run_tests():
                         "status": "closed",
                         "closed_at": "2026-03-30T13:05:26+00:00",
                         "close_context": {
+                            "close_reason": "reeval",
+                            "close_action": "SELL",
+                            "close_price": 0.31,
+                            "close_shares": 2.0,
+                            "pnl_cash": -0.18,
+                            "pnl_pct": -12.0,
+                            "timestamp": "2026-03-30T13:05:26+00:00",
+                        },
+                        "post_exit_analysis": {
+                            "market_seen_after_close": False,
+                            "upside_left_cash_peak": 0.0,
+                            "drawdown_avoided_cash_peak": 0.0,
+                        },
+                        "integrity": {
+                            "analysis_ready": True,
+                            "close_only_record": True,
+                            "missing_entry_context": True,
+                            "missing_buy_history": True,
+                        },
+                    },
+                    {
+                        "label": "Historical partial",
+                        "city": "Boston",
+                        "status": "closed",
+                        "closed_at": "2026-03-30T13:20:26+00:00",
+                        "close_context": {
                             "close_reason": "take_profit",
                             "close_action": "SELL",
                             "close_price": None,
                             "close_shares": 0.0,
-                            "timestamp": "2026-03-30T13:05:26+00:00",
+                            "timestamp": "2026-03-30T13:20:26+00:00",
                         },
                         "post_exit_analysis": {
                             "market_seen_after_close": True,
                             "upside_left_cash_peak": 1.4,
                             "drawdown_avoided_cash_peak": 0.0,
                         },
-                        "integrity": {"analysis_ready": False},
+                        "integrity": {
+                            "analysis_ready": False,
+                            "partial_historical_record": True,
+                            "close_only_record": True,
+                        },
                     },
                 ],
             }
         )
         test("trade analytics: cuenta solo cierres observados utilizables",
-             trade_analytics["sample_size"] == 2 and trade_analytics["tracked_positions"] == 3,
+             trade_analytics["sample_size"] == 2 and trade_analytics["tracked_positions"] == 5,
              trade_analytics)
         test("trade analytics: calcula score y queue de upside/proteccion",
              trade_analytics["score_pct"] > 80
@@ -1271,13 +1332,20 @@ def run_tests():
              trade_analytics["breakdown_rows"][0]["label"] == "Take-profit"
              and len(trade_analytics["timeline_points"]) == 2,
              {"breakdown": trade_analytics["breakdown_rows"], "timeline": trade_analytics["timeline_points"]})
-        test("trade analytics: expone totales y detalle por trade",
+        test("trade analytics: separa LOSS_TOTAL y legacy en los totales",
              trade_analytics["total_cards"][0]["label"] == "Operaciones totales"
-             and any(card["label"] == "Dejado de ganar" for card in trade_analytics["total_cards"])
+             and any(card["label"] == "LOSS_TOTAL" and card["value"] == "1" for card in trade_analytics["total_cards"])
+             and any(card["label"] == "Legacy/parcial" and card["value"] == "2" for card in trade_analytics["total_cards"])
+             and any(card["label"] == "SELL negativos" and card["value"] == "1" for card in trade_analytics["total_cards"]),
+             {"totals": trade_analytics["total_cards"]})
+        test("trade analytics: expone detalle semantico por trade",
+             trade_analytics["legacy_review_records"] == 2
              and any(row["label"] == "Atlanta TP" and "TP mecanico" in row["exit_condition"] for row in trade_analytics["trade_rows"])
              and any(row["label"] == "Dallas SL" and "SL mecanico" in row["exit_condition"] for row in trade_analytics["trade_rows"])
-             and any(row["entry_condition"] == "Historico parcial: faltan datos claros de entrada." for row in trade_analytics["trade_rows"]),
-             {"totals": trade_analytics["total_cards"], "trade_rows": trade_analytics["trade_rows"][:2]})
+             and any(row["label"] == "Chicago LT" and row["bucket_label"] == "LOSS_TOTAL" and row["status_label"] == "Perdida total" for row in trade_analytics["trade_rows"])
+             and any(row["label"] == "Legacy close-only" and row["status_label"] == "Perdida legacy" and "Cierre heredado" in row["entry_condition"] for row in trade_analytics["trade_rows"])
+             and any(row["label"] == "Historical partial" and row["integrity_note"] == "Historico parcial" for row in trade_analytics["trade_rows"]),
+             {"trade_rows": trade_analytics["trade_rows"][:5]})
 
         snapshot_ns = {
             "datetime": datetime,
