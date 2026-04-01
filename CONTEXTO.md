@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 1 de abril de 2026 (Sesión 54 — auth de Railway saneada y contexto operativo actualizado)
-**Próxima sesión:** retomar el refinamiento semántico local pendiente y su validación/deploy con el Railway CLI ya operativo; el bloqueo de auth quedó resuelto el 1 de abril de 2026.
+**Última actualización:** 1 de abril de 2026 (Sesión 55 — refinamiento semántico live validado)
+**Próxima sesión:** usar la consola live ya desplegada para revisar TP / reeval / SL reales con la nueva taxonomía y decidir si hace falta otra iteración de lectura o si el foco vuelve por completo a measurement/NOAA.
 
 ---
 
@@ -126,9 +126,9 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
-**Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.10`)
-**Estado actual tras sesión 54:** el acceso live quedó reabierto por la vía del dashboard con auth básica y ya existe un snapshot congelado de producción (`SNAPSHOT_DASHBOARD_LIVE_2026-04-01T2013Z.json` + `SNAPSHOT_ANALITICO_LIVE_2026-04-01.md`). Foto real de Railway a `2026-04-01 20:13 UTC`: `101` operaciones, `85` cerradas, `16` abiertas, `TP=5`, `SL=13`, `LOSS_TOTAL=60`, `PnL neto = $-37.53`, `sample observado = 7/85`, `portfolio_total = $31.91`, `signals ok`, sin `pending_exit` atascadas. El focus live sigue diciendo `No tocar trading: priorizar crecimiento de muestra NOAA` (`2/10` casos, `0/4` ciudades interpretables). Hallazgo clave del snapshot: la consola live actual todavía colapsa demasiados cierres en `Otro`, aunque el breakdown validado ya reconoce `60 LOSS_TOTAL`; por eso se cerró también en local la refinación semántica que separa `SELL negativo` vs `LOSS_TOTAL` vs `legacy/parcial`. Además, el 1 de abril de 2026 quedó restaurada la operativa del Railway CLI: `whoami` autentica bien, `status` vuelve a resolver `enchanting-respect / production / polymarket-bot` y `logs` funciona de nuevo desde el wrapper.
-**Versión local / remoto GitHub:** `origin/main` ya incluye NOAA hardening, `trade_lifecycle`, fase 1 de integridad, hotfix de coalescing (`47c68ee`), el wrapper Railway (`6b07f25`) y la fase 2 analítica base del dashboard (`4f3deda`). La sesión 52 dejó el `trade console`, la 53 añadió en local su refinamiento semántico + snapshot live congelado, y la 54 deja en local el tooling de reparación de auth Railway (`tools/railway_auth_repair.ps1`), el endurecimiento del wrapper y la memoria operativa actualizada. El siguiente paso natural vuelve a ser desplegar el refinamiento semántico y revalidar la lectura live con la nueva taxonomía.
+**Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.10`, refinamiento semántico del `trade console` validado live el 1 abr 2026 a las `21:00 UTC`)
+**Estado actual tras sesión 55:** el acceso live sigue reabierto por la vía del dashboard con auth básica y el snapshot congelado de producción (`SNAPSHOT_DASHBOARD_LIVE_2026-04-01T2013Z.json` + `SNAPSHOT_ANALITICO_LIVE_2026-04-01.md`) ya no es la foto final de la consola. Tras empujar `5b23d02` y forzar el redeploy `00366049-f0a4-4267-b782-450ef49feb75`, la lectura autenticada de `dashboard.json` a `2026-04-01 21:00 UTC` confirma en live las tarjetas `LOSS_TOTAL`, `SELL negativos` y `Legacy/parcial`, además de filas reales como `Stop-loss | Perdida SELL | Completa` y `LOSS_TOTAL | Perdida total | Completa`. El focus operativo no cambia: sigue diciendo `No tocar trading: priorizar crecimiento de muestra NOAA`.
+**Versión local / remoto GitHub:** `origin/main` ya incluye NOAA hardening, `trade_lifecycle`, fase 1 de integridad, hotfix de coalescing (`47c68ee`), el wrapper Railway (`6b07f25`), la base analítica del dashboard (`4f3deda`) y el despliegue validado del refinamiento semántico del `trade console` (`5b23d02`). La sesión 54 cerró la auth de Railway y la 55 confirmó en producción la nueva taxonomía `SL / LOSS_TOTAL / SELL negativo / legacy-parcial`. El siguiente paso natural ya no es auth ni deploy, sino usar esa lectura live estable para revisar exits reales y priorizar mejoras de measurement.
 
 ### Archivos del proyecto:
 | Archivo | Función |

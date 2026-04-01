@@ -70,6 +70,7 @@ Comandos útiles:
 | 2026-03-31 | Explícita | Sesión 52 | `—` | Trade console dashboard: nueva pestaña separada con `Resumen / Trades`, KPIs de operativa real y tabla por posición basada en `trade_lifecycle/postmortem`, pensada para seguimiento activo sin tocar trading. |
 | 2026-04-01 | Explícita | Sesión 53 | `—` | Snapshot analítico live + refinamiento semántico local: acceso live reabierto vía dashboard, foto congelada de producción (`101` operaciones, `85` cerradas, `16` abiertas, `LOSS_TOTAL=60`, `sample observado=7/85`) y handoff limpio del bug de auth Railway. |
 | 2026-04-01 | Explícita | Sesión 54 | `—` | Cierre del bug de Railway auth: wrapper endurecido (`HTTP_PROXY`/minúsculas/`npm_config_*`), nuevo helper `tools/railway_auth_repair.ps1` con `doctor/reset/launch-login/restore-links`, login browserless validado y re-enlace del proyecto restaurado desde backup; `whoami/status/logs` vuelven a funcionar. |
+| 2026-04-01 | Explícita | Sesión 55 | `5b23d02` | Deploy validado del refinamiento semántico del `trade console`: push + redeploy manual en Railway y confirmación live de `LOSS_TOTAL`, `SELL negativos` y `Legacy/parcial` ya visibles en producción. |
 
 ---
 
@@ -1331,6 +1332,26 @@ Investigación completa de trades, commits y lógica de trading desde v10.3 hast
 - no se tocó trading;
 - no se tocó dashboard;
 - la lectura de logs live fue solo para validar que la CLI había quedado operativa otra vez.
+
+---
+
+## Sesión 55 — deploy validado de semántica trade console (1 abr 2026)
+
+**Disparador:** con Railway auth ya reparada y el refinamiento semántico listo en local, faltaba cerrar el paso obvio: empujar el commit, redeployar y comprobar si la consola live seguía colapsando cierres en `Otro` o ya leía bien `SL / LOSS_TOTAL / legacy-parcial`.
+
+**Ejecución y validación:**
+
+- Se empuja `5b23d02` (`ops: refine trade console semantics and harden railway auth workflow`) a `origin/main`.
+- Se fuerza redeploy manual con `powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 redeploy -s polymarket-bot -y`.
+- Railway crea el deployment `00366049-f0a4-4267-b782-450ef49feb75`, que progresa hasta `SUCCESS`.
+- La comprobación live autenticada de `dashboard.json` a las `21:00 UTC` confirma las tarjetas:
+  - `Operaciones totales`, `TP`, `SL`, `LOSS_TOTAL`, `Ganadas`, `SELL negativos`, `Legacy/parcial`, `PnL neto`, `Dejado de ganar`, `Protegido`
+- La nota live ya explica explícitamente que la consola separa `SL`, `LOSS_TOTAL` y `legacy/parcial`.
+- Las primeras filas reales dejan de caer en `Otro` y pasan a verse como:
+  - `Stop-loss | Perdida SELL | Completa`
+  - `LOSS_TOTAL | Perdida total | Completa`
+
+**Resultado:** queda cerrada la brecha entre el snapshot local y el panel productivo. El dashboard live ya muestra la nueva taxonomía sin tocar reglas de trading ni bump de versión (`v10.6.10`), y el siguiente trabajo vuelve a ser análisis operativo sobre casos reales, no auth ni deploy.
 
 ---
 
