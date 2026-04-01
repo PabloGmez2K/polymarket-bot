@@ -71,6 +71,10 @@ Comandos útiles:
 | 2026-04-01 | Explícita | Sesión 53 | `—` | Snapshot analítico live + refinamiento semántico local: acceso live reabierto vía dashboard, foto congelada de producción (`101` operaciones, `85` cerradas, `16` abiertas, `LOSS_TOTAL=60`, `sample observado=7/85`) y handoff limpio del bug de auth Railway. |
 | 2026-04-01 | Explícita | Sesión 54 | `—` | Cierre del bug de Railway auth: wrapper endurecido (`HTTP_PROXY`/minúsculas/`npm_config_*`), nuevo helper `tools/railway_auth_repair.ps1` con `doctor/reset/launch-login/restore-links`, login browserless validado y re-enlace del proyecto restaurado desde backup; `whoami/status/logs` vuelven a funcionar. |
 | 2026-04-01 | Explícita | Sesión 55 | `5b23d02` | Deploy validado del refinamiento semántico del `trade console`: push + redeploy manual en Railway y confirmación live de `LOSS_TOTAL`, `SELL negativos` y `Legacy/parcial` ya visibles en producción. |
+| 2026-04-01 | Explícita | Sesión 56 | `—` | Auditoría manual de inconsistencias en `trade_lifecycle/trade console`: evidencia de trades recientes con desenlace contradictorio o entrada parcial (`Seoul 14C`, `Seoul 13C`, `Atlanta 70-71F`, `Atlanta 78-79F`), creación del handoff `TRADE_LIFECYCLE_INCONSISTENCY_HANDOFF_2026-04-01.md` y cambio de foco a saneamiento de trazabilidad, sin tocar trading ni deploy. |
+| 2026-04-01 | Explícita | Sesión 57 | `—` | Saneamiento local de `trade_lifecycle/trade console`: clave estable por mercado+lados, coalescing de follow-ups (`SELL` + residuo `LOSS_TOTAL`, `RESOLVED_WIN` repetidos), label con `YES/NO`, cruce con cartera para `claim/redeem` y fallback visible desde `portfolio.dead/resolved_won`. Validación concreta sobre `Seoul 14C/13C`, `Atlanta 70-71F/78-79F/80-81F`, `Tokyo 18C`, `Buenos Aires 28C`, `Chicago 40-41F` y `Dallas 82-83F`. Suite local `483/483`. |
+| 2026-04-02 | Explícita | Sesión 58 | `—` | Cierre operativo sin tocar el bot: se fija como siguiente prioridad la auditoría de la captura del `Mission HUD`, se formaliza la regla `1 sesión = 1 tarea` con contexto mínimo, se añade una sección de `token economics` para Codex + Claude Code y se crea `.codex/config.toml` del proyecto con `medium` por defecto y perfiles `low/deep/max`. Sin deploy ni cambios de trading/NOAA. |
+| 2026-04-02 | Explícita | Sesión 59 | `—` | Cierre completo: `python verify_before_deploy.py` vuelve a pasar `483/483`, se versionan el saneamiento local de `trade_lifecycle/trade console`, el handoff y los guardrails de contexto/tokens, y se hace `commit + push` a `origin/main`. No se tocan reglas de trading ni NOAA; queda pendiente revalidación live del nuevo push. |
 
 ---
 
@@ -1352,6 +1356,231 @@ Investigación completa de trades, commits y lógica de trading desde v10.3 hast
   - `LOSS_TOTAL | Perdida total | Completa`
 
 **Resultado:** queda cerrada la brecha entre el snapshot local y el panel productivo. El dashboard live ya muestra la nueva taxonomía sin tocar reglas de trading ni bump de versión (`v10.6.10`), y el siguiente trabajo vuelve a ser análisis operativo sobre casos reales, no auth ni deploy.
+
+---
+
+## Sesión 56 — auditoría de inconsistencias en `trade_lifecycle` / trade console (1 abr 2026)
+
+**Disparador:** tras revisar los últimos trades reales en Polymarket, quedó claro que la pregunta importante ya no era solo "si la consola separa bien `SL / LOSS_TOTAL / legacy`", sino si realmente conserva una historia coherente por posicion reciente: por qué entro, por qué salió, qué ocurrió tras salir y si la lectura visible coincide con la cartera real.
+
+**Hallazgos confirmados en la auditoría manual:**
+
+1. **`Seoul 14C Apr 1` aparece con desenlace contradictorio.**
+   - En el snapshot congelado de `trade_rows` aparece una fila como `Perdida` con salida `Micro posicion incanjeable / perdida total` y otra fila del mismo mercado como `Ganada` con salida `market_resolved_yes`.
+   - Eso rompe la regla básica de "una posición, una historia".
+
+2. **`Seoul 13C Apr 1` sale ganada pero con entrada degradada a parcial.**
+   - La fila visible marca `Ganada` y `trade_value = $3.04`.
+   - Sin embargo, el `entry_condition` dice `Historico parcial: faltan datos claros de entrada.`
+   - Para un caso tan reciente eso apunta a problema de reconciliación, no a mera limitación legacy.
+
+3. **`Atlanta 70-71F Mar 30` sigue duplicada en la lectura humana.**
+   - Hay una fila "completa" con la entrada real y `pnl_cash = -1.33`.
+   - Además sobreviven filas heredadas/parciales del mismo mercado con `trade_value = $0.00`.
+   - El coalescing mejoró, pero todavía no deja una única traza limpia para todos los casos recientes.
+
+4. **`Atlanta 78-79F Apr 1` existe en `portfolio.dead` pero no quedó visible en la extracción revisada de `trade_rows`.**
+   - En cartera muerta aparece con `initialValue = 2.1238`, `currentValue = 0.010619`, `cashPnl = -2.113181`.
+   - Eso obliga a revisar si el problema está en generación de filas, orden, filtro o semántica del cierre.
+
+5. **La etiqueta visible aún puede ocultar el lado `YES/NO`.**
+   - `_trade_lifecycle_label()` prioriza `question`; si existe, no muestra explícitamente `side`.
+   - En mercados de temperatura casi idénticos eso dificulta detectar rápido inconsistencias humanas aunque el record interno sí tenga `side`.
+
+6. **El `redeem/claim` manual no se registra como evento propio.**
+   - La capa sí maneja `BUY`, `SELL_PENDING`, `SELL`, `SELL_FAILED`, `LOSS_TOTAL` y `RESOLVED_WIN`.
+   - Pero el cobro manual posterior no queda registrado como acción diferenciada; solo se sabe que el mercado resolvió y quedó pendiente de canjear/cobrar.
+
+**Qué se validó también como positivo:**
+
+- los BUY recientes sí guardan contexto rico (`price`, `shares`, `amount`, `edge_pct`, `our_prob`, `mkt_price`, `forecast_max`, traders y ciclo);
+- los `SELL_PENDING` guardan motivo, trigger, límite, `decision_note`, `decision_source`, `PnL` y `order_id`;
+- existen `position_snapshots`, `market_observations` y `post_exit_analysis`.
+
+**Acciones de cierre de la sesión:**
+
+- se deja creado `TRADE_LIFECYCLE_INCONSISTENCY_HANDOFF_2026-04-01.md` con:
+  - lista de evidencias verificadas;
+  - hipótesis de trabajo;
+  - y prompt listo para arrancar la siguiente sesión solo con esta tarea;
+- se actualizan `CONTEXTO.md` y esta bitácora para mover explícitamente el foco operativo desde auth/deploy hacia saneamiento de trazabilidad.
+
+**Límite de alcance respetado:**
+
+- no se tocó trading;
+- no se tocó NOAA;
+- no se desplegó nada;
+- no se cambió lógica del bot en esta sesión;
+- se cerró únicamente la auditoría y el handoff.
+
+---
+
+## Sesión 57 — saneamiento local de `trade_lifecycle` / trade console (1 abr 2026)
+
+**Disparador:** el handoff de la sesión 56 ya había aislado el problema real: no faltaban datos de entrada/salida, faltaba reconciliarlos en una sola historia humana por posición. El objetivo de esta sesión fue arreglar eso sin tocar reglas de trading ni NOAA.
+
+**Cambios aplicados:**
+
+- `trade_lifecycle` gana una clave estable por mercado+lados (`position_key`) y un segundo coalescing por identidad de posición para fusionar records que antes quedaban separados solo porque cambiaba el timestamp del `id`.
+- `_trade_lifecycle_label()` deja de ocultar el lado cuando existe `question`; ahora la etiqueta visible puede diferenciar `YES/NO`.
+- `build_dashboard_trade_analytics()` vuelve a coalescer al leer, cruza cada record con `portfolio.active / resolved_won / dead` y añade dos capacidades nuevas:
+  - explicar qué pasó después (`cartera muerta`, residuo micro, posición aún abierta, etc.);
+  - y mostrar si hay `claim/redeem` pendiente sin inventar un evento que no existe en el lifecycle.
+- La trade console crea fallback visible para posiciones recientes que hoy sobreviven solo en cartera y no habían quedado en `trade_rows` (`portfolio.dead/resolved_won`).
+- `verify_before_deploy.py` añade regresiones para:
+  - coalescer `SELL` + follow-up `LOSS_TOTAL` en una sola posición;
+  - exigir label con lado explícito;
+  - validar `claim pendiente`;
+  - y asegurar fallback desde cartera para trades recientes sin lifecycle visible.
+
+**Validación concreta sobre los 9 casos auditados:**
+
+1. `Seoul 14C Apr 1`
+   - El snapshot congelado mostraba dos filas contradictorias con el mismo label: una pérdida `LOSS_TOTAL` y otra ganada por resolución.
+   - La evidencia de cartera (`portfolio.dead`) confirma que el lado `No` quedó a `0c`, `avg=0.85`, `cashPnl=-1.0530`, `redeemable=true`.
+   - Con el label por lado y el cruce por mercado, la lectura correcta pasa a ser: dos posiciones distintas del mismo mercado; `NO` perdió y `YES` resolvió a favor.
+
+2. `Seoul 13C Apr 1`
+   - El snapshot mostraba ganancia correcta (`$+0.61`) pero entrada degradada a parcial.
+   - `portfolio.resolved_won` conserva la entrada real del lado `No`: `avg=0.80`, `initialValue=2.43144`, `currentValue=3.0393`, `redeemable=true`.
+   - La consola ya puede reconstruir la entrada desde cartera y marcar `claim pendiente` en vez de esconderse detrás de `Historico parcial`.
+
+3. `Atlanta 70-71F Mar 30`
+   - El snapshot tenía una fila completa y dos duplicados parciales del mismo `LOSS_TOTAL`.
+   - `portfolio.dead` confirma el residuo final: `avg=0.14`, `initialValue=1.3309534`, `currentValue=0`, `redeemable=true`.
+   - El coalescing nuevo colapsa esos follow-ups en una sola historia coherente.
+
+4. `Atlanta 78-79F Apr 1`
+   - Antes no aparecía en `trade_rows` aunque sí existía en `portfolio.dead`.
+   - La cartera conserva evidencia suficiente para mostrarla: lado `Yes`, `avg=0.10`, `initialValue=2.1238`, `currentValue=0.010619`, `cashPnl=-2.113181`, `redeemable=false`.
+   - La consola ahora la puede enseñar vía fallback desde cartera, sin volver a dejarla invisible.
+
+5. `Atlanta 80-81F Apr 1`
+   - El snapshot ya mostraba el `SELL` por `stop_loss` (`$-1.30`) y la cartera muerta conservaba un residuo ínfimo (`currentValue=0.000005`, `realizedPnl=-1.480007`).
+   - La nueva lectura une ambas capas: salida principal por SL y después residuo micro en cartera muerta.
+
+6. `Tokyo 18C Apr 1`
+   - El snapshot mostraba resolución ganada duplicada.
+   - `portfolio.resolved_won` conserva el lado `No` con `avg=0.61`, `initialValue=2.4524318`, `currentValue=4.02038`, `cashPnl=+1.5679`, `redeemable=true`.
+   - La consola pasa a leerlo como una sola resolución con `claim pendiente`, no como dos cierres idénticos.
+
+7. `Buenos Aires 28C Apr 1`
+   - El snapshot ya tenía una historia bastante limpia.
+   - La cartera la completa: lado `No`, `avg=0.65`, `initialValue=1.07289`, `currentValue=1.6506`, `cashPnl=+0.57771`, `redeemable=true`.
+   - La mejora visible aquí es sobre todo de presentación: resolución clara + estado de claim.
+
+8. `Chicago 40-41F Apr 1`
+   - Sigue abierta; el snapshot la mostraba como `Abierta` y `portfolio.active` confirma `avg=0.186`, `cur=0.8505`, `currentValue=8.0691`, `cashPnl=+6.3044`.
+   - La trade console mantiene una única historia de posición abierta, sin forzar cierre/resolución artificial.
+
+9. `Dallas 82-83F Apr 1`
+   - El snapshot mostraba dos historias separadas para la misma posición: `SELL` por SL y luego `LOSS_TOTAL` micro.
+   - La cartera muerta confirma el residuo final (`avg=0.12`, `currentValue=0.000026`, `realizedPnl=-0.6108`, `redeemable=false`).
+   - El nuevo coalescing lo convierte en una sola narrativa: SL principal y, después, residuo micro muerto.
+
+**Validación de suite:**
+
+- `python verify_before_deploy.py`
+- Resultado final: `483/483`
+
+**Límite de alcance respetado:**
+
+- no se tocaron reglas de trading;
+- no se tocó NOAA;
+- no se desplegó nada;
+- el trabajo fue solo de trazabilidad, reconciliación, presentación y documentación.
+
+---
+
+## Sesión 58 — cierre limpio de contexto + prioridad siguiente + token economics (2 abr 2026)
+
+**Disparador:** tras cerrar el saneamiento de `trade_lifecycle`, la necesidad ya no era tocar más código del bot, sino dejar la siguiente sesión bien acotada y evitar volver a abrir ventanas de contexto demasiado grandes o costosas.
+
+**Decisión principal:** no se identifica una tarea separada más prioritaria que la auditoría de la captura del `Mission HUD` compartida el 2 de abril de 2026. Por tanto, el siguiente paso lógico queda fijado así:
+
+1. dedicar una sesión completa solo a verificar la captura de la capa 1;
+2. contrastar screenshot, snapshot live y builders locales;
+3. buscar evidencia de errores de dato, agregación o semántica antes de rediseñar nada.
+
+**Cambios aplicados en esta sesión:**
+
+- `CONTEXTO.md` se actualiza para dejar explícita la prioridad siguiente:
+  - auditar la captura del `Mission HUD` como sesión 58 recomendada;
+  - y reservar la auditoría de `token economics` para una sesión posterior separada.
+- `OPERATIONS_PLAYBOOK.md` gana una sección nueva de disciplina `1 sesión = 1 tarea` y contexto mínimo:
+  - arrancar cada sesión con una fuente primaria de verdad;
+  - limitar la lectura inicial a `1-3` artefactos relevantes;
+  - no mezclar rediseño con auditoría de datos.
+- `OPERATIONS_PLAYBOOK.md` gana también una sección específica de `token economics` para Codex + Claude Code.
+- Se crea `.codex/config.toml` a nivel de proyecto:
+  - `model_reasoning_effort = "medium"` por defecto;
+  - perfiles `low`, `deep` y `max` para subir esfuerzo solo cuando la tarea lo justifique.
+
+**Criterio operativo resultante:**
+
+- Codex deja de arrancar este repo en `xhigh` por inercia.
+- No se asume que Codex pueda decidir un `reasoning effort` completamente `auto` desde config; la estrategia elegida es `medium` por defecto + escalado selectivo por perfil/override.
+- Claude Code queda guiado por protocolo, no por más contexto:
+  - medir con `/cost`;
+  - compactar con `/compact`;
+  - limpiar con `/clear`;
+  - cambiar modelo con `/model` solo cuando el retorno esperado compense.
+
+**Validación ejecutada:**
+
+- revisión local de la configuración activa de Codex en `C:\Users\USUARIO\.codex\config.toml`, donde el default previo seguía en `xhigh`;
+- confirmación en documentación oficial de Codex de que `model_reasoning_effort` acepta valores fijos y puede definirse en config por proyecto;
+- confirmación en documentación oficial de Claude Code de que existen `/cost`, `/compact`, `/clear` y `/model` como herramientas nativas para controlar gasto y contexto.
+
+**Límite de alcance respetado:**
+
+- no se tocó `bot.py`;
+- no se tocaron reglas de trading;
+- no se tocó NOAA;
+- no se desplegó nada;
+- no se ejecutó la suite porque la sesión fue solo de proceso, documentación y configuración local de herramienta.
+
+---
+
+## Sesión 59 — cierre completo con verify + commit + push (2 abr 2026)
+
+**Disparador:** tras dejar lista la parte funcional en la sesión 57 y la parte de proceso/configuración en la 58, faltaba todavía un cierre operativo real: validar la suite otra vez, versionar todo y empujarlo a `origin/main`.
+
+**Verificación ejecutada:**
+
+- `python verify_before_deploy.py`
+- resultado final: `483/483`
+
+**Qué se versiona en este cierre:**
+
+- saneamiento local de `trade_lifecycle` y trade console de la sesión 57:
+  - clave estable por mercado+lados;
+  - coalescing de follow-ups;
+  - labels con `YES/NO`;
+  - cruce con cartera para `claim/redeem`;
+  - fallback para posiciones visibles solo en cartera.
+- guardrails de proceso y token economics de la sesión 58:
+  - regla `1 sesión = 1 tarea`;
+  - contexto mínimo;
+  - sección de `token economics` en playbook;
+  - `.codex/config.toml` con `medium` por defecto y perfiles `low/deep/max`.
+- documentación de soporte:
+  - actualización de `CONTEXTO.md`;
+  - actualización de `HISTORIAL_SESIONES.md`;
+  - actualización de `agent_events.jsonl`;
+  - versionado del handoff `TRADE_LIFECYCLE_INCONSISTENCY_HANDOFF_2026-04-01.md`.
+
+**Resultado operativo:**
+
+- se hace `commit + push` a `origin/main`;
+- no se toca lógica de trading;
+- no se toca NOAA;
+- el último deploy verificado live sigue siendo el previo (`5b23d02`);
+- este nuevo push queda pendiente de revalidación explícita en Railway en la próxima sesión.
+
+**Siguiente paso permanece igual:**
+
+- auditar la captura del `Mission HUD` como única tarea de la próxima sesión, usando screenshot + snapshot live + builders locales como fuentes primarias de verdad.
 
 ---
 

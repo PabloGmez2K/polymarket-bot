@@ -1184,11 +1184,13 @@ def run_tests():
              legacy_dashboard)
 
         trade_analytics_ns = {
+            "re": re,
             "_to_lifecycle_float": lambda value, digits=4: (
                 None if value in (None, "") else round(float(value), digits)
             ),
             "_trade_lifecycle_label": lambda record: record.get("label") or record.get("question") or "label",
             "_build_trade_lifecycle_record_integrity": lambda record: record.get("integrity", {}),
+            "_get_portfolio_and_positions": lambda: None,
             "load_trade_lifecycle_data": lambda: {},
         }
         exec(get_function_source(module_ast, code_lines, "build_dashboard_trade_analytics"), trade_analytics_ns)
@@ -1346,6 +1348,109 @@ def run_tests():
              and any(row["label"] == "Legacy close-only" and row["status_label"] == "Perdida legacy" and "Cierre heredado" in row["entry_condition"] for row in trade_analytics["trade_rows"])
              and any(row["label"] == "Historical partial" and row["integrity_note"] == "Historico parcial" for row in trade_analytics["trade_rows"]),
              {"trade_rows": trade_analytics["trade_rows"][:5]})
+
+        trade_analytics_portfolio = trade_analytics_ns["build_dashboard_trade_analytics"](
+            trade_lifecycle={
+                "summary": {"tracked_positions": 2, "closed_positions": 2},
+                "integrity": {"analysis_ready_records": 2, "partial_historical_records": 0, "close_only_records": 0},
+                "records": [
+                    {
+                        "question": "Will the highest temperature in Seoul be 13°C on April 1?",
+                        "city": "Seoul",
+                        "side": "NO",
+                        "date": "2026-04-01",
+                        "status": "closed",
+                        "close_context": {
+                            "close_reason": "market_resolved_yes",
+                            "close_action": "RESOLVED_WIN",
+                            "close_price": 1.0,
+                            "close_shares": 3.0393,
+                            "pnl_cash": 0.61,
+                            "timestamp": "2026-04-01T08:00:00+00:00",
+                        },
+                        "post_exit_analysis": {},
+                        "integrity": {"analysis_ready": True},
+                    },
+                    {
+                        "question": "Will the highest temperature in Dallas be between 82-83°F on April 1?",
+                        "city": "Dallas",
+                        "side": "YES",
+                        "date": "2026-04-01",
+                        "status": "closed",
+                        "entry_context": {"timestamp": "2026-03-31T08:00:00+00:00", "price": 0.13},
+                        "close_context": {
+                            "close_reason": "stop_loss",
+                            "close_action": "SELL",
+                            "close_price": 0.04,
+                            "close_shares": 10.9,
+                            "pnl_cash": -0.56,
+                            "timestamp": "2026-03-31T23:00:00+00:00",
+                        },
+                        "post_exit_analysis": {},
+                        "integrity": {"analysis_ready": True},
+                    },
+                ],
+            },
+            portfolio={
+                "active": [],
+                "resolved_won": [{
+                    "asset": "seoul13-no",
+                    "title": "Will the highest temperature in Seoul be 13°C on April 1?",
+                    "outcome": "NO",
+                    "endDate": "2026-04-01",
+                    "curPrice": 1.0,
+                    "currentValue": 3.04,
+                    "cashPnl": 0.61,
+                    "percentPnl": 25.0,
+                    "size": 3.0393,
+                    "avgPrice": 0.8,
+                    "initialValue": 2.43,
+                    "redeemable": True,
+                    "realizedPnl": 0.0,
+                }],
+                "dead": [
+                    {
+                        "asset": "dallas82-yes",
+                        "title": "Will the highest temperature in Dallas be between 82-83°F on April 1?",
+                        "outcome": "YES",
+                        "endDate": "2026-04-01",
+                        "curPrice": 0.0005,
+                        "currentValue": 0.01,
+                        "cashPnl": -0.56,
+                        "percentPnl": -99.5,
+                        "size": 0.01,
+                        "avgPrice": 0.13,
+                        "initialValue": 1.33,
+                        "redeemable": False,
+                        "realizedPnl": 0.0,
+                    },
+                    {
+                        "asset": "atlanta78-yes",
+                        "title": "Will the highest temperature in Atlanta be between 78-79°F on April 1?",
+                        "outcome": "YES",
+                        "endDate": "2026-04-01",
+                        "curPrice": 0.0005,
+                        "currentValue": 0.01,
+                        "cashPnl": -2.11,
+                        "percentPnl": -99.5,
+                        "size": 21.238,
+                        "avgPrice": 0.1,
+                        "initialValue": 2.12,
+                        "redeemable": False,
+                        "realizedPnl": 0.0,
+                    },
+                ],
+            },
+        )
+        test("trade analytics: muestra claim pendiente y residuo post-salida",
+             any("claim pendiente" in row["exit_condition"] or "claim pendiente" in row["after_close_display"]
+                 for row in trade_analytics_portfolio["trade_rows"] if "Seoul" in row["label"])
+             and any("residuo micro" in row["after_close_display"]
+                     for row in trade_analytics_portfolio["trade_rows"] if "Dallas" in row["label"]),
+             {"trade_rows": trade_analytics_portfolio["trade_rows"]})
+        test("trade analytics: crea fallback desde portfolio para posiciones sin lifecycle",
+             any("Atlanta" in row["label"] and "78-79" in row["label"] for row in trade_analytics_portfolio["trade_rows"]),
+             {"trade_rows": trade_analytics_portfolio["trade_rows"]})
 
         snapshot_ns = {
             "datetime": datetime,
@@ -1929,6 +2034,7 @@ def run_tests():
         pm_ns = {
             "os": os,
             "json": json,
+            "re": re,
             "datetime": datetime,
             "timezone": timezone,
             "POSTMORTEM_FILE": tmp_postmortem,
@@ -1937,7 +2043,11 @@ def run_tests():
         for fn_name in [
             "load_postmortem_data",
             "save_postmortem_data",
+            "_normalize_trade_lifecycle_text",
+            "_trade_lifecycle_market_key",
+            "_trade_lifecycle_position_key",
             "_find_open_postmortem",
+            "_find_postmortem_by_position_key",
             "update_postmortem",
         ]:
             exec(get_function_source(module_ast, code_lines, fn_name), pm_ns)
@@ -2172,6 +2282,12 @@ def run_tests():
             "_lifecycle_is_empty",
             "_parse_lifecycle_timestamp",
             "_to_lifecycle_float",
+            "_normalize_trade_lifecycle_text",
+            "_trade_lifecycle_market_key",
+            "_trade_lifecycle_position_key",
+            "_trade_lifecycle_entry_anchor",
+            "_trade_lifecycle_merge_priority",
+            "_trade_lifecycle_records_can_merge",
             "_trade_lifecycle_label",
             "_trade_lifecycle_record_id",
             "_find_trade_lifecycle_record",
@@ -2196,6 +2312,7 @@ def run_tests():
         ]:
             exec(get_function_source(module_ast, code_lines, fn_name), lifecycle_ns)
 
+        lifecycle_ns["_parse_position_label"] = lambda title, outcome="": f"{title} {outcome}".strip()
         lifecycle_ns["parse_temperature_question"] = lambda title: {"date_str": "2026-03-30", "condition": "between"}
         lifecycle_ns["date_text_to_iso"] = lambda value: value
         lifecycle_ns["parse_city_from_title"] = lambda title: "Atlanta"
@@ -2408,6 +2525,76 @@ def run_tests():
              and merged_entry_context.get("trader_confirmed") == ["Alpha", "Beta"],
              {"records": merged_records, "collisions": merged_collisions})
 
+        followup_records, followup_collisions = lifecycle_ns["_coalesce_trade_lifecycle_records"]([
+            {
+                "id": "tok-dal-yes|YES|2026-04-01|2026-03-31T08:00:00+00:00",
+                "token_id": "tok-dal-yes",
+                "question": "Will the highest temperature in Dallas be between 82-83°F on April 1?",
+                "city": "Dallas",
+                "side": "YES",
+                "date": "2026-04-01",
+                "status": "closed",
+                "entry_context": {
+                    "timestamp": "2026-03-31T08:00:00+00:00",
+                    "price": 0.13,
+                },
+                "close_context": {
+                    "close_action": "SELL",
+                    "close_reason": "stop_loss",
+                    "close_price": 0.04,
+                    "close_shares": 10.9,
+                },
+                "buys": [{"timestamp": "2026-03-31T08:00:00+00:00", "price": 0.13, "amount": 1.33, "shares": 10.9}],
+                "timeline": [{"timestamp": "2026-03-31T23:00:00+00:00", "action": "SELL"}],
+                "exit_attempts": [],
+                "position_snapshots": [],
+                "market_observations": [],
+                "position_stats": {},
+                "post_exit_analysis": {},
+                "history_sources": {},
+            },
+            {
+                "id": "tok-dal-yes|YES|2026-04-01|2026-04-01T08:00:00+00:00",
+                "token_id": "tok-dal-yes",
+                "question": "Will the highest temperature in Dallas be between 82-83°F on April 1?",
+                "city": "Dallas",
+                "side": "YES",
+                "date": "2026-04-01",
+                "status": "closed",
+                "entry_context": {},
+                "close_context": {
+                    "close_action": "LOSS_TOTAL",
+                    "close_reason": "micro_position_unsellable",
+                    "close_price": 0.0,
+                    "close_shares": 0.01,
+                },
+                "buys": [],
+                "timeline": [{"timestamp": "2026-04-01T08:00:00+00:00", "action": "LOSS_TOTAL"}],
+                "exit_attempts": [],
+                "position_snapshots": [],
+                "market_observations": [],
+                "position_stats": {},
+                "post_exit_analysis": {},
+                "history_sources": {},
+            },
+        ])
+        followup_record = followup_records[0] if followup_records else {}
+        test("trade_lifecycle funcional: coalesce une follow-up LOSS_TOTAL con la posicion original",
+             len(followup_records) == 1
+             and followup_collisions == 1
+             and followup_record.get("close_context", {}).get("close_action") == "SELL"
+             and {item.get("action") for item in followup_record.get("timeline", [])} == {"SELL", "LOSS_TOTAL"},
+             {"records": followup_records, "collisions": followup_collisions})
+        test("trade_lifecycle funcional: label explicita el lado cuando hay question",
+             lifecycle_ns["_trade_lifecycle_label"]({
+                 "question": "Will the highest temperature in Seoul be 14°C on April 1?",
+                 "side": "NO",
+             }).endswith("NO"),
+             lifecycle_ns["_trade_lifecycle_label"]({
+                 "question": "Will the highest temperature in Seoul be 14°C on April 1?",
+                 "side": "NO",
+             }))
+
         for tmp_path in [tmp_perf_lifecycle, tmp_pm_lifecycle, tmp_trade_lifecycle]:
             if os.path.exists(tmp_path):
                 try:
@@ -2492,6 +2679,7 @@ def run_tests():
         backfill_ns = {
             "os": os,
             "json": json,
+            "re": re,
             "datetime": datetime,
             "timezone": timezone,
             "PERFORMANCE_FILE": tmp_perf,
@@ -2502,7 +2690,11 @@ def run_tests():
             "load_performance_history",
             "load_postmortem_data",
             "save_postmortem_data",
+            "_normalize_trade_lifecycle_text",
+            "_trade_lifecycle_market_key",
+            "_trade_lifecycle_position_key",
             "_find_open_postmortem",
+            "_find_postmortem_by_position_key",
             "update_postmortem",
             "backfill_postmortem_from_performance",
         ]:

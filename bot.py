@@ -881,10 +881,113 @@ def _to_lifecycle_float(value, digits=4):
         return None
 
 
+def _normalize_trade_lifecycle_text(value):
+    return re.sub(r"\s+", " ", str(value or "").strip()).lower()
+
+
+def _trade_lifecycle_market_key(entry):
+    token_id = str(entry.get("token_id", "") or "").strip()
+    question = _normalize_trade_lifecycle_text(entry.get("question", ""))
+    city = _normalize_trade_lifecycle_text(entry.get("city", ""))
+    market_date = str(entry.get("date", "") or "").strip()
+    if token_id:
+        return f"token:{token_id}|date:{market_date}"
+    if question:
+        return f"question:{question}|date:{market_date}"
+    if city or market_date:
+        return f"market:{city}|date:{market_date}"
+    return ""
+
+
+def _trade_lifecycle_position_key(entry):
+    side = str(entry.get("side", "") or "").upper()
+    market_key = _trade_lifecycle_market_key(entry)
+    if market_key:
+        return f"{market_key}|side:{side}"
+    return ""
+
+
+def _trade_lifecycle_entry_anchor(record):
+    buys = record.get("buys", []) or []
+    if buys:
+        ts = str((buys[0] or {}).get("timestamp", "") or "").strip()
+        if ts:
+            return ts
+
+    for context_key in ["entry_context", "latest_entry_context"]:
+        context = record.get(context_key) or {}
+        ts = str(context.get("timestamp", "") or "").strip()
+        if not ts:
+            continue
+        if any(
+            not _lifecycle_is_empty(context.get(field))
+            for field in [
+                "price",
+                "amount",
+                "shares",
+                "forecast_max",
+                "edge_pct",
+                "our_prob",
+                "mkt_price",
+                "cycle_number",
+                "logic_cycle_number",
+                "trader_confirmed",
+            ]
+        ):
+            return ts
+    return ""
+
+
+def _trade_lifecycle_merge_priority(record):
+    entry_anchor = _trade_lifecycle_entry_anchor(record)
+    buys = record.get("buys", []) or []
+    timeline = record.get("timeline", []) or []
+    exit_attempts = record.get("exit_attempts", []) or []
+    close_context = record.get("close_context") or {}
+    post_exit = record.get("post_exit_analysis") or {}
+    score = 0
+    if entry_anchor:
+        score += 100
+    score += len(buys) * 20
+    score += len(timeline) * 3
+    score += len(exit_attempts) * 5
+    if record.get("token_id"):
+        score += 8
+    if record.get("question"):
+        score += 6
+    if close_context.get("close_action"):
+        score += 4
+    if post_exit.get("market_seen_after_close"):
+        score += 2
+    if record.get("position_key"):
+        score += 1
+    return (
+        score,
+        str(record.get("last_activity_at") or record.get("closed_at") or record.get("opened_at") or ""),
+    )
+
+
+def _trade_lifecycle_records_can_merge(existing, candidate):
+    existing_key = existing.get("position_key") or _trade_lifecycle_position_key(existing)
+    candidate_key = candidate.get("position_key") or _trade_lifecycle_position_key(candidate)
+    if not existing_key or not candidate_key or existing_key != candidate_key:
+        return False
+
+    existing_anchor = _trade_lifecycle_entry_anchor(existing)
+    candidate_anchor = _trade_lifecycle_entry_anchor(candidate)
+    if existing_anchor and candidate_anchor:
+        return existing_anchor == candidate_anchor
+    return True
+
+
 def _trade_lifecycle_label(record):
     question = str(record.get("question", "") or "").strip()
     if question:
-        return question
+        label = _parse_position_label(question, str(record.get("side", "") or "").upper())
+        if label and not label.startswith("?"):
+            return label
+        side = str(record.get("side", "") or "").upper()
+        return f"{question} [{side}]".strip()
     city = str(record.get("city", "?") or "?")
     side = str(record.get("side", "?") or "?")
     market_date = str(record.get("date", "") or "").strip()
@@ -905,9 +1008,8 @@ def _trade_lifecycle_record_id(entry):
     )
     token_id = entry.get("token_id", "")
     city = entry.get("city", "?")
-    side = str(entry.get("side", "")).upper()
-    market_date = entry.get("date", "")
-    return entry.get("id") or f"{token_id or city}|{side}|{market_date}|{timestamp}"
+    position_key = _trade_lifecycle_position_key(entry)
+    return entry.get("id") or f"{position_key or token_id or city}|{timestamp}"
 
 
 def _find_trade_lifecycle_record(records, entry):
@@ -921,6 +1023,7 @@ def _find_trade_lifecycle_record(records, entry):
       4. city + side + date
     """
     record_id = _trade_lifecycle_record_id(entry)
+    position_key = _trade_lifecycle_position_key(entry)
     token_id = entry.get("token_id", "")
     question = entry.get("question", "")
     city = entry.get("city", "")
@@ -929,6 +1032,8 @@ def _find_trade_lifecycle_record(records, entry):
 
     for record in reversed(records):
         if record_id and record.get("id") == record_id:
+            return record
+        if position_key and (record.get("position_key") or _trade_lifecycle_position_key(record)) == position_key:
             return record
         if token_id and record.get("token_id") == token_id:
             return record
@@ -956,6 +1061,7 @@ def _new_trade_lifecycle_record(entry):
     record_id = _trade_lifecycle_record_id(entry)
     return {
         "id": record_id,
+        "position_key": _trade_lifecycle_position_key(entry),
         "label": entry.get("question") or f"{city} {market_date} {side}".strip(),
         "token_id": token_id,
         "question": entry.get("question", ""),
@@ -1052,6 +1158,7 @@ def _merge_trade_lifecycle_record(target, incoming):
         target["status"] = incoming.get("status", target.get("status", "open"))
 
     for key in [
+        "position_key",
         "token_id",
         "question",
         "city",
@@ -1195,23 +1302,47 @@ def _merge_trade_lifecycle_record(target, incoming):
 
 
 def _coalesce_trade_lifecycle_records(records):
-    merged = []
-    merged_by_id = {}
+    merged_by_id = []
+    merged_id_index = {}
     collisions = 0
 
     for record in records:
         if not isinstance(record, dict):
             continue
-        record_id = record.get("id") or _trade_lifecycle_record_id(record)
         candidate = _lifecycle_clone(record)
-        candidate["id"] = record_id
-        if record_id and record_id in merged_by_id:
-            _merge_trade_lifecycle_record(merged_by_id[record_id], candidate)
+        candidate["id"] = candidate.get("id") or _trade_lifecycle_record_id(candidate)
+        candidate["position_key"] = candidate.get("position_key") or _trade_lifecycle_position_key(candidate)
+        record_id = candidate.get("id")
+        if record_id and record_id in merged_id_index:
+            _merge_trade_lifecycle_record(merged_by_id[merged_id_index[record_id]], candidate)
             collisions += 1
             continue
-        merged.append(candidate)
         if record_id:
-            merged_by_id[record_id] = candidate
+            merged_id_index[record_id] = len(merged_by_id)
+        merged_by_id.append(candidate)
+
+    grouped = {}
+    for record in merged_by_id:
+        position_key = record.get("position_key") or _trade_lifecycle_position_key(record) or record.get("id")
+        record["position_key"] = position_key
+        grouped.setdefault(position_key, []).append(record)
+
+    merged = []
+    for group in grouped.values():
+        group.sort(key=_trade_lifecycle_merge_priority, reverse=True)
+        merged_group = []
+        for candidate in group:
+            target = None
+            for existing in merged_group:
+                if _trade_lifecycle_records_can_merge(existing, candidate):
+                    target = existing
+                    break
+            if target is None:
+                merged_group.append(candidate)
+                continue
+            _merge_trade_lifecycle_record(target, candidate)
+            collisions += 1
+        merged.extend(merged_group)
 
     for record in merged:
         record["integrity"] = _build_trade_lifecycle_record_integrity(record)
@@ -2042,6 +2173,21 @@ def _find_open_postmortem(records, entry):
     return None
 
 
+def _find_postmortem_by_position_key(records, entry, close_action=None):
+    position_key = _trade_lifecycle_position_key(entry)
+    if not position_key:
+        return None
+
+    for record in reversed(records):
+        record_key = record.get("position_key") or _trade_lifecycle_position_key(record)
+        if record_key != position_key:
+            continue
+        if close_action and record.get("close_action") != close_action:
+            continue
+        return record
+    return None
+
+
 def update_postmortem(action, entry):
     """
     Mantiene postmortem.json sincronizado con el ciclo de vida de cada posición.
@@ -2075,6 +2221,7 @@ def update_postmortem(action, entry):
         if record is None:
             record = {
                 "id": f"{token_id or city}|{side}|{market_date}|{timestamp}",
+                "position_key": _trade_lifecycle_position_key(entry),
                 "status": "open",
                 "token_id": token_id,
                 "question": question,
@@ -2098,6 +2245,7 @@ def update_postmortem(action, entry):
         shares = float(entry.get("shares", 0) or 0)
         price = float(entry.get("price", 0) or 0)
         record["status"] = "open"
+        record["position_key"] = record.get("position_key") or _trade_lifecycle_position_key(entry)
         record["token_id"] = token_id or record.get("token_id", "")
         record["question"] = question or record.get("question", "")
         record["condition"] = condition or record.get("condition", "")
@@ -2131,6 +2279,7 @@ def update_postmortem(action, entry):
         if record is None:
             record = {
                 "id": f"{token_id or city}|{side}|{market_date}|{timestamp}",
+                "position_key": _trade_lifecycle_position_key(entry),
                 "status": "pending_exit",
                 "token_id": token_id,
                 "question": question,
@@ -2152,6 +2301,7 @@ def update_postmortem(action, entry):
             records.append(record)
 
         record["status"] = "pending_exit"
+        record["position_key"] = record.get("position_key") or _trade_lifecycle_position_key(entry)
         record["pending_exit"] = {
             "timestamp": timestamp,
             "reason": entry.get("reason"),
@@ -2167,6 +2317,7 @@ def update_postmortem(action, entry):
         if record is None:
             record = {
                 "id": f"{token_id or city}|{side}|{market_date}|{timestamp}",
+                "position_key": _trade_lifecycle_position_key(entry),
                 "status": "exit_failed",
                 "token_id": token_id,
                 "question": question,
@@ -2188,6 +2339,7 @@ def update_postmortem(action, entry):
             records.append(record)
 
         record["status"] = "exit_failed"
+        record["position_key"] = record.get("position_key") or _trade_lifecycle_position_key(entry)
         record.pop("pending_exit", None)
         record["last_exit_failed"] = {
             "timestamp": timestamp,
@@ -2196,9 +2348,15 @@ def update_postmortem(action, entry):
         }
 
     else:
+        if record is None and action in {"LOSS_TOTAL", "RESOLVED_WIN"}:
+            duplicate_closed = _find_postmortem_by_position_key(records, entry, close_action=action)
+            if duplicate_closed is not None:
+                return
+
         if record is None:
             record = {
                 "id": f"{token_id or city}|{side}|{market_date}|{timestamp}",
+                "position_key": _trade_lifecycle_position_key(entry),
                 "status": "closed",
                 "token_id": token_id,
                 "question": question,
@@ -2239,6 +2397,7 @@ def update_postmortem(action, entry):
             pnl_pct = round((float(payout_est) / initial_value - 1.0) * 100, 1)
 
         record["status"] = "closed"
+        record["position_key"] = record.get("position_key") or _trade_lifecycle_position_key(entry)
         record["closed_at"] = timestamp
         record["close_action"] = action
         record["close_reason"] = entry.get("reason", "market_resolved_yes" if action == "RESOLVED_WIN" else "")
@@ -4453,15 +4612,267 @@ def build_dashboard_legacy_forecast_drift(audit=None):
     }
 
 
-def build_dashboard_trade_analytics(trade_lifecycle=None):
+def build_dashboard_trade_analytics(trade_lifecycle=None, portfolio=None):
     """Resume la eficiencia observada de las salidas sin tocar reglas de trading."""
     if trade_lifecycle is None:
         trade_lifecycle = load_trade_lifecycle_data()
+    if portfolio is None:
+        portfolio = _get_portfolio_and_positions()
 
     payload = trade_lifecycle if isinstance(trade_lifecycle, dict) else {}
     records = payload.get("records", []) if isinstance(payload.get("records"), list) else []
-    summary = payload.get("summary", {}) if isinstance(payload.get("summary"), dict) else {}
-    integrity_summary = payload.get("integrity", {}) if isinstance(payload.get("integrity"), dict) else {}
+    coalesce_fn = globals().get("_coalesce_trade_lifecycle_records")
+    if callable(coalesce_fn):
+        records, _ = coalesce_fn(records)
+    summary_builder = globals().get("_build_trade_lifecycle_summary")
+    integrity_builder = globals().get("_build_trade_lifecycle_integrity")
+    summary = (
+        summary_builder(records)
+        if callable(summary_builder)
+        else payload.get("summary", {}) if isinstance(payload.get("summary"), dict) else {}
+    )
+    integrity_summary = (
+        integrity_builder(records)
+        if callable(integrity_builder)
+        else payload.get("integrity", {}) if isinstance(payload.get("integrity"), dict) else {}
+    )
+    position_key_fn = globals().get("_trade_lifecycle_position_key")
+    if not callable(position_key_fn):
+        def position_key_fn(entry):
+            side = str(entry.get("side", "") or "").upper()
+            token_id = str(entry.get("token_id", "") or "").strip()
+            question = re.sub(r"\s+", " ", str(entry.get("question", "") or "").strip()).lower()
+            city = re.sub(r"\s+", " ", str(entry.get("city", "") or "").strip()).lower()
+            market_date = str(entry.get("date", "") or "").strip()
+            if token_id:
+                return f"token:{token_id}|date:{market_date}|side:{side}"
+            if question:
+                return f"question:{question}|date:{market_date}|side:{side}"
+            if city or market_date:
+                return f"market:{city}|date:{market_date}|side:{side}"
+            return ""
+    market_key_fn = globals().get("_trade_lifecycle_market_key")
+    if not callable(market_key_fn):
+        def market_key_fn(entry):
+            token_id = str(entry.get("token_id", "") or "").strip()
+            question = re.sub(r"\s+", " ", str(entry.get("question", "") or "").strip()).lower()
+            city = re.sub(r"\s+", " ", str(entry.get("city", "") or "").strip()).lower()
+            market_date = str(entry.get("date", "") or "").strip()
+            if token_id:
+                return f"token:{token_id}|date:{market_date}"
+            if question:
+                return f"question:{question}|date:{market_date}"
+            if city or market_date:
+                return f"market:{city}|date:{market_date}"
+            return ""
+    def _position_alias_keys(entry):
+        aliases = []
+        token_id = str(entry.get("token_id", "") or "").strip()
+        side = str(entry.get("side", "") or "").upper()
+        question = re.sub(r"\s+", " ", str(entry.get("question", "") or "").strip()).lower()
+        city = re.sub(r"\s+", " ", str(entry.get("city", "") or "").strip()).lower()
+        market_date = str(entry.get("date", "") or "").strip()
+        if token_id:
+            aliases.append(f"token:{token_id}|date:{market_date}|side:{side}")
+        if question:
+            aliases.append(f"question:{question}|date:{market_date}|side:{side}")
+        if city or market_date:
+            aliases.append(f"market:{city}|date:{market_date}|side:{side}")
+        deduped = []
+        for alias in aliases:
+            if alias and alias not in deduped:
+                deduped.append(alias)
+        return deduped
+    parse_city_fn = globals().get("parse_city_from_title")
+    if not callable(parse_city_fn):
+        def parse_city_fn(title):
+            match = re.search(r"temperature in (.+?) (?:be |between |\d)", str(title or ""), re.IGNORECASE)
+            return match.group(1).strip() if match else "?"
+
+    portfolio_lookup = {}
+    portfolio_states = {}
+    unmatched_portfolio_records = []
+    if isinstance(portfolio, dict):
+        for bucket in ["active", "resolved_won", "dead"]:
+            for pos in portfolio.get(bucket, []) or []:
+                entry = {
+                    "token_id": pos.get("asset", ""),
+                    "question": pos.get("title", ""),
+                    "city": parse_city_fn(pos.get("title", "")),
+                    "side": pos.get("outcome", ""),
+                    "date": pos.get("endDate", ""),
+                }
+                alias_keys = _position_alias_keys(entry)
+                if not alias_keys:
+                    continue
+                state = {
+                    "alias_keys": alias_keys,
+                    "primary_key": alias_keys[0],
+                    "bucket": bucket,
+                    "asset": pos.get("asset", ""),
+                    "title": pos.get("title", ""),
+                    "side": str(pos.get("outcome", "") or "").upper(),
+                    "date": pos.get("endDate", ""),
+                    "cur_price": _to_lifecycle_float(pos.get("curPrice")),
+                    "current_value": _to_lifecycle_float(pos.get("currentValue"), 2),
+                    "cash_pnl": _to_lifecycle_float(pos.get("cashPnl"), 2),
+                    "pct_pnl": _to_lifecycle_float(pos.get("percentPnl"), 2),
+                    "shares": _to_lifecycle_float(pos.get("size")),
+                    "avg_price": _to_lifecycle_float(pos.get("avgPrice")),
+                    "initial_value": _to_lifecycle_float(pos.get("initialValue"), 2),
+                    "redeemable": bool(pos.get("redeemable")),
+                    "realized_pnl": _to_lifecycle_float(pos.get("realizedPnl"), 2),
+                }
+                existing_state = portfolio_lookup.get(alias_keys[0])
+                if existing_state is None or state["bucket"] == "resolved_won":
+                    portfolio_states[state["primary_key"]] = state
+                    for alias in alias_keys:
+                        portfolio_lookup[alias] = state
+
+    known_position_keys = {
+        alias
+        for record in records
+        if isinstance(record, dict)
+        for alias in _position_alias_keys(record)
+    }
+
+    for pos in portfolio_states.values():
+        position_key = pos.get("primary_key")
+        if not position_key:
+            continue
+        if any(alias in known_position_keys for alias in pos.get("alias_keys", [])):
+            continue
+        synthetic = {
+            "id": f"portfolio::{position_key}",
+            "position_key": position_key,
+            "label": pos.get("title", ""),
+            "token_id": pos.get("asset", ""),
+            "question": pos.get("title", ""),
+            "city": parse_city_fn(pos.get("title", "")),
+            "side": pos.get("side", ""),
+            "date": pos.get("date", ""),
+            "condition": "",
+            "status": "open" if pos.get("bucket") == "active" else "closed",
+            "opened_at": "",
+            "last_buy_at": "",
+            "closed_at": "",
+            "buy_count": 0,
+            "total_amount": pos.get("initial_value") or 0.0,
+            "total_shares": pos.get("shares") or 0.0,
+            "avg_entry_price": pos.get("avg_price"),
+            "trader_confirmed": [],
+            "bot_version_opened": "",
+            "bot_version_closed": "",
+            "entry_context": {},
+            "latest_entry_context": {},
+            "close_context": {},
+            "buys": [],
+            "timeline": [],
+            "exit_attempts": [],
+            "position_snapshots": [],
+            "market_observations": [],
+            "position_stats": {
+                "max_cur_price_open": None,
+                "min_cur_price_open": None,
+                "max_pct_pnl_open": None,
+                "min_pct_pnl_open": None,
+                "max_current_value_open": None,
+                "last_snapshot_at": "",
+            },
+            "post_exit_analysis": {
+                "market_seen_after_close": False,
+                "observations_after_close": 0,
+                "last_price_after_close": None,
+                "max_price_after_close": None,
+                "min_price_after_close": None,
+                "reached_98_after_close": False,
+                "first_reached_98_after_close_at": "",
+                "upside_left_cash_peak": None,
+                "upside_left_pct_peak": None,
+                "drawdown_avoided_cash_peak": None,
+                "drawdown_avoided_pct_peak": None,
+            },
+            "history_sources": {
+                "performance": False,
+                "postmortem": False,
+                "reconstructed": True,
+                "portfolio": True,
+            },
+            "last_activity_at": "",
+        }
+        if pos.get("avg_price") is not None or pos.get("shares") is not None:
+            synthetic["entry_context"] = {
+                "timestamp": "",
+                "price": pos.get("avg_price"),
+                "amount": pos.get("initial_value"),
+                "shares": pos.get("shares"),
+            }
+            synthetic["latest_entry_context"] = dict(synthetic["entry_context"])
+        if pos.get("bucket") == "active":
+            synthetic["position_snapshots"].append({
+                "timestamp": "",
+                "source": "portfolio_snapshot",
+                "stage": "dashboard",
+                "cur_price": pos.get("cur_price"),
+                "current_value": pos.get("current_value"),
+                "pct_pnl": pos.get("pct_pnl"),
+                "cash_pnl": pos.get("cash_pnl"),
+                "size": pos.get("shares"),
+                "avg_price": pos.get("avg_price"),
+                "outcome": pos.get("side", ""),
+            })
+        else:
+            close_action = "RESOLVED_WIN" if pos.get("bucket") == "resolved_won" else "LOSS_TOTAL"
+            close_reason = "market_resolved_yes" if close_action == "RESOLVED_WIN" else "portfolio_dead_residual"
+            synthetic["close_context"] = {
+                "close_action": close_action,
+                "close_reason": close_reason,
+                "close_subtype": close_reason,
+                "close_price": 1.0 if close_action == "RESOLVED_WIN" else pos.get("cur_price"),
+                "close_shares": pos.get("shares"),
+                "return_est": pos.get("current_value"),
+                "pnl_cash": pos.get("cash_pnl"),
+                "pnl_pct": pos.get("pct_pnl"),
+                "order_id": "",
+                "timestamp": "",
+                "bot_version": "",
+            }
+        synthetic["label"] = _trade_lifecycle_label(synthetic)
+        synthetic["integrity"] = _build_trade_lifecycle_record_integrity(synthetic)
+        unmatched_portfolio_records.append(synthetic)
+
+    if unmatched_portfolio_records:
+        records = records + unmatched_portfolio_records
+        summary = (
+            summary_builder(records)
+            if callable(summary_builder)
+            else payload.get("summary", {}) if isinstance(payload.get("summary"), dict) else {}
+        )
+        integrity_summary = (
+            integrity_builder(records)
+            if callable(integrity_builder)
+            else payload.get("integrity", {}) if isinstance(payload.get("integrity"), dict) else {}
+        )
+
+    resolved_side_by_market = {}
+    for record in records:
+        market_key = market_key_fn(record)
+        side = str(record.get("side", "") or "").upper()
+        action = str((record.get("close_context") or {}).get("close_action", "") or "")
+        if market_key and side and action == "RESOLVED_WIN":
+            resolved_side_by_market[market_key] = side
+    for state in portfolio_lookup.values():
+        if state.get("bucket") != "resolved_won":
+            continue
+        market_key = market_key_fn({
+            "token_id": state.get("asset", ""),
+            "question": state.get("title", ""),
+            "city": parse_city_fn(state.get("title", "")),
+            "date": state.get("date", ""),
+        })
+        side = str(state.get("side", "") or "").upper()
+        if market_key and side:
+            resolved_side_by_market[market_key] = side
 
     def _fmt_cash(value):
         number = _to_lifecycle_float(value, 2)
@@ -4593,8 +5004,73 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
             return _to_lifecycle_float(snapshots[-1].get("cur_price"))
         return None
 
-    def _entry_condition(record, integrity):
+    def _portfolio_state_for_record(record):
+        return portfolio_lookup.get(record.get("position_key") or position_key_fn(record))
+
+    def _portfolio_claim_note(record, portfolio_state):
+        if not isinstance(portfolio_state, dict):
+            return ""
+        bucket = portfolio_state.get("bucket")
+        redeemable = bool(portfolio_state.get("redeemable"))
+        realized = _to_lifecycle_float(portfolio_state.get("realized_pnl"), 2)
+        current_value = _to_lifecycle_float(portfolio_state.get("current_value"), 2)
+        action = str((record.get("close_context") or {}).get("close_action", "") or "")
+        if bucket == "resolved_won":
+            if redeemable:
+                return "claim pendiente (wallet redeemable=true)"
+            if realized is not None and abs(realized) > 1e-9:
+                return "claim/redeem ya impactado en wallet"
+            return "mercado resuelto; claim aun no confirmado"
+        if bucket == "dead" and redeemable:
+            return "wallet redeemable=true; revisar claim/manual"
+        if bucket == "dead" and action == "SELL" and current_value is not None and current_value < 0.10:
+            return f"tras la salida quedo residuo micro {_fmt_cash_plain(current_value)}"
+        return ""
+
+    def _after_close_note(record, portfolio_state):
+        post_exit = record.get("post_exit_analysis") or {}
+        notes = []
+        if post_exit.get("market_seen_after_close"):
+            obs = int(post_exit.get("observations_after_close", 0) or 0)
+            notes.append(f"{obs} obs post-salida")
+        elif record.get("status") == "open":
+            notes.append("sigue abierta")
+        else:
+            notes.append("sin obs")
+
+        market_key = market_key_fn(record)
+        winning_side = resolved_side_by_market.get(market_key)
+        record_side = str(record.get("side", "") or "").upper()
+        action = str((record.get("close_context") or {}).get("close_action", "") or "")
+        if winning_side and record_side and winning_side != record_side and action == "LOSS_TOTAL":
+            notes.append(f"mercado termino del lado {winning_side}")
+
+        if isinstance(portfolio_state, dict):
+            bucket = portfolio_state.get("bucket")
+            if bucket == "active":
+                notes.append("activa en cartera")
+            elif bucket == "resolved_won":
+                notes.append("resuelta en cartera")
+            elif bucket == "dead":
+                notes.append("cartera muerta")
+
+        claim_note = _portfolio_claim_note(record, portfolio_state)
+        if claim_note:
+            notes.append(claim_note)
+        return " | ".join(notes)
+
+    def _entry_condition(record, integrity, portfolio_state=None):
         entry = record.get("latest_entry_context") or record.get("entry_context") or {}
+        if not entry.get("timestamp") and isinstance(portfolio_state, dict) and portfolio_state.get("avg_price") is not None:
+            parts = [f"entrada reconstruida {portfolio_state.get('avg_price') * 100:.1f}c"]
+            initial_value = _to_lifecycle_float(portfolio_state.get("initial_value"), 2)
+            shares = _to_lifecycle_float(portfolio_state.get("shares"))
+            if initial_value is not None:
+                parts.append(f"inversion {_fmt_cash_plain(initial_value)}")
+            if shares is not None:
+                parts.append(f"{shares:.4f} shares")
+            parts.append("sin timestamp BUY")
+            return " | ".join(parts)
         if integrity.get("partial_historical_record"):
             return "Historico parcial: faltan token, buys y datos de entrada."
         if integrity.get("close_only_record"):
@@ -4635,7 +5111,7 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
 
         return " | ".join(parts) if parts else "Entrada registrada sin detalle adicional."
 
-    def _exit_condition(record, integrity):
+    def _exit_condition(record, integrity, portfolio_state=None):
         status = str(record.get("status", "") or "")
         close_context = record.get("close_context") or {}
         reason = str(close_context.get("close_reason", "") or "")
@@ -4664,12 +5140,15 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
             "stop_loss_intra": "SL intra: PnL <= -25%",
             "reeval": "Re-eval: edge recalculado < -3%",
             "micro_position_unsellable": "Micro posicion incanjeable / perdida total",
+            "market_resolved_yes": "Mercado resuelto a favor",
+            "market_resolved_no": "Mercado resuelto en contra",
+            "portfolio_dead_residual": "Solo visible hoy en cartera muerta",
         }
         action_map = {
             "SELL": "Salida vendida",
             "SELL_FAILED": "Salida fallida",
             "LOSS_TOTAL": "Perdida total",
-            "RESOLVED_WIN": "Cobro / resolucion",
+            "RESOLVED_WIN": "Mercado resuelto a favor",
         }
 
         parts = []
@@ -4687,6 +5166,12 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
         decision_note = str(last_attempt.get("decision_note", "") or "").strip()
         if decision_note:
             parts.append(decision_note)
+
+        claim_note = _portfolio_claim_note(record, portfolio_state)
+        if claim_note and action == "RESOLVED_WIN":
+            parts.append(claim_note)
+        elif claim_note and action == "SELL":
+            parts.append(claim_note)
 
         if integrity.get("close_only_record") and not attempts:
             parts.append("registro heredado")
@@ -4955,6 +5440,7 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
     for record in records:
         integrity = record.get("integrity") or _build_trade_lifecycle_record_integrity(record)
         quality_meta = _quality_meta(integrity)
+        portfolio_state = _portfolio_state_for_record(record)
         status = str(record.get("status", "") or "")
         close_context = record.get("close_context") or {}
         post_exit = record.get("post_exit_analysis") or {}
@@ -4977,19 +5463,31 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
         snapshots = record.get("position_snapshots", []) or []
         latest_snapshot = snapshots[-1] if snapshots else {}
         current_value = _to_lifecycle_float(latest_snapshot.get("current_value"), 2)
+        if current_value is None and isinstance(portfolio_state, dict):
+            current_value = _to_lifecycle_float(portfolio_state.get("current_value"), 2)
         trade_value = close_value if close_value is not None else current_value
         if trade_value is None:
             trade_value = _to_lifecycle_float(record.get("total_amount"), 2)
+        if trade_value is None and isinstance(portfolio_state, dict):
+            trade_value = _to_lifecycle_float(portfolio_state.get("initial_value"), 2)
 
         pnl_cash = _to_lifecycle_float(close_context.get("pnl_cash"), 2)
         pnl_pct = _to_lifecycle_float(close_context.get("pnl_pct"), 2)
         if status == "open":
             pnl_cash = _to_lifecycle_float(latest_snapshot.get("cash_pnl"), 2)
             pnl_pct = _to_lifecycle_float(latest_snapshot.get("pct_pnl"), 2)
+            if pnl_cash is None and isinstance(portfolio_state, dict):
+                pnl_cash = _to_lifecycle_float(portfolio_state.get("cash_pnl"), 2)
+            if pnl_pct is None and isinstance(portfolio_state, dict):
+                pnl_pct = _to_lifecycle_float(portfolio_state.get("pct_pnl"), 2)
+        elif pnl_cash is None and isinstance(portfolio_state, dict):
+            pnl_cash = _to_lifecycle_float(portfolio_state.get("cash_pnl"), 2)
+            pnl_pct = _to_lifecycle_float(portfolio_state.get("pct_pnl"), 2)
         result_meta = _result_meta(status, close_context, pnl_cash, integrity)
         result_label = result_meta["label"]
         result_badge = result_meta["badge"]
         result_kind = result_meta["kind"]
+        after_close_display = _after_close_note(record, portfolio_state)
 
         if status == "open":
             bucket_label = "Abierta"
@@ -5035,8 +5533,8 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
             "status_badge": result_badge if status != "open" else "accent",
             "status_label": result_label,
             "bucket_label": bucket_label,
-            "entry_condition": _entry_condition(record, integrity),
-            "exit_condition": _exit_condition(record, integrity),
+            "entry_condition": _entry_condition(record, integrity, portfolio_state=portfolio_state),
+            "exit_condition": _exit_condition(record, integrity, portfolio_state=portfolio_state),
             "opened_at_display": _fmt_ts(record.get("opened_at")),
             "closed_at_display": _fmt_ts(record.get("closed_at") or close_context.get("timestamp")),
             "pnl_cash": pnl_cash,
@@ -5049,11 +5547,8 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
             "left_to_gain_display": _fmt_cash_plain(_to_lifecycle_float(post_exit.get("upside_left_cash_peak"), 2)),
             "downside_avoided_display": _fmt_cash_plain(_to_lifecycle_float(post_exit.get("drawdown_avoided_cash_peak"), 2)),
             "observed_after_close": bool(post_exit.get("market_seen_after_close")),
-            "observed_after_close_display": (
-                f"{int(post_exit.get('observations_after_close', 0) or 0)} obs"
-                if post_exit.get("market_seen_after_close")
-                else "sin obs"
-            ),
+            "observed_after_close_display": after_close_display,
+            "after_close_display": after_close_display,
             "analysis_ready": bool(integrity.get("analysis_ready")),
             "integrity_note": quality_meta["label"],
             "integrity_badge": quality_meta["badge"],
@@ -5125,7 +5620,7 @@ def build_dashboard_trade_analytics(trade_lifecycle=None):
         "timeline_points": timeline_points,
         "note": (
             "Solo cuenta cierres con precio de salida util y observacion de mercado despues del cierre. "
-            "La muestra historica parcial queda fuera de esta capa y la consola separa SL, LOSS_TOTAL y legacy/parcial para no mezclar semanticas."
+            "La consola usa trade_lifecycle como base y lo contrasta con cartera live para distinguir SL, LOSS_TOTAL, resolucion y estado de claim/redeem sin mezclar semanticas."
         ),
     }
 
@@ -5568,7 +6063,7 @@ def build_dashboard_snapshot():
     forecast_quality = build_dashboard_forecast_quality(audit=audit)
     city_observation = build_dashboard_city_observation(audit=audit, city_accuracy=city_accuracy)
     legacy_forecast_drift = build_dashboard_legacy_forecast_drift(audit=audit)
-    trade_analytics = build_dashboard_trade_analytics(trade_lifecycle=trade_lifecycle)
+    trade_analytics = build_dashboard_trade_analytics(trade_lifecycle=trade_lifecycle, portfolio=portfolio)
     agent_events = []
     stage_labels = {
         "proposed": "Propuesta",

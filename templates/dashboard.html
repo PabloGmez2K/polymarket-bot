@@ -777,8 +777,8 @@
         <span class="badge badge-accent">Vista operativa</span>
       </div>
       <p class="layer-copy">
-        Panel pensado para responder trade por trade que hizo el bot, por qué entró, por qué salió,
-        qué resultado dejó y cuánto upside o downside quedó observado después.
+        Panel pensado para responder trade por trade qué hizo el bot, por qué entró, por qué salió,
+        qué resultado dejó, qué pasó después y si sigue pendiente `claim/redeem`.
       </p>
 
       <div class="focus-tab-bar">
@@ -896,7 +896,7 @@
                   <th>Valor</th>
                   <th>c/share</th>
                   <th>Dejado</th>
-                  <th>Obs</th>
+                  <th>Despues</th>
                 </tr>
               </thead>
               <tbody>
@@ -915,7 +915,7 @@
                   <td>{{ row.trade_value_display }}</td>
                   <td>{{ row.cents_result_display }}</td>
                   <td>{{ row.left_to_gain_display }}</td>
-                  <td><span class="table-note">{{ row.observed_after_close_display }} · {{ row.integrity_note }}</span></td>
+                  <td><span class="table-note">{{ row.after_close_display }} · {{ row.integrity_note }}</span></td>
                 </tr>
                 {% endfor %}
               </tbody>

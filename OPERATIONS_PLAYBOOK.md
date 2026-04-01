@@ -43,6 +43,24 @@ Antes de tocar codigo o producir analisis:
 
 ---
 
+## Disciplina de sesion y contexto minimo
+
+Regla principal desde la sesion 58:
+
+- `1 sesion = 1 tarea`.
+- Si aparece una segunda tarea importante, se documenta como `siguiente sesion`; no se mezcla en la misma ventana de contexto.
+- La sesion debe arrancar identificando una fuente primaria de verdad. Ejemplos:
+  - captura de dashboard -> snapshot/json live + builder local;
+  - bug de trazabilidad -> handoff + dataset afectado + helper de ensamblado;
+  - problema de deploy -> playbook + auth/config + comandos de validacion.
+- Antes de abrir archivos largos, decidir que `1-3` artefactos son suficientes para esa tarea concreta.
+- No releer `CONTEXTO.md` completo ni sesiones antiguas si no aportan a la tarea actual; leer solo el bloque vigente y las ultimas sesiones directamente relacionadas.
+- Si la tarea es de auditoria visual o semantica, primero verificar datos y evidencia; el rediseño o refactor va despues, en otra sesion si hace falta.
+
+Objetivo: reducir ruido, evitar conversaciones demasiado anchas y dejar cierres mas limpios.
+
+---
+
 ## Checklist de cierre
 
 Toda sesion relevante debe cerrar estas capas, en este orden:
@@ -62,6 +80,42 @@ Toda sesion relevante debe cerrar estas capas, en este orden:
    - si hay push/deploy, dejar anotado commit y estado esperado de Railway
 
 Regla: no cerrar una sesion con docs sin `agent_events.jsonl`, ni con `agent_events.jsonl` sin docs.
+
+---
+
+## Token economics
+
+Objetivo: reservar el gasto alto de contexto/modelo para tareas con tradeoffs reales y usar defaults mas baratos/compactos en trabajo operativo.
+
+### Codex
+
+- Default del proyecto: `.codex/config.toml` fija `model_reasoning_effort = "medium"`.
+- Perfiles disponibles:
+  - `low`: trabajo mecanico, docs, limpieza, snapshots, QA ligero.
+  - `deep`: bugs complejos, revisiones de arquitectura, reconciliaciones dificiles.
+  - `max`: solo para casos excepcionales donde `deep` no alcance.
+- No existe hoy un valor `auto` documentado para `model_reasoning_effort` en config; por eso la estrategia es `medium` por defecto + subida selectiva por perfil o override.
+- Si hace falta subir esfuerzo puntualmente, usar una de estas vias:
+  - `codex -c profile=\"deep\"`
+  - `codex -c profile=\"max\"`
+  - `codex -c model_reasoning_effort=\"high\"`
+- Regla practica: no usar `xhigh` por defecto en este repo.
+
+### Claude Code
+
+- Medir antes de optimizar a ciegas:
+  - usar `/cost` para ver consumo de la sesion;
+  - usar `/compact` cuando la conversacion ya resolvio una subparte;
+  - usar `/clear` al cambiar de tarea.
+- Cambiar modelo con `/model` solo cuando la tarea lo justifique; no dejar modelos caros por inercia.
+- Si una tarea se vuelve amplia, dividirla en dos sesiones en vez de arrastrar contexto largo.
+- Guardar en `CLAUDE.md` y `CONTEXTO.md` solo memoria estable; no convertirlos en transcript de razonamiento.
+
+### Regla de uso
+
+- `medium/default`: docs, UX copy, validaciones, wiring, snapshots, higiene operativa.
+- `high/deep`: bugs no obvios, reconciliaciones complejas, revisiones criticas.
+- modelo premium o esfuerzo maximo: solo para decisiones de trading, arquitectura o auditorias estrategicas donde el coste adicional tenga retorno claro.
 
 ---
 

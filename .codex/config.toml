@@ -1,0 +1,15 @@
+# Configuracion por proyecto para mantener Codex en modo eficiente por defecto.
+# No existe hoy un valor "auto" documentado para model_reasoning_effort en config;
+# dejamos "medium" como base y perfiles opt-in para tareas mas profundas.
+
+model = "gpt-5.4"
+model_reasoning_effort = "medium"
+
+[profiles.low]
+model_reasoning_effort = "low"
+
+[profiles.deep]
+model_reasoning_effort = "high"
+
+[profiles.max]
+model_reasoning_effort = "xhigh"
