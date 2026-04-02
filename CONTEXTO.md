@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 1 de abril de 2026 (Sesión 55 — refinamiento semántico live validado)
-**Próxima sesión:** usar la consola live ya desplegada para revisar TP / reeval / SL reales con la nueva taxonomía y decidir si hace falta otra iteración de lectura o si el foco vuelve por completo a measurement/NOAA.
+**Última actualización:** 2 de abril de 2026 (Sesión 60 — fix de exposición redeemable + truncado seguro en ventas)
+**Próxima sesión:** revalidar en Railway el siguiente ciclo real para confirmar que, tras vender/canjear manualmente las posiciones pendientes, la exposición cae a ~0, el presupuesto libre vuelve a la zona de `$10` y el bot recupera capacidad de entrada sin falsos bloqueos.
 
 ---
 
@@ -39,6 +39,7 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **0.5. Gestión activa (manage_positions):** Para cada posición abierta:
 - ¿currentValue < $0.10? → LOSS_TOTAL
 - ¿curPrice >= 0.98? → SKIP (resuelta, esperando pago)
+- ¿redeemable=True? → SKIP (cash garantizado pendiente de claim/redeem; no cuenta como riesgo)
 - ¿PnL < -25%? → VENDER (stop-loss)
 - ¿PnL > +40%? → VENDER (take-profit)
 - Si no: recalcula edge. Si edge < -3% → VENDER (re-evaluación)
@@ -116,6 +117,8 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Trade console dashboard (31 mar, sin bump):** La primera capa analítica de exits resultó demasiado estrecha para uso diario: respondía bien a `¿estamos capturando bien los exits observados?`, pero no a `¿qué hizo exactamente el bot en cada operación?`. Sobre la misma base de `trade_lifecycle`, el dashboard añade ahora una pestaña separada tipo consola con dos vistas: `Resumen` y `Trades`. Esta nueva capa expone `Operaciones totales`, `TP`, `SL`, `Ganadas`, `Perdidas`, `PnL neto`, `Dejado de ganar` y `Protegido`, además de una tabla por trade con: mercado, condición de entrada del bot, condición de salida, resultado, valor, centavos por share y evidencia observada post-salida. Importante: no depende del CSV local; usa exclusivamente `trade_lifecycle`/`postmortem` para que la misma lectura exista también en Railway. `verify_before_deploy.py` sube a `478/478`.
 
+**Fix exposición redeemable + truncado seguro en SELL (2 abr, sin bump):** Se corrigen dos bugs operativos que podían bloquear capital aunque la wallet ya tuviera dinero prácticamente liberado. En `get_current_exposure()` las posiciones con `redeemable=True` dejan de contar como exposición aunque `curPrice` aún no haya subido a `0.98+`; esto cubre mercados ya resueltos/canjeables que la API sigue mostrando con valor pero que en práctica son cash garantizado. En paralelo, la construcción de órdenes SELL en `manage_positions()` y en el monitor intra-ciclo deja de usar `round(size, 2)` y pasa a truncar hacia abajo con `math.floor(size * 100) / 100`, evitando rechazos `400 not enough balance / allowance` por pedir más shares de las realmente disponibles. Validación dirigida: el caso real tipo `redeemable=True @ 0.97` deja de consumir exposición, el presupuesto libre sube de `0` a zona operativa en el escenario reproducido, y tamaños como `9.48748` se convierten en `9.48` en vez de `9.49`. `verify_before_deploy.py` se mantiene en verde (`483/483`).
+
 **City accuracy tracker (v10.5.2):** Calcula win rate por ciudad desde postmortem. Alerta por Telegram si una ciudad baja de 25% win rate con 3+ trades. Nuevo comando `/accuracy`. Win rate visible en `/rendimiento`.
 
 **Integración `/accuracy` + revisión crítica (v10.5.3):** `/accuracy` queda visible en el menú, responde siempre con menú, `/estado` muestra explícitamente el intervalo intra-SL y la trazabilidad de sesión 20 queda corregida para reflejar mejor lo que realmente introdujeron los commits de la mañana.
@@ -126,10 +129,10 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
-**Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.10`, refinamiento semántico del `trade console` validado live el 1 abr 2026 a las `21:00 UTC`). El cierre de la sesión 59 empuja además a `origin/main` el saneamiento local de `trade_lifecycle/trade console` y los guardrails de contexto/tokens; queda pendiente revalidación live explícita de ese nuevo push.
-**Estado actual tras sesión 59:** el estado funcional del bot incorpora ya en repo el saneamiento de trazabilidad de la sesión 57: `trade_lifecycle/trade console` reconciliados con clave estable por mercado+lados, coalescing secundario para follow-ups (`SELL` + residuo `LOSS_TOTAL`, `RESOLVED_WIN` repetidos), label visible con `YES/NO` explícito y cruce con cartera live para explicar estado posterior (`active/resolved_won/dead`) y si sigue pendiente `claim/redeem`. La sesión 58 añadió disciplina de contexto mínimo y token economics; la 59 cierra con suite `483/483`, commit y push, sin tocar reglas de trading ni NOAA.
-**Versión local / remoto GitHub:** `origin/main` ya incluye el saneamiento de las sesiones 57-59. El último deploy verificado live sigue siendo `5b23d02`, pero hay un push posterior pendiente de revalidación en Railway.
-**Siguiente paso prioritario (sesión 60 recomendada):** no veo una tarea separada más urgente que la auditoría de la captura del `Mission HUD` compartida el 2 abr 2026. La próxima sesión debe dedicarse solo a verificar que cada dato visible de esa capa (`System HP`, `Allowlist vs NOAA`, `NOAA Sample Growth`, `Pipeline de prioridad`, badges y copy de misión) sale de la fuente correcta, sin errores de cálculo, doble conteo ni semántica engañosa, y a reunir evidencia cuando algo no cuadre. No es sesión para rediseño ni para tocar trading/NOAA; es sesión de trazabilidad de datos de la capa 1.
+**Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.10`, refinamiento semántico del `trade console` validado live el 1 abr 2026 a las `21:00 UTC`). Tras la sesión 60 queda además empujado a `origin/main` el fix operativo de exposición/redeemable + truncado seguro de ventas; su validación live explícita queda pendiente del siguiente ciclo.
+**Estado actual tras sesión 60:** el repo incorpora ya el saneamiento de trazabilidad de las sesiones 57-59 y un ajuste operativo puntual del core de ejecución sin cambiar estrategia: las posiciones `redeemable` ya no bloquean exposición y las ventas truncadas hacia abajo evitan rechazos por exceso de shares. El caso que disparó la revisión fue un ciclo con `Exposición actual: $9.21 | Presupuesto libre: $0.79` pese a tener una posición casi a `100c` y otra `Ganado/Canjear`; el análisis confirmó que el bloqueo combinaba exposición falsa por `redeemable=True` y fallo de SELL por redondeo al alza. La validación local mantuvo la suite en `483/483`.
+**Versión local / remoto GitHub:** `origin/main` queda actualizado hasta la sesión 60, incluyendo el fix de exposición/redeemable y sizing seguro de SELL. El último deploy verificado live sigue siendo `5b23d02`, pero ahora hay pushes posteriores pendientes de revalidación en Railway.
+**Siguiente paso prioritario (sesión 61 recomendada):** verificar el próximo ciclo real en Railway y confirmar tres cosas: `Exposición actual` cercana a `0` tras el redeem/venta manual ya hechos, `Presupuesto libre` restaurado hacia `$10.00` con `BANKROLL=$25` y `MAX_EXPOSURE=40%`, y ausencia de nuevos errores `not enough balance / allowance` en ventas. Si eso queda limpio, el foco puede volver a la auditoría de datos del `Mission HUD`.
 **Bloque posterior recomendado, en sesión separada:** auditoría completa de `token economics` y disciplina de contexto mínimo. Regla operativa desde ahora: `1 sesión = 1 tarea`, con contexto local y la menor ventana posible. Para Codex se deja configuración por proyecto en `.codex/config.toml` con `medium` por defecto y perfiles opt-in para subir esfuerzo cuando la tarea realmente lo merezca; para Claude Code la optimización queda como protocolo operativo (`/cost`, `/compact`, `/clear`, cambio de modelo solo cuando aporte valor).
 
 ### Archivos del proyecto:

@@ -73,6 +73,7 @@ Comandos útiles:
 | 2026-04-01 | Explícita | Sesión 55 | `5b23d02` | Deploy validado del refinamiento semántico del `trade console`: push + redeploy manual en Railway y confirmación live de `LOSS_TOTAL`, `SELL negativos` y `Legacy/parcial` ya visibles en producción. |
 | 2026-04-01 | Explícita | Sesión 56 | `—` | Auditoría manual de inconsistencias en `trade_lifecycle/trade console`: evidencia de trades recientes con desenlace contradictorio o entrada parcial (`Seoul 14C`, `Seoul 13C`, `Atlanta 70-71F`, `Atlanta 78-79F`), creación del handoff `TRADE_LIFECYCLE_INCONSISTENCY_HANDOFF_2026-04-01.md` y cambio de foco a saneamiento de trazabilidad, sin tocar trading ni deploy. |
 | 2026-04-01 | Explícita | Sesión 57 | `—` | Saneamiento local de `trade_lifecycle/trade console`: clave estable por mercado+lados, coalescing de follow-ups (`SELL` + residuo `LOSS_TOTAL`, `RESOLVED_WIN` repetidos), label con `YES/NO`, cruce con cartera para `claim/redeem` y fallback visible desde `portfolio.dead/resolved_won`. Validación concreta sobre `Seoul 14C/13C`, `Atlanta 70-71F/78-79F/80-81F`, `Tokyo 18C`, `Buenos Aires 28C`, `Chicago 40-41F` y `Dallas 82-83F`. Suite local `483/483`. |
+| 2026-04-02 | Explícita | Sesión 60 | `—` | Diagnóstico y fix del bloqueo de capital en live: posiciones `redeemable=True` dejaban exposición falsa y `round(size, 2)` provocaba SELL rechazadas por exceso de shares. `bot.py` pasa a excluir `redeemable` en `get_current_exposure()` y a truncar SELL hacia abajo en `manage_positions()` e intra-cycle. Validación dirigida + suite `483/483`; se actualizan contexto, historial y scoreboard y se empuja a `origin/main`. |
 | 2026-04-02 | Explícita | Sesión 58 | `—` | Cierre operativo sin tocar el bot: se fija como siguiente prioridad la auditoría de la captura del `Mission HUD`, se formaliza la regla `1 sesión = 1 tarea` con contexto mínimo, se añade una sección de `token economics` para Codex + Claude Code y se crea `.codex/config.toml` del proyecto con `medium` por defecto y perfiles `low/deep/max`. Sin deploy ni cambios de trading/NOAA. |
 | 2026-04-02 | Explícita | Sesión 59 | `—` | Cierre completo: `python verify_before_deploy.py` vuelve a pasar `483/483`, se versionan el saneamiento local de `trade_lifecycle/trade console`, el handoff y los guardrails de contexto/tokens, y se hace `commit + push` a `origin/main`. No se tocan reglas de trading ni NOAA; queda pendiente revalidación live del nuevo push. |
 
@@ -1607,3 +1608,41 @@ Regla recomendada:
 - cuando una sesión cierre, añadir una entrada nueva aquí;
 - si una sesión antigua se reconstruye mejor desde Git, marcarla como `reconstruida` o `corregida`, sin borrar la entrada original.
 - antes de cada push relevante, revisar si también hay que actualizar `CONTEXTO.md` para la foto actual y este archivo para la memoria histórica.
+
+---
+
+## Sesión 60 — fix de exposición redeemable + SELL seguro (2 abr 2026)
+
+**Disparador:** en live apareció un ciclo bloqueado con `Exposición actual: $9.21 | Presupuesto libre: $0.79` y sin entradas nuevas, pese a que la wallet mostraba una posición casi a `100c` y otra ya `Ganado / Canjear`. Además, el intento de take-profit sobre Chicago falló con `not enough balance / allowance`.
+
+**Hallazgos confirmados:**
+
+- había dos bugs independientes combinándose:
+  - `get_current_exposure()` ya excluía `curPrice >= 0.98`, pero no excluía posiciones `redeemable=True`, aunque en práctica ya son cash garantizado pendiente de claim/redeem;
+  - el sizing de SELL usaba `round(size, 2)`, que puede redondear al alza y pedir más shares de las realmente disponibles (`9.48748 -> 9.49`), provocando `400` de Polymarket.
+- el resultado operativo del caso reproducido era coherente con el síntoma:
+  - antes del fix, una posición `redeemable=True @ 0.97` seguía contando ~$8.70 de exposición;
+  - tras excluirla, el escenario de prueba pasaba de `budget_left=$0.00` a `budget_left=$6.79`;
+  - el truncado con `floor` evitaba errores tanto en tamaños tipo `9.48748` como `0.999`.
+
+**Cambios implementados en `bot.py`:**
+
+- `get_current_exposure()` ahora hace `continue` si `p.get("redeemable")` es truthy;
+- `manage_positions()` cambia `round(size, 2)` por `math.floor(size * 100) / 100`;
+- `intra_cycle_sl_check()` aplica el mismo truncado seguro para mantener consistencia.
+
+**Validación ejecutada:**
+
+- `python verify_before_deploy.py`
+- resultado final: `483/483`
+- mini-validación dirigida adicional:
+  - posición `redeemable=True, curPrice=0.97` deja de contar exposición;
+  - `redeemable=False, curPrice=0.99` sigue excluyéndose por precio como antes;
+  - un residuo de `0.01` shares queda por debajo del umbral material de exposición;
+  - `size=9.48748` produce `9.48` con `floor`, evitando el rechazo que producía `9.49`.
+
+**Cierre operativo de la sesión:**
+
+- se actualizan `CONTEXTO.md`, `HISTORIAL_SESIONES.md` y `agent_events.jsonl`;
+- el fix queda preparado para `commit + push`;
+- el siguiente paso correcto ya no es más investigación local, sino revalidar en Railway el próximo ciclo real después del redeem/venta manual ya ejecutados por el usuario.

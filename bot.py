@@ -7872,6 +7872,10 @@ def get_current_exposure():
             # el bot encontró 15 oportunidades y no pudo entrar en ninguna.
             if cur_price >= 0.98:
                 continue
+            # Fix Bug #15: posiciones redeemable son cash garantizado aunque
+            # curPrice no haya llegado aún a 0.98 (ej: resolución en progreso).
+            if p.get("redeemable"):
+                continue
             total_exposure += current_value
 
         return total_exposure
@@ -8258,8 +8262,10 @@ def manage_positions(client, dl):
         # Precio agresivo: ligeramente por debajo del mercado para asegurar fill
         sell_price = round(max(0.01, cur_price - SELL_AGGRESSION), 2)
 
-        # Shares: vender todo
-        shares_to_sell = round(size, 2)
+        # Shares: vender todo. Truncar hacia abajo para no pedir más shares
+        # de las disponibles (Fix Bug #15: round() puede redondear 9.48748 → 9.49
+        # y Polymarket rechaza con "not enough balance").
+        shares_to_sell = math.floor(size * 100) / 100
         if shares_to_sell < 0.1:
             dl.append(f"    ⚠ {outcome} {title} | muy pocas shares ({shares_to_sell})")
             continue
@@ -8449,7 +8455,8 @@ def intra_cycle_sl_check(client):
             market_date = date_text_to_iso(parsed["date_str"]) if parsed and parsed.get("date_str") else ""
 
             sell_price = round(max(0.01, cur_price - SELL_AGGRESSION), 2)
-            shares_to_sell = round(size, 2)
+            # Truncar hacia abajo (Fix Bug #15: igual que manage_positions)
+            shares_to_sell = math.floor(size * 100) / 100
             if shares_to_sell < 0.1:
                 continue
             estimated_return = round(shares_to_sell * sell_price, 2)
