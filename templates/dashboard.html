@@ -959,6 +959,268 @@
           {{ dashboard.city_observation.note }}
         </div>
 
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Decision engine</p>
+            <h2>Altas, bajas y canaries</h2>
+          </div>
+          <span class="badge badge-accent">{{ dashboard.city_decisions.shadow_summary.opportunities_seen }} sombras</span>
+        </div>
+        <div class="notice notice-{{ dashboard.city_decisions.note_level }}">
+          <strong>{{ dashboard.city_decisions.summary }}</strong><br>
+          {{ dashboard.city_decisions.note }}
+        </div>
+        <section class="grid cards-2">
+          <article class="mini-card focus-mini-card">
+            <span class="stat-label">Regla shadow → canary</span>
+            <strong class="stat-value">{{ dashboard.city_decisions.policy.promote.edge_hits }} edges / {{ dashboard.city_decisions.policy.promote.cycles }} ciclos</strong>
+            <span class="stat-sub">mejor edge >= {{ '%.1f'|format(dashboard.city_decisions.policy.promote.best_edge_pct) }}% y soporte >= {{ dashboard.city_decisions.policy.promote.support }}</span>
+          </article>
+          <article class="mini-card focus-mini-card">
+            <span class="stat-label">Regla salida allowlist</span>
+            <strong class="stat-value">>= {{ dashboard.city_decisions.policy.remove.trades }} trades · WR <= {{ '%.1f'|format(dashboard.city_decisions.policy.remove.win_rate) }}%</strong>
+            <span class="stat-sub">y PnL <= ${{ '%.2f'|format(dashboard.city_decisions.policy.remove.pnl) }}</span>
+          </article>
+        </section>
+        <section class="grid cards-2">
+          <article class="mini-card focus-mini-card">
+            <span class="stat-label">Canaries automáticos</span>
+            <strong class="stat-value">{{ dashboard.city_decisions.auto_state.canary_count }}</strong>
+            <span class="stat-sub">ciudades con sizing reducido y trading habilitado</span>
+          </article>
+          <article class="mini-card focus-mini-card">
+            <span class="stat-label">Shadows automáticos</span>
+            <strong class="stat-value">{{ dashboard.city_decisions.auto_state.shadow_count }}</strong>
+            <span class="stat-sub">ciudades degradadas sin nuevas entradas</span>
+          </article>
+        </section>
+        <div class="city-zone-grid decision-zone-grid">
+          <section class="city-zone-card">
+            <div class="card-head">
+              <div>
+                <p class="section-kicker">Overlay vivo</p>
+                <h2>Canaries automáticos actuales</h2>
+              </div>
+              <span class="badge badge-accent">{{ dashboard.city_decisions.auto_state.canary_rows|length }}</span>
+            </div>
+            {% if dashboard.city_decisions.auto_state.canary_rows %}
+            <div class="blocked-pill-list">
+              {% for row in dashboard.city_decisions.auto_state.canary_rows %}
+              <article class="blocked-pill-card">
+                <div class="blocked-pill-head">
+                  <strong>{{ row.city }}</strong>
+                  <span class="badge badge-accent">Canary</span>
+                </div>
+                <span>{{ row.reason }}</span>
+              </article>
+              {% endfor %}
+            </div>
+            {% else %}
+            <div class="notice notice-muted">Todavía no hay ciudades promovidas automáticamente a canary.</div>
+            {% endif %}
+          </section>
+          <section class="city-zone-card">
+            <div class="card-head">
+              <div>
+                <p class="section-kicker">Overlay vivo</p>
+                <h2>Shadows automáticos actuales</h2>
+              </div>
+              <span class="badge badge-warn">{{ dashboard.city_decisions.auto_state.shadow_rows|length }}</span>
+            </div>
+            {% if dashboard.city_decisions.auto_state.shadow_rows %}
+            <div class="blocked-pill-list">
+              {% for row in dashboard.city_decisions.auto_state.shadow_rows %}
+              <article class="blocked-pill-card">
+                <div class="blocked-pill-head">
+                  <strong>{{ row.city }}</strong>
+                  <span class="badge badge-warn">Shadow</span>
+                </div>
+                <span>{{ row.reason }}</span>
+              </article>
+              {% endfor %}
+            </div>
+            {% else %}
+            <div class="notice notice-muted">No hay ciudades degradadas automáticamente a shadow.</div>
+            {% endif %}
+          </section>
+        </div>
+
+        <div class="city-zone-grid decision-zone-grid">
+          <section class="city-zone-card">
+            <div class="card-head">
+              <div>
+                <p class="section-kicker">Mantener</p>
+                <h2>Ciudades que siguen dentro</h2>
+              </div>
+              <span class="badge badge-good">{{ dashboard.city_decisions.keep_rows|length }}</span>
+            </div>
+            <div class="city-card-grid">
+              {% for row in dashboard.city_decisions.keep_rows %}
+              <article class="city-card city-card-{{ row.badge }}">
+                <div class="city-card-head">
+                  <strong>{{ row.city }}</strong>
+                  <span class="badge badge-{{ row.badge }}">{{ row.decision_label }}</span>
+                </div>
+                <p class="city-card-copy">{{ row.reason }}</p>
+                <div class="city-card-meta">
+                  <span>{{ row.history_label }} · {{ row.pnl_display }}</span>
+                  <span>NOAA {{ row.observed_display }}</span>
+                </div>
+              </article>
+              {% endfor %}
+            </div>
+          </section>
+
+          {% if dashboard.city_decisions.promote_rows %}
+          <section class="city-zone-card">
+            <div class="card-head">
+              <div>
+                <p class="section-kicker">Promover</p>
+                <h2>Candidatas a canary</h2>
+              </div>
+              <span class="badge badge-accent">{{ dashboard.city_decisions.promote_rows|length }}</span>
+            </div>
+            <div class="city-card-grid">
+              {% for row in dashboard.city_decisions.promote_rows %}
+              <article class="city-card city-card-{{ row.badge }}">
+                <div class="city-card-head">
+                  <strong>{{ row.city }}</strong>
+                  <span class="badge badge-{{ row.badge }}">{{ row.decision_label }}</span>
+                </div>
+                <p class="city-card-copy">{{ row.reason }}</p>
+                <div class="city-card-meta">
+                  <span>Shadow {{ row.shadow_edges }} edges · pico {{ row.shadow_best_edge_display }}</span>
+                  <span>{{ row.history_label }}</span>
+                </div>
+              </article>
+              {% endfor %}
+            </div>
+          </section>
+          {% endif %}
+
+          {% if dashboard.city_decisions.remove_rows %}
+          <section class="city-zone-card">
+            <div class="card-head">
+              <div>
+                <p class="section-kicker">Revisar salida</p>
+                <h2>Activas en zona roja</h2>
+              </div>
+              <span class="badge badge-bad">{{ dashboard.city_decisions.remove_rows|length }}</span>
+            </div>
+            <div class="city-card-grid">
+              {% for row in dashboard.city_decisions.remove_rows %}
+              <article class="city-card city-card-{{ row.badge }}">
+                <div class="city-card-head">
+                  <strong>{{ row.city }}</strong>
+                  <span class="badge badge-{{ row.badge }}">{{ row.decision_label }}</span>
+                </div>
+                <p class="city-card-copy">{{ row.reason }}</p>
+                <div class="city-card-meta">
+                  <span>{{ row.history_label }} · {{ row.pnl_display }}</span>
+                  <span>NOAA {{ row.observed_display }}</span>
+                </div>
+              </article>
+              {% endfor %}
+            </div>
+          </section>
+          {% endif %}
+        </div>
+
+        {% if dashboard.city_decisions.observe_rows %}
+        <section class="blocked-city-section">
+          <div class="card-head">
+            <div>
+              <p class="section-kicker">Observación</p>
+              <h2>Ciudades para seguir sin comprar aún</h2>
+            </div>
+            <span class="badge badge-warn">{{ dashboard.city_decisions.observe_rows|length }}</span>
+          </div>
+          <div class="blocked-pill-list">
+            {% for row in dashboard.city_decisions.observe_rows %}
+            <article class="blocked-pill-card">
+              <div class="blocked-pill-head">
+                <strong>{{ row.city }}</strong>
+                <span class="badge badge-{{ row.badge }}">{{ row.decision_label }}</span>
+              </div>
+              <span>{{ row.reason }}</span>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+        {% endif %}
+
+        {% if dashboard.city_decisions.recent_shadow_rows %}
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Shadow</p>
+            <h2>Últimas oportunidades fuera de allowlist</h2>
+          </div>
+          <span class="badge badge-accent">{{ dashboard.city_decisions.recent_shadow_rows|length }} recientes</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Ciudad</th>
+                <th>Fecha mercado</th>
+                <th>Lado</th>
+                <th>Edge</th>
+                <th>EV</th>
+                <th>Mercado</th>
+                <th>Nuestro</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in dashboard.city_decisions.recent_shadow_rows %}
+              <tr>
+                <td>{{ row.city }}</td>
+                <td>{{ row.date }}</td>
+                <td>{{ row.side }}</td>
+                <td><span class="badge badge-accent">{{ '%.1f'|format(row.edge_pct) }}%</span></td>
+                <td>${{ '%.2f'|format(row.expected_value) }}</td>
+                <td>{{ row.market_price }}%</td>
+                <td>{{ row.our_prob }}%</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+
+        {% if dashboard.city_decisions.auto_state.transitions %}
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Transiciones</p>
+            <h2>Historial automático reciente</h2>
+          </div>
+          <span class="badge badge-accent">{{ dashboard.city_decisions.auto_state.transitions|length }} eventos</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Ciudad</th>
+                <th>De</th>
+                <th>A</th>
+                <th>Momento</th>
+                <th>Motivo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in dashboard.city_decisions.auto_state.transitions %}
+              <tr>
+                <td>{{ row.city }}</td>
+                <td>{{ row.from }}</td>
+                <td>{{ row.to }}</td>
+                <td>{{ row.at }}</td>
+                <td>{{ row.reason }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+
         <div class="city-zone-grid">
           <section class="city-zone-card">
             <div class="card-head">

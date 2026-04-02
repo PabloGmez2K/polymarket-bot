@@ -74,6 +74,7 @@ Comandos útiles:
 | 2026-04-01 | Explícita | Sesión 56 | `—` | Auditoría manual de inconsistencias en `trade_lifecycle/trade console`: evidencia de trades recientes con desenlace contradictorio o entrada parcial (`Seoul 14C`, `Seoul 13C`, `Atlanta 70-71F`, `Atlanta 78-79F`), creación del handoff `TRADE_LIFECYCLE_INCONSISTENCY_HANDOFF_2026-04-01.md` y cambio de foco a saneamiento de trazabilidad, sin tocar trading ni deploy. |
 | 2026-04-01 | Explícita | Sesión 57 | `—` | Saneamiento local de `trade_lifecycle/trade console`: clave estable por mercado+lados, coalescing de follow-ups (`SELL` + residuo `LOSS_TOTAL`, `RESOLVED_WIN` repetidos), label con `YES/NO`, cruce con cartera para `claim/redeem` y fallback visible desde `portfolio.dead/resolved_won`. Validación concreta sobre `Seoul 14C/13C`, `Atlanta 70-71F/78-79F/80-81F`, `Tokyo 18C`, `Buenos Aires 28C`, `Chicago 40-41F` y `Dallas 82-83F`. Suite local `483/483`. |
 | 2026-04-02 | Explícita | Sesión 60 | `—` | Diagnóstico y fix del bloqueo de capital en live: posiciones `redeemable=True` dejaban exposición falsa y `round(size, 2)` provocaba SELL rechazadas por exceso de shares. `bot.py` pasa a excluir `redeemable` en `get_current_exposure()` y a truncar SELL hacia abajo en `manage_positions()` e intra-cycle. Validación dirigida + suite `483/483`; se actualizan contexto, historial y scoreboard y se empuja a `origin/main`. |
+| 2026-04-02 | Explícita | Sesión 61 | `—` | Auditoría operativa del `Mission HUD` y salto de capa descriptiva a capa decisional por ciudad: `shadow tracking` para ciudades fuera de allowlist, reglas explícitas `shadow -> canary` y `active/canary -> shadow`, overlay automático persistente, dashboard con `canaries/shadows` actuales e historial de transiciones, y alertas Telegram cuando una ciudad cambia de estado. Suite local `496/496`; queda pendiente validar el comportamiento live en Railway y como siguiente tarea se fija el backfill conservador de `shadow` histórico. |
 | 2026-04-02 | Explícita | Sesión 58 | `—` | Cierre operativo sin tocar el bot: se fija como siguiente prioridad la auditoría de la captura del `Mission HUD`, se formaliza la regla `1 sesión = 1 tarea` con contexto mínimo, se añade una sección de `token economics` para Codex + Claude Code y se crea `.codex/config.toml` del proyecto con `medium` por defecto y perfiles `low/deep/max`. Sin deploy ni cambios de trading/NOAA. |
 | 2026-04-02 | Explícita | Sesión 59 | `—` | Cierre completo: `python verify_before_deploy.py` vuelve a pasar `483/483`, se versionan el saneamiento local de `trade_lifecycle/trade console`, el handoff y los guardrails de contexto/tokens, y se hace `commit + push` a `origin/main`. No se tocan reglas de trading ni NOAA; queda pendiente revalidación live del nuevo push. |
 
@@ -1646,3 +1647,63 @@ Regla recomendada:
 - se actualizan `CONTEXTO.md`, `HISTORIAL_SESIONES.md` y `agent_events.jsonl`;
 - el fix queda preparado para `commit + push`;
 - el siguiente paso correcto ya no es más investigación local, sino revalidar en Railway el próximo ciclo real después del redeem/venta manual ya ejecutados por el usuario.
+
+---
+
+## Sesión 61 — shadow/canary automático + dashboard decisional por ciudad (2 abr 2026)
+
+**Disparador:** la auditoría del `Mission HUD` confirmó que la lectura actual era coherente, pero también dejó visible el atasco real: el dashboard explicaba el estado de `NOAA / allowlist / accuracy`, aunque todavía no servía para decidir qué ciudades mantener, cuáles observar y cómo aprender de ciudades fuera de allowlist sin abrir trades reales.
+
+**Hallazgos confirmados en la revisión del HUD:**
+
+- `Allowlist vs NOAA 0/4` significaba `0` ciudades activas con muestra NOAA interpretable (`>= 3` casos), no ausencia total de NOAA;
+- `NOAA sample growth 2/10` estaba calculado correctamente como muestra global acumulada;
+- la allowlist activa (`Chicago`, `Atlanta`, `Dallas`, `Buenos Aires`) seguía siendo manual y fija;
+- el sistema estaba sano a nivel operativo, pero bloqueado a nivel aprendizaje;
+- fuera de allowlist faltaba una capa intermedia entre `no comprar` y `arriesgar capital real`.
+
+**Cambios implementados:**
+
+- nueva capa de tracking `shadow` para ciudades fuera de `ACTIVE_TRADING_CITIES`:
+  - el scan ya no descarta esas oportunidades silenciosamente;
+  - las registra en `shadow_city_tracking.json`;
+  - el resumen de ciclo incorpora el contador `shadow`;
+  - la evidencia se acumula por ciudad sin abrir posiciones reales.
+- nuevo `decision engine` por ciudad en dashboard:
+  - `Mantener`
+  - `Candidata a canary`
+  - `Seguir observando`
+  - `Revisar salida`
+  - `Bloqueada`
+- reglas explícitas de política:
+  - `shadow -> canary`: al menos `2` edges shadow, `2` ciclos shadow, mejor edge `>= 7.0%` y soporte `>= 2`;
+  - `active/canary -> shadow`: al menos `3` trades, `win rate <= 25%` y `PnL <= $0.00`.
+- overlay automático persistente:
+  - `city_policy_state.json` guarda `auto_canary_cities`, `auto_shadow_cities` e historial reciente;
+  - `get_effective_city_mode()` resuelve `active / canary / shadow / blocked`;
+  - las ciudades `canary` ya pueden operar con sizing reducido (`CANARY_POSITION_SCALE`, default `50%`);
+  - las ciudades `shadow` siguen observándose, pero sin nuevas compras.
+- visibilidad y alertas:
+  - el dashboard añade `Canaries automáticos actuales`, `Shadows automáticos actuales` e `Historial automático reciente`;
+  - Telegram avisa cuando una ciudad pasa de `shadow -> canary` o de `active/canary -> shadow`.
+
+**Validación local:**
+
+- `python verify_before_deploy.py`
+- resultado final: `496/496`
+
+**Impacto operativo:**
+
+- el sistema ya puede empezar a aprender de ciudades fuera de allowlist sin exponer capital real;
+- la allowlist manual sigue existiendo, pero ahora convive con una capa automática de promoción/degradación;
+- la tabla decisional arrancará con algo de histórico real (`accuracy`, `PnL`, NOAA) y empezará a poblar el nuevo histórico `shadow` a partir de los próximos ciclos.
+
+**Limitación abierta:**
+
+- todavía no existe backfill histórico de `shadow`; la nueva capa aprende bien hacia adelante, pero casi no tiene memoria hacia atrás.
+
+**Siguiente tarea fijada:**
+
+- construir un backfill conservador de `shadow` histórico;
+- poblar la capa decisional con evidencia retroconstruida donde haya datos suficientes;
+- separar en dashboard lo `retroconstruido` de lo `live`.

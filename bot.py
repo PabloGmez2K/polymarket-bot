@@ -118,6 +118,13 @@ LOW_BANKROLL_RESET_MARGIN = float(os.getenv("LOW_BANKROLL_RESET_MARGIN", "1.0"))
 # v10.5.2: City accuracy tracker
 CITY_MIN_TRADES_FOR_BLOCK = int(os.getenv("CITY_MIN_TRADES_FOR_BLOCK", "3"))
 CITY_BLOCK_WIN_RATE = float(os.getenv("CITY_BLOCK_WIN_RATE", "25.0"))
+SHADOW_CANARY_MIN_EDGE_HITS = int(os.getenv("SHADOW_CANARY_MIN_EDGE_HITS", "2"))
+SHADOW_CANARY_MIN_CYCLES = int(os.getenv("SHADOW_CANARY_MIN_CYCLES", "2"))
+SHADOW_CANARY_MIN_BEST_EDGE = float(os.getenv("SHADOW_CANARY_MIN_BEST_EDGE", str(MIN_EDGE)))
+SHADOW_CANARY_MIN_SUPPORT = int(os.getenv("SHADOW_CANARY_MIN_SUPPORT", "2"))
+ALLOWLIST_REMOVE_MIN_TRADES = int(os.getenv("ALLOWLIST_REMOVE_MIN_TRADES", str(CITY_MIN_TRADES_FOR_BLOCK)))
+ALLOWLIST_REMOVE_MAX_WIN_RATE = float(os.getenv("ALLOWLIST_REMOVE_MAX_WIN_RATE", str(CITY_BLOCK_WIN_RATE)))
+ALLOWLIST_REMOVE_MAX_PNL = float(os.getenv("ALLOWLIST_REMOVE_MAX_PNL", "0.0"))
 
 # v10.5.5: Dashboard web
 DASHBOARD_ENABLED = os.getenv("DASHBOARD_ENABLED", "true").lower() == "true"
@@ -157,6 +164,16 @@ ACTIVE_TRADING_CITIES = {
     ).split(",")
     if city.strip()
 }
+
+CANARY_TRADING_CITIES = {
+    city.strip()
+    for city in os.getenv(
+        "CANARY_TRADING_CITIES",
+        ""
+    ).split(",")
+    if city.strip()
+}
+CANARY_POSITION_SCALE = float(os.getenv("CANARY_POSITION_SCALE", "0.50"))
 
 
 def get_min_days_ahead():
@@ -396,6 +413,8 @@ CYCLES_HISTORY_FILE = _data_path("cycles_history.jsonl")
 POSTMORTEM_FILE = _data_path("postmortem.json")
 TRADE_LIFECYCLE_FILE = _data_path("trade_lifecycle.json")
 ALERTS_FILE = _data_path("alerts_state.json")
+SHADOW_TRACKING_FILE = _data_path("shadow_city_tracking.json")
+CITY_POLICY_FILE = _data_path("city_policy_state.json")
 AGENT_EVENTS_FILE = _sync_agent_events_seed()
 SIGNALS_FILE = _seed_data_file("signals.json")
 TRADERS_DB_FILE = _seed_data_file("traders_db.json")
@@ -456,6 +475,271 @@ def load_alerts_state():
         return state
     except Exception:
         return default
+
+
+def load_shadow_city_tracking():
+    """Carga la capa de observacion shadow por ciudad."""
+    default = {
+        "logic_series": LOGIC_SERIES,
+        "updated_at": "",
+        "cities": {},
+        "recent_opportunities": [],
+        "summary": {
+            "cycles_with_shadow": 0,
+            "opportunities_seen": 0,
+            "edge_hits": 0,
+            "promotable_cities": 0,
+        },
+    }
+    if not os.path.exists(SHADOW_TRACKING_FILE):
+        return default
+    try:
+        with open(SHADOW_TRACKING_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return default
+        if data.get("logic_series") != LOGIC_SERIES:
+            return default
+        payload = dict(default)
+        payload.update(data)
+        if not isinstance(payload.get("cities"), dict):
+            payload["cities"] = {}
+        if not isinstance(payload.get("recent_opportunities"), list):
+            payload["recent_opportunities"] = []
+        if not isinstance(payload.get("summary"), dict):
+            payload["summary"] = dict(default["summary"])
+        return payload
+    except Exception:
+        return default
+
+
+def save_shadow_city_tracking(data):
+    """Guarda la capa shadow por ciudad con orden estable."""
+    payload = data if isinstance(data, dict) else {}
+    payload.setdefault("logic_series", LOGIC_SERIES)
+    payload.setdefault("updated_at", "")
+    payload.setdefault("cities", {})
+    payload.setdefault("recent_opportunities", [])
+    payload.setdefault("summary", {})
+
+    ordered_cities = {}
+    for city in sorted(payload["cities"]):
+        ordered_cities[city] = payload["cities"][city]
+    payload["cities"] = ordered_cities
+    payload["recent_opportunities"] = sorted(
+        payload["recent_opportunities"],
+        key=lambda item: (
+            str(item.get("seen_at", "")),
+            float(item.get("edge_pct", 0) or 0),
+            str(item.get("city", "")),
+        ),
+        reverse=True,
+    )[:30]
+
+    with open(SHADOW_TRACKING_FILE, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+
+
+def load_city_policy_state():
+    """Carga el overlay operativo automatico por ciudad."""
+    default = {
+        "logic_series": LOGIC_SERIES,
+        "updated_at": "",
+        "auto_canary_cities": {},
+        "auto_shadow_cities": {},
+        "transition_history": [],
+    }
+    if not os.path.exists(CITY_POLICY_FILE):
+        return default
+    try:
+        with open(CITY_POLICY_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return default
+        if data.get("logic_series") != LOGIC_SERIES:
+            return default
+        payload = dict(default)
+        payload.update(data)
+        if not isinstance(payload.get("auto_canary_cities"), dict):
+            payload["auto_canary_cities"] = {}
+        if not isinstance(payload.get("auto_shadow_cities"), dict):
+            payload["auto_shadow_cities"] = {}
+        if not isinstance(payload.get("transition_history"), list):
+            payload["transition_history"] = []
+        return payload
+    except Exception:
+        return default
+
+
+def save_city_policy_state(data):
+    """Guarda el overlay operativo automatico por ciudad."""
+    payload = data if isinstance(data, dict) else {}
+    payload.setdefault("logic_series", LOGIC_SERIES)
+    payload.setdefault("updated_at", "")
+    payload.setdefault("auto_canary_cities", {})
+    payload.setdefault("auto_shadow_cities", {})
+    payload.setdefault("transition_history", [])
+    payload["auto_canary_cities"] = {
+        city: payload["auto_canary_cities"][city]
+        for city in sorted(payload["auto_canary_cities"])
+    }
+    payload["auto_shadow_cities"] = {
+        city: payload["auto_shadow_cities"][city]
+        for city in sorted(payload["auto_shadow_cities"])
+    }
+    payload["transition_history"] = sorted(
+        payload["transition_history"],
+        key=lambda item: (str(item.get("at", "")), str(item.get("city", ""))),
+        reverse=True,
+    )[:40]
+    with open(CITY_POLICY_FILE, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+
+
+def get_effective_city_mode(city, policy_state=None):
+    """Devuelve active/canary/shadow/blocked segun politica manual + automatica."""
+    city = str(city or "").strip()
+    if not city:
+        return "shadow"
+    if is_city_blocked(city):
+        return "blocked"
+    policy_state = policy_state or load_city_policy_state()
+    auto_shadow = policy_state.get("auto_shadow_cities", {}) if isinstance(policy_state, dict) else {}
+    auto_canary = policy_state.get("auto_canary_cities", {}) if isinstance(policy_state, dict) else {}
+    if city in auto_shadow:
+        return "shadow"
+    if city in ACTIVE_TRADING_CITIES:
+        return "active"
+    if city in auto_canary or city in CANARY_TRADING_CITIES:
+        return "canary"
+    return "shadow"
+
+
+def _scaled_position(position, estimated_prob, city_mode):
+    """Reduce sizing para modo canary sin tocar la logica principal."""
+    if city_mode != "canary" or not isinstance(position, dict):
+        return position
+    aggressive_price = float(position.get("aggressive_price", position.get("market_price", 0)) or 0)
+    market_price = float(position.get("market_price", aggressive_price) or aggressive_price)
+    if aggressive_price <= 0:
+        return position
+    amount = max(MIN_BET, round(float(position.get("amount", 0) or 0) * CANARY_POSITION_SCALE, 2))
+    shares = round(amount / aggressive_price, 2)
+    profit = round(shares * (1.0 - aggressive_price), 2)
+    loss = round(amount, 2)
+    ev = round(estimated_prob * profit - (1 - estimated_prob) * loss, 2)
+    scaled = dict(position)
+    scaled.update({
+        "fraction_pct": round(float(position.get("fraction_pct", 0) or 0) * CANARY_POSITION_SCALE, 2),
+        "amount": amount,
+        "shares": shares,
+        "profit_if_win": profit,
+        "loss_if_lose": loss,
+        "expected_value": ev,
+        "aggressive_price": aggressive_price,
+        "market_price": market_price,
+    })
+    return scaled
+
+
+def record_shadow_city_opportunities(opportunities, cycle_context=None):
+    """
+    Registra oportunidades fuera de allowlist para aprender sin comprar.
+    Cada fila representa una operacion que el bot habria considerado si la ciudad
+    estuviera habilitada.
+    """
+    data = load_shadow_city_tracking()
+    cities = data.setdefault("cities", {})
+    recent = data.setdefault("recent_opportunities", [])
+    summary = data.setdefault("summary", {})
+
+    cycle_context = cycle_context if isinstance(cycle_context, dict) else {}
+    cycle_seen = False
+
+    for item in opportunities or []:
+        if not isinstance(item, dict):
+            continue
+        city = str(item.get("city", "") or "").strip()
+        if not city:
+            continue
+        seen_at = str(item.get("seen_at") or datetime.now(timezone.utc).isoformat())
+        city_state = cities.setdefault(city, {
+            "city": city,
+            "first_seen_at": seen_at,
+            "last_seen_at": seen_at,
+            "markets_seen": 0,
+            "edge_hits": 0,
+            "cycles_seen": 0,
+            "best_edge_pct": 0.0,
+            "best_ev": 0.0,
+            "last_side": "",
+            "last_question": "",
+            "last_date": "",
+            "last_market_price": None,
+            "last_our_prob": None,
+            "last_forecast_max": None,
+            "recent_edges": [],
+        })
+        city_state["last_seen_at"] = seen_at
+        city_state["markets_seen"] = int(city_state.get("markets_seen", 0) or 0) + 1
+        city_state["edge_hits"] = int(city_state.get("edge_hits", 0) or 0) + (1 if item.get("edge_hit") else 0)
+        city_state["cycles_seen"] = int(city_state.get("cycles_seen", 0) or 0) + (1 if item.get("first_for_cycle") else 0)
+        city_state["best_edge_pct"] = round(max(float(city_state.get("best_edge_pct", 0) or 0), float(item.get("edge_pct", 0) or 0)), 1)
+        city_state["best_ev"] = round(max(float(city_state.get("best_ev", 0) or 0), float(item.get("expected_value", 0) or 0)), 2)
+        city_state["last_side"] = item.get("side", "")
+        city_state["last_question"] = item.get("question", "")
+        city_state["last_date"] = item.get("date", "")
+        city_state["last_market_price"] = item.get("mkt_price")
+        city_state["last_our_prob"] = item.get("our_prob")
+        city_state["last_forecast_max"] = item.get("forecast_max")
+        recent_edge = {
+            "seen_at": seen_at,
+            "date": item.get("date", ""),
+            "question": item.get("question", ""),
+            "side": item.get("side", ""),
+            "edge_pct": round(float(item.get("edge_pct", 0) or 0), 1),
+            "expected_value": round(float(item.get("expected_value", 0) or 0), 2),
+            "market_price": item.get("mkt_price"),
+            "our_prob": item.get("our_prob"),
+        }
+        city_state.setdefault("recent_edges", []).append(recent_edge)
+        city_state["recent_edges"] = sorted(
+            city_state["recent_edges"],
+            key=lambda row: (str(row.get("seen_at", "")), float(row.get("edge_pct", 0) or 0)),
+            reverse=True,
+        )[:8]
+        recent.append({
+            "city": city,
+            "seen_at": seen_at,
+            "date": item.get("date", ""),
+            "question": item.get("question", ""),
+            "side": item.get("side", ""),
+            "edge_pct": round(float(item.get("edge_pct", 0) or 0), 1),
+            "expected_value": round(float(item.get("expected_value", 0) or 0), 2),
+            "market_price": item.get("mkt_price"),
+            "our_prob": item.get("our_prob"),
+            "forecast_max": item.get("forecast_max"),
+        })
+        if item.get("first_for_cycle"):
+            cycle_seen = True
+
+    data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    summary["cycles_with_shadow"] = int(summary.get("cycles_with_shadow", 0) or 0) + (1 if cycle_seen else 0)
+    summary["opportunities_seen"] = sum(int(item.get("markets_seen", 0) or 0) for item in cities.values())
+    summary["edge_hits"] = sum(int(item.get("edge_hits", 0) or 0) for item in cities.values())
+    summary["promotable_cities"] = sum(
+        1
+        for item in cities.values()
+        if float(item.get("best_edge_pct", 0) or 0) >= MIN_EDGE
+    )
+
+    if cycle_context:
+        summary["last_cycle_number"] = cycle_context.get("cycle_number")
+        summary["last_logic_cycle_number"] = cycle_context.get("logic_cycle_number")
+        summary["last_cycle_at"] = cycle_context.get("timestamp_utc")
+
+    save_shadow_city_tracking(data)
+    return data
 
 
 def save_alerts_state(state):
@@ -2893,6 +3177,13 @@ def run_observability_alerts():
             state["low_bankroll_alerted"] = False
             changed = True
 
+    try:
+        sync_city_policy_state(notify=True)
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"Error sincronizando city policy state: {e}")
+
     if changed:
         save_alerts_state(state)
 
@@ -3802,7 +4093,10 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None):
         if market_date and market_date > observed_last_date.get(city, ""):
             observed_last_date[city] = market_date
 
-    tracked_cities = set(ACTIVE_TRADING_CITIES) | set(OBSERVED_AUDIT_CITIES) | set(city_accuracy.keys())
+    policy_state = load_city_policy_state()
+    auto_canary = set((policy_state.get("auto_canary_cities", {}) if isinstance(policy_state, dict) else {}).keys())
+    auto_shadow = set((policy_state.get("auto_shadow_cities", {}) if isinstance(policy_state, dict) else {}).keys())
+    tracked_cities = set(ACTIVE_TRADING_CITIES) | set(CANARY_TRADING_CITIES) | auto_canary | auto_shadow | set(OBSERVED_AUDIT_CITIES) | set(city_accuracy.keys())
     tracked_cities |= {city for city in RESOLUTION_ICAO if is_city_blocked(city)}
 
     rows = []
@@ -3812,7 +4106,8 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None):
     observed_configured_count = 0
 
     for city in tracked_cities:
-        active = city in ACTIVE_TRADING_CITIES
+        city_mode = get_effective_city_mode(city, policy_state=policy_state)
+        active = city_mode in {"active", "canary"}
         blocked = is_city_blocked(city)
         resolution_meta = RESOLUTION_ICAO.get(city, {})
         noaa_configured = city in OBSERVED_AUDIT_CITIES or bool(resolution_meta.get("noaa_station_id"))
@@ -3835,10 +4130,14 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None):
         if interpretable:
             observed_ready_count += 1
 
-        if active:
+        if city_mode == "active":
             trading_label = "Activa"
             trading_badge = "good"
             trading_detail = "BUY habilitado en el scan"
+        elif city_mode == "canary":
+            trading_label = "Canary"
+            trading_badge = "accent"
+            trading_detail = f"BUY habilitado en modo canary ({CANARY_POSITION_SCALE:.0%} sizing)"
         elif blocked:
             trading_label = "Bloqueada"
             trading_badge = "bad"
@@ -3925,6 +4224,7 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None):
 
         rows.append({
             "city": city,
+            "city_mode": city_mode,
             "active": active,
             "blocked": blocked,
             "noaa_configured": noaa_configured,
@@ -3997,6 +4297,290 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None):
         "watch_rows": watch_rows,
         "blocked_rows": blocked_rows,
     }
+
+
+def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, shadow_tracking=None):
+    """
+    Convierte el seguimiento de ciudades en una lectura decisional:
+    mantener, promover a canary, observar, revisar salida o bloquear.
+    """
+    if city_observation is None:
+        city_observation = build_dashboard_city_observation()
+    if city_accuracy is None:
+        city_accuracy = get_city_accuracy()
+    if shadow_tracking is None:
+        shadow_tracking = load_shadow_city_tracking()
+    policy_state = load_city_policy_state()
+
+    shadow_cities = shadow_tracking.get("cities", {}) if isinstance(shadow_tracking, dict) else {}
+    policy = {
+        "promote": {
+            "edge_hits": SHADOW_CANARY_MIN_EDGE_HITS,
+            "cycles": SHADOW_CANARY_MIN_CYCLES,
+            "best_edge_pct": round(SHADOW_CANARY_MIN_BEST_EDGE, 1),
+            "support": SHADOW_CANARY_MIN_SUPPORT,
+            "label": (
+                f"canary si shadow >= {SHADOW_CANARY_MIN_EDGE_HITS} edges, >= {SHADOW_CANARY_MIN_CYCLES} ciclos, "
+                f"mejor edge >= {SHADOW_CANARY_MIN_BEST_EDGE:.1f}% y soporte >= {SHADOW_CANARY_MIN_SUPPORT}"
+            ),
+        },
+        "remove": {
+            "trades": ALLOWLIST_REMOVE_MIN_TRADES,
+            "win_rate": round(ALLOWLIST_REMOVE_MAX_WIN_RATE, 1),
+            "pnl": round(ALLOWLIST_REMOVE_MAX_PNL, 2),
+            "label": (
+                f"sacar de allowlist si activa y con >= {ALLOWLIST_REMOVE_MIN_TRADES} trades, "
+                f"WR <= {ALLOWLIST_REMOVE_MAX_WIN_RATE:.1f}% y PnL <= ${ALLOWLIST_REMOVE_MAX_PNL:.2f}"
+            ),
+        },
+    }
+    rows = []
+    buckets = {
+        "keep": [],
+        "promote": [],
+        "observe": [],
+        "remove": [],
+        "blocked": [],
+    }
+
+    for row in city_observation.get("rows", []):
+        city = row.get("city", "?")
+        shadow = shadow_cities.get(city, {}) if isinstance(shadow_cities, dict) else {}
+        shadow_seen = int(shadow.get("markets_seen", 0) or 0)
+        shadow_edges = int(shadow.get("edge_hits", 0) or 0)
+        shadow_best_edge = round(float(shadow.get("best_edge_pct", 0) or 0), 1)
+        shadow_cycles = int(shadow.get("cycles_seen", 0) or 0)
+        trades = int(row.get("trades", 0) or 0)
+        pnl = round(float(row.get("pnl", 0) or 0), 2)
+        win_rate = round(float(row.get("win_rate", 0) or 0), 1)
+        active = bool(row.get("active"))
+        blocked = bool(row.get("blocked"))
+        city_mode = row.get("city_mode", "shadow")
+        interpretable = bool(row.get("interpretable"))
+        noaa_configured = bool(row.get("noaa_configured"))
+        observed_count = int(row.get("observed_count", 0) or 0)
+        support_count = max(observed_count, trades, shadow_cycles)
+        promotable_shadow = (
+            shadow_edges >= SHADOW_CANARY_MIN_EDGE_HITS
+            and shadow_cycles >= SHADOW_CANARY_MIN_CYCLES
+            and shadow_best_edge >= SHADOW_CANARY_MIN_BEST_EDGE
+            and support_count >= SHADOW_CANARY_MIN_SUPPORT
+        )
+        removable_active = (
+            active
+            and trades >= ALLOWLIST_REMOVE_MIN_TRADES
+            and win_rate <= ALLOWLIST_REMOVE_MAX_WIN_RATE
+            and pnl <= ALLOWLIST_REMOVE_MAX_PNL
+        )
+
+        if blocked:
+            decision = "blocked"
+            decision_label = "Bloqueada"
+            badge = "bad"
+            reason = row.get("state_detail", "fuera de juego por ahora")
+        elif removable_active:
+            decision = "remove"
+            decision_label = "Revisar salida"
+            badge = "bad"
+            reason = f"regla de salida disparada: {trades} trades, WR {win_rate:.1f}% y PnL ${pnl:+.2f}"
+        elif active:
+            decision = "keep"
+            decision_label = "Mantener"
+            badge = "good" if interpretable or pnl >= 0 else "accent"
+            reason = (
+                "ciudad ya operativa; mantener mientras siga aportando evidencia"
+                if interpretable or pnl >= 0
+                else "sigue activa, pero aun sin evidencia suficiente para ampliar riesgo"
+            )
+        elif promotable_shadow:
+            decision = "promote"
+            decision_label = "Candidata a canary"
+            badge = "accent"
+            reason = f"regla canary disparada: {shadow_edges} edges shadow, {shadow_cycles} ciclos y pico {shadow_best_edge:.1f}%"
+        elif noaa_configured or shadow_seen > 0 or trades > 0:
+            decision = "observe"
+            decision_label = "Seguir observando"
+            badge = "warn" if shadow_seen > 0 else "muted"
+            if shadow_seen > 0:
+                reason = (
+                    f"shadow ya vio {shadow_seen} mercados y {shadow_edges} edges; "
+                    "falta decidir si merece canary"
+                )
+            elif noaa_configured and observed_count > 0:
+                reason = "proxy NOAA activo, pero todavia sin muestra para promocionar"
+            elif trades > 0:
+                reason = "hay historico, pero hoy no hay señal suficiente para volver a operar"
+            else:
+                reason = "todavia sin evidencia accionable"
+        else:
+            decision = "observe"
+            decision_label = "Sin evidencia suficiente"
+            badge = "muted"
+            reason = "ni NOAA ni shadow ni historico suficiente para tomar una decision"
+
+        candidate = {
+            "city": city,
+            "decision": decision,
+            "decision_label": decision_label,
+            "badge": badge,
+            "city_mode": city_mode,
+            "active": active,
+            "blocked": blocked,
+            "interpretable": interpretable,
+            "trades": trades,
+            "win_rate": win_rate,
+            "pnl_display": f"${pnl:+.2f}",
+            "observed_display": f"{observed_count}/{row.get('observed_goal', OBSERVED_FORECAST_MIN_SAMPLE)}",
+            "shadow_seen": shadow_seen,
+            "shadow_edges": shadow_edges,
+            "shadow_best_edge": shadow_best_edge,
+            "shadow_best_edge_display": f"{shadow_best_edge:.1f}%" if shadow_best_edge else "n/d",
+            "reason": reason,
+            "trading_label": row.get("trading_label", ""),
+            "history_label": row.get("history_label", ""),
+            "noaa_label": row.get("noaa_label", ""),
+        }
+        rows.append(candidate)
+        buckets[decision].append(candidate)
+
+    for bucket_name in buckets:
+        buckets[bucket_name].sort(
+            key=lambda item: (
+                0 if item.get("active") else 1,
+                -int(item.get("shadow_edges", 0) or 0),
+                -float(item.get("shadow_best_edge", 0) or 0),
+                -int(item.get("trades", 0) or 0),
+                item.get("city", ""),
+            )
+        )
+
+    shadow_summary = shadow_tracking.get("summary", {}) if isinstance(shadow_tracking, dict) else {}
+    promotable = len(buckets["promote"])
+    note = (
+        "Esta capa no cambia la allowlist sola: resume evidencia real, NOAA y shadow "
+        "para decidir mantener, probar con canary u observar. "
+        f"Promover: {policy['promote']['label']}. "
+        f"Salida: {policy['remove']['label']}."
+    )
+    summary = (
+        f"{len(buckets['keep'])} mantener | "
+        f"{promotable} candidatas a canary | "
+        f"{len(buckets['remove'])} revisar salida"
+    )
+    auto_canary = policy_state.get("auto_canary_cities", {}) if isinstance(policy_state, dict) else {}
+    auto_shadow = policy_state.get("auto_shadow_cities", {}) if isinstance(policy_state, dict) else {}
+
+    return {
+        "summary": summary,
+        "note": note,
+        "note_level": "accent" if promotable else "muted",
+        "policy": policy,
+        "rows": rows,
+        "keep_rows": buckets["keep"],
+        "promote_rows": buckets["promote"],
+        "observe_rows": buckets["observe"],
+        "remove_rows": buckets["remove"],
+        "blocked_rows": buckets["blocked"],
+        "shadow_summary": {
+            "cycles_with_shadow": int(shadow_summary.get("cycles_with_shadow", 0) or 0),
+            "opportunities_seen": int(shadow_summary.get("opportunities_seen", 0) or 0),
+            "edge_hits": int(shadow_summary.get("edge_hits", 0) or 0),
+            "promotable_cities": promotable,
+        },
+        "auto_state": {
+            "canary_count": len(auto_canary),
+            "shadow_count": len(auto_shadow),
+            "canary_rows": [
+                {"city": city, **(auto_canary.get(city) or {})}
+                for city in sorted(auto_canary)
+            ],
+            "shadow_rows": [
+                {"city": city, **(auto_shadow.get(city) or {})}
+                for city in sorted(auto_shadow)
+            ],
+            "transitions": list((policy_state.get("transition_history", []) if isinstance(policy_state, dict) else [])[:10]),
+        },
+        "recent_shadow_rows": list((shadow_tracking.get("recent_opportunities", []) if isinstance(shadow_tracking, dict) else [])[:10]),
+    }
+
+
+def sync_city_policy_state(notify=True):
+    """
+    Promueve shadow -> canary y degrada canary/active -> shadow cuando las reglas se disparan.
+    No toca las env vars; aplica un overlay persistente en volumen.
+    """
+    policy_state = load_city_policy_state()
+    city_accuracy = get_city_accuracy()
+    shadow_tracking = load_shadow_city_tracking()
+    city_observation = build_dashboard_city_observation(city_accuracy=city_accuracy)
+    city_decisions = build_dashboard_city_decisions(
+        city_observation=city_observation,
+        city_accuracy=city_accuracy,
+        shadow_tracking=shadow_tracking,
+    )
+
+    auto_canary = policy_state.setdefault("auto_canary_cities", {})
+    auto_shadow = policy_state.setdefault("auto_shadow_cities", {})
+    history = policy_state.setdefault("transition_history", [])
+    changed = False
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    for row in city_decisions.get("rows", []):
+        city = row.get("city", "?")
+        current_mode = get_effective_city_mode(city, policy_state=policy_state)
+        decision = row.get("decision")
+
+        if decision == "promote" and current_mode == "shadow" and city not in ACTIVE_TRADING_CITIES:
+            auto_canary[city] = {
+                "promoted_at": now_iso,
+                "reason": row.get("reason", ""),
+                "best_edge_pct": row.get("shadow_best_edge"),
+                "shadow_edges": row.get("shadow_edges"),
+            }
+            auto_shadow.pop(city, None)
+            history.append({
+                "at": now_iso,
+                "city": city,
+                "from": "shadow",
+                "to": "canary",
+                "reason": row.get("reason", ""),
+            })
+            changed = True
+            if notify:
+                send_telegram(
+                    f"🧪 <b>Ciudad promovida a canary</b>\n"
+                    f"{city} pasa de <b>shadow</b> a <b>canary</b>.\n"
+                    f"{row.get('reason', '')}\n"
+                    f"El bot ya puede abrir entradas pequeñas en esta ciudad."
+                )
+
+        if decision == "remove" and current_mode in {"active", "canary"}:
+            auto_shadow[city] = {
+                "shadowed_at": now_iso,
+                "reason": row.get("reason", ""),
+                "from_mode": current_mode,
+            }
+            auto_canary.pop(city, None)
+            history.append({
+                "at": now_iso,
+                "city": city,
+                "from": current_mode,
+                "to": "shadow",
+                "reason": row.get("reason", ""),
+            })
+            changed = True
+            if notify:
+                send_telegram(
+                    f"🛑 <b>Ciudad degradada a shadow</b>\n"
+                    f"{city} pasa de <b>{current_mode}</b> a <b>shadow</b>.\n"
+                    f"{row.get('reason', '')}\n"
+                    f"Se bloquean nuevas entradas hasta nueva evidencia."
+                )
+
+    if changed:
+        policy_state["updated_at"] = now_iso
+        save_city_policy_state(policy_state)
+    return policy_state
 
 
 def build_dashboard_focus_center(
@@ -6029,6 +6613,7 @@ def build_dashboard_snapshot():
     cycle_history = load_cycle_history(limit=8)
     audit = load_audit_data()
     trade_lifecycle = load_trade_lifecycle_data()
+    shadow_tracking = load_shadow_city_tracking()
     clean_stats = get_clean_closed_trade_stats()
     series_clean_stats = get_logic_series_clean_closed_trade_stats()
     validated_closed = get_validated_closed_postmortems()
@@ -6062,6 +6647,11 @@ def build_dashboard_snapshot():
     )
     forecast_quality = build_dashboard_forecast_quality(audit=audit)
     city_observation = build_dashboard_city_observation(audit=audit, city_accuracy=city_accuracy)
+    city_decisions = build_dashboard_city_decisions(
+        city_observation=city_observation,
+        city_accuracy=city_accuracy,
+        shadow_tracking=shadow_tracking,
+    )
     legacy_forecast_drift = build_dashboard_legacy_forecast_drift(audit=audit)
     trade_analytics = build_dashboard_trade_analytics(trade_lifecycle=trade_lifecycle, portfolio=portfolio)
     agent_events = []
@@ -6201,6 +6791,7 @@ def build_dashboard_snapshot():
         "exit_breakdown": exit_breakdown,
         "forecast_quality": forecast_quality,
         "city_observation": city_observation,
+        "city_decisions": city_decisions,
         "legacy_forecast_drift": legacy_forecast_drift,
         "trade_analytics": trade_analytics,
         "trophies": trophies,
@@ -9457,6 +10048,7 @@ def main(client):
     min_days_global = get_min_days_ahead()  # Solo para logging
     dl.append(f"MIN_DAYS_AHEAD base: {min_days_global} (hora UTC: {datetime.now(timezone.utc).hour:02d})")
     dl.append(f"  ↳ Ajuste por zona horaria activo: ciudades asiáticas pueden requerir min_days=1 incluso a las 08:00 UTC")
+    policy_state = load_city_policy_state()
 
     candidates = []
     parse_fail = 0
@@ -9488,16 +10080,17 @@ def main(client):
 
         # v10.3: min_days PER-CITY según zona horaria (Bug #5 fix)
         city = parsed["city"]
-        if is_city_blocked(city):
+        city_mode = get_effective_city_mode(city, policy_state=policy_state)
+        if city_mode == "blocked":
             blocked_city_skip += 1
             blocked_seen.add(city)
             continue
-        if ACTIVE_TRADING_CITIES and city not in ACTIVE_TRADING_CITIES:
+        allowlisted = city_mode in {"active", "canary"}
+        if not allowlisted:
             allowlist_city_skip += 1
             if city not in allowlist_seen:
-                dl.append(f"SKIP {city}: fuera de ACTIVE_TRADING_CITIES")
+                dl.append(f"SHADOW {city}: fuera de ACTIVE_TRADING_CITIES (se observa, no se compra)")
                 allowlist_seen.add(city)
-            continue
         min_days = get_min_days_for_city(city)
 
         if days_ahead < min_days:
@@ -9545,6 +10138,8 @@ def main(client):
             "mkt_prob_yes": mkt_prob_yes, "mkt_prob_no": 1.0 - mkt_prob_yes,
             "volume_24h": float(market.get("volume24hr", 0)), "liquidity": liquidity,
             "token_id_yes": clob_ids[0], "token_id_no": clob_ids[1],
+            "allowlisted": allowlisted,
+            "city_mode": city_mode,
         })
         candidates.append(parsed)
 
@@ -9572,6 +10167,7 @@ def main(client):
 
     # ---- PASO 4: Edge ----
     trades = []
+    shadow_trades = []
     skipped_dup = 0
     edge_analysis = []  # Para el log detallado
     # v10.4 Fix Bug #9: token_ids vendidos en manage_positions → no re-comprar
@@ -9615,6 +10211,26 @@ def main(client):
             edge_analysis.append(f"  ✗ {city} {side} {temp_label} {c['date_iso']} | forecast={forecast_max:.1f}°C | nuestro={our_prob*100:.1f}% mercado={mkt_price*100:.1f}% | edge={edge_pct:.1f}% → BAJO (min {MIN_EDGE}%)")
             continue
 
+        position = calculate_position(effective_bankroll, our_prob, mkt_price)
+        if not position:
+            edge_analysis.append(f"  ✗ {city} {side} | edge={edge_pct:.1f}% → KELLY MUY BAJO (no alcanza $1 mín)")
+            continue
+        position = _scaled_position(position, our_prob, c.get("city_mode"))
+
+        if not c.get("allowlisted", True):
+            shadow_trades.append({
+                "question": c["question"], "city": city, "date": c["date_iso"],
+                "days_ahead": c["days_ahead"], "forecast_max": forecast_max,
+                "threshold": threshold, "threshold_high": threshold_high,
+                "unit": c["unit"], "condition": c["condition"],
+                "side": side, "our_prob": round(our_prob * 100, 1),
+                "mkt_price": round(mkt_price * 100, 1), "edge_pct": round(edge_pct, 1),
+                "position": position, "volume_24h": c["volume_24h"],
+                "liquidity": c["liquidity"], "token_id": token_id,
+            })
+            edge_analysis.append(f"  SHADOW {city} {side} {temp_label} {c['date_iso']} | forecast={forecast_max:.1f}°C | nuestro={our_prob*100:.1f}% mercado={mkt_price*100:.1f}% | edge={edge_pct:.1f}% | ${position['amount']:.2f} virtual")
+            continue
+
         if token_id in open_token_ids:
             skipped_dup += 1
             edge_analysis.append(f"   {city} {side} | edge={edge_pct:.1f}% → YA HAY ORDEN")
@@ -9630,11 +10246,6 @@ def main(client):
         if token_id in existing_position_tokens:
             skipped_dup += 1
             edge_analysis.append(f"   {city} {side} | edge={edge_pct:.1f}% → YA HAY POSICIÓN ABIERTA")
-            continue
-
-        position = calculate_position(effective_bankroll, our_prob, mkt_price)
-        if not position:
-            edge_analysis.append(f"  ✗ {city} {side} | edge={edge_pct:.1f}% → KELLY MUY BAJO (no alcanza $1 mín)")
             continue
 
         # v9: Cruzar con señales de traders
@@ -9657,6 +10268,7 @@ def main(client):
             "days_ahead": c["days_ahead"], "forecast_max": forecast_max,
             "threshold": threshold, "threshold_high": threshold_high,
             "unit": c["unit"], "condition": c["condition"],
+            "city_mode": c.get("city_mode", "active"),
             "side": side, "our_prob": round(our_prob * 100, 1),
             "mkt_price": round(mkt_price * 100, 1), "edge_pct": round(edge_pct, 1),
             "position": position, "volume_24h": c["volume_24h"],
@@ -9679,7 +10291,9 @@ def main(client):
     dl.extend(edge_analysis)
     if skipped_dup:
         dl.append(f"\n  {skipped_dup} saltados (orden ya abierta)")
-    dl.append(f"\nRESULTADO: {len(trades)} oportunidades con edge")
+    dl.append(f"\nRESULTADO: {len(trades)} oportunidades operables con edge")
+    if shadow_trades:
+        dl.append(f"SHADOW: {len(shadow_trades)} oportunidades fuera de allowlist registradas para aprendizaje")
 
     # ---- PASO 5: Presupuesto (v10: acumulativo) ----
     # Consultar cuánto hay REALMENTE invertido en posiciones
@@ -9773,6 +10387,35 @@ def main(client):
         bot_state["last_orders_placed"] = ok
         bot_state["last_trades"] = selected
 
+    shadow_payload = []
+    shadow_seen_cities = set()
+    shadow_timestamp = datetime.now(timezone.utc).isoformat()
+    for trade in shadow_trades:
+        shadow_payload.append({
+            "city": trade["city"],
+            "question": trade["question"],
+            "date": trade["date"],
+            "side": trade["side"],
+            "edge_pct": trade["edge_pct"],
+            "expected_value": trade["position"]["expected_value"],
+            "mkt_price": trade["mkt_price"],
+            "our_prob": trade["our_prob"],
+            "forecast_max": trade["forecast_max"],
+            "seen_at": shadow_timestamp,
+            "edge_hit": True,
+            "first_for_cycle": trade["city"] not in shadow_seen_cities,
+        })
+        shadow_seen_cities.add(trade["city"])
+    if shadow_payload:
+        record_shadow_city_opportunities(
+            shadow_payload,
+            cycle_context={
+                "cycle_number": bot_state["cycle_count"] + 1,
+                "logic_cycle_number": bot_state.get("cycle_count_series", 0) + 1,
+                "timestamp_utc": shadow_timestamp,
+            },
+        )
+
     # ---- v10.2: RESUMEN COMPLETO DEL CICLO ----
     if not DRY_RUN:
         summary = f"📊 <b>Ciclo #{bot_state['cycle_count']+1}</b>\n"
@@ -9799,7 +10442,7 @@ def main(client):
 
         # Estado
         summary += f"{'─' * 25}\n"
-        summary += f"Evaluados: {len(candidates)} | Edge: {len(trades)}\n"
+        summary += f"Evaluados: {len(candidates)} | Edge: {len(trades)} | Shadow: {len(shadow_trades)}\n"
         summary += f"Exposición actual: ${current_exposure:.2f} | Presupuesto libre: ${budget_left:.2f}\n"
 
         send_telegram(summary, with_menu=True)
@@ -9828,6 +10471,7 @@ def main(client):
                 "markets_evaluated": len(candidates) if 'candidates' in locals() else 0,
                 "with_edge": len(trades) if 'trades' in locals() else 0,
                 "selected": len(selected) if 'selected' in locals() else 0,
+                "shadow": len(shadow_trades) if 'shadow_trades' in locals() else 0,
             },
             "buys": [
                 {

@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 2 de abril de 2026 (Sesión 60 — fix de exposición redeemable + truncado seguro en ventas)
-**Próxima sesión:** revalidar en Railway el siguiente ciclo real para confirmar que, tras vender/canjear manualmente las posiciones pendientes, la exposición cae a ~0, el presupuesto libre vuelve a la zona de `$10` y el bot recupera capacidad de entrada sin falsos bloqueos.
+**Última actualización:** 2 de abril de 2026 (Sesión 61 — shadow/canary automático + dashboard decisional por ciudad)
+**Próxima sesión:** hacer un backfill conservador de `shadow` histórico para poblar la nueva capa de decisiones por ciudad con evidencia retroconstruida, separando claramente lo estimado hacia atrás de lo observado live.
 
 ---
 
@@ -129,17 +129,17 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
-**Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.10`, refinamiento semántico del `trade console` validado live el 1 abr 2026 a las `21:00 UTC`). Tras la sesión 60 queda además empujado a `origin/main` el fix operativo de exposición/redeemable + truncado seguro de ventas; su validación live explícita queda pendiente del siguiente ciclo.
-**Estado actual tras sesión 60:** el repo incorpora ya el saneamiento de trazabilidad de las sesiones 57-59 y un ajuste operativo puntual del core de ejecución sin cambiar estrategia: las posiciones `redeemable` ya no bloquean exposición y las ventas truncadas hacia abajo evitan rechazos por exceso de shares. El caso que disparó la revisión fue un ciclo con `Exposición actual: $9.21 | Presupuesto libre: $0.79` pese a tener una posición casi a `100c` y otra `Ganado/Canjear`; el análisis confirmó que el bloqueo combinaba exposición falsa por `redeemable=True` y fallo de SELL por redondeo al alza. La validación local mantuvo la suite en `483/483`.
-**Versión local / remoto GitHub:** `origin/main` queda actualizado hasta la sesión 60, incluyendo el fix de exposición/redeemable y sizing seguro de SELL. El último deploy verificado live sigue siendo `5b23d02`, pero ahora hay pushes posteriores pendientes de revalidación en Railway.
-**Siguiente paso prioritario (sesión 61 recomendada):** verificar el próximo ciclo real en Railway y confirmar tres cosas: `Exposición actual` cercana a `0` tras el redeem/venta manual ya hechos, `Presupuesto libre` restaurado hacia `$10.00` con `BANKROLL=$25` y `MAX_EXPOSURE=40%`, y ausencia de nuevos errores `not enough balance / allowance` en ventas. Si eso queda limpio, el foco puede volver a la auditoría de datos del `Mission HUD`.
-**Bloque posterior recomendado, en sesión separada:** auditoría completa de `token economics` y disciplina de contexto mínimo. Regla operativa desde ahora: `1 sesión = 1 tarea`, con contexto local y la menor ventana posible. Para Codex se deja configuración por proyecto en `.codex/config.toml` con `medium` por defecto y perfiles opt-in para subir esfuerzo cuando la tarea realmente lo merezca; para Claude Code la optimización queda como protocolo operativo (`/cost`, `/compact`, `/clear`, cambio de modelo solo cuando aporte valor).
+**Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.10`, refinamiento semántico del `trade console` validado live el 1 abr 2026 a las `21:00 UTC`). Tras la sesión 61 el repo queda listo para empujar una nueva capa de decisiones por ciudad; la validación live de esta automatización sigue pendiente hasta revisar el siguiente ciclo en Railway.
+**Estado actual tras sesión 61:** el repo añade una capa nueva de aprendizaje operacional para ciudades fuera de allowlist sin tocar todavía la estrategia base. `bot.py` ya registra oportunidades `shadow`, construye un `decision engine` por ciudad, expone reglas explícitas `shadow -> canary` y `active/canary -> shadow`, sincroniza un overlay automático persistente (`city_policy_state.json`), muestra `canaries/shadows` automáticos en dashboard y envía alertas Telegram cuando una ciudad cambia de estado. La suite local vuelve a quedar limpia en `496/496`.
+**Versión local / remoto GitHub:** la rama local incorpora ya el fix operativo de la sesión 60 y la nueva capa de política automática por ciudad de la sesión 61. Hasta validar Railway, el último deploy confirmado live sigue siendo `5b23d02`; el siguiente push/deploy debe comprobar tanto la salud del ciclo como la nueva observabilidad `shadow/canary`.
+**Siguiente paso prioritario (sesión 62 recomendada):** backfill conservador de `shadow` histórico. Objetivo: reconstruir oportunidades pasadas con suficiente trazabilidad para que la tabla decisional no arranque casi vacía, marcando siempre qué evidencia es retroconstruida y cuál viene de ciclos live.
+**Bloque posterior recomendado, en sesión separada:** revalidación live del nuevo overlay automático en Railway tras al menos `1-2` ciclos reales y auditoría de `token economics`/disciplina de contexto mínimo solo después de que la capa `shadow/canary` tenga muestra útil.
 
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.6.10 con NOAA hardening, `trade_lifecycle` saneado y dashboard ampliado con analítica + consola de trades |
-| `verify_before_deploy.py` | Suite local de `483` tests de comportamiento |
+| `bot.py` | Script principal v10.6.10 con NOAA hardening, `trade_lifecycle` saneado y nueva capa `shadow/canary` automática para decisiones por ciudad |
+| `verify_before_deploy.py` | Suite local de `496` tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
 | `CLAUDE.md` | Instrucciones para Claude Code |

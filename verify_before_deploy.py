@@ -349,8 +349,8 @@ def run_tests():
          '"ACTIVE_TRADING_CITIES",' in code
          and '"Chicago,Atlanta,Dallas,Buenos Aires"' in code)
     test("scan usa ACTIVE_TRADING_CITIES para filtrar entradas nuevas",
-         'if ACTIVE_TRADING_CITIES and city not in ACTIVE_TRADING_CITIES:' in code
-         and 'SKIP {city}: fuera de ACTIVE_TRADING_CITIES' in code)
+         'if not allowlisted:' in code
+         and 'SHADOW {city}: fuera de ACTIVE_TRADING_CITIES (se observa, no se compra)' in code)
     test("is_city_blocked definida", "def is_city_blocked(" in code)
     test("parse_market_date_iso definida", "def parse_market_date_iso(" in code)
     test("format_postmortem_label definida", "def format_postmortem_label(" in code)
@@ -425,6 +425,11 @@ def run_tests():
     test("build_dashboard_exit_breakdown definida", "def build_dashboard_exit_breakdown(" in code)
     test("build_dashboard_forecast_quality definida", "def build_dashboard_forecast_quality(" in code)
     test("build_dashboard_city_observation definida", "def build_dashboard_city_observation(" in code)
+    test("build_dashboard_city_decisions definida", "def build_dashboard_city_decisions(" in code)
+    test("load_city_policy_state definida", "def load_city_policy_state(" in code)
+    test("save_city_policy_state definida", "def save_city_policy_state(" in code)
+    test("get_effective_city_mode definida", "def get_effective_city_mode(" in code)
+    test("sync_city_policy_state definida", "def sync_city_policy_state(" in code)
     test("build_dashboard_focus_center definida", "def build_dashboard_focus_center(" in code)
     test("build_dashboard_legacy_forecast_drift definida", "def build_dashboard_legacy_forecast_drift(" in code)
     test("build_dashboard_trade_analytics definida", "def build_dashboard_trade_analytics(" in code)
@@ -462,6 +467,7 @@ def run_tests():
     test("template dashboard incluye desbloqueos", "dashboard.unlocks" in dashboard_template_code and "Qué falta para habilitar decisiones" in dashboard_template_code)
     test("template dashboard incluye NOAA observado", "dashboard.forecast_quality" in dashboard_template_code and "Calidad Forecast Observada (NOAA)" in dashboard_template_code)
     test("template dashboard incluye estado de observacion por ciudad", "dashboard.city_observation" in dashboard_template_code and "Estado de observacion por ciudad" in dashboard_template_code)
+    test("template dashboard incluye decision engine de ciudades", "dashboard.city_decisions" in dashboard_template_code and "Candidatas a canary" in dashboard_template_code and "Regla shadow → canary" in dashboard_template_code and "Canaries automáticos actuales" in dashboard_template_code)
     test("template dashboard incluye mission HUD focus", "dashboard.focus" in dashboard_template_code and "Mission HUD" in dashboard_template_code and "dashboard.focus.tracks" in dashboard_template_code and "dashboard.focus.city_race" in dashboard_template_code)
     test("template dashboard carga dashboard.js", "dashboard.js" in dashboard_template_code and "data-focus-tabs" in dashboard_template_code)
     test("template dashboard mantiene bloque legacy drift", "dashboard.legacy_forecast_drift" in dashboard_template_code and "Drift Open-Meteo (historico - no comparable con NOAA)" in dashboard_template_code)
@@ -1031,6 +1037,8 @@ def run_tests():
             "OBSERVED_AUDIT_CITIES": {"Chicago", "Atlanta", "Buenos Aires", "Dallas"},
             "OBSERVED_FORECAST_MIN_SAMPLE": 3,
             "ACTIVE_TRADING_CITIES": {"Chicago", "Atlanta", "Dallas", "Buenos Aires"},
+            "CANARY_TRADING_CITIES": set(),
+            "CANARY_POSITION_SCALE": 0.5,
             "CITY_MIN_TRADES_FOR_BLOCK": 3,
             "CITY_BLOCK_WIN_RATE": 25.0,
             "RESOLUTION_ICAO": {
@@ -1042,6 +1050,12 @@ def run_tests():
                 "New York City": {"icao": "KLGA"},
             },
             "is_city_blocked": lambda city: str(city or "").strip().lower() in {"london", "wellington"},
+            "load_city_policy_state": lambda: {"auto_canary_cities": {}, "auto_shadow_cities": {}, "transition_history": []},
+            "get_effective_city_mode": lambda city, policy_state=None: (
+                "blocked" if str(city or "").strip().lower() in {"london", "wellington"}
+                else "active" if city in {"Chicago", "Atlanta", "Dallas", "Buenos Aires"}
+                else "shadow"
+            ),
         }
         exec(get_function_source(module_ast, code_lines, "build_dashboard_city_observation"), city_observation_ns)
         city_observation = city_observation_ns["build_dashboard_city_observation"](
@@ -1085,6 +1099,90 @@ def run_tests():
              and nyc_watch_row["noaa_label"] == "Sin NOAA"
              and nyc_watch_row["state_label"] == "Referencia historica",
              nyc_watch_row)
+
+        city_decisions_ns = {
+            "CITY_MIN_TRADES_FOR_BLOCK": 3,
+            "CITY_BLOCK_WIN_RATE": 25.0,
+            "MIN_EDGE": 7.0,
+            "OBSERVED_FORECAST_MIN_SAMPLE": 3,
+            "SHADOW_CANARY_MIN_EDGE_HITS": 2,
+            "SHADOW_CANARY_MIN_CYCLES": 2,
+            "SHADOW_CANARY_MIN_BEST_EDGE": 7.0,
+            "SHADOW_CANARY_MIN_SUPPORT": 2,
+            "ALLOWLIST_REMOVE_MIN_TRADES": 3,
+            "ALLOWLIST_REMOVE_MAX_WIN_RATE": 25.0,
+            "ALLOWLIST_REMOVE_MAX_PNL": 0.0,
+            "build_dashboard_city_observation": lambda: {},
+            "get_city_accuracy": lambda: {},
+            "load_shadow_city_tracking": lambda: {},
+            "load_city_policy_state": lambda: {"auto_canary_cities": {}, "auto_shadow_cities": {}, "transition_history": []},
+        }
+        exec(get_function_source(module_ast, code_lines, "build_dashboard_city_decisions"), city_decisions_ns)
+        city_decisions = city_decisions_ns["build_dashboard_city_decisions"](
+            city_observation=city_observation,
+            city_accuracy={
+                "Chicago": {"trades": 4, "wins": 3, "pnl": 5.2, "win_rate": 75.0},
+                "London": {"trades": 3, "wins": 0, "pnl": -4.0, "win_rate": 0.0},
+                "New York City": {"trades": 2, "wins": 1, "pnl": 0.85, "win_rate": 50.0},
+            },
+            shadow_tracking={
+                "cities": {
+                    "New York City": {"markets_seen": 3, "edge_hits": 2, "best_edge_pct": 11.4, "cycles_seen": 2},
+                },
+                "recent_opportunities": [{"city": "New York City", "date": "2026-03-30", "side": "YES", "edge_pct": 11.4, "expected_value": 0.52, "market_price": 42.0, "our_prob": 53.4}],
+                "summary": {"cycles_with_shadow": 2, "opportunities_seen": 3, "edge_hits": 2},
+            },
+        )
+        nyc_decision = next(item for item in city_decisions["rows"] if item["city"] == "New York City")
+        chicago_decision = next(item for item in city_decisions["rows"] if item["city"] == "Chicago")
+        london_decision = next(item for item in city_decisions["rows"] if item["city"] == "London")
+        test("city decisions: promueve canary cuando shadow acumula edge",
+             nyc_decision["decision"] == "promote"
+             and city_decisions["promote_rows"][0]["city"] == "New York City",
+             city_decisions)
+        test("city decisions: mantiene activa con evidencia favorable",
+             chicago_decision["decision"] == "keep"
+             and chicago_decision["decision_label"] == "Mantener",
+             chicago_decision)
+        test("city decisions: respeta bloqueadas",
+             london_decision["decision"] == "blocked"
+             and london_decision["badge"] == "bad",
+             london_decision)
+        test("city decisions: expone politica explicita",
+             "policy" in city_decisions
+             and city_decisions["policy"]["promote"]["edge_hits"] == 2
+             and city_decisions["policy"]["remove"]["trades"] == 3,
+             city_decisions)
+
+        transition_messages = []
+        sync_policy_ns = {
+            "datetime": datetime,
+            "timezone": timezone,
+            "LOGIC_SERIES": "10.6",
+            "ACTIVE_TRADING_CITIES": {"Chicago"},
+            "get_city_accuracy": lambda: {},
+            "load_shadow_city_tracking": lambda: {},
+            "build_dashboard_city_observation": lambda city_accuracy=None: {},
+            "build_dashboard_city_decisions": lambda city_observation=None, city_accuracy=None, shadow_tracking=None: {
+                "rows": [
+                    {"city": "New York City", "decision": "promote", "reason": "regla canary disparada", "shadow_best_edge": 10.2, "shadow_edges": 2},
+                    {"city": "Chicago", "decision": "remove", "reason": "regla de salida disparada"},
+                ]
+            },
+            "load_city_policy_state": lambda: {"logic_series": "10.6", "auto_canary_cities": {}, "auto_shadow_cities": {}, "transition_history": []},
+            "save_city_policy_state": lambda data: transition_messages.append(("save", data)),
+            "get_effective_city_mode": lambda city, policy_state=None: "shadow" if city == "New York City" else "active",
+            "send_telegram": lambda text, with_menu=False, custom_keyboard=None: transition_messages.append(("msg", text)),
+        }
+        exec(get_function_source(module_ast, code_lines, "sync_city_policy_state"), sync_policy_ns)
+        sync_policy_ns["sync_city_policy_state"](notify=True)
+        sent_texts = [item[1] for item in transition_messages if item[0] == "msg"]
+        test("city policy sync: alerta promoción a canary",
+             any("promovida a canary" in text and "New York City" in text for text in sent_texts),
+             sent_texts)
+        test("city policy sync: alerta degradación a shadow",
+             any("degradada a shadow" in text and "Chicago" in text for text in sent_texts),
+             sent_texts)
 
         focus_ns = {
             "OBSERVED_AUDIT_CITIES": {"Chicago", "Atlanta", "Buenos Aires", "Dallas"},
@@ -1460,6 +1558,7 @@ def run_tests():
             "load_cycle_history": lambda limit=None: [{"cycle_number": 5, "logic_cycle_number": 1, "logic_series": "10.5", "version": "v10.6.10", "timestamp_utc": "2026-03-29T11:08:00+00:00", "buys": [], "management": {"n_sold": 1}, "exposure_after": 2.94}],
             "load_audit_data": lambda: {"pending_sells": [], "forecast_vs_real": [], "observed_vs_forecast": [], "errors": []},
             "load_trade_lifecycle_data": lambda: {"summary": {"tracked_positions": 2}, "records": []},
+            "load_shadow_city_tracking": lambda: {"cities": {}, "recent_opportunities": [], "summary": {"cycles_with_shadow": 0, "opportunities_seen": 0, "edge_hits": 0}},
             "get_clean_closed_trade_stats": lambda: {"count": 18, "sell": 12, "loss_total": 6, "resolved_win": 0},
             "get_logic_series_clean_closed_trade_stats": lambda: {"count": 0, "sell": 0, "loss_total": 0, "resolved_win": 0},
             "get_validated_closed_postmortems": lambda: [],
@@ -1472,6 +1571,7 @@ def run_tests():
             "build_dashboard_exit_breakdown": lambda **kwargs: {"validated_rows": [{"label": "Take-profit", "balance_display": "$+1.00"}], "series_rows": [{"label": "Pending exit serie v10.6", "balance_display": "$-0.50"}]},
             "build_dashboard_forecast_quality": lambda **kwargs: {"sample_size": 0, "sample_display": "0 mercados", "mae_display": "acumulando muestra...", "bias_display": "acumulando muestra...", "coverage_display": "0 / 4 ciudades con muestra", "coverage_detail": "0 / 4 con >= 3 casos", "city_rows": [], "latest_rows": [], "note": "acumulando muestra...", "note_level": "muted", "last_record_display": "n/d", "kpis_ready": False, "global_ready": False},
             "build_dashboard_city_observation": lambda **kwargs: {"tracked_count": 4, "active_count": 4, "blocked_count": 0, "observed_ready_count": 0, "observed_configured_count": 4, "summary": "4 activas", "note": "watch", "note_level": "muted", "rows": []},
+            "build_dashboard_city_decisions": lambda **kwargs: {"summary": "0 mantener", "note": "decision", "note_level": "muted", "rows": [], "keep_rows": [], "promote_rows": [], "observe_rows": [], "remove_rows": [], "blocked_rows": [], "shadow_summary": {"opportunities_seen": 0}, "recent_shadow_rows": []},
             "build_dashboard_focus_center": lambda **kwargs: {"status_label": "Sano con limitaciones", "status_badge": "accent", "headline": "sample", "summary": "watch", "answers": [], "action": {"title": "No tocar trading", "detail": "NOAA", "badge": "accent"}, "incidents": [], "quick_stats": [], "drivers": [], "detail_routes": []},
             "build_dashboard_legacy_forecast_drift": lambda **kwargs: {"sample_size": 0, "sample_display": "0 mercados", "mae_display": "n/d", "bias_display": "n/d", "last_record_display": "n/d", "latest_case": "", "note": "legacy"},
             "build_dashboard_trade_analytics": lambda **kwargs: {"sample_size": 1, "score_display": "81.0%", "headline": "sample exits"},
@@ -1500,6 +1600,7 @@ def run_tests():
         test("snapshot: incluye exit_breakdown", "exit_breakdown" in snapshot and snapshot["exit_breakdown"]["validated_rows"][0]["label"] == "Take-profit", snapshot)
         test("snapshot: incluye forecast_quality", "forecast_quality" in snapshot and snapshot["forecast_quality"]["sample_size"] == 0, snapshot)
         test("snapshot: incluye city_observation", "city_observation" in snapshot and snapshot["city_observation"]["tracked_count"] == 4, snapshot)
+        test("snapshot: incluye city_decisions", "city_decisions" in snapshot and "shadow_summary" in snapshot["city_decisions"], snapshot)
         test("snapshot: incluye focus", "focus" in snapshot and snapshot["focus"]["action"]["title"] == "No tocar trading", snapshot)
         test("snapshot: incluye legacy_forecast_drift", "legacy_forecast_drift" in snapshot and snapshot["legacy_forecast_drift"]["last_record_display"] == "n/d", snapshot)
         test("snapshot: incluye trade_analytics", "trade_analytics" in snapshot and snapshot["trade_analytics"]["sample_size"] == 1, snapshot)
