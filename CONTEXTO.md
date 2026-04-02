@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 2 de abril de 2026 (Sesión 61 — shadow/canary automático + dashboard decisional por ciudad)
-**Próxima sesión:** hacer un backfill conservador de `shadow` histórico para poblar la nueva capa de decisiones por ciudad con evidencia retroconstruida, separando claramente lo estimado hacia atrás de lo observado live.
+**Última actualización:** 2 de abril de 2026 (Sesión 62 — ranking operacional claro para ciudades)
+**Próxima sesión:** validar en live que el ranking operacional refleja bien `degradadas vs candidatas reales` tras el deploy, y después retomar el backfill conservador de `shadow` histórico para poblar la capa con evidencia retroconstruida.
 
 ---
 
@@ -129,11 +129,12 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
-**Producción (último deploy verificado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false (`v10.6.10`, refinamiento semántico del `trade console` validado live el 1 abr 2026 a las `21:00 UTC`). Tras la sesión 61 el nuevo overlay `shadow/canary` queda ya empujado a `origin/main` y redeployado en Railway; su validación funcional explícita sigue pendiente hasta revisar el siguiente ciclo con foco en decisiones por ciudad y alertas automáticas.
-**Estado actual tras sesión 61:** el repo añade una capa nueva de aprendizaje operacional para ciudades fuera de allowlist sin tocar todavía la estrategia base. `bot.py` ya registra oportunidades `shadow`, construye un `decision engine` por ciudad, expone reglas explícitas `shadow -> canary` y `active/canary -> shadow`, sincroniza un overlay automático persistente (`city_policy_state.json`), muestra `canaries/shadows` automáticos en dashboard y envía alertas Telegram cuando una ciudad cambia de estado. La suite local vuelve a quedar limpia en `496/496`.
-**Versión local / remoto GitHub:** `origin/main` ya incluye el fix operativo de la sesión 60 y la nueva capa de política automática por ciudad de la sesión 61. Hasta validar esta revisión en live, el último deploy confirmado exhaustivamente sigue siendo `5b23d02`; el siguiente chequeo en Railway debe comprobar tanto la salud del ciclo como la nueva observabilidad `shadow/canary`.
-**Siguiente paso prioritario (sesión 62 recomendada):** backfill conservador de `shadow` histórico. Objetivo: reconstruir oportunidades pasadas con suficiente trazabilidad para que la tabla decisional no arranque casi vacía, marcando siempre qué evidencia es retroconstruida y cuál viene de ciclos live.
-**Bloque posterior recomendado, en sesión separada:** revalidación live del nuevo overlay automático en Railway tras al menos `1-2` ciclos reales y auditoría de `token economics`/disciplina de contexto mínimo solo después de que la capa `shadow/canary` tenga muestra útil.
+**Producción (último deploy lanzado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false. Tras la sesión 62, `origin/main` ya incluye tanto el overlay `shadow/canary` como la nueva vista de ranking operacional por ciudad, y el deploy quedó lanzado desde el push del commit `e4dce44`. La validación funcional explícita del deploy sigue pendiente hasta revisar el siguiente ciclo live.
+**Estado actual tras sesión 62:** el dashboard ya no se queda en una capa descriptiva por ciudad. `bot.py` calcula ahora un `readiness_score` y una prioridad operativa por ciudad combinando histórico real, evidencia NOAA, actividad shadow y overlay de política. La UI muestra de un vistazo quién está `Lista para canary`, quién está `Cerca de canary`, qué ciudades están `Enfriándose`, cuáles son `No tocar` y cuáles son `Expulsada / degradada`. Las ciudades degradadas dejan de parecer candidatas normales aunque tengan actividad shadow; el caso objetivo de `Dallas` queda cubierto como `shadow degradada` en lógica, UX y tests.
+**Validación local:** `python verify_before_deploy.py` vuelve a cerrar en `500/500` tras añadir ranking, score, distancia a canary, tendencia y copy/UX más ejecutiva. El scoreboard/documentación también quedan alineados de nuevo con `agent_events.jsonl`.
+**Versión local / remoto GitHub:** `origin/main` ya incluye el fix operativo de la sesión 60, la capa automática `shadow/canary` de la sesión 61 y la nueva vista de decisión/ranking operacional de la sesión 62. El siguiente chequeo en Railway debe comprobar tanto la salud del ciclo como la lectura visual real de `candidatas vs degradadas`.
+**Siguiente paso prioritario:** validar en live que el ranking operacional refleja bien `degradadas vs candidatas reales` tras el deploy.
+**Bloque posterior recomendado, en sesión separada:** una vez confirmada la semántica live, retomar el backfill conservador de `shadow` histórico para enriquecer la capa con evidencia retroconstruida.
 
 ### Archivos del proyecto:
 | Archivo | Función |

@@ -75,6 +75,7 @@ Comandos útiles:
 | 2026-04-01 | Explícita | Sesión 57 | `—` | Saneamiento local de `trade_lifecycle/trade console`: clave estable por mercado+lados, coalescing de follow-ups (`SELL` + residuo `LOSS_TOTAL`, `RESOLVED_WIN` repetidos), label con `YES/NO`, cruce con cartera para `claim/redeem` y fallback visible desde `portfolio.dead/resolved_won`. Validación concreta sobre `Seoul 14C/13C`, `Atlanta 70-71F/78-79F/80-81F`, `Tokyo 18C`, `Buenos Aires 28C`, `Chicago 40-41F` y `Dallas 82-83F`. Suite local `483/483`. |
 | 2026-04-02 | Explícita | Sesión 60 | `—` | Diagnóstico y fix del bloqueo de capital en live: posiciones `redeemable=True` dejaban exposición falsa y `round(size, 2)` provocaba SELL rechazadas por exceso de shares. `bot.py` pasa a excluir `redeemable` en `get_current_exposure()` y a truncar SELL hacia abajo en `manage_positions()` e intra-cycle. Validación dirigida + suite `483/483`; se actualizan contexto, historial y scoreboard y se empuja a `origin/main`. |
 | 2026-04-02 | Explícita | Sesión 61 | `3c2b568` | Auditoría operativa del `Mission HUD` y salto de capa descriptiva a capa decisional por ciudad: `shadow tracking` para ciudades fuera de allowlist, reglas explícitas `shadow -> canary` y `active/canary -> shadow`, overlay automático persistente, dashboard con `canaries/shadows` actuales e historial de transiciones, y alertas Telegram cuando una ciudad cambia de estado. Suite local `496/496`, `commit + push` a `origin/main` y redeploy lanzado en Railway; queda pendiente validar el comportamiento live de la automatización y como siguiente tarea se fija el backfill conservador de `shadow` histórico. |
+| 2026-04-02 | Explícita | Sesión 62 | `e4dce44` | Conversión de la capa de ciudades en una vista de ranking operacional clara: `readiness_score`, ranking principal, distancia a canary, tendencia y motivo principal por ciudad; degradadas diferenciadas explícitamente (`Dallas` como `shadow degradada`), copy/UX afinado y tests ampliados. `verify_before_deploy.py` cierra en `500/500`; se detecta además que faltaba el cierre documental, por lo que se actualizan `CONTEXTO.md`, `HISTORIAL_SESIONES.md` y `agent_events.jsonl` y se empuja el deploy. |
 | 2026-04-02 | Explícita | Sesión 58 | `—` | Cierre operativo sin tocar el bot: se fija como siguiente prioridad la auditoría de la captura del `Mission HUD`, se formaliza la regla `1 sesión = 1 tarea` con contexto mínimo, se añade una sección de `token economics` para Codex + Claude Code y se crea `.codex/config.toml` del proyecto con `medium` por defecto y perfiles `low/deep/max`. Sin deploy ni cambios de trading/NOAA. |
 | 2026-04-02 | Explícita | Sesión 59 | `—` | Cierre completo: `python verify_before_deploy.py` vuelve a pasar `483/483`, se versionan el saneamiento local de `trade_lifecycle/trade console`, el handoff y los guardrails de contexto/tokens, y se hace `commit + push` a `origin/main`. No se tocan reglas de trading ni NOAA; queda pendiente revalidación live del nuevo push. |
 
@@ -1718,3 +1719,94 @@ Regla recomendada:
   - `Telegram polling: OK`;
   - primer ciclo ejecutado y resumen guardado.
 - la validación funcional completa del nuevo overlay automático queda pendiente de revisar en el siguiente ciclo live.
+
+---
+
+## Sesión 62 — ranking operacional claro para ciudades (2 abr 2026)
+
+**Disparador:** la nueva capa `shadow/canary/shadow` ya existía y el dashboard enseñaba estado, NOAA y transiciones, pero todavía no permitía responder en segundos qué ciudad estaba más cerca de entrar a operativa ni distinguir con claridad una candidata real de una ciudad degradada o de puro ruido.
+
+**Objetivo exacto de producto:** convertir la capa de ciudades en una vista de decisión, no solo descriptiva:
+
+- ranking principal ordenado por prioridad operativa;
+- `readiness score` comprensible;
+- `estado actual`, `distancia a canary`, `tendencia` y `motivo principal`;
+- buckets legibles `Lista para canary / Cerca de canary / Seguir observando / No tocar / Expulsada / degradada`;
+- degradadas recientes separadas visualmente de candidatas normales.
+
+**Cambios implementados en backend (`bot.py`):**
+
+- `build_dashboard_city_decisions()` deja de devolver solo buckets simples y pasa a construir una capa de ranking operacional:
+  - `readiness_score`;
+  - `priority_group` y `priority_label`;
+  - `state_label` y `state_badge`;
+  - `distance_label` / `distance_detail`;
+  - `trend_label`;
+  - `main_reason`;
+  - answers rápidas `top_candidate`, `next_candidate`, `cooling_city` y `noise_city`.
+- la puntuación combina de forma legible:
+  - actividad `shadow` (`edges`, `cycles`, `best_edge`);
+  - cobertura NOAA;
+  - histórico real (`trades`, `WR`, `PnL`);
+  - overlay automático (`auto_canary`, `auto_shadow`, transiciones).
+- penalización explícita para ciudades degradadas o expulsadas:
+  - una ciudad con shadow activo pero degradada deja de competir como candidata normal;
+  - `Dallas` queda cubierta como `Shadow degradada` y `Enfriándose` cuando su overlay / histórico lo justifican.
+
+**Cambios implementados en UI (`templates/dashboard.html` + `static/dashboard.css`):**
+
+- nueva cabecera `Vista de decisión por ciudad`;
+- bloque superior con lectura de 10 segundos:
+  - `Más cerca de entrar`;
+  - `Siguiente`;
+  - `Alejándose`;
+  - `No merecen atención`.
+- nueva tabla principal de ranking con columnas:
+  - `Ciudad`;
+  - `Score`;
+  - `Estado actual`;
+  - `Distancia a canary`;
+  - `Tendencia`;
+  - `Motivo principal`.
+- barras de score y acentos visuales por prioridad;
+- fila visualmente diferenciada para degradadas (`city-ranking-row-degraded`).
+
+**Copy / UX refinado al cierre:**
+
+- la vista se reescribe con lenguaje más ejecutivo:
+  - `Vista de decisión por ciudad`;
+  - `Más cerca de entrar`;
+  - `Alejándose`;
+  - `No merecen atención`;
+  - `Reiniciar por degradación`;
+  - `Ya operativa`;
+  - `histórico real malo`;
+  - `bloqueada por política`;
+  - `NOAA aún corta`.
+
+**Tests y verificación:**
+
+- `verify_before_deploy.py` gana cobertura nueva para:
+  - presencia del ranking en template y CSS;
+  - prioridad real del top candidate;
+  - caso de `Dallas` como `shadow degradada`;
+  - semántica de `readiness_score`, `distance_label`, `trend_label` y `ranking_summary`.
+- resultado final local:
+  - `python verify_before_deploy.py`
+  - `500/500`
+
+**Incidencia de proceso detectada y corregida en el cierre:**
+
+- al hacer `commit + push` del cambio funcional se cerró código y scoreboard, pero todavía faltaban `CONTEXTO.md` y `HISTORIAL_SESIONES.md`;
+- el propio playbook seguía exigiendo esas dos capas para considerar la sesión cerrada;
+- se corrige con un cierre documental adicional y sincronización final de:
+  - `CONTEXTO.md`;
+  - `HISTORIAL_SESIONES.md`;
+  - `agent_events.jsonl`.
+
+**Cierre operativo de la sesión:**
+
+- commit funcional del ranking: `e4dce44` (`ux: add operational city ranking view`);
+- `git push origin main` completado;
+- deploy lanzado hacia Railway;
+- queda pendiente, ya para la siguiente sesión, validar en live que el ranking separa bien `candidatas reales vs degradadas` y, después, retomar el backfill conservador de `shadow` histórico.
