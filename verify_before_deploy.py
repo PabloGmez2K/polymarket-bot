@@ -468,6 +468,7 @@ def run_tests():
     test("template dashboard incluye NOAA observado", "dashboard.forecast_quality" in dashboard_template_code and "Calidad Forecast Observada (NOAA)" in dashboard_template_code)
     test("template dashboard incluye estado de observacion por ciudad", "dashboard.city_observation" in dashboard_template_code and "Estado de observacion por ciudad" in dashboard_template_code)
     test("template dashboard incluye decision engine de ciudades", "dashboard.city_decisions" in dashboard_template_code and "Candidatas a canary" in dashboard_template_code and "Regla shadow → canary" in dashboard_template_code and "Canaries automáticos actuales" in dashboard_template_code)
+    test("template dashboard incluye ranking operacional", "dashboard.city_decisions.ranking_rows" in dashboard_template_code and "Vista de decisión por ciudad" in dashboard_template_code and "Distancia a canary" in dashboard_template_code)
     test("template dashboard incluye mission HUD focus", "dashboard.focus" in dashboard_template_code and "Mission HUD" in dashboard_template_code and "dashboard.focus.tracks" in dashboard_template_code and "dashboard.focus.city_race" in dashboard_template_code)
     test("template dashboard carga dashboard.js", "dashboard.js" in dashboard_template_code and "data-focus-tabs" in dashboard_template_code)
     test("template dashboard mantiene bloque legacy drift", "dashboard.legacy_forecast_drift" in dashboard_template_code and "Drift Open-Meteo (historico - no comparable con NOAA)" in dashboard_template_code)
@@ -481,6 +482,7 @@ def run_tests():
     test("css dashboard define mission HUD", ".focus-tab-bar" in dashboard_css_code and ".mission-track-grid" in dashboard_css_code and ".city-race-list" in dashboard_css_code)
     test("css dashboard define city grouping cards", ".city-zone-grid" in dashboard_css_code and ".city-card-grid" in dashboard_css_code and ".blocked-pill-list" in dashboard_css_code)
     test("css dashboard define layer toggle", ".layer-toggle" in dashboard_css_code and ".layer-toggle-content" in dashboard_css_code)
+    test("css dashboard define ranking operacional", ".city-ranking-table" in dashboard_css_code and ".city-score-bar" in dashboard_css_code and ".city-ranking-row-degraded" in dashboard_css_code)
     test("js dashboard soporta multiples tab shells", "data-tab-shell" in dashboard_js_code and "defaultPanel" in dashboard_js_code)
     if os.path.exists(agent_events_path):
         try:
@@ -1118,16 +1120,34 @@ def run_tests():
             "load_city_policy_state": lambda: {"auto_canary_cities": {}, "auto_shadow_cities": {}, "transition_history": []},
         }
         exec(get_function_source(module_ast, code_lines, "build_dashboard_city_decisions"), city_decisions_ns)
+        city_observation_for_decisions = {
+            **city_observation,
+            "rows": [dict(item) for item in city_observation["rows"]],
+        }
+        for item in city_observation_for_decisions["rows"]:
+            if item["city"] == "Dallas":
+                item["city_mode"] = "shadow"
+                item["active"] = False
+                item["trading_label"] = "Fuera allowlist"
+                item["state_label"] = "Observacion"
+                item["state_badge"] = "accent"
+        city_decisions_ns["load_city_policy_state"] = lambda: {
+            "auto_canary_cities": {},
+            "auto_shadow_cities": {"Dallas": {"shadowed_at": "2026-03-31T12:00:00+00:00", "reason": "historico real malo", "from_mode": "active"}},
+            "transition_history": [{"city": "Dallas", "from": "active", "to": "shadow", "at": "2026-03-31T12:00:00+00:00", "reason": "historico real malo"}],
+        }
         city_decisions = city_decisions_ns["build_dashboard_city_decisions"](
-            city_observation=city_observation,
+            city_observation=city_observation_for_decisions,
             city_accuracy={
                 "Chicago": {"trades": 4, "wins": 3, "pnl": 5.2, "win_rate": 75.0},
                 "London": {"trades": 3, "wins": 0, "pnl": -4.0, "win_rate": 0.0},
                 "New York City": {"trades": 2, "wins": 1, "pnl": 0.85, "win_rate": 50.0},
+                "Dallas": {"trades": 4, "wins": 1, "pnl": -2.5, "win_rate": 25.0},
             },
             shadow_tracking={
                 "cities": {
                     "New York City": {"markets_seen": 3, "edge_hits": 2, "best_edge_pct": 11.4, "cycles_seen": 2},
+                    "Dallas": {"markets_seen": 4, "edge_hits": 3, "best_edge_pct": 9.2, "cycles_seen": 3},
                 },
                 "recent_opportunities": [{"city": "New York City", "date": "2026-03-30", "side": "YES", "edge_pct": 11.4, "expected_value": 0.52, "market_price": 42.0, "our_prob": 53.4}],
                 "summary": {"cycles_with_shadow": 2, "opportunities_seen": 3, "edge_hits": 2},
@@ -1136,22 +1156,38 @@ def run_tests():
         nyc_decision = next(item for item in city_decisions["rows"] if item["city"] == "New York City")
         chicago_decision = next(item for item in city_decisions["rows"] if item["city"] == "Chicago")
         london_decision = next(item for item in city_decisions["rows"] if item["city"] == "London")
+        dallas_decision = next(item for item in city_decisions["rows"] if item["city"] == "Dallas")
         test("city decisions: promueve canary cuando shadow acumula edge",
              nyc_decision["decision"] == "promote"
              and city_decisions["promote_rows"][0]["city"] == "New York City",
              city_decisions)
+        test("city decisions: ranking prioriza candidata real",
+             city_decisions["top_candidate"]["city"] == "New York City"
+             and nyc_decision["priority_label"] == "Lista para canary"
+             and nyc_decision["readiness_score"] >= 80
+             and nyc_decision["distance_label"] == "Lista ahora",
+             nyc_decision)
         test("city decisions: mantiene activa con evidencia favorable",
              chicago_decision["decision"] == "keep"
-             and chicago_decision["decision_label"] == "Mantener",
+             and chicago_decision["decision_label"] == "Mantener"
+             and chicago_decision["priority_group"] == "operating",
              chicago_decision)
         test("city decisions: respeta bloqueadas",
              london_decision["decision"] == "blocked"
-             and london_decision["badge"] == "bad",
+             and london_decision["badge"] == "bad"
+             and london_decision["priority_group"] == "no_touch",
              london_decision)
+        test("city decisions: Dallas aparece como shadow degradada",
+             dallas_decision["priority_group"] == "expelled"
+             and dallas_decision["state_label"] == "Shadow degradada"
+             and dallas_decision["trend_label"] == "Enfriándose"
+             and dallas_decision["main_reason"] == "shadow degradada por histórico real",
+             dallas_decision)
         test("city decisions: expone politica explicita",
              "policy" in city_decisions
              and city_decisions["policy"]["promote"]["edge_hits"] == 2
-             and city_decisions["policy"]["remove"]["trades"] == 3,
+             and city_decisions["policy"]["remove"]["trades"] == 3
+             and city_decisions["ranking_summary"]["expelled"] >= 1,
              city_decisions)
 
         transition_messages = []

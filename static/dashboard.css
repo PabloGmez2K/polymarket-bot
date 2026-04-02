@@ -1121,6 +1121,82 @@ th {
   line-height: 1.35;
 }
 
+.cards-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.city-ranking-summary {
+  margin-top: 18px;
+}
+
+.city-ranking-table-wrap {
+  margin-top: 18px;
+}
+
+.city-ranking-table tbody tr {
+  transition: background 140ms ease, transform 140ms ease;
+}
+
+.city-ranking-table tbody tr:hover {
+  background: rgba(142, 217, 255, 0.06);
+}
+
+.city-ranking-row-good {
+  box-shadow: inset 4px 0 0 rgba(99, 210, 159, 0.72);
+}
+
+.city-ranking-row-accent {
+  box-shadow: inset 4px 0 0 rgba(21, 126, 189, 0.7);
+}
+
+.city-ranking-row-warn {
+  box-shadow: inset 4px 0 0 rgba(240, 183, 104, 0.72);
+}
+
+.city-ranking-row-bad,
+.city-ranking-row-degraded {
+  box-shadow: inset 4px 0 0 rgba(255, 139, 125, 0.76);
+}
+
+.city-score-cell {
+  display: grid;
+  gap: 8px;
+  min-width: 110px;
+}
+
+.city-score-bar {
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(33, 52, 71, 0.08);
+}
+
+.city-score-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #168aad 0%, #63d29f 100%);
+}
+
+.city-score-fill-good {
+  background: linear-gradient(90deg, rgba(99, 210, 159, 0.96), rgba(134, 234, 180, 0.92));
+}
+
+.city-score-fill-accent {
+  background: linear-gradient(90deg, rgba(21, 126, 189, 0.96), rgba(99, 210, 159, 0.88));
+}
+
+.city-score-fill-warn {
+  background: linear-gradient(90deg, rgba(240, 183, 104, 0.98), rgba(255, 214, 102, 0.92));
+}
+
+.city-score-fill-bad {
+  background: linear-gradient(90deg, rgba(255, 139, 125, 0.98), rgba(255, 99, 99, 0.92));
+}
+
+.city-score-fill-muted {
+  background: linear-gradient(90deg, rgba(157, 169, 184, 0.88), rgba(157, 169, 184, 0.56));
+}
+
 .good {
   color: var(--good);
 }

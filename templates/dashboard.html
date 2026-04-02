@@ -994,6 +994,116 @@
             <span class="stat-sub">ciudades degradadas sin nuevas entradas</span>
           </article>
         </section>
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Ranking operacional</p>
+            <h2>Vista de decisión por ciudad</h2>
+          </div>
+          <span class="badge badge-accent">{{ dashboard.city_decisions.ranking_rows|length }} ciudades</span>
+        </div>
+        <section class="grid cards-4 city-ranking-summary">
+          <article class="mini-card focus-mini-card">
+            <span class="stat-label">Más cerca de entrar</span>
+            <strong class="stat-value">{{ dashboard.city_decisions.top_candidate.city if dashboard.city_decisions.top_candidate else 'Nadie' }}</strong>
+            <span class="stat-sub">
+              {% if dashboard.city_decisions.top_candidate %}
+              {{ dashboard.city_decisions.top_candidate.priority_label }} | {{ dashboard.city_decisions.top_candidate.distance_label }}
+              {% else %}
+              no hay candidata clara ahora mismo
+              {% endif %}
+            </span>
+          </article>
+          <article class="mini-card focus-mini-card">
+            <span class="stat-label">Siguiente</span>
+            <strong class="stat-value">{{ dashboard.city_decisions.next_candidate.city if dashboard.city_decisions.next_candidate else 'n/d' }}</strong>
+            <span class="stat-sub">
+              {% if dashboard.city_decisions.next_candidate %}
+              {{ dashboard.city_decisions.next_candidate.priority_label }} | {{ dashboard.city_decisions.next_candidate.distance_label }}
+              {% else %}
+              no hay segunda candidata con prioridad real
+              {% endif %}
+            </span>
+          </article>
+          <article class="mini-card focus-mini-card">
+            <span class="stat-label">Alejándose</span>
+            <strong class="stat-value">{{ dashboard.city_decisions.cooling_city.city if dashboard.city_decisions.cooling_city else 'n/d' }}</strong>
+            <span class="stat-sub">
+              {% if dashboard.city_decisions.cooling_city %}
+              {{ dashboard.city_decisions.cooling_city.main_reason }}
+              {% else %}
+              no hay una ciudad enfriándose de forma dominante
+              {% endif %}
+            </span>
+          </article>
+          <article class="mini-card focus-mini-card">
+            <span class="stat-label">No merecen atención</span>
+            <strong class="stat-value">{{ dashboard.city_decisions.ranking_summary.no_touch }}</strong>
+            <span class="stat-sub">
+              {% if dashboard.city_decisions.noise_city %}
+              líder de ruido: {{ dashboard.city_decisions.noise_city.city }}
+              {% else %}
+              sin ruido claro ahora mismo
+              {% endif %}
+            </span>
+          </article>
+        </section>
+
+        <div class="table-wrap city-ranking-table-wrap">
+          <table class="city-ranking-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Ciudad</th>
+                <th>Score</th>
+                <th>Estado actual</th>
+                <th>Distancia a canary</th>
+                <th>Tendencia</th>
+                <th>Motivo principal</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in dashboard.city_decisions.ranking_rows %}
+              <tr class="city-ranking-row city-ranking-row-{{ row.priority_badge }}{% if row.degraded %} city-ranking-row-degraded{% endif %}">
+                <td><strong>#{{ loop.index }}</strong></td>
+                <td>
+                  <strong>{{ row.city }}</strong>
+                  <span class="table-note"><span class="badge badge-{{ row.priority_badge }}">{{ row.priority_label }}</span></span>
+                </td>
+                <td>
+                  <div class="city-score-cell">
+                    <span class="badge badge-{{ row.score_badge }}">{{ row.readiness_score }}</span>
+                    <div class="city-score-bar">
+                      <div class="city-score-fill city-score-fill-{{ row.score_badge }}" style="width: {{ row.readiness_score }}%"></div>
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <span class="badge badge-{{ row.state_badge }}">{{ row.state_label }}</span>
+                  <span class="table-note">{{ row.trading_label }}</span>
+                </td>
+                <td>
+                  <span class="badge badge-{{ row.distance_badge }}">{{ row.distance_label }}</span>
+                  <span class="table-note">{{ row.distance_detail }}</span>
+                </td>
+                <td>
+                  <span class="badge badge-{{ row.trend_badge }}">{{ row.trend_label }}</span>
+                  <span class="table-note">{{ row.history_label }} | NOAA {{ row.observed_display }}</span>
+                </td>
+                <td>
+                  <strong>{{ row.main_reason }}</strong>
+                  <span class="table-note">
+                    {% if row.degraded and row.degradation_reason %}
+                    {{ row.degradation_reason }}
+                    {% else %}
+                    {{ row.reason }}
+                    {% endif %}
+                  </span>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
         <div class="city-zone-grid decision-zone-grid">
           <section class="city-zone-card">
             <div class="card-head">

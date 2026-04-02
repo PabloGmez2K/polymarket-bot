@@ -4313,6 +4313,9 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
     policy_state = load_city_policy_state()
 
     shadow_cities = shadow_tracking.get("cities", {}) if isinstance(shadow_tracking, dict) else {}
+    auto_canary = policy_state.get("auto_canary_cities", {}) if isinstance(policy_state, dict) else {}
+    auto_shadow = policy_state.get("auto_shadow_cities", {}) if isinstance(policy_state, dict) else {}
+    transition_history = list((policy_state.get("transition_history", []) if isinstance(policy_state, dict) else [])[:20])
     policy = {
         "promote": {
             "edge_hits": SHADOW_CANARY_MIN_EDGE_HITS,
@@ -4342,6 +4345,14 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
         "remove": [],
         "blocked": [],
     }
+    priority_order = {
+        "ready": 0,
+        "near": 1,
+        "watch": 2,
+        "operating": 3,
+        "no_touch": 4,
+        "expelled": 5,
+    }
 
     for row in city_observation.get("rows", []):
         city = row.get("city", "?")
@@ -4359,6 +4370,7 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
         interpretable = bool(row.get("interpretable"))
         noaa_configured = bool(row.get("noaa_configured"))
         observed_count = int(row.get("observed_count", 0) or 0)
+        observed_goal = int(row.get("observed_goal", OBSERVED_FORECAST_MIN_SAMPLE) or OBSERVED_FORECAST_MIN_SAMPLE)
         support_count = max(observed_count, trades, shadow_cycles)
         promotable_shadow = (
             shadow_edges >= SHADOW_CANARY_MIN_EDGE_HITS
@@ -4371,6 +4383,40 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
             and trades >= ALLOWLIST_REMOVE_MIN_TRADES
             and win_rate <= ALLOWLIST_REMOVE_MAX_WIN_RATE
             and pnl <= ALLOWLIST_REMOVE_MAX_PNL
+        )
+        history_bad = (
+            trades >= ALLOWLIST_REMOVE_MIN_TRADES
+            and win_rate <= ALLOWLIST_REMOVE_MAX_WIN_RATE
+            and pnl <= ALLOWLIST_REMOVE_MAX_PNL
+        )
+        auto_shadow_meta = auto_shadow.get(city, {}) if isinstance(auto_shadow, dict) else {}
+        auto_canary_meta = auto_canary.get(city, {}) if isinstance(auto_canary, dict) else {}
+        latest_transition = next(
+            (
+                item for item in transition_history
+                if isinstance(item, dict) and item.get("city") == city
+            ),
+            {},
+        )
+        degraded = bool(auto_shadow_meta) or (
+            city_mode == "shadow"
+            and isinstance(latest_transition, dict)
+            and latest_transition.get("to") == "shadow"
+        )
+        state_label = (
+            "Activa" if city_mode == "active"
+            else "Canary" if city_mode == "canary"
+            else "Bloqueada" if blocked
+            else "Shadow degradada" if degraded
+            else "Referencia" if trades > 0 and not noaa_configured and shadow_seen == 0
+            else "Shadow"
+        )
+        state_badge = (
+            "good" if city_mode == "active"
+            else "accent" if city_mode == "canary"
+            else "bad" if blocked or degraded
+            else "muted" if state_label == "Referencia"
+            else "warn"
         )
 
         if blocked:
@@ -4418,35 +4464,211 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
             badge = "muted"
             reason = "ni NOAA ni shadow ni historico suficiente para tomar una decision"
 
+        canary_gaps = []
+        if shadow_edges < SHADOW_CANARY_MIN_EDGE_HITS:
+            missing_edges = SHADOW_CANARY_MIN_EDGE_HITS - shadow_edges
+            canary_gaps.append(f"{missing_edges} edge{'s' if missing_edges != 1 else ''}")
+        if shadow_cycles < SHADOW_CANARY_MIN_CYCLES:
+            missing_cycles = SHADOW_CANARY_MIN_CYCLES - shadow_cycles
+            canary_gaps.append(f"{missing_cycles} ciclo{'s' if missing_cycles != 1 else ''}")
+        if shadow_best_edge < SHADOW_CANARY_MIN_BEST_EDGE:
+            canary_gaps.append(f"pico +{(SHADOW_CANARY_MIN_BEST_EDGE - shadow_best_edge):.1f}%")
+        if support_count < SHADOW_CANARY_MIN_SUPPORT:
+            missing_support = SHADOW_CANARY_MIN_SUPPORT - support_count
+            canary_gaps.append(f"{missing_support} soporte")
+
+        if active:
+            distance_label = "Ya operativa"
+            distance_badge = "good" if city_mode == "active" else "accent"
+            distance_detail = (
+                "ya esta en allowlist activa"
+                if city_mode == "active"
+                else "ya opera con sizing reducido en canary"
+            )
+        elif blocked:
+            distance_label = "Fuera de carrera"
+            distance_badge = "bad"
+            distance_detail = "bloqueada por politica; no es candidata mientras siga asi"
+        elif degraded:
+            distance_label = "Reiniciar por degradación"
+            distance_badge = "bad"
+            distance_detail = auto_shadow_meta.get("reason") or latest_transition.get("reason") or "primero debe reparar su historico real"
+        elif promotable_shadow:
+            distance_label = "Lista ahora"
+            distance_badge = "good"
+            distance_detail = "cumple la regla shadow -> canary"
+        else:
+            distance_label = f"{len(canary_gaps)} gap{'s' if len(canary_gaps) != 1 else ''}"
+            distance_badge = "warn" if shadow_seen > 0 or observed_count > 0 else "muted"
+            distance_detail = (
+                "falta " + " + ".join(canary_gaps[:3])
+                if canary_gaps else
+                "acumula evidencia, pero aun no tiene señal clara para canary"
+            )
+
+        score = 0.0
+        score += min(30.0, shadow_edges * 12.0)
+        score += min(18.0, shadow_cycles * 8.0)
+        if SHADOW_CANARY_MIN_BEST_EDGE > 0:
+            score += min(12.0, max(0.0, shadow_best_edge) / SHADOW_CANARY_MIN_BEST_EDGE * 12.0)
+        if noaa_configured:
+            score += 6.0
+        score += min(16.0, (observed_count / max(1, observed_goal)) * 16.0)
+        if interpretable:
+            score += 6.0
+        if trades > 0:
+            if history_bad:
+                score -= 28.0
+            elif pnl > 0 or win_rate >= 50.0:
+                score += 10.0
+            else:
+                score += 3.0
+        if city_mode == "active":
+            score += 24.0
+        elif city_mode == "canary":
+            score += 18.0
+        if promotable_shadow:
+            score = max(score, 82.0)
+        if blocked:
+            score = min(score, 8.0)
+        if degraded:
+            score = min(score, 18.0)
+        if removable_active:
+            score = min(score, 15.0)
+        readiness_score = int(max(0.0, min(99.0, round(score))))
+
+        if degraded or removable_active:
+            priority_group = "expelled"
+            priority_label = "Expulsada / degradada"
+            priority_badge = "bad"
+        elif blocked or (history_bad and not active):
+            priority_group = "no_touch"
+            priority_label = "No tocar"
+            priority_badge = "bad" if history_bad else "muted"
+        elif promotable_shadow:
+            priority_group = "ready"
+            priority_label = "Lista para canary"
+            priority_badge = "good"
+        elif not active and shadow_seen > 0 and not history_bad:
+            priority_group = "near"
+            priority_label = "Cerca de canary"
+            priority_badge = "accent"
+        elif active:
+            priority_group = "operating"
+            priority_label = "Operando"
+            priority_badge = "good" if city_mode == "active" else "accent"
+        elif noaa_configured or trades > 0 or shadow_seen > 0:
+            priority_group = "watch"
+            priority_label = "Seguir observando"
+            priority_badge = "warn"
+        else:
+            priority_group = "no_touch"
+            priority_label = "No tocar"
+            priority_badge = "muted"
+
+        if degraded or removable_active or history_bad:
+            trend_label = "Enfriándose"
+            trend_badge = "bad"
+        elif promotable_shadow or (shadow_seen > 0 and shadow_edges > 0) or (observed_count > 0 and not active):
+            trend_label = "Subiendo"
+            trend_badge = "good" if promotable_shadow else "accent"
+        else:
+            trend_label = "Estable"
+            trend_badge = "muted" if priority_group in {"no_touch", "operating"} else "warn"
+
+        if degraded:
+            main_reason = "shadow degradada por histórico real"
+        elif removable_active:
+            main_reason = "histórico real malo"
+        elif blocked:
+            main_reason = "bloqueada por política"
+        elif promotable_shadow:
+            main_reason = "shadow fuerte"
+        elif shadow_seen > 0 and shadow_edges > 0:
+            main_reason = "shadow prometedor"
+        elif noaa_configured and observed_count == 0:
+            main_reason = "sin muestra NOAA"
+        elif noaa_configured and observed_count < observed_goal:
+            main_reason = "NOAA aún corta"
+        elif trades > 0 and pnl < 0:
+            main_reason = "histórico mixto o flojo"
+        elif trades == 0 and shadow_seen == 0:
+            main_reason = "sin muestra"
+        else:
+            main_reason = "solo referencia"
+
         candidate = {
             "city": city,
             "decision": decision,
             "decision_label": decision_label,
             "badge": badge,
+            "readiness_score": readiness_score,
+            "score_badge": (
+                "good" if readiness_score >= 80
+                else "accent" if readiness_score >= 60
+                else "warn" if readiness_score >= 35
+                else "bad" if degraded or removable_active or history_bad
+                else "muted"
+            ),
+            "priority_group": priority_group,
+            "priority_label": priority_label,
+            "priority_badge": priority_badge,
             "city_mode": city_mode,
+            "state_label": state_label,
+            "state_badge": state_badge,
             "active": active,
             "blocked": blocked,
+            "degraded": degraded,
             "interpretable": interpretable,
             "trades": trades,
             "win_rate": win_rate,
             "pnl_display": f"${pnl:+.2f}",
-            "observed_display": f"{observed_count}/{row.get('observed_goal', OBSERVED_FORECAST_MIN_SAMPLE)}",
+            "observed_display": f"{observed_count}/{observed_goal}",
             "shadow_seen": shadow_seen,
             "shadow_edges": shadow_edges,
+            "shadow_cycles": shadow_cycles,
             "shadow_best_edge": shadow_best_edge,
             "shadow_best_edge_display": f"{shadow_best_edge:.1f}%" if shadow_best_edge else "n/d",
+            "distance_label": distance_label,
+            "distance_badge": distance_badge,
+            "distance_detail": distance_detail,
+            "trend_label": trend_label,
+            "trend_badge": trend_badge,
+            "main_reason": main_reason,
+            "support_count": support_count,
+            "canary_gap_count": len(canary_gaps),
+            "degradation_reason": auto_shadow_meta.get("reason") or latest_transition.get("reason") or "",
+            "degradation_from": auto_shadow_meta.get("from_mode") or latest_transition.get("from") or "",
+            "degradation_at": auto_shadow_meta.get("shadowed_at") or latest_transition.get("at") or "",
+            "overlay_reason": auto_canary_meta.get("reason") if city_mode == "canary" else auto_shadow_meta.get("reason"),
             "reason": reason,
             "trading_label": row.get("trading_label", ""),
             "history_label": row.get("history_label", ""),
             "noaa_label": row.get("noaa_label", ""),
+            "_sort": (
+                priority_order.get(priority_group, 9),
+                -readiness_score,
+                len(canary_gaps),
+                -shadow_edges,
+                -shadow_best_edge,
+                -observed_count,
+                -trades,
+                city,
+            ),
         }
         rows.append(candidate)
         buckets[decision].append(candidate)
+
+    rows.sort(key=lambda item: item["_sort"])
+    for item in rows:
+        item.pop("_sort", None)
 
     for bucket_name in buckets:
         buckets[bucket_name].sort(
             key=lambda item: (
                 0 if item.get("active") else 1,
+                priority_order.get(item.get("priority_group"), 9),
+                -int(item.get("readiness_score", 0) or 0),
                 -int(item.get("shadow_edges", 0) or 0),
                 -float(item.get("shadow_best_edge", 0) or 0),
                 -int(item.get("trades", 0) or 0),
@@ -4456,31 +4678,54 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
 
     shadow_summary = shadow_tracking.get("summary", {}) if isinstance(shadow_tracking, dict) else {}
     promotable = len(buckets["promote"])
+    top_candidate_rows = [
+        item for item in rows
+        if item.get("priority_group") in {"ready", "near", "watch"}
+        and not item.get("active")
+        and not item.get("blocked")
+        and not item.get("degraded")
+    ]
+    top_candidate = top_candidate_rows[0] if top_candidate_rows else None
+    next_candidate = top_candidate_rows[1] if len(top_candidate_rows) > 1 else None
+    cooling_rows = [item for item in rows if item.get("trend_label") == "Enfriandose"]
+    noise_rows = [item for item in rows if item.get("priority_group") == "no_touch"]
     note = (
-        "Esta capa no cambia la allowlist sola: resume evidencia real, NOAA y shadow "
-        "para decidir mantener, probar con canary u observar. "
+        "Esta tabla ordena ciudades por prioridad operativa real. "
+        "Combina historico validado, evidencia NOAA, actividad shadow y overlay de politica "
+        "para separar candidatas reales de degradadas, ruido o referencias. "
         f"Promover: {policy['promote']['label']}. "
         f"Salida: {policy['remove']['label']}."
     )
     summary = (
-        f"{len(buckets['keep'])} mantener | "
-        f"{promotable} candidatas a canary | "
-        f"{len(buckets['remove'])} revisar salida"
+        f"{top_candidate.get('city') if top_candidate else 'Nadie'} lidera | "
+        f"{promotable} listas para canary | "
+        f"{len(cooling_rows)} enfriándose"
     )
-    auto_canary = policy_state.get("auto_canary_cities", {}) if isinstance(policy_state, dict) else {}
-    auto_shadow = policy_state.get("auto_shadow_cities", {}) if isinstance(policy_state, dict) else {}
 
     return {
         "summary": summary,
         "note": note,
-        "note_level": "accent" if promotable else "muted",
+        "note_level": "accent" if promotable else "warn" if top_candidate else "muted",
         "policy": policy,
         "rows": rows,
+        "ranking_rows": rows,
         "keep_rows": buckets["keep"],
         "promote_rows": buckets["promote"],
         "observe_rows": buckets["observe"],
         "remove_rows": buckets["remove"],
         "blocked_rows": buckets["blocked"],
+        "ranking_summary": {
+            "ready": len([item for item in rows if item.get("priority_group") == "ready"]),
+            "near": len([item for item in rows if item.get("priority_group") == "near"]),
+            "watch": len([item for item in rows if item.get("priority_group") == "watch"]),
+            "operating": len([item for item in rows if item.get("priority_group") == "operating"]),
+            "no_touch": len(noise_rows),
+            "expelled": len([item for item in rows if item.get("priority_group") == "expelled"]),
+        },
+        "top_candidate": top_candidate,
+        "next_candidate": next_candidate,
+        "cooling_city": cooling_rows[0] if cooling_rows else None,
+        "noise_city": noise_rows[0] if noise_rows else None,
         "shadow_summary": {
             "cycles_with_shadow": int(shadow_summary.get("cycles_with_shadow", 0) or 0),
             "opportunities_seen": int(shadow_summary.get("opportunities_seen", 0) or 0),
