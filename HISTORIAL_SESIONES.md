@@ -77,6 +77,8 @@ Comandos útiles:
 | 2026-04-02 | Explícita | Sesión 61 | `3c2b568` | Auditoría operativa del `Mission HUD` y salto de capa descriptiva a capa decisional por ciudad: `shadow tracking` para ciudades fuera de allowlist, reglas explícitas `shadow -> canary` y `active/canary -> shadow`, overlay automático persistente, dashboard con `canaries/shadows` actuales e historial de transiciones, y alertas Telegram cuando una ciudad cambia de estado. Suite local `496/496`, `commit + push` a `origin/main` y redeploy lanzado en Railway; queda pendiente validar el comportamiento live de la automatización y como siguiente tarea se fija el backfill conservador de `shadow` histórico. |
 | 2026-04-02 | Explícita | Sesión 62 | `e4dce44` | Conversión de la capa de ciudades en una vista de ranking operacional clara: `readiness_score`, ranking principal, distancia a canary, tendencia y motivo principal por ciudad; degradadas diferenciadas explícitamente (`Dallas` como `shadow degradada`), copy/UX afinado y tests ampliados. `verify_before_deploy.py` cierra en `500/500`; se detecta además que faltaba el cierre documental, por lo que se actualizan `CONTEXTO.md`, `HISTORIAL_SESIONES.md` y `agent_events.jsonl` y se empuja el deploy. |
 | 2026-04-02 | Explícita | Sesión 63 | `—` | Cierre mínimo de hardening de tooling/documentación con evidencia ya verificada en local: `OPERATIONS_PLAYBOOK.md` deja RTK y Engram como setup global del usuario, no del repo; RTK queda marcado como verificado para Codex con `rtk --version` + `rtk init -g --codex` + uso real (`rtk git status`, `rtk git diff`); Engram queda marcado como operativo tras `engram setup codex` y alta manual del MCP `engram` en la extensión de Codex para VS Code. Sin cambios en bot, trading, NOAA o deploy. |
+| 2026-04-03 | Explícita | Sesión 69 | `—` | Reconciliación acotada de `postmortem.json` live para Chicago Apr1: la fila `2026-04-01` ya no estaba `open`, sino `closed/LOSS_TOTAL` con `micro_position_unsellable`, y `city_accuracy[Chicago]` recalcula a `4T / 1W / 25.0% / +$2.09`; el sesgo pendiente queda movido a 3 filas legacy de Chicago (`2026-03-26`, `2026-03-27`, `2026-03-28`) que siguen abiertas. |
+| 2026-04-03 | Explícita | Sesión 70 | `—` | Auditoría completa del Control Center dashboard (v10.6.10): 6 bloques analizados (fidelidad de datos, utilidad operativa, UX/IA, motor de ciudades, alertas Telegram, valor estratégico). Hallazgos críticos: `shadow_tracking` posiblemente no persiste en Volume, WR Chicago sesgado por 3 filas legacy `open`, NOAA/Decision engine al final de capa 2 cuando es el limitante dominante, `readiness_score` opaco (propuesta de 3 gates). Entregables: `docs/control-center-audit.md`, `docs/control-center-roadmap.md` (QW1-7, M1-5, R1-3, I1-3), `docs/control-center-next-session.md` con prompt listo. Sin cambios de código. |
 | 2026-04-03 | Explícita | Sesión 66 | `—` | Implementación local del auto-bloqueo real por ciudad sin tocar trading/NOAA/scheduler: `city_policy_state.json` añade `auto_blocked_cities` con `action/reason/metrics/from_mode/triggered_at`, `get_effective_city_mode()` prioriza ese estado sobre la allowlist activa, `sync_city_policy_state()` registra `active/canary -> blocked` con evidencia persistida, dashboard/decision engine leen la política y la suite pasa en `506/506`. Sin push/deploy todavía; siguiente paso validar en Railway. |
 | 2026-04-02 | Explícita | Sesión 58 | `—` | Cierre operativo sin tocar el bot: se fija como siguiente prioridad la auditoría de la captura del `Mission HUD`, se formaliza la regla `1 sesión = 1 tarea` con contexto mínimo, se añade una sección de `token economics` para Codex + Claude Code y se crea `.codex/config.toml` del proyecto con `medium` por defecto y perfiles `low/deep/max`. Sin deploy ni cambios de trading/NOAA. |
 | 2026-04-02 | Explícita | Sesión 59 | `—` | Cierre completo: `python verify_before_deploy.py` vuelve a pasar `483/483`, se versionan el saneamiento local de `trade_lifecycle/trade console`, el handoff y los guardrails de contexto/tokens, y se hace `commit + push` a `origin/main`. No se tocan reglas de trading ni NOAA; queda pendiente revalidación live del nuevo push. |
@@ -2061,3 +2063,29 @@ Regla recomendada:
 - no se tocó `bot.py`;
 - no se tocaron trading, NOAA, scheduler, exits ni arquitectura core;
 - único cambio en producción: env var `ACTIVE_TRADING_CITIES` en Railway.
+
+---
+
+## Sesión 69 — reconciliación postmortem Chicago Apr1 sin edición live (3 abr 2026)
+
+**Disparador:** cerrar la tarea acotada pendiente de sesión 68: verificar si `Chicago Apr1` seguía `open` en `postmortem.json` y, si era así, cerrarla manualmente para que `city_accuracy` no quedara sesgada.
+
+**Evidencia descargada de Railway:**
+
+- Se bajó `/app/data/postmortem.json` vía `tools/railway_safe.ps1 ssh "cat /app/data/postmortem.json"` a un snapshot temporal local.
+- La entrada `Chicago|YES|2026-04-01|2026-03-31T23:00:28.735723+00:00` ya estaba `status=closed`, `close_action=LOSS_TOTAL`, `close_reason=micro_position_unsellable`, `closed_at=2026-04-02T07:39:19.807998+00:00`, `total_amount=1.88`, `total_shares=9.89`, `avg_entry_price=0.1901`, `pnl_cash=0.0`.
+- Con la misma lógica de `get_city_accuracy()`, Chicago recalcula a `4 trades`, `1 win`, `WR 25.0%`, `PnL +$2.09`, así que esta fila Apr1 ya no explica el posible sesgo por denominador incompleto.
+
+**Hallazgo nuevo:**
+
+- Siguen abiertas 3 filas legacy de Chicago no relacionadas con Apr1:
+- `Chicago|YES|2026-03-26|2026-03-25T16:49:42.552882+00:00`
+- `Chicago|YES|2026-03-27|2026-03-27T16:00:37.157021+00:00`
+- `Chicago|YES|2026-03-28|2026-03-28T16:00:32.932997+00:00`
+- Si hay sesgo pendiente en `city_accuracy`, ahora la hipótesis prioritaria son esas filas legacy todavía `open`, no `Chicago Apr1`.
+
+**Acción tomada y límite de alcance:**
+
+- No se editó `postmortem.json` live porque la fila Apr1 ya estaba cerrada.
+- No se tocó `bot.py`, trading, NOAA, scheduler ni reglas de salida.
+- Solo se corrigió la trazabilidad documental para retirar el aviso stale de Apr1 y mover la siguiente tarea al saneamiento de esas 3 filas Chicago antiguas.

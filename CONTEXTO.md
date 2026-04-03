@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 3 de abril de 2026 (Sesión 68 — validación end-to-end deploy + corrección desfase env vars)
-**Próxima sesión:** verificar en postmortem.json raw si Chicago Apr1 (cerrada manualmente) está correctamente reflejada como closed; si no, reconciliar para que city_accuracy no esté sesgada. Vigilar el ciclo de 23:00 UTC para confirmar que `city_policy_state.json` se crea si alguna ciudad activa dispara la regla de auto-block.
+**Última actualización:** 3 de abril de 2026 (Sesión 70 — auditoría completa del Control Center dashboard)
+**Próxima sesión:** quick wins Control Center (ver `docs/control-center-next-session.md`): verificar que `shadow_tracking` y `city_policy_state.json` persisten en Railway Volume, añadir alarma "sin ciclo en >12h" en Mission HUD, y aplicar 5 quick wins de HTML sin riesgo. Prompt exacto disponible en el archivo. Las 3 filas legacy de Chicago (`2026-03-26`, `2026-03-27`, `2026-03-28`) siguen pendientes de cierre.
 
 **Estado real de la cuenta a cierre de sesión 68 (3 abr 2026, ~17:00 UTC):**
 - Cash disponible: $21.62
@@ -10,7 +10,7 @@
 - Ciudades activas Railway: Chicago, Buenos Aires (Dallas degradada a shadow por overlay, Atlanta bloqueada)
 - `ACTIVE_TRADING_CITIES` Railway: `Chicago,Dallas,Buenos Aires` (Atlanta retirada sesión 68)
 - `BLOCKED_CITIES` Railway: incluye Atlanta (añadida sesión 65)
-- **AVISO:** Chicago Apr1 cerrada manualmente puede no estar reflejada en postmortem — verificar en próxima sesión.
+- **Postmortem Chicago Apr1 reconciliado:** la fila `Chicago|YES|2026-04-01|2026-03-31T23:00:28.735723+00:00` ya aparece `status=closed`, `close_action=LOSS_TOTAL`, `close_reason=micro_position_unsellable`, `closed_at=2026-04-02T07:39:19.807998+00:00`, `pnl_cash=0.0`. Con la lógica actual del bot, `city_accuracy[Chicago] = 4 trades, 1 win, WR 25.0%, PnL +$2.09`; el sesgo pendiente no viene de Apr1 sino de 3 filas Chicago antiguas todavía `open`.
 
 **Hotfix operativo sesión 65 (3 abr 2026):**
 - `BLOCKED_CITIES` en Railway quedó actualizado con `Atlanta` añadida.
