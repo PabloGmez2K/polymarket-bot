@@ -1,9 +1,13 @@
 # Configuracion por proyecto para mantener Codex en modo eficiente por defecto.
-# No existe hoy un valor "auto" documentado para model_reasoning_effort en config;
-# dejamos "medium" como base y perfiles opt-in para tareas mas profundas.
+# Base deliberada: medium siempre. La subida de profundidad se hace por perfil,
+# no inflando todo el hilo por inercia.
+# En el CLI local actual dejamos solo claves observables/seguras para no depender
+# de opciones no verificadas en esta version.
 
 model = "gpt-5.4"
 model_reasoning_effort = "medium"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
 
 [profiles.low]
 model_reasoning_effort = "low"

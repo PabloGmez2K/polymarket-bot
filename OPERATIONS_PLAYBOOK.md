@@ -20,6 +20,7 @@ comprobacion para no romper el proceso.
 
 ## Fuentes de verdad
 
+- `AGENTS.md`: contrato corto y canonico para Codex en este repo.
 - `CONTEXTO.md`: foto actual del proyecto, estado operativo, version local/remota, riesgos y siguientes pasos.
 - `HISTORIAL_SESIONES.md`: memoria append-only de sesiones y decisiones.
 - `agent_events.jsonl`: eventos estructurados que alimentan el scoreboard del Dashboard.
@@ -34,12 +35,13 @@ Regla: una sesion no esta realmente cerrada si solo se actualiza una de estas ca
 
 Antes de tocar codigo o producir analisis:
 
-1. Leer `CONTEXTO.md`.
-2. Leer las ultimas sesiones relevantes de `HISTORIAL_SESIONES.md`.
-3. Leer este `OPERATIONS_PLAYBOOK.md`.
-4. Revisar `git status`.
-5. Si el trabajo afecta al Dashboard/scoreboard, revisar tambien `agent_events.jsonl`.
-6. Si el trabajo afecta a produccion, confirmar version local vs `origin/main` y estado de Railway.
+1. Leer `AGENTS.md`.
+2. Leer el bloque relevante de `CONTEXTO.md`.
+3. Leer las ultimas sesiones relevantes de `HISTORIAL_SESIONES.md` solo si aportan a la tarea.
+4. Leer este `OPERATIONS_PLAYBOOK.md` si la tarea toca workflow, cierre, deploy, Railway o scoreboard.
+5. Revisar `git status`.
+6. Si el trabajo afecta al Dashboard/scoreboard, revisar tambien `agent_events.jsonl`.
+7. Si el trabajo afecta a produccion, confirmar version local vs `origin/main` y estado de Railway.
 
 ---
 
@@ -90,6 +92,7 @@ Objetivo: reservar el gasto alto de contexto/modelo para tareas con tradeoffs re
 ### Codex
 
 - Default del proyecto: `.codex/config.toml` fija `model_reasoning_effort = "medium"`.
+- La config del repo tambien fija `approval_policy = "on-request"` y `sandbox_mode = "workspace-write"` para una autonomia predecible sin abrir permisos de mas.
 - Perfiles disponibles:
   - `low`: trabajo mecanico, docs, limpieza, snapshots, QA ligero.
   - `deep`: bugs complejos, revisiones de arquitectura, reconciliaciones dificiles.
@@ -100,6 +103,9 @@ Objetivo: reservar el gasto alto de contexto/modelo para tareas con tradeoffs re
   - `codex -c profile=\"max\"`
   - `codex -c model_reasoning_effort=\"high\"`
 - Regla practica: no usar `xhigh` por defecto en este repo.
+- Pendiente futuro: evaluar un launcher o wrapper de proyecto que clasifique la tarea y arranque Codex con `low/deep/max` automaticamente. No esta implementado; hoy solo existen `medium` por defecto y perfiles manuales.
+- Rentabilidad esperada de esa automatizacion: media-alta si seguimos trabajando con muchas sesiones cortas y heterogeneas, porque evitaria pagar `high/xhigh` en tareas operativas y reduciria decisiones manuales. Si la mayoria de tareas reales siguen resolviendose bien en `medium`, el retorno seria mas de comodidad que de ahorro fuerte.
+- No metemos aqui claves de roles/subagentes no verificadas en el CLI actual; la preparacion practica para profundidad selectiva queda en perfiles + skills + delegacion puntual.
 
 ### Claude Code
 
@@ -116,6 +122,104 @@ Objetivo: reservar el gasto alto de contexto/modelo para tareas con tradeoffs re
 - `medium/default`: docs, UX copy, validaciones, wiring, snapshots, higiene operativa.
 - `high/deep`: bugs no obvios, reconciliaciones complejas, revisiones criticas.
 - modelo premium o esfuerzo maximo: solo para decisiones de trading, arquitectura o auditorias estrategicas donde el coste adicional tenga retorno claro.
+
+### Skills minimas del repo
+
+- `context-bootstrap`: abrir contexto minimo y elegir `1-3` artefactos fuente.
+- `operational-audit`: auditorias de dashboard/logs/Railway sin tocar logica core.
+- `session-close-sync`: cierre de sesion sin drift entre docs y scoreboard.
+
+Regla: skills cortas, sin duplicar estado vivo ni inventar memoria.
+
+---
+
+## Capa canonica para Codex
+
+Orden recomendado de lectura/uso en este repo:
+
+1. `AGENTS.md`
+2. bloque relevante de `CONTEXTO.md`
+3. seccion necesaria de `OPERATIONS_PLAYBOOK.md`
+4. solo despues: handoff, log, snapshot o archivo de codigo objetivo
+
+Objetivo: menos gasto de contexto, menos drift y menos releer historia no util.
+
+---
+
+## Integracion RTK
+
+Objetivo: reducir ruido de shell cuando Codex trabaja mucho con git, busquedas y listados.
+
+### Que vive en el repo
+
+- En `AGENTS.md`: preferir lecturas puntuales, `rg` y evidencia minima.
+- En este playbook: reglas de uso, limites y el recordatorio de que RTK es tooling global del usuario, no dependencia versionada del proyecto.
+
+### Comandos a preferir cuando RTK exista
+
+- `rtk git status`
+- `rtk git diff`
+- `rtk git log -n 10`
+- `rtk grep`
+- `rtk find`
+- `rtk ls`
+- `rtk gain`
+
+Regla: si un comando no esta claramente soportado por RTK, usar el comando nativo normal.
+
+### Pasos manuales de Pablo fuera del repo
+
+1. Instalar `rtk`.
+2. Confirmar la sintaxis real con `rtk --version` y `rtk init --help`.
+3. Inicializarlo para Codex desde el entorno global del usuario.
+4. Reiniciar Codex.
+5. Validar con `rtk gain` tras una o dos sesiones reales.
+
+Estado verificado en esta maquina el 2 de abril de 2026: `rtk` ya esta instalado, `rtk --version` funciona, `rtk init -g --codex` funciona en la instalacion real del usuario y Codex ya lo uso en una tarea real con `rtk git status` y `rtk git diff`.
+
+Referencia externa de apoyo: la web publica de RTK que revise documenta `rtk init --global` como comando oficial de activacion del hook.
+
+Matiz importante: para este caso real queda verificado `rtk init -g --codex` como setup valido de Codex en la maquina del usuario. Aun asi, el repo no debe asumir que esa variante exista igual en cualquier otra instalacion.
+
+---
+
+## Integracion Engram
+
+Objetivo: usar memoria persistente para continuidad de sesiones sin convertirla en fuente de verdad del repo.
+
+### Fuente de verdad que debe quedarse en el repo
+
+- `AGENTS.md`: contrato operativo corto.
+- `CONTEXTO.md`: estado actual y siguiente paso.
+- `OPERATIONS_PLAYBOOK.md`: protocolo de trabajo.
+- `HISTORIAL_SESIONES.md`: memoria append-only humana.
+- `agent_events.jsonl`: capa maquina del scoreboard.
+
+### Lo que si puede ir a memoria persistente
+
+- resumenes de sesion y punto de reentrada;
+- descubrimientos no obvios del repo;
+- patrones recurrentes de incidentes;
+- preferencias operativas del operador que no sustituyen docs;
+- pistas para retomar investigacion o auditorias futuras.
+
+### Lo que no debe delegarse a Engram
+
+- estado canonico del deploy;
+- inventario oficial del repo;
+- decisiones core no reflejadas en docs;
+- configuracion operativa que deba viajar con el repositorio.
+
+### Pasos manuales de Pablo fuera del repo
+
+1. Instalar el binario `engram`.
+2. Ejecutar `engram setup codex`.
+3. Reiniciar Codex.
+4. Verificar que aparecen herramientas tipo `mem_save` y `mem_search`.
+
+Estado verificado en esta maquina el 2 de abril de 2026: Engram ya esta instalado y funcionando; `engram setup codex` funciono; y en la extension de Codex para VS Code hizo falta completar la conexion MCP manualmente por UI con `command = C:\Users\USUARIO\go\bin\engram.exe` y `args = mcp`. Tras eso, Codex ya ve herramientas `mcp__engram__...` en una sesion real.
+
+Nota de verificacion externa: a 2 de abril de 2026, la guia publica de Engram para Codex indica que `engram setup codex` registra `[mcp_servers.engram]` y escribe instrucciones/prompt de compaction en el config global del usuario, no en este repo. En este caso real, la extension de VS Code no quedo operativa solo con ese setup y requirio el alta manual del servidor MCP por UI. Sigue siendo integracion global del usuario, no parte del arbol versionado.
 
 ---
 
