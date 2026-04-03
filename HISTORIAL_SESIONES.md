@@ -76,6 +76,8 @@ Comandos útiles:
 | 2026-04-02 | Explícita | Sesión 60 | `—` | Diagnóstico y fix del bloqueo de capital en live: posiciones `redeemable=True` dejaban exposición falsa y `round(size, 2)` provocaba SELL rechazadas por exceso de shares. `bot.py` pasa a excluir `redeemable` en `get_current_exposure()` y a truncar SELL hacia abajo en `manage_positions()` e intra-cycle. Validación dirigida + suite `483/483`; se actualizan contexto, historial y scoreboard y se empuja a `origin/main`. |
 | 2026-04-02 | Explícita | Sesión 61 | `3c2b568` | Auditoría operativa del `Mission HUD` y salto de capa descriptiva a capa decisional por ciudad: `shadow tracking` para ciudades fuera de allowlist, reglas explícitas `shadow -> canary` y `active/canary -> shadow`, overlay automático persistente, dashboard con `canaries/shadows` actuales e historial de transiciones, y alertas Telegram cuando una ciudad cambia de estado. Suite local `496/496`, `commit + push` a `origin/main` y redeploy lanzado en Railway; queda pendiente validar el comportamiento live de la automatización y como siguiente tarea se fija el backfill conservador de `shadow` histórico. |
 | 2026-04-02 | Explícita | Sesión 62 | `e4dce44` | Conversión de la capa de ciudades en una vista de ranking operacional clara: `readiness_score`, ranking principal, distancia a canary, tendencia y motivo principal por ciudad; degradadas diferenciadas explícitamente (`Dallas` como `shadow degradada`), copy/UX afinado y tests ampliados. `verify_before_deploy.py` cierra en `500/500`; se detecta además que faltaba el cierre documental, por lo que se actualizan `CONTEXTO.md`, `HISTORIAL_SESIONES.md` y `agent_events.jsonl` y se empuja el deploy. |
+| 2026-04-02 | Explícita | Sesión 63 | `—` | Cierre mínimo de hardening de tooling/documentación con evidencia ya verificada en local: `OPERATIONS_PLAYBOOK.md` deja RTK y Engram como setup global del usuario, no del repo; RTK queda marcado como verificado para Codex con `rtk --version` + `rtk init -g --codex` + uso real (`rtk git status`, `rtk git diff`); Engram queda marcado como operativo tras `engram setup codex` y alta manual del MCP `engram` en la extensión de Codex para VS Code. Sin cambios en bot, trading, NOAA o deploy. |
+| 2026-04-03 | Explícita | Sesión 66 | `—` | Implementación local del auto-bloqueo real por ciudad sin tocar trading/NOAA/scheduler: `city_policy_state.json` añade `auto_blocked_cities` con `action/reason/metrics/from_mode/triggered_at`, `get_effective_city_mode()` prioriza ese estado sobre la allowlist activa, `sync_city_policy_state()` registra `active/canary -> blocked` con evidencia persistida, dashboard/decision engine leen la política y la suite pasa en `506/506`. Sin push/deploy todavía; siguiente paso validar en Railway. |
 | 2026-04-02 | Explícita | Sesión 58 | `—` | Cierre operativo sin tocar el bot: se fija como siguiente prioridad la auditoría de la captura del `Mission HUD`, se formaliza la regla `1 sesión = 1 tarea` con contexto mínimo, se añade una sección de `token economics` para Codex + Claude Code y se crea `.codex/config.toml` del proyecto con `medium` por defecto y perfiles `low/deep/max`. Sin deploy ni cambios de trading/NOAA. |
 | 2026-04-02 | Explícita | Sesión 59 | `—` | Cierre completo: `python verify_before_deploy.py` vuelve a pasar `483/483`, se versionan el saneamiento local de `trade_lifecycle/trade console`, el handoff y los guardrails de contexto/tokens, y se hace `commit + push` a `origin/main`. No se tocan reglas de trading ni NOAA; queda pendiente revalidación live del nuevo push. |
 
@@ -1810,3 +1812,173 @@ Regla recomendada:
 - `git push origin main` completado;
 - deploy lanzado hacia Railway;
 - queda pendiente, ya para la siguiente sesión, validar en live que el ranking separa bien `candidatas reales vs degradadas` y, después, retomar el backfill conservador de `shadow` histórico.
+
+---
+
+## Sesión 63 — cierre mínimo de hardening de tooling/documentación verificado localmente (2 abr 2026)
+
+**Disparador:** después del cierre de proceso de la sesión 58 quedaban matices de RTK/Engram escritos todavía como no verificados o solo parcialmente confirmados. La verificación real ya existía fuera del repo; faltaba alinear la documentación sin reabrir aquella sesión ni tocar el bot.
+
+**Qué se corrige en esta pasada:**
+
+- `OPERATIONS_PLAYBOOK.md` deja explícito que RTK y Engram son setup global del usuario, no dependencias versionadas del proyecto.
+- RTK queda marcado como verificado en esta máquina para Codex con evidencia local ya comprobada:
+  - `rtk --version`;
+  - `rtk init -g --codex`;
+  - uso real desde Codex con `rtk git status` y `rtk git diff`.
+- Engram queda marcado como operativo en este caso real:
+  - `engram setup codex` funcionó;
+  - en la extensión de Codex para VS Code hizo falta añadir manualmente por UI el servidor MCP `engram`;
+  - configuración usada: `C:\Users\USUARIO\go\bin\engram.exe` + `mcp`;
+  - tras eso, Codex ya vio herramientas `mcp__engram__...` en una sesión real.
+- `CONTEXTO.md` añade una nota corta para que el estado actual del repo recuerde ese matiz sin convertir memoria externa en fuente de verdad.
+
+**Filosofía que se mantiene:**
+
+- repo = fuente de verdad del proyecto;
+- Engram = memoria complementaria, no estado canónico;
+- RTK = capa de reducción de ruido/contexto para shell, no requisito del repo.
+
+**Límite de alcance respetado:**
+
+- no se tocó `bot.py`;
+- no se tocaron trading, NOAA ni scheduler;
+- no hubo refactor;
+- no hubo deploy;
+- el cambio fue solo documental y de trazabilidad mínima.
+
+---
+
+## Sesión 64 — setup Claude Code + diagnóstico operativo exploratorio (2 abr 2026)
+
+**Disparador:** primera sesión real de Claude Code en este repo (no Claude.ai ni Codex). El objetivo era verificar que las herramientas de infraestructura quedaban operativas y después hacer un primer diagnóstico del estado actual del bot.
+
+**Qué se configuró y verificó en esta sesión:**
+
+- **Claude Code** queda preparado y funcional para este repo. Es la primera vez que Claude Code opera aquí como agente interactivo (distinción importante: antes se usaban Claude.ai y Codex).
+- **Subagente `trading-ops-analyst`** creado en `.claude/agents/trading-ops-analyst.md`. Se probó en live en esta misma sesión y produjo resultados útiles.
+- **RTK** verificado operativo en Claude Code en Windows vía `~/.claude/CLAUDE.md`. La integración funciona en sesión real.
+- **Engram** verificado operativo en Claude Code. Las herramientas `mem_save`, `mem_search` y `mem_context` son accesibles via MCP y se usaron en esta sesión. Primera memoria guardada para este proyecto.
+
+**Diagnóstico operativo realizado (prueba exploratoria — no conclusión final):**
+
+- Se usó el subagente `trading-ops-analyst` para hacer un primer diagnóstico del estado del bot.
+- La primera lectura usó el snapshot Railway del 1-abr-20:13 UTC como fuente, que resultó obsoleto.
+- El usuario corrigió el estado real: Chicago Apr1 fue vendida manualmente ~11 horas antes; solo quedan 2 posiciones abiertas en Atlanta; cash disponible ~$27.20; cartera ~$31.58; P&L all-time -$21.79.
+- Se rehízo el diagnóstico con el estado real corregido.
+
+**Hallazgos del diagnóstico (exploratorio — requieren verificación en live):**
+
+1. **Discrepancia repo vs real:** el snapshot de Railway (y presumiblemente `postmortem.json`) sigue mostrando Chicago Apr1 como posición abierta. Las ventas manuales no quedan registradas en el bot. Esto puede afectar al cálculo de exposición en el próximo ciclo.
+2. **Atlanta no se autobloqueó:** con WR 14.3% en 14 trades, la regla `CITY_BLOCK_WIN_RATE=25%` debería haber bloqueado Atlanta automáticamente. No lo hizo. Es el hallazgo más urgente antes del próximo ciclo, especialmente porque con $27.20 disponibles el bot puede abrir nuevas posiciones en Atlanta.
+3. **LOSS_TOTAL = 70.6% de los cierres:** 60 de 85 cierres terminaron en pérdida total. P&L on-chain all-time -$36.42 sobre $161.21 invertido (CSV hasta 31 mar).
+4. **Deploy sesión 62 sin validación explícita:** el commit `e4dce44` está en `origin/main` pero no se ha confirmado que Railway lo esté ejecutando.
+
+**Clasificación explícita:**
+
+- El análisis completo de esta sesión fue **exploratorio**, realizado con datos parcialmente obsoletos y sin acceso directo a Railway live.
+- Los hallazgos son orientativos y sirven como punto de partida para la próxima sesión, no como conclusiones cerradas.
+- La prioridad operativa de mañana queda documentada en `CONTEXTO.md`.
+
+**Límite de alcance respetado:**
+
+- no se tocó `bot.py`;
+- no se tocaron trading, NOAA, scheduler ni arquitectura core;
+- no hubo deploy;
+- no se ejecutó la suite;
+- el trabajo fue solo setup de infraestructura, diagnóstico y documentación de cierre.
+
+---
+
+## Sesión 65 — hotfix Atlanta bloqueada en Railway + cierre de diagnóstico live (3 abr 2026)
+
+**Disparador:** la sesión 64 dejó como prioridad urgente validar por qué Atlanta seguía operando pese a `WR 14.3%` y umbral de bloqueo `25%`. Antes del próximo ciclo, se necesitaba comprobar el estado live real y aplicar el corte operativo mínimo.
+
+**Evidencia live leída en Railway:**
+
+- `alerts_state.json` contiene `city_accuracy_flagged.Atlanta` desde `2026-03-30T21:02:35.447220+00:00`, con `trades=4`, `wins=1`, `win_rate=25.0`, `pnl=-1.12777159`.
+- `postmortem.json` para Atlanta da:
+  - `23` trades cerrados;
+  - `4` wins si se sigue el criterio real de `get_city_accuracy()` (`pnl_cash > 0`);
+  - `WR 17.4%`;
+  - `LOSS_TOTAL=17`, `SELL=4`, `RESOLVED_WIN=2`;
+  - una entrada antigua anómala todavía `open`: `Atlanta|YES|2026-03-28|2026-03-26T08:00:35.955319+00:00`.
+- En Railway no existían overrides de `CITY_MIN_TRADES_FOR_BLOCK` ni `CITY_BLOCK_WIN_RATE`, así que aplicaban los defaults del código.
+- Antes del hotfix, `BLOCKED_CITIES` tampoco estaba seteada en Railway, por lo que Atlanta no estaba bloqueada por env var.
+
+**Conclusión del bug:**
+
+- el problema inmediato no era que Telegram no avisara;
+- la alerta sí se disparó una vez, pero al quedar Atlanta ya registrada en `city_accuracy_flagged`, no se reenvía aunque el WR siga empeorando;
+- más importante: el supuesto “auto-bloqueo” no bloquea nada por sí mismo; solo recomienda añadir la ciudad a `BLOCKED_CITIES`;
+- por eso Atlanta seguía habilitada para nuevos BUYs.
+
+**Hotfix aplicado en producción:**
+
+- se seteó en Railway:
+  - `BLOCKED_CITIES=London,Miami,Seattle,Paris,Tel Aviv,Wellington,Toronto,Madrid,Singapore,Ankara,Atlanta`
+- verificación posterior:
+  - `railway_safe.ps1 variable list --kv` ya muestra Atlanta dentro de `BLOCKED_CITIES`;
+  - logs de Railway confirman redeploy/reinicio a `2026-04-03 09:16:46 UTC` y arranque limpio de `POLYMARKET BOT v10.6.10`.
+
+**Incidencia operativa secundaria detectada:**
+
+- pese a la reparación previa, la CLI de Railway volvió a caer en `Unauthorized` / `invalid_grant`;
+- se recuperó manualmente con:
+  - `powershell -ExecutionPolicy Bypass -File .\tools\railway_auth_repair.ps1 reset`
+  - `powershell -ExecutionPolicy Bypass -File .\tools\railway_auth_repair.ps1 launch-login -Browserless`
+  - validación con `railway_safe.ps1 whoami` y `status`
+- queda como sesión separada revisar por qué este relogin vuelve a ser necesario.
+
+**Apunte de diseño para la siguiente sesión (Claude):**
+
+- el nombre “auto-bloqueo” es engañoso;
+- si el sistema debe sacar una ciudad de operativa automáticamente, no basta con una alerta one-shot;
+- hace falta persistir `qué ciudad se sacó`, `por qué`, `con qué evidencia`, `cuándo`, y que el scan de BUYs lea esa política persistente.
+
+**Límite de alcance respetado:**
+
+- no se tocó `bot.py`;
+- no se cambió lógica de trading;
+- el cambio de producción fue solo el hotfix de env var para Atlanta;
+- la corrección estructural queda explícitamente aplazada a otra sesión.
+
+---
+
+## Sesión 66 — auto-bloqueo real persistido por ciudad en local (3 abr 2026)
+
+**Disparador:** tras el hotfix manual de Atlanta en Railway, faltaba cerrar el bug de diseño de fondo: el supuesto auto-bloqueo no podía seguir siendo solo `city_accuracy_flagged + Telegram`, porque eso no sacaba la ciudad de BUYs ni dejaba política persistida con evidencia.
+
+**Alcance respetado:**
+
+- no se tocaron reglas de entrada/salida, NOAA, scheduler ni arquitectura core de trading;
+- el cambio se concentró en la capa de política por ciudad ya existente en `load_city_policy_state/save_city_policy_state/get_effective_city_mode/sync_city_policy_state`;
+- no hubo push ni deploy en esta sesión.
+
+**Cambios implementados:**
+
+- `city_policy_state.json` añade `auto_blocked_cities` como tercera capa persistida del overlay, junto a `auto_canary_cities`, `auto_shadow_cities` y `transition_history`.
+- Se añade `_build_auto_city_block_policy()` para persistir por ciudad:
+  - `action="auto_block"`;
+  - `reason`;
+  - `metrics` (`trades`, `wins`, `win_rate`, `pnl`, `observed_count`, `shadow_seen`, `shadow_edges`, `shadow_best_edge`, `support_count`);
+  - `from_mode`;
+  - `triggered_at`.
+- `get_effective_city_mode()` da prioridad a `auto_blocked_cities` y devuelve `blocked` aunque la ciudad siga en `ACTIVE_TRADING_CITIES`, así el scan de BUYs ya respeta la política sin depender solo de Telegram.
+- `sync_city_policy_state()` cambia la transición de salida de `active/canary -> shadow` a `active/canary -> blocked`, guarda `action` + `metrics` en `transition_history`, elimina overlays previos `auto_canary/auto_shadow`, y deja la reactivación como manual/conservadora retirando la política persistida.
+- `build_dashboard_city_observation()` y `build_dashboard_city_decisions()` pasan a reconocer el auto-bloqueo persistido y exponen `policy_action`, `policy_reason`, `policy_metrics` y `policy_changed_at` para que el dashboard no pierda el motivo/evidencia.
+- `verify_before_deploy.py` añade tests estructurales y funcionales para:
+  - existencia de `_build_auto_city_block_policy`;
+  - persistencia de `auto_blocked_cities`;
+  - prioridad de `auto_blocked` sobre allowlist activa;
+  - transición `to=blocked` con `action=auto_block` y métricas.
+
+**Validación local:**
+
+- `python verify_before_deploy.py` pasa en `506/506`.
+
+**Estado final:**
+
+- el auto-bloqueo real queda implementado localmente y listo para push/deploy;
+- Atlanta sigue bloqueada manualmente en Railway por `BLOCKED_CITIES` desde la sesión 65, así que no hay riesgo inmediato de BUYs nuevos mientras se valida el overlay persistido;
+- siguiente paso recomendado: desplegar, inspeccionar `city_policy_state.json` en Railway y confirmar por logs que el scan salta ciudades auto-bloqueadas aunque sigan en la allowlist manual.

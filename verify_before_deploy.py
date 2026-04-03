@@ -429,7 +429,13 @@ def run_tests():
     test("load_city_policy_state definida", "def load_city_policy_state(" in code)
     test("save_city_policy_state definida", "def save_city_policy_state(" in code)
     test("get_effective_city_mode definida", "def get_effective_city_mode(" in code)
+    test("_build_auto_city_block_policy definida", "def _build_auto_city_block_policy(" in code)
     test("sync_city_policy_state definida", "def sync_city_policy_state(" in code)
+    test("city policy persiste auto_blocked_cities", '"auto_blocked_cities": {}' in code and 'payload.setdefault("auto_blocked_cities", {})' in code)
+    test("get_effective_city_mode respeta auto_blocked_cities",
+         'auto_blocked = policy_state.get("auto_blocked_cities", {})' in code
+         and 'if city in auto_blocked:' in code
+         and 'return "blocked"' in code)
     test("build_dashboard_focus_center definida", "def build_dashboard_focus_center(" in code)
     test("build_dashboard_legacy_forecast_drift definida", "def build_dashboard_legacy_forecast_drift(" in code)
     test("build_dashboard_trade_analytics definida", "def build_dashboard_trade_analytics(" in code)
@@ -1202,23 +1208,81 @@ def run_tests():
             "build_dashboard_city_decisions": lambda city_observation=None, city_accuracy=None, shadow_tracking=None: {
                 "rows": [
                     {"city": "New York City", "decision": "promote", "reason": "regla canary disparada", "shadow_best_edge": 10.2, "shadow_edges": 2},
-                    {"city": "Chicago", "decision": "remove", "reason": "regla de salida disparada"},
+                    {
+                        "city": "Chicago",
+                        "decision": "remove",
+                        "reason": "regla de salida disparada",
+                        "trades": 4,
+                        "wins": 1,
+                        "win_rate": 25.0,
+                        "pnl": -1.13,
+                        "observed_count": 2,
+                        "shadow_seen": 0,
+                        "shadow_edges": 0,
+                        "shadow_best_edge": 0.0,
+                        "support_count": 4,
+                    },
                 ]
             },
-            "load_city_policy_state": lambda: {"logic_series": "10.6", "auto_canary_cities": {}, "auto_shadow_cities": {}, "transition_history": []},
+            "load_city_policy_state": lambda: {
+                "logic_series": "10.6",
+                "auto_canary_cities": {},
+                "auto_shadow_cities": {},
+                "auto_blocked_cities": {},
+                "transition_history": [],
+            },
             "save_city_policy_state": lambda data: transition_messages.append(("save", data)),
             "get_effective_city_mode": lambda city, policy_state=None: "shadow" if city == "New York City" else "active",
             "send_telegram": lambda text, with_menu=False, custom_keyboard=None: transition_messages.append(("msg", text)),
         }
+        exec(get_function_source(module_ast, code_lines, "_build_auto_city_block_policy"), sync_policy_ns)
         exec(get_function_source(module_ast, code_lines, "sync_city_policy_state"), sync_policy_ns)
         sync_policy_ns["sync_city_policy_state"](notify=True)
         sent_texts = [item[1] for item in transition_messages if item[0] == "msg"]
+        saved_policy = next((item[1] for item in transition_messages if item[0] == "save"), {})
         test("city policy sync: alerta promoción a canary",
              any("promovida a canary" in text and "New York City" in text for text in sent_texts),
              sent_texts)
         test("city policy sync: alerta degradación a shadow",
-             any("degradada a shadow" in text and "Chicago" in text for text in sent_texts),
+             any("blocked" in text and "Chicago" in text for text in sent_texts),
              sent_texts)
+
+        test("city policy sync: persiste auto_blocked_cities con evidencia",
+             saved_policy.get("auto_blocked_cities", {}).get("Chicago", {}).get("action") == "auto_block"
+             and saved_policy.get("auto_blocked_cities", {}).get("Chicago", {}).get("reason") == "regla de salida disparada"
+             and saved_policy.get("auto_blocked_cities", {}).get("Chicago", {}).get("metrics", {}).get("trades") == 4
+             and saved_policy.get("auto_blocked_cities", {}).get("Chicago", {}).get("metrics", {}).get("wins") == 1
+             and saved_policy.get("auto_blocked_cities", {}).get("Chicago", {}).get("from_mode") == "active"
+             and bool(saved_policy.get("auto_blocked_cities", {}).get("Chicago", {}).get("triggered_at")),
+             saved_policy)
+        test("city policy sync: transicion de salida apunta a blocked",
+             any(
+                 item.get("city") == "Chicago"
+                 and item.get("to") == "blocked"
+                 and item.get("action") == "auto_block"
+                 and item.get("metrics", {}).get("win_rate") == 25.0
+                 for item in saved_policy.get("transition_history", [])
+             ),
+             saved_policy.get("transition_history"))
+
+        effective_mode_ns = {
+            "ACTIVE_TRADING_CITIES": {"Atlanta", "Chicago"},
+            "CANARY_TRADING_CITIES": set(),
+            "is_city_blocked": lambda city: False,
+            "load_city_policy_state": lambda: {
+                "auto_blocked_cities": {"Atlanta": {"action": "auto_block", "reason": "WR 25%"}},
+                "auto_shadow_cities": {},
+                "auto_canary_cities": {},
+            },
+        }
+        exec(get_function_source(module_ast, code_lines, "get_effective_city_mode"), effective_mode_ns)
+        test("get_effective_city_mode: auto_blocked domina sobre allowlist activa",
+             effective_mode_ns["get_effective_city_mode"]("Atlanta") == "blocked"
+             and effective_mode_ns["get_effective_city_mode"]("Chicago") == "active",
+             {
+                 "Atlanta": effective_mode_ns["get_effective_city_mode"]("Atlanta"),
+                 "Chicago": effective_mode_ns["get_effective_city_mode"]("Chicago"),
+             })
 
         focus_ns = {
             "OBSERVED_AUDIT_CITIES": {"Chicago", "Atlanta", "Buenos Aires", "Dallas"},
@@ -2886,6 +2950,8 @@ def run_tests():
             },
             "save_alerts_state": lambda state: saved_review_state.update(state),
             "get_city_accuracy": lambda: {},
+            "load_city_policy_state": lambda: {"auto_blocked_cities": {}, "auto_shadow_cities": {}, "auto_canary_cities": {}},
+            "get_effective_city_mode": lambda city, policy_state=None: "blocked" if review_ns["is_city_blocked"](city) else "active",
             "is_city_blocked": lambda city: False,
             "CITY_MIN_TRADES_FOR_BLOCK": 3,
             "CITY_BLOCK_WIN_RATE": 25.0,
@@ -2931,6 +2997,8 @@ def run_tests():
             },
             "save_alerts_state": lambda state: None,
             "get_city_accuracy": lambda: {},
+            "load_city_policy_state": lambda: {"auto_blocked_cities": {}, "auto_shadow_cities": {}, "auto_canary_cities": {}},
+            "get_effective_city_mode": lambda city, policy_state=None: "blocked" if signal_ns["is_city_blocked"](city) else "active",
             "is_city_blocked": lambda city: False,
             "CITY_MIN_TRADES_FOR_BLOCK": 3,
             "CITY_BLOCK_WIN_RATE": 25.0,
@@ -2976,6 +3044,8 @@ def run_tests():
             },
             "save_alerts_state": lambda state: saved_pending_state.update(state),
             "get_city_accuracy": lambda: {},
+            "load_city_policy_state": lambda: {"auto_blocked_cities": {}, "auto_shadow_cities": {}, "auto_canary_cities": {}},
+            "get_effective_city_mode": lambda city, policy_state=None: "blocked" if pending_ns["is_city_blocked"](city) else "active",
             "is_city_blocked": lambda city: False,
             "CITY_MIN_TRADES_FOR_BLOCK": 3,
             "CITY_BLOCK_WIN_RATE": 25.0,
@@ -3036,6 +3106,8 @@ def run_tests():
             },
             "save_alerts_state": lambda state: saved_observed_state.update(state),
             "get_city_accuracy": lambda: {},
+            "load_city_policy_state": lambda: {"auto_blocked_cities": {}, "auto_shadow_cities": {}, "auto_canary_cities": {}},
+            "get_effective_city_mode": lambda city, policy_state=None: "blocked" if observed_ns["is_city_blocked"](city) else "active",
             "is_city_blocked": lambda city: False,
             "CITY_MIN_TRADES_FOR_BLOCK": 3,
             "CITY_BLOCK_WIN_RATE": 25.0,
@@ -3096,6 +3168,8 @@ def run_tests():
             },
             "save_alerts_state": lambda state: saved_observed_ready_state.update(state),
             "get_city_accuracy": lambda: {},
+            "load_city_policy_state": lambda: {"auto_blocked_cities": {}, "auto_shadow_cities": {}, "auto_canary_cities": {}},
+            "get_effective_city_mode": lambda city, policy_state=None: "blocked" if observed_ready_ns["is_city_blocked"](city) else "active",
             "is_city_blocked": lambda city: False,
             "CITY_MIN_TRADES_FOR_BLOCK": 3,
             "CITY_BLOCK_WIN_RATE": 25.0,
@@ -3169,6 +3243,8 @@ def run_tests():
             "load_alerts_state": lambda: observed_idempotent_state,
             "save_alerts_state": lambda state: observed_idempotent_state.update(state),
             "get_city_accuracy": lambda: {},
+            "load_city_policy_state": lambda: {"auto_blocked_cities": {}, "auto_shadow_cities": {}, "auto_canary_cities": {}},
+            "get_effective_city_mode": lambda city, policy_state=None: "blocked" if observed_idempotent_ns["is_city_blocked"](city) else "active",
             "is_city_blocked": lambda city: False,
             "CITY_MIN_TRADES_FOR_BLOCK": 3,
             "CITY_BLOCK_WIN_RATE": 25.0,
@@ -3225,6 +3301,8 @@ def run_tests():
             },
             "save_alerts_state": lambda state: saved_low_bankroll_state.update(state),
             "get_city_accuracy": lambda: {},
+            "load_city_policy_state": lambda: {"auto_blocked_cities": {}, "auto_shadow_cities": {}, "auto_canary_cities": {}},
+            "get_effective_city_mode": lambda city, policy_state=None: "blocked" if low_bankroll_ns["is_city_blocked"](city) else "active",
             "is_city_blocked": lambda city: False,
             "CITY_MIN_TRADES_FOR_BLOCK": 3,
             "CITY_BLOCK_WIN_RATE": 25.0,
@@ -3278,6 +3356,8 @@ def run_tests():
             },
             "save_alerts_state": lambda state: saved_low_bankroll_api_state.update(state),
             "get_city_accuracy": lambda: {},
+            "load_city_policy_state": lambda: {"auto_blocked_cities": {}, "auto_shadow_cities": {}, "auto_canary_cities": {}},
+            "get_effective_city_mode": lambda city, policy_state=None: "blocked" if low_bankroll_api_ns["is_city_blocked"](city) else "active",
             "is_city_blocked": lambda city: False,
             "CITY_MIN_TRADES_FOR_BLOCK": 3,
             "CITY_BLOCK_WIN_RATE": 25.0,
@@ -3330,6 +3410,8 @@ def run_tests():
             },
             "save_alerts_state": lambda state: saved_low_bankroll_reset_state.update(state),
             "get_city_accuracy": lambda: {},
+            "load_city_policy_state": lambda: {"auto_blocked_cities": {}, "auto_shadow_cities": {}, "auto_canary_cities": {}},
+            "get_effective_city_mode": lambda city, policy_state=None: "blocked" if low_bankroll_reset_ns["is_city_blocked"](city) else "active",
             "is_city_blocked": lambda city: False,
             "CITY_MIN_TRADES_FOR_BLOCK": 3,
             "CITY_BLOCK_WIN_RATE": 25.0,

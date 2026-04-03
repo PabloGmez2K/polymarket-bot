@@ -1,7 +1,35 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 2 de abril de 2026 (Sesión 62 — ranking operacional claro para ciudades)
-**Próxima sesión:** validar en live que el ranking operacional refleja bien `degradadas vs candidatas reales` tras el deploy, y después retomar el backfill conservador de `shadow` histórico para poblar la capa con evidencia retroconstruida.
+**Última actualización:** 3 de abril de 2026 (Sesión 66 — auto-bloqueo real persistido por ciudad en local)
+**Próxima sesión:** desplegar y validar en Railway que `city_policy_state.json` registra `auto_blocked_cities` con `action/reason/metrics/triggered_at` y que el scan corta BUYs aunque la ciudad siga en `ACTIVE_TRADING_CITIES`; en sesión separada, revisar el relogin recurrente de Railway.
+
+**Estado real de la cuenta a cierre de sesión 64 (2 abr 2026, ~tarde):**
+- Chicago Apr1: CERRADA manualmente. El bot no tiene constancia de esa venta.
+- Posiciones abiertas: 2 en Atlanta (identidad exacta pendiente de confirmar).
+- Cartera total: ~$31.58 | Cash disponible: ~$27.20
+- P&L all-time visible en Polymarket: -$21.79
+- **AVISO:** el snapshot de Railway (1 abr 20:13 UTC) sigue siendo la referencia documental del repo, pero está obsoleto respecto al estado real de la cuenta. Tratarlo como stale hasta verificar en live.
+
+**Hotfix operativo sesión 65 (3 abr 2026):**
+- `BLOCKED_CITIES` en Railway quedó actualizado con `Atlanta` añadida.
+- `alerts_state.json` live confirma que la alerta de baja accuracy de Atlanta sí se envió una vez el `2026-03-30T21:02:35.447220+00:00`, cuando llevaba `1/4`, `WR 25.0%`, `PnL -1.13`.
+- `postmortem.json` live para Atlanta da `23` cierres, `4` wins por `pnl_cash > 0`, `WR 17.4%`, con `SELL=4`, `RESOLVED_WIN=2`, `LOSS_TOTAL=17`, más una entrada antigua abierta `Atlanta|YES|2026-03-28|2026-03-26T08:00:35.955319+00:00`.
+- Diagnóstico operativo: el nombre “auto-bloqueo” es engañoso en la implementación actual; la regla solo manda Telegram y añade `city_accuracy_flagged`, pero no modifica `BLOCKED_CITIES`.
+- Redeploy confirmado por logs Railway a `2026-04-03 09:16:46 UTC` con `POLYMARKET BOT v10.6.10` arrancando limpio.
+
+**Implementación local sesión 66 (3 abr 2026):**
+- El rediseño del auto-bloqueo queda hecho en `city_policy_state.json`: `auto_blocked_cities[city]` persiste `action="auto_block"`, `reason`, `metrics` (`trades`, `wins`, `win_rate`, `pnl`, `observed_count`, `shadow_seen`, `shadow_edges`, `shadow_best_edge`, `support_count`), `from_mode` y `triggered_at`.
+- `get_effective_city_mode()` ahora da prioridad a `auto_blocked_cities`, así que una ciudad auto-bloqueada queda en `blocked` aunque siga en `ACTIVE_TRADING_CITIES`; el scan de BUYs ya respeta ese modo sin depender solo de Telegram.
+- `sync_city_policy_state()` pasa de degradar `active/canary -> shadow` a registrar `active/canary -> blocked` con evidencia estructurada y sin reactivación automática agresiva; la salida de esa política queda deliberadamente manual/conservadora retirando la entrada persistida.
+- `build_dashboard_city_observation()` y `build_dashboard_city_decisions()` ya leen el bloqueo automático persistido y exponen `policy_action`, `policy_reason`, `policy_metrics` y `policy_changed_at`.
+- Validación local: `python verify_before_deploy.py` pasa en `506/506`.
+
+**Tarea pendiente separada — Railway relogin recurrente (3 abr 2026):**
+- El problema `Unauthorized / invalid_grant` volvió a aparecer aunque la sesión 54 lo había dejado aparentemente cerrado.
+- No arrancar esta investigación desde cero: leer primero `RAILWAY_AUTH_BUG_HANDOFF_2026-04-01.md`, el bloque `Railway auth repair cerrado` de este `CONTEXTO.md`, `OPERATIONS_PLAYBOOK.md` sección `Higiene Railway CLI`, y `HISTORIAL_SESIONES.md` sesiones 50, 54 y 65.
+- Nueva evidencia de recurrencia: `tools/railway_auth_repair.ps1 doctor` mostraba el 3 abr `accessToken present=True`, `refreshToken present=True`, `tokenExpiresAtUtc=2026-04-03T10:03:11Z`, sin proxies persistentes ni de proceso, pero `Auth check via clean env` seguía devolviendo `Unauthorized`.
+- Workaround manual volvió a funcionar: `reset` + `launch-login -Browserless` + `railway_safe.ps1 whoami/status`.
+- Objetivo de esa sesión: encontrar causa raíz de por qué la auth se degrada otra vez y endurecer el fix sin repetir el mismo diagnóstico proxy-only.
 
 ---
 
@@ -121,6 +149,10 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **City accuracy tracker (v10.5.2):** Calcula win rate por ciudad desde postmortem. Alerta por Telegram si una ciudad baja de 25% win rate con 3+ trades. Nuevo comando `/accuracy`. Win rate visible en `/rendimiento`.
 
+**Hotfix Atlanta manual (3 abr, sin bump):** La auditoría live confirmó que Atlanta seguía operativa no porque faltara alerta, sino porque `run_observability_alerts()` solo emite una alerta one-shot y deja `city_accuracy_flagged[Atlanta]` persistido; no cambia la política de entrada. Se añade `Atlanta` a `BLOCKED_CITIES` en Railway para cortar BUYs nuevos de inmediato y se documenta el bug de diseño para rediseñarlo en la siguiente sesión.
+
+**Auto-bloqueo persistido por ciudad (3 abr, sin bump):** Se cierra el bug de diseño sin duplicar mecanismo: `load_city_policy_state/save_city_policy_state/get_effective_city_mode/sync_city_policy_state` pasan a manejar `auto_blocked_cities` dentro de `city_policy_state.json`. Cuando una ciudad activa/canary dispara la regla de salida por mala accuracy, se persisten `action`, `reason`, `metrics`, `from_mode` y `triggered_at`, `get_effective_city_mode()` la resuelve como `blocked`, y el scan de BUYs la salta aunque permanezca en la allowlist manual. No hay reactivación automática agresiva desde `blocked`; la reversión queda manual o muy conservadora editando la política persistida. `verify_before_deploy.py` sube a `506/506`.
+
 **Integración `/accuracy` + revisión crítica (v10.5.3):** `/accuracy` queda visible en el menú, responde siempre con menú, `/estado` muestra explícitamente el intervalo intra-SL y la trazabilidad de sesión 20 queda corregida para reflejar mejor lo que realmente introdujeron los commits de la mañana.
 
 ---
@@ -130,21 +162,24 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Repositorio:** https://github.com/PabloGmez2K/polymarket-bot (PRIVADO)
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción (último deploy lanzado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false. Tras la sesión 62, `origin/main` ya incluye tanto el overlay `shadow/canary` como la nueva vista de ranking operacional por ciudad, y el deploy quedó lanzado desde el push del commit `e4dce44`. La validación funcional explícita del deploy sigue pendiente hasta revisar el siguiente ciclo live.
-**Estado actual tras sesión 62:** el dashboard ya no se queda en una capa descriptiva por ciudad. `bot.py` calcula ahora un `readiness_score` y una prioridad operativa por ciudad combinando histórico real, evidencia NOAA, actividad shadow y overlay de política. La UI muestra de un vistazo quién está `Lista para canary`, quién está `Cerca de canary`, qué ciudades están `Enfriándose`, cuáles son `No tocar` y cuáles son `Expulsada / degradada`. Las ciudades degradadas dejan de parecer candidatas normales aunque tengan actividad shadow; el caso objetivo de `Dallas` queda cubierto como `shadow degradada` en lógica, UX y tests.
-**Validación local:** `python verify_before_deploy.py` vuelve a cerrar en `500/500` tras añadir ranking, score, distancia a canary, tendencia y copy/UX más ejecutiva. El scoreboard/documentación también quedan alineados de nuevo con `agent_events.jsonl`.
-**Versión local / remoto GitHub:** `origin/main` ya incluye el fix operativo de la sesión 60, la capa automática `shadow/canary` de la sesión 61 y la nueva vista de decisión/ranking operacional de la sesión 62. El siguiente chequeo en Railway debe comprobar tanto la salud del ciclo como la lectura visual real de `candidatas vs degradadas`.
+**Estado actual tras sesión 66:** el dashboard ya no se queda en una capa descriptiva por ciudad. `bot.py` calcula un `readiness_score` y una prioridad operativa por ciudad combinando histórico real, evidencia NOAA, actividad shadow y overlay de política, y además el overlay persistente ya soporta `auto_blocked_cities` con evidencia estructurada para cortar BUYs de ciudades perdedoras sin depender solo de Telegram. La salida desde `blocked` queda manual/conservadora, no automática agresiva.
+**Validación local:** `python verify_before_deploy.py` cierra en `506/506` tras añadir persistencia de `auto_blocked_cities`, prioridad de `blocked` sobre allowlist activa, tests funcionales de transición y lectura en dashboard/decision engine.
+**Versión local / remoto GitHub:** `origin/main` aún no incluye la sesión 66; el siguiente paso operativo es hacer push/deploy y validar en Railway que `city_policy_state.json` registra el auto-bloqueo y que el scan de BUYs respeta `blocked` aunque la ciudad siga listada como activa.
+**Tooling local verificado (2 abr, sin bump):** RTK ya quedó operativo como tooling global del usuario para Codex (`rtk --version`, `rtk init -g --codex`, `rtk git status`, `rtk git diff` verificados en uso real), mientras que Engram también quedó operativo como memoria complementaria tras `engram setup codex` y el alta manual por UI del servidor MCP `engram` en la extensión de Codex para VS Code (`C:\Users\USUARIO\go\bin\engram.exe`, `mcp`). Nada de esto sustituye `CONTEXTO.md`/`HISTORIAL_SESIONES.md`/`agent_events.jsonl` como fuente de verdad del repo.
 **Siguiente paso prioritario:** validar en live que el ranking operacional refleja bien `degradadas vs candidatas reales` tras el deploy.
 **Bloque posterior recomendado, en sesión separada:** una vez confirmada la semántica live, retomar el backfill conservador de `shadow` histórico para enriquecer la capa con evidencia retroconstruida.
 
 ### Archivos del proyecto:
 | Archivo | Función |
 |---------|---------|
-| `bot.py` | Script principal v10.6.10 con NOAA hardening, `trade_lifecycle` saneado y nueva capa `shadow/canary` automática para decisiones por ciudad |
-| `verify_before_deploy.py` | Suite local de `496` tests de comportamiento |
+| `bot.py` | Script principal v10.6.10 con NOAA hardening, `trade_lifecycle` saneado y overlay persistente `canary/shadow/blocked` por ciudad |
+| `verify_before_deploy.py` | Suite local de `506` tests de comportamiento |
 | `trader_analyzer.py` | Genera `signals.json` diariamente en Volume |
 | `find_traders.py` | Descubrimiento semanal de traders y mantenimiento de `traders_db.json` en Volume |
-| `CLAUDE.md` | Instrucciones para Claude Code |
-| `.codex/config.toml` | Config por proyecto para Codex: `medium` por defecto y perfiles `low/deep/max` para ajustar reasoning effort sin tocar la configuración global |
+| `AGENTS.md` | Contrato corto, canónico y operativo para Codex en la raíz del repo |
+| `CLAUDE.md` | Puente corto para Claude Code; remite a `AGENTS.md`, `CONTEXTO.md` y `OPERATIONS_PLAYBOOK.md` |
+| `.codex/config.toml` | Config por proyecto para Codex: `medium` por defecto, perfiles `low/deep/max` y permisos operativos predecibles |
+| `.codex/skills/` | Skills mínimas del repo para arranque de contexto, auditoría operativa y cierre de sesión sin drift |
 | `CONTEXTO.md` | Estado del proyecto (este archivo) |
 | `OPERATIONS_PLAYBOOK.md` | Protocolo operativo multiagente y checklist de inicio/cierre |
 | `HISTORIAL_SESIONES.md` | Bitácora append-only de sesiones e hitos reconstruidos desde Git |
@@ -175,6 +210,7 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 | `performance.json` | 38+ trades (BUY/SELL/LOSS_TOTAL desde 25 mar) |
 | `postmortem.json` | Postmortems estructurados de apertura/cierre por mercado |
 | `alerts_state.json` | Estado persistente de alertas para evitar avisos duplicados |
+| `city_policy_state.json` | Overlay persistente por ciudad: `auto_canary_cities`, `auto_shadow_cities`, `auto_blocked_cities` y `transition_history` |
 | `agent_events.jsonl` | Eventos persistentes del scoreboard de agentes (si existe en Volume) |
 | `signals.json` | Señales de traders activas usadas por el bot en producción |
 | `traders_db.json` | Base de datos persistente de traders descubiertos/calificados |
@@ -193,6 +229,7 @@ BANKROLL="25.00"
 MIN_DAYS_AHEAD="-1"
 MIN_BET="1.00"
 DATA_DIR="/app/data"
+BLOCKED_CITIES="London,Miami,Seattle,Paris,Tel Aviv,Wellington,Toronto,Madrid,Singapore,Ankara,Atlanta"
 ```
 
 ### Configuración en código (defaults bot.py v10.6.10):
@@ -375,7 +412,7 @@ Schedule: 08:00, 16:00, 23:00 UTC
 
 ### Convención a seguir en futuras sesiones
 
-- **Lectura obligatoria al abrir sesión:** `CONTEXTO.md` + `OPERATIONS_PLAYBOOK.md`
+- **Lectura obligatoria al abrir sesión:** `AGENTS.md` + bloque relevante de `CONTEXTO.md` + `OPERATIONS_PLAYBOOK.md` si la tarea toca workflow/deploy/cierre
 - **ChatGPT / Claude.ai:** análisis, estrategia, revisión de contexto, ideas y validación conceptual.
 - **Codex:** cambios de código en local, revisión crítica del repo, corrección de implementaciones previas, validación técnica y tests.
 - **Claude Code:** edición/coding en local cuando se use explícitamente para implementar cambios.
@@ -430,7 +467,7 @@ Usar esta plantilla al cerrar cada sesión relevante:
 
 ### Regla práctica de uso
 
-- `CONTEXTO.md` define el estado actual; `OPERATIONS_PLAYBOOK.md` define el protocolo para no desalinear código, docs y scoreboard.
+- `AGENTS.md` define la capa corta y canónica para Codex; `CONTEXTO.md` define el estado actual; `OPERATIONS_PLAYBOOK.md` define el protocolo para no desalinear código, docs y scoreboard.
 - Si solo participa una herramienta, se rellena solo su bloque y se dejan las demás como `No usado en esta sesión`.
 - Si una herramienta corrige o valida trabajo de otra, dejarlo explícito en `Problemas detectados en trabajo previo` y `Correcciones aplicadas en esta sesión`.
 - Si hay cambios en Railway, Volume, Telegram o datos históricos, anotarlo también en el bloque `Estado final`.

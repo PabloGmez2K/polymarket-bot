@@ -547,6 +547,7 @@ def load_city_policy_state():
         "updated_at": "",
         "auto_canary_cities": {},
         "auto_shadow_cities": {},
+        "auto_blocked_cities": {},
         "transition_history": [],
     }
     if not os.path.exists(CITY_POLICY_FILE):
@@ -564,6 +565,8 @@ def load_city_policy_state():
             payload["auto_canary_cities"] = {}
         if not isinstance(payload.get("auto_shadow_cities"), dict):
             payload["auto_shadow_cities"] = {}
+        if not isinstance(payload.get("auto_blocked_cities"), dict):
+            payload["auto_blocked_cities"] = {}
         if not isinstance(payload.get("transition_history"), list):
             payload["transition_history"] = []
         return payload
@@ -578,6 +581,7 @@ def save_city_policy_state(data):
     payload.setdefault("updated_at", "")
     payload.setdefault("auto_canary_cities", {})
     payload.setdefault("auto_shadow_cities", {})
+    payload.setdefault("auto_blocked_cities", {})
     payload.setdefault("transition_history", [])
     payload["auto_canary_cities"] = {
         city: payload["auto_canary_cities"][city]
@@ -586,6 +590,10 @@ def save_city_policy_state(data):
     payload["auto_shadow_cities"] = {
         city: payload["auto_shadow_cities"][city]
         for city in sorted(payload["auto_shadow_cities"])
+    }
+    payload["auto_blocked_cities"] = {
+        city: payload["auto_blocked_cities"][city]
+        for city in sorted(payload["auto_blocked_cities"])
     }
     payload["transition_history"] = sorted(
         payload["transition_history"],
@@ -604,8 +612,11 @@ def get_effective_city_mode(city, policy_state=None):
     if is_city_blocked(city):
         return "blocked"
     policy_state = policy_state or load_city_policy_state()
+    auto_blocked = policy_state.get("auto_blocked_cities", {}) if isinstance(policy_state, dict) else {}
     auto_shadow = policy_state.get("auto_shadow_cities", {}) if isinstance(policy_state, dict) else {}
     auto_canary = policy_state.get("auto_canary_cities", {}) if isinstance(policy_state, dict) else {}
+    if city in auto_blocked:
+        return "blocked"
     if city in auto_shadow:
         return "shadow"
     if city in ACTIVE_TRADING_CITIES:
@@ -613,6 +624,37 @@ def get_effective_city_mode(city, policy_state=None):
     if city in auto_canary or city in CANARY_TRADING_CITIES:
         return "canary"
     return "shadow"
+
+
+def _build_auto_city_block_policy(row, current_mode, triggered_at):
+    """Normaliza la evidencia persistida al auto-bloquear una ciudad."""
+    row = row if isinstance(row, dict) else {}
+    trades = int(row.get("trades", 0) or 0)
+    win_rate = round(float(row.get("win_rate", 0.0) or 0.0), 1)
+    pnl = round(float(row.get("pnl", 0.0) or 0.0), 2)
+    if "pnl" not in row and row.get("pnl_display"):
+        try:
+            pnl = round(float(str(row.get("pnl_display", "$0.00")).replace("$", "")), 2)
+        except (TypeError, ValueError):
+            pnl = 0.0
+
+    return {
+        "action": "auto_block",
+        "reason": str(row.get("reason") or row.get("main_reason") or "baja accuracy persistente"),
+        "metrics": {
+            "trades": trades,
+            "wins": int(row.get("wins", 0) or 0),
+            "win_rate": win_rate,
+            "pnl": pnl,
+            "observed_count": int(row.get("observed_count", 0) or 0),
+            "shadow_seen": int(row.get("shadow_seen", 0) or 0),
+            "shadow_edges": int(row.get("shadow_edges", 0) or 0),
+            "shadow_best_edge": round(float(row.get("shadow_best_edge", 0.0) or 0.0), 1),
+            "support_count": int(row.get("support_count", 0) or 0),
+        },
+        "from_mode": str(current_mode or "active"),
+        "triggered_at": triggered_at,
+    }
 
 
 def _scaled_position(position, estimated_prob, city_mode):
@@ -3135,13 +3177,15 @@ def run_observability_alerts():
 
     # ---- v10.5.2: City Accuracy Alert ----
     city_stats = get_city_accuracy()
+    policy_state = load_city_policy_state()
     flagged_key = "city_accuracy_flagged"
     if flagged_key not in state:
         state[flagged_key] = {}
 
     for city, data in city_stats.items():
         if data["trades"] >= CITY_MIN_TRADES_FOR_BLOCK and data["win_rate"] <= CITY_BLOCK_WIN_RATE:
-            if not is_city_blocked(city) and city not in state[flagged_key]:
+            city_mode = get_effective_city_mode(city, policy_state=policy_state)
+            if city_mode != "blocked" and city not in state[flagged_key]:
                 now_iso = datetime.now(timezone.utc).isoformat()
                 send_telegram(
                     f"⚠ <b>Ciudad con baja accuracy</b>\n"
@@ -4096,7 +4140,17 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None):
     policy_state = load_city_policy_state()
     auto_canary = set((policy_state.get("auto_canary_cities", {}) if isinstance(policy_state, dict) else {}).keys())
     auto_shadow = set((policy_state.get("auto_shadow_cities", {}) if isinstance(policy_state, dict) else {}).keys())
-    tracked_cities = set(ACTIVE_TRADING_CITIES) | set(CANARY_TRADING_CITIES) | auto_canary | auto_shadow | set(OBSERVED_AUDIT_CITIES) | set(city_accuracy.keys())
+    auto_blocked = policy_state.get("auto_blocked_cities", {}) if isinstance(policy_state, dict) else {}
+    auto_blocked_names = set(auto_blocked.keys()) if isinstance(auto_blocked, dict) else set()
+    tracked_cities = (
+        set(ACTIVE_TRADING_CITIES)
+        | set(CANARY_TRADING_CITIES)
+        | auto_canary
+        | auto_shadow
+        | auto_blocked_names
+        | set(OBSERVED_AUDIT_CITIES)
+        | set(city_accuracy.keys())
+    )
     tracked_cities |= {city for city in RESOLUTION_ICAO if is_city_blocked(city)}
 
     rows = []
@@ -4108,7 +4162,8 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None):
     for city in tracked_cities:
         city_mode = get_effective_city_mode(city, policy_state=policy_state)
         active = city_mode in {"active", "canary"}
-        blocked = is_city_blocked(city)
+        blocked = city_mode == "blocked"
+        auto_block_meta = auto_blocked.get(city, {}) if isinstance(auto_blocked, dict) else {}
         resolution_meta = RESOLUTION_ICAO.get(city, {})
         noaa_configured = city in OBSERVED_AUDIT_CITIES or bool(resolution_meta.get("noaa_station_id"))
         observed_count = int(observed_counts.get(city, 0) or 0)
@@ -4141,7 +4196,10 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None):
         elif blocked:
             trading_label = "Bloqueada"
             trading_badge = "bad"
-            trading_detail = "solo referencia; no abrir nuevas entradas"
+            if auto_block_meta:
+                trading_detail = f"auto-bloqueada: {auto_block_meta.get('reason', 'baja accuracy')}"
+            else:
+                trading_detail = "solo referencia; no abrir nuevas entradas"
         else:
             trading_label = "Fuera allowlist"
             trading_badge = "muted"
@@ -4193,7 +4251,10 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None):
         elif blocked:
             state_label = "Bloqueada"
             state_badge = "bad"
-            state_detail = "revisar solo si aparece evidencia nueva mejor"
+            if auto_block_meta:
+                state_detail = f"auto-bloqueo persistido {auto_block_meta.get('triggered_at', 'n/d')}"
+            else:
+                state_detail = "revisar solo si aparece evidencia nueva mejor"
         elif noaa_configured and interpretable:
             state_label = "Lista para revisar"
             state_badge = "accent"
@@ -4248,6 +4309,10 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None):
             "state_label": state_label,
             "state_badge": state_badge,
             "state_detail": state_detail,
+            "policy_action": auto_block_meta.get("action", ""),
+            "policy_reason": auto_block_meta.get("reason", ""),
+            "policy_metrics": auto_block_meta.get("metrics", {}),
+            "policy_changed_at": auto_block_meta.get("triggered_at", ""),
             "_sort": (
                 sort_rank,
                 0 if active else 1,
@@ -4315,6 +4380,7 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
     shadow_cities = shadow_tracking.get("cities", {}) if isinstance(shadow_tracking, dict) else {}
     auto_canary = policy_state.get("auto_canary_cities", {}) if isinstance(policy_state, dict) else {}
     auto_shadow = policy_state.get("auto_shadow_cities", {}) if isinstance(policy_state, dict) else {}
+    auto_blocked = policy_state.get("auto_blocked_cities", {}) if isinstance(policy_state, dict) else {}
     transition_history = list((policy_state.get("transition_history", []) if isinstance(policy_state, dict) else [])[:20])
     policy = {
         "promote": {
@@ -4362,6 +4428,7 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
         shadow_best_edge = round(float(shadow.get("best_edge_pct", 0) or 0), 1)
         shadow_cycles = int(shadow.get("cycles_seen", 0) or 0)
         trades = int(row.get("trades", 0) or 0)
+        wins = int(row.get("wins", 0) or 0)
         pnl = round(float(row.get("pnl", 0) or 0), 2)
         win_rate = round(float(row.get("win_rate", 0) or 0), 1)
         active = bool(row.get("active"))
@@ -4391,6 +4458,7 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
         )
         auto_shadow_meta = auto_shadow.get(city, {}) if isinstance(auto_shadow, dict) else {}
         auto_canary_meta = auto_canary.get(city, {}) if isinstance(auto_canary, dict) else {}
+        auto_block_meta = auto_blocked.get(city, {}) if isinstance(auto_blocked, dict) else {}
         latest_transition = next(
             (
                 item for item in transition_history
@@ -4423,7 +4491,12 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
             decision = "blocked"
             decision_label = "Bloqueada"
             badge = "bad"
-            reason = row.get("state_detail", "fuera de juego por ahora")
+            reason = (
+                auto_block_meta.get("reason")
+                or row.get("policy_reason")
+                or row.get("state_detail")
+                or "fuera de juego por ahora"
+            )
         elif removable_active:
             decision = "remove"
             decision_label = "Revisar salida"
@@ -4621,7 +4694,9 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
             "degraded": degraded,
             "interpretable": interpretable,
             "trades": trades,
+            "wins": wins,
             "win_rate": win_rate,
+            "pnl": pnl,
             "pnl_display": f"${pnl:+.2f}",
             "observed_display": f"{observed_count}/{observed_goal}",
             "shadow_seen": shadow_seen,
@@ -4640,7 +4715,14 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
             "degradation_reason": auto_shadow_meta.get("reason") or latest_transition.get("reason") or "",
             "degradation_from": auto_shadow_meta.get("from_mode") or latest_transition.get("from") or "",
             "degradation_at": auto_shadow_meta.get("shadowed_at") or latest_transition.get("at") or "",
-            "overlay_reason": auto_canary_meta.get("reason") if city_mode == "canary" else auto_shadow_meta.get("reason"),
+            "policy_action": auto_block_meta.get("action", row.get("policy_action", "")),
+            "policy_metrics": auto_block_meta.get("metrics", row.get("policy_metrics", {})),
+            "policy_changed_at": auto_block_meta.get("triggered_at", row.get("policy_changed_at", "")),
+            "overlay_reason": (
+                auto_canary_meta.get("reason") if city_mode == "canary"
+                else auto_block_meta.get("reason") if city_mode == "blocked"
+                else auto_shadow_meta.get("reason")
+            ),
             "reason": reason,
             "trading_label": row.get("trading_label", ""),
             "history_label": row.get("history_label", ""),
@@ -4735,6 +4817,7 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
         "auto_state": {
             "canary_count": len(auto_canary),
             "shadow_count": len(auto_shadow),
+            "blocked_count": len(auto_blocked),
             "canary_rows": [
                 {"city": city, **(auto_canary.get(city) or {})}
                 for city in sorted(auto_canary)
@@ -4742,6 +4825,10 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
             "shadow_rows": [
                 {"city": city, **(auto_shadow.get(city) or {})}
                 for city in sorted(auto_shadow)
+            ],
+            "blocked_rows": [
+                {"city": city, **(auto_blocked.get(city) or {})}
+                for city in sorted(auto_blocked)
             ],
             "transitions": list((policy_state.get("transition_history", []) if isinstance(policy_state, dict) else [])[:10]),
         },
@@ -4751,7 +4838,7 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
 
 def sync_city_policy_state(notify=True):
     """
-    Promueve shadow -> canary y degrada canary/active -> shadow cuando las reglas se disparan.
+    Promueve shadow -> canary y auto-bloquea canary/active -> blocked cuando hay evidencia.
     No toca las env vars; aplica un overlay persistente en volumen.
     """
     policy_state = load_city_policy_state()
@@ -4766,6 +4853,7 @@ def sync_city_policy_state(notify=True):
 
     auto_canary = policy_state.setdefault("auto_canary_cities", {})
     auto_shadow = policy_state.setdefault("auto_shadow_cities", {})
+    auto_blocked = policy_state.setdefault("auto_blocked_cities", {})
     history = policy_state.setdefault("transition_history", [])
     changed = False
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -4800,26 +4888,32 @@ def sync_city_policy_state(notify=True):
                 )
 
         if decision == "remove" and current_mode in {"active", "canary"}:
-            auto_shadow[city] = {
-                "shadowed_at": now_iso,
-                "reason": row.get("reason", ""),
-                "from_mode": current_mode,
-            }
+            auto_blocked[city] = _build_auto_city_block_policy(
+                row=row,
+                current_mode=current_mode,
+                triggered_at=now_iso,
+            )
+            auto_shadow.pop(city, None)
             auto_canary.pop(city, None)
             history.append({
                 "at": now_iso,
                 "city": city,
                 "from": current_mode,
-                "to": "shadow",
+                "to": "blocked",
                 "reason": row.get("reason", ""),
+                "action": "auto_block",
+                "metrics": auto_blocked[city].get("metrics", {}),
             })
             changed = True
             if notify:
+                metrics = auto_blocked[city].get("metrics", {})
                 send_telegram(
-                    f"🛑 <b>Ciudad degradada a shadow</b>\n"
-                    f"{city} pasa de <b>{current_mode}</b> a <b>shadow</b>.\n"
+                    f"🛑 <b>Ciudad auto-bloqueada</b>\n"
+                    f"{city} pasa de <b>{current_mode}</b> a <b>blocked</b>.\n"
                     f"{row.get('reason', '')}\n"
-                    f"Se bloquean nuevas entradas hasta nueva evidencia."
+                    f"Evidencia: {metrics.get('wins', 0)}/{metrics.get('trades', 0)} trades, "
+                    f"WR {metrics.get('win_rate', 0.0):.1f}%, PnL ${metrics.get('pnl', 0.0):+.2f}.\n"
+                    f"Reactivacion solo manual/conservadora retirando la politica persistida."
                 )
 
     if changed:
