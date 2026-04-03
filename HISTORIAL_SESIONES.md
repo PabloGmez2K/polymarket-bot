@@ -2025,3 +2025,39 @@ Regla recomendada:
 - no se tocaron trading, NOAA, scheduler, exits ni arquitectura core;
 - no hubo push ni deploy;
 - el cambio fue solo hardening de tooling operativo y trazabilidad documental.
+
+## Sesión 68 — validación end-to-end deploy + corrección desfase env vars (3 abr 2026)
+
+**Disparador:** verificar que el código de sesiones 66-67 estaba desplegado en Railway y que el auto-block engine funciona correctamente end-to-end.
+
+**Verificaciones completadas:**
+
+- Commits `aeebdfb` (sesión 66) y `b54407c` (sesión 67) confirmados en local y pushed a origin.
+- `verify_before_deploy.py` pasa 506/506.
+- Railway redesplegó a 16:36 UTC (post-push) y de nuevo a 16:54 UTC (post-corrección env var), v10.6.10 limpio.
+- `city_policy_state.json` no existe aún en Railway: esperado por diseño (se crea solo cuando `sync_city_policy_state()` detecta un cambio en un ciclo).
+- Scan de BUYs verificado en código (L10422-10426): `get_effective_city_mode()` → si `blocked` → `continue` (skip total). Funciona para bloqueos manuales (`BLOCKED_CITIES`) y automáticos (`auto_blocked_cities`).
+- Dashboard live auditado via `/api/dashboard.json`: datos cruzados entre portfolio, postmortem (126 registros), trade_lifecycle (62 registros), city_accuracy y exit_breakdown sin desfases funcionales críticos.
+
+**Desfase corregido:**
+
+- Atlanta estaba simultáneamente en `ACTIVE_TRADING_CITIES` (default del código) y en `BLOCKED_CITIES` (env var Railway, sesión 65). Funcionalmente no causaba daño (`is_city_blocked` se evalúa primero), pero impedía que el auto-block engine la procesara y confundía el dashboard.
+- Corrección: `ACTIVE_TRADING_CITIES` seteada explícitamente en Railway como `Chicago,Dallas,Buenos Aires`. Redeploy confirmado.
+
+**Hallazgo adicional: Dallas degradada a shadow por overlay:**
+
+- `shadow_city_tracking.json` registra degradación de Dallas el 2 abr (15 trades, WR 6.7%, PnL -$1.66). El overlay `auto_shadow` tiene prioridad sobre `ACTIVE_TRADING_CITIES` en `get_effective_city_mode()` (L620).
+- El decision engine la propone como candidata a canary (7 edges shadow, pico 38.9%), pero la promoción requiere que alguien la saque de `auto_shadow` o que el engine la promueva automáticamente en un ciclo futuro.
+
+**Desfases menores documentados (no bloquean):**
+
+- NYC (21 trades, no en ACTIVE ni BLOCKED): ruido informativo, no funcional.
+- CONTEXTO.md tenía cash stale ($27.20 vs $21.62 real): actualizado.
+- Chicago Apr1 cerrada manualmente: podría no estar en postmortem como closed. Pendiente verificar.
+- 4 resolved_won pendientes cobro (~$3.38): capital trabado, no desfase de accounting.
+
+**Límite de alcance respetado:**
+
+- no se tocó `bot.py`;
+- no se tocaron trading, NOAA, scheduler, exits ni arquitectura core;
+- único cambio en producción: env var `ACTIVE_TRADING_CITIES` en Railway.

@@ -1,14 +1,16 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 3 de abril de 2026 (Sesión 67 — hardening del relogin recurrente de Railway CLI)
-**Próxima sesión:** desplegar y validar en Railway que `city_policy_state.json` registra `auto_blocked_cities` con `action/reason/metrics/triggered_at` y que el scan corta BUYs aunque la ciudad siga en `ACTIVE_TRADING_CITIES`; en paralelo, vigilar si el relogin de Railway reaparece tras el siguiente refresh OAuth con el mutex nuevo y el preflight de escritura.
+**Última actualización:** 3 de abril de 2026 (Sesión 68 — validación end-to-end deploy + corrección desfase env vars)
+**Próxima sesión:** verificar en postmortem.json raw si Chicago Apr1 (cerrada manualmente) está correctamente reflejada como closed; si no, reconciliar para que city_accuracy no esté sesgada. Vigilar el ciclo de 23:00 UTC para confirmar que `city_policy_state.json` se crea si alguna ciudad activa dispara la regla de auto-block.
 
-**Estado real de la cuenta a cierre de sesión 64 (2 abr 2026, ~tarde):**
-- Chicago Apr1: CERRADA manualmente. El bot no tiene constancia de esa venta.
-- Posiciones abiertas: 2 en Atlanta (identidad exacta pendiente de confirmar).
-- Cartera total: ~$31.58 | Cash disponible: ~$27.20
-- P&L all-time visible en Polymarket: -$21.79
-- **AVISO:** el snapshot de Railway (1 abr 20:13 UTC) sigue siendo la referencia documental del repo, pero está obsoleto respecto al estado real de la cuenta. Tratarlo como stale hasta verificar en live.
+**Estado real de la cuenta a cierre de sesión 68 (3 abr 2026, ~17:00 UTC):**
+- Cash disponible: $21.62
+- Posiciones abiertas: 2 (NYC Apr3 YES x2, PnL neto ~$0.00)
+- Pendiente cobro (resolved_won): 4 posiciones, ~$3.38
+- Ciudades activas Railway: Chicago, Buenos Aires (Dallas degradada a shadow por overlay, Atlanta bloqueada)
+- `ACTIVE_TRADING_CITIES` Railway: `Chicago,Dallas,Buenos Aires` (Atlanta retirada sesión 68)
+- `BLOCKED_CITIES` Railway: incluye Atlanta (añadida sesión 65)
+- **AVISO:** Chicago Apr1 cerrada manualmente puede no estar reflejada en postmortem — verificar en próxima sesión.
 
 **Hotfix operativo sesión 65 (3 abr 2026):**
 - `BLOCKED_CITIES` en Railway quedó actualizado con `Atlanta` añadida.
