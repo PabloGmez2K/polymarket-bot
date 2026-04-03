@@ -1982,3 +1982,46 @@ Regla recomendada:
 - el auto-bloqueo real queda implementado localmente y listo para push/deploy;
 - Atlanta sigue bloqueada manualmente en Railway por `BLOCKED_CITIES` desde la sesión 65, así que no hay riesgo inmediato de BUYs nuevos mientras se valida el overlay persistido;
 - siguiente paso recomendado: desplegar, inspeccionar `city_policy_state.json` en Railway y confirmar por logs que el scan salta ciudades auto-bloqueadas aunque sigan en la allowlist manual.
+
+---
+
+## Sesión 67 — hardening del relogin recurrente de Railway CLI (3 abr 2026)
+
+**Disparador:** el usuario pidió resolver el problema de relogin recurrente de Railway sin volver a empezar desde cero ni tocar lógica de trading.
+
+**Evidencia reunida antes de cambiar tooling:**
+
+- `CONTEXTO.md`, `RAILWAY_AUTH_BUG_HANDOFF_2026-04-01.md`, `OPERATIONS_PLAYBOOK.md` y las sesiones 50/54/65 dejaban una pista consistente: `invalid_grant` reaparecía tras una auth aparentemente reparada, y el workaround manual `reset + launch-login -Browserless` seguía funcionando.
+- En esta sesión, `powershell -ExecutionPolicy Bypass -File .\tools\railway_auth_repair.ps1 doctor` confirmó que no había proxy persistente ni de proceso, `config.json` seguía enlazado, y el token pudo refrescarse correctamente hasta `2026-04-03T11:07:57Z`.
+- `railway_safe.ps1 whoami` y `railway_safe.ps1 status` funcionaron y siguieron funcionando incluso lanzados en paralelo con `doctor`.
+
+**Cambios implementados:**
+
+- `tools/railway_safe.ps1` añade un preflight de refresh OAuth:
+  - lee `%USERPROFILE%\.railway\config.json`;
+  - parsea `tokenExpiresAt`;
+  - si faltan `<=300s` para expirar y el proceso actual no puede abrir el config en modo escritura, corta con instrucciones explícitas en vez de dejar que Railway intente refrescar en un contexto frágil.
+- `tools/railway_safe.ps1` también serializa todas las invocaciones del CLI con un mutex global `Global\polymarket-bot-railway-cli`, para evitar carreras de refresh concurrente contra el mismo `refreshToken`.
+- `tools/railway_auth_repair.ps1` usa ese mismo mutex en `doctor`, `whoami/version` y `interactive-login`, y `doctor` ahora muestra:
+  - `Writable from this process`;
+  - `secondsToExpiry`;
+  - `refreshWriteRiskSoon`.
+
+**Diagnóstico de causa raíz, formulado con cautela:**
+
+- ya no queda probado que el problema sea solo proxy o solo sandbox;
+- la hipótesis más plausible pasa a ser una combinación de refresh sin escritura persistida y/o refreshes concurrentes del Railway CLI sobre el mismo `config.json`;
+- el hardening nuevo cubre ambas rutas antes de que la CLI vuelva a degradar el estado OAuth local.
+
+**Validación operativa final:**
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 whoami` -> `Logged in as pablogomez.eu@gmail.com`
+- `powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 status` -> `Project: enchanting-respect / Environment: production / Service: polymarket-bot`
+- `powershell -ExecutionPolicy Bypass -File .\tools\railway_auth_repair.ps1 doctor` -> `Writable from this process: True`, `tokenExpiresAtUtc=2026-04-03T11:07:57Z`, `refreshWriteRiskSoon: False`, `ExitCode: 0`
+
+**Límite de alcance respetado:**
+
+- no se tocó `bot.py`;
+- no se tocaron trading, NOAA, scheduler, exits ni arquitectura core;
+- no hubo push ni deploy;
+- el cambio fue solo hardening de tooling operativo y trazabilidad documental.

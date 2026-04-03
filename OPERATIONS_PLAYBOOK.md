@@ -256,12 +256,14 @@ Guardrail minimo desde ahora:
    - `powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 logs -s polymarket-bot -n 80`
    - `powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 ssh "ls -l /app/data"`
 2. `tools/railway_safe.ps1` limpia proxies en mayusculas/minusculas y tambien variantes `npm_config_*`, para que Railway no herede un proxy roto aunque la shell venga contaminada.
+   - tambien serializa todas las invocaciones del CLI con un mutex global y hace preflight de `tokenExpiresAt` + escritura de `%USERPROFILE%\.railway\config.json` cuando el token esta a `<=300s` de expirar, para evitar refreshes OAuth concurrentes o sin persistencia.
 3. `railway login` se hace solo en una terminal interactiva del usuario.
 4. Si `whoami` o `status` vuelven a pedir login de forma persistente, usar primero:
    - `powershell -ExecutionPolicy Bypass -File .\tools\railway_auth_repair.ps1 doctor`
    - `powershell -ExecutionPolicy Bypass -File .\tools\railway_auth_repair.ps1 reset`
    - `powershell -ExecutionPolicy Bypass -File .\tools\railway_auth_repair.ps1 launch-login -Browserless`
    El reset hace backup del `config.json`, limpia solo los tokens stale y preserva el enlace del proyecto.
+   - `doctor` ahora muestra `Writable from this process`, `secondsToExpiry` y `refreshWriteRiskSoon`; si el fallo reaparece con writability `True`, tratar como posible carrera de refresh y no lanzar varios comandos Railway en paralelo fuera del wrapper.
 5. Tras el login limpio, validar con:
    - `powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 whoami`
    - `powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 status`

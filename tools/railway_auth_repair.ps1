@@ -29,6 +29,9 @@ $proxyVars = @(
 )
 
 $repoRoot = Split-Path $PSScriptRoot -Parent
+$tokenRefreshSafetyWindowSeconds = 300
+$railwayCliMutexName = "Global\polymarket-bot-railway-cli"
+$railwayCliMutexTimeoutMs = 60000
 
 function Get-RailwayCommand {
     $railwayCommand = Get-Command "railway.cmd" -ErrorAction SilentlyContinue
@@ -144,6 +147,67 @@ function Get-BackupPath {
     return Join-Path $directory "config.backup.$timestamp.json"
 }
 
+function Test-RailwayConfigWritable {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ConfigPath
+    )
+
+    if (-not (Test-Path $ConfigPath)) {
+        return $false
+    }
+
+    try {
+        $stream = [System.IO.File]::Open(
+            $ConfigPath,
+            [System.IO.FileMode]::Open,
+            [System.IO.FileAccess]::Write,
+            [System.IO.FileShare]::ReadWrite
+        )
+        $stream.Close()
+        return $true
+    }
+    catch {
+        return $false
+    }
+    finally {
+        if ($null -ne $stream) {
+            $stream.Dispose()
+        }
+    }
+}
+
+function Invoke-WithRailwayCliLock {
+    param(
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$ScriptBlock
+    )
+
+    $mutex = New-Object System.Threading.Mutex($false, $railwayCliMutexName)
+    $lockAcquired = $false
+
+    try {
+        try {
+            $lockAcquired = $mutex.WaitOne($railwayCliMutexTimeoutMs)
+        }
+        catch [System.Threading.AbandonedMutexException] {
+            $lockAcquired = $true
+        }
+
+        if (-not $lockAcquired) {
+            throw "Another Railway CLI command is still running. Retry in a moment to avoid concurrent OAuth refresh against the same config."
+        }
+
+        & $ScriptBlock
+    }
+    finally {
+        if ($lockAcquired) {
+            $mutex.ReleaseMutex()
+        }
+        $mutex.Dispose()
+    }
+}
+
 function Backup-RailwayConfig {
     param(
         [Parameter(Mandatory = $true)]
@@ -234,7 +298,9 @@ function Invoke-RailwayCapture {
     $ErrorActionPreference = "Continue"
 
     try {
-        $output = Invoke-InCleanRailwayEnv { & $railwayCommand.Source @RailwayArgs 2>&1 }
+        $output = Invoke-WithRailwayCliLock {
+            Invoke-InCleanRailwayEnv { & $railwayCommand.Source @RailwayArgs 2>&1 }
+        }
         $exitCode = $LASTEXITCODE
     }
     finally {
@@ -264,7 +330,8 @@ function Show-Doctor {
 
     Write-Host "Railway CLI"
     Write-Host "  Path: $($railwayCommand.Source)"
-    Write-Host "  Version: $(& $railwayCommand.Source --version)"
+    $version = Invoke-WithRailwayCliLock { & $railwayCommand.Source --version }
+    Write-Host "  Version: $version"
     Write-Host ""
 
     Write-Host "Proxy vars in current process"
@@ -307,13 +374,19 @@ function Show-Doctor {
         Write-Host "  Path: $configPath"
         Write-Host "  LastWriteTimeUtc: $($configItem.LastWriteTimeUtc.ToString('yyyy-MM-ddTHH:mm:ssZ'))"
         Write-Host "  Linked projects: $(Get-ProjectLinkCount $config.projects)"
+        Write-Host "  Writable from this process: $(Test-RailwayConfigWritable -ConfigPath $configPath)"
         Write-Host "  accessToken present: $hasAccessToken"
         Write-Host "  refreshToken present: $hasRefreshToken"
         if ($null -ne $expiresAtUtc) {
             Write-Host "  tokenExpiresAtUtc: $($expiresAtUtc.ToString('yyyy-MM-ddTHH:mm:ssZ'))"
+            $secondsToExpiry = [int][Math]::Round(($expiresAtUtc - [DateTime]::UtcNow).TotalSeconds)
+            Write-Host "  secondsToExpiry: $secondsToExpiry"
+            Write-Host "  refreshWriteRiskSoon: $($secondsToExpiry -le $tokenRefreshSafetyWindowSeconds)"
         }
         else {
             Write-Host "  tokenExpiresAtUtc: (null)"
+            Write-Host "  secondsToExpiry: (null)"
+            Write-Host "  refreshWriteRiskSoon: False"
         }
     }
     else {
@@ -422,8 +495,10 @@ function Start-InteractiveLogin {
         $loginArgs += "--browserless"
     }
 
-    Invoke-InCleanRailwayEnv {
-        & $railwayCommand.Source @loginArgs
+    Invoke-WithRailwayCliLock {
+        Invoke-InCleanRailwayEnv {
+            & $railwayCommand.Source @loginArgs
+        }
     }
 
     Write-Host ""
