@@ -1,7 +1,7 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 3 de abril de 2026 (Sesión 70 — auditoría completa del Control Center dashboard)
-**Próxima sesión:** quick wins Control Center (ver `docs/control-center-next-session.md`): verificar que `shadow_tracking` y `city_policy_state.json` persisten en Railway Volume, añadir alarma "sin ciclo en >12h" en Mission HUD, y aplicar 5 quick wins de HTML sin riesgo. Prompt exacto disponible en el archivo. Las 3 filas legacy de Chicago (`2026-03-26`, `2026-03-27`, `2026-03-28`) siguen pendientes de cierre.
+**Última actualización:** 3 de abril de 2026 (Sesión 71 — quick wins Control Center + alarma sin ciclo)
+**Próxima sesión (M3):** cerrar 3 filas legacy Chicago (`2026-03-26`, `2026-03-27`, `2026-03-28`) que sesgan WR. Verificar antes con `MSYS_NO_PATHCONV=1 railway ssh ls /app/data/` que `trade_lifecycle.json` tiene esas filas como `open`, luego cerrarlas como `LOSS_TOTAL/legacy`. Ver roadmap `docs/control-center-roadmap.md` sesión M3.
 
 **Estado real de la cuenta a cierre de sesión 68 (3 abr 2026, ~17:00 UTC):**
 - Cash disponible: $21.62
