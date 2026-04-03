@@ -284,115 +284,6 @@
       </section>
     </section>
 
-    <section class="layer-block legacy-focus-shell" hidden>
-      <div class="layer-header">
-        <div>
-          <p class="section-kicker">Capa 1</p>
-          <h2>Control Center Discovery / Stabilization</h2>
-        </div>
-        <span class="badge badge-{{ dashboard.focus.status_badge }}">{{ dashboard.focus.status_label }}</span>
-      </div>
-      <p class="layer-copy">
-        Respuesta rápida para saber si el sistema está sano, si hoy toca intervenir
-        y cuál es el cuello de botella dominante sin abrir todavía el detalle.
-      </p>
-
-      <section class="grid focus-grid">
-        <article class="card focus-primary-card">
-          <div class="card-head">
-            <div>
-              <p class="section-kicker">Hoy</p>
-              <h2>{{ dashboard.focus.headline }}</h2>
-            </div>
-            <span class="badge badge-{{ dashboard.focus.action.badge }}">Acción</span>
-          </div>
-          <p class="focus-summary">{{ dashboard.focus.summary }}</p>
-
-          <div class="action-callout action-{{ dashboard.focus.action.badge }}">
-            <span class="action-label">Acción recomendada hoy</span>
-            <strong>{{ dashboard.focus.action.title }}</strong>
-            <span>{{ dashboard.focus.action.detail }}</span>
-          </div>
-
-          <div class="route-list">
-            {% for route in dashboard.focus.detail_routes %}
-            <span class="route-pill"><code>{{ route.label }}</code> {{ route.detail }}</span>
-            {% endfor %}
-          </div>
-        </article>
-
-        <div class="focus-answer-grid">
-          {% for answer in dashboard.focus.answers %}
-          <article class="card focus-answer-card">
-            <div class="answer-head">
-              <span class="focus-question">{{ answer.question }}</span>
-              <span class="badge badge-{{ answer.badge }}">{{ answer.tag }}</span>
-            </div>
-            <strong class="focus-answer">{{ answer.answer }}</strong>
-            <p class="focus-detail">{{ answer.detail }}</p>
-          </article>
-          {% endfor %}
-        </div>
-      </section>
-
-      <section class="grid cards-4 focus-stats-grid">
-        {% for item in dashboard.focus.quick_stats %}
-        <article class="card mini-card focus-mini-card">
-          <span class="stat-label">{{ item.label }}</span>
-          <strong class="stat-value">{{ item.value }}</strong>
-          <span class="stat-sub">{{ item.detail }}</span>
-        </article>
-        {% endfor %}
-      </section>
-
-      <section class="grid layout-main focus-lower-grid">
-        <article class="card">
-          <div class="card-head">
-            <div>
-              <p class="section-kicker">Incidentes</p>
-              <h2>Salud real e incidentes</h2>
-            </div>
-          </div>
-          {% if dashboard.focus.incidents %}
-          <div class="list-stack compact">
-            {% for item in dashboard.focus.incidents %}
-            <div class="list-row">
-              <div class="check-body">
-                <strong>{{ item.title }}</strong>
-                <span>{{ item.detail }}</span>
-              </div>
-              <span class="badge badge-{{ item.badge }}">Activa</span>
-            </div>
-            {% endfor %}
-          </div>
-          {% else %}
-          <div class="notice notice-good">Sin incidentes operativos activos relevantes en este momento.</div>
-          {% endif %}
-        </article>
-
-        <article class="card">
-          <div class="card-head">
-            <div>
-              <p class="section-kicker">Drivers</p>
-              <h2>Qué está limitando ahora</h2>
-            </div>
-          </div>
-          <div class="checklist">
-            {% for item in dashboard.focus.drivers %}
-            <div class="check-item check-item-{{ item.status }}">
-              <div class="check-status {{ item.status }}"></div>
-              <div class="check-body">
-                <strong>{{ item.label }}</strong>
-                <span>{{ item.value }} Â· {{ item.detail }}</span>
-              </div>
-              <span class="check-tag check-tag-{{ item.status }}">{{ item.tag }}</span>
-            </div>
-            {% endfor %}
-          </div>
-        </article>
-      </section>
-    </section>
-
     <section class="layer-block layer-block-secondary">
       <div class="layer-header">
         <div>
@@ -522,407 +413,6 @@
         <div class="notice notice-good">Sin alertas activas relevantes en este momento.</div>
         {% endif %}
       </article>
-    </section>
-
-    <section class="grid layout-main">
-      <article class="card">
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Progreso</p>
-            <h2>Readiness operativo</h2>
-          </div>
-        </div>
-        <div class="checklist">
-          {% for item in dashboard.progress %}
-          <div class="check-item check-item-{{ item.status }}">
-            <div class="check-status {{ item.status }}"></div>
-            <div class="check-body">
-              <strong>{{ item.label }}</strong>
-              <span>{{ item.value }} · {{ item.detail }}</span>
-            </div>
-            <span class="check-tag check-tag-{{ item.status }}">{{ item.tag }}</span>
-          </div>
-          {% endfor %}
-        </div>
-      </article>
-
-      <article class="card">
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Desbloqueos</p>
-            <h2>Qué falta para habilitar decisiones</h2>
-          </div>
-        </div>
-        <div class="checklist">
-          {% for item in dashboard.unlocks %}
-          <div class="check-item check-item-{{ item.status }}">
-            <div class="check-status {{ item.status }}"></div>
-            <div class="check-body">
-              <strong>{{ item.label }}</strong>
-              <span>{{ item.value }} · {{ item.detail }}</span>
-            </div>
-            <span class="check-tag check-tag-{{ item.status }}">{{ item.tag }}</span>
-          </div>
-          {% endfor %}
-        </div>
-      </article>
-    </section>
-
-    <section class="grid cards-4">
-      <article class="card mini-card">
-        <span class="stat-label">PnL serie v{{ dashboard.logic_series }}</span>
-        <strong class="stat-value">{{ dashboard.series_stats.pnl_display }}</strong>
-        {% if not dashboard.series_stats.has_closed_count %}
-        <span class="stat-sub">Sin cierres todavía</span>
-        {% endif %}
-      </article>
-      <article class="card mini-card">
-        <span class="stat-label">Win rate serie</span>
-        <strong class="stat-value">{{ dashboard.series_stats.win_rate_display }}</strong>
-        {% if not dashboard.series_stats.has_closed_count %}
-        <span class="stat-sub">Esperando muestra</span>
-        {% endif %}
-      </article>
-      <article class="card mini-card">
-        <span class="stat-label">Cierres serie</span>
-        <strong class="stat-value">{{ dashboard.series_stats.closed_count }}</strong>
-      </article>
-      <article class="card mini-card">
-        <span class="stat-label">Drawdown reciente</span>
-        <strong class="stat-value">{{ dashboard.series_stats.drawdown_display }}</strong>
-        {% if not dashboard.series_stats.has_drawdown_data %}
-        <span class="stat-sub">Sin cierres todavía</span>
-        {% endif %}
-      </article>
-    </section>
-
-    <section class="grid layout-main">
-      <article class="card">
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Operativa observada</p>
-            <h2>Eficiencia de exits</h2>
-          </div>
-          <div class="event-meta">
-            <span class="badge badge-{{ dashboard.trade_analytics.score_badge }}">{{ dashboard.trade_analytics.score_display }}</span>
-            <span class="badge badge-{{ dashboard.trade_analytics.confidence_badge }}">{{ dashboard.trade_analytics.confidence_label }}</span>
-          </div>
-        </div>
-
-        <p class="focus-summary">{{ dashboard.trade_analytics.summary }}</p>
-
-        <div class="progress-block">
-          <div class="progress-copy">
-            <span>Medidor de eficiencia observada</span>
-            <strong>{{ dashboard.trade_analytics.score_display }}</strong>
-          </div>
-          <div class="progress-bar">
-            <div class="progress-fill progress-fill-{{ dashboard.trade_analytics.score_badge }}" style="width: {{ dashboard.trade_analytics.score_pct }}%"></div>
-          </div>
-        </div>
-
-        <section class="grid cards-4 focus-stats-grid">
-          {% for item in dashboard.trade_analytics.quick_stats %}
-          <article class="mini-card focus-mini-card">
-            <span class="stat-label">{{ item.label }}</span>
-            <strong class="stat-value">{{ item.value }}</strong>
-            <span class="stat-sub">{{ item.detail }}</span>
-          </article>
-          {% endfor %}
-        </section>
-
-        {% if dashboard.trade_analytics.timeline_points %}
-        <div class="efficiency-timeline">
-          {% for point in dashboard.trade_analytics.timeline_points %}
-          <div class="efficiency-point">
-            <div class="efficiency-point-rail">
-              <div class="efficiency-point-bar efficiency-point-bar-{{ point.badge }}" style="height: {{ point.height_pct }}%"></div>
-            </div>
-            <strong class="efficiency-point-value">{{ point.score_display }}</strong>
-            <span class="efficiency-point-label">{{ point.short_label }}</span>
-            <span class="table-note">{{ point.reason_tag }} · {{ point.closed_at_display }}</span>
-          </div>
-          {% endfor %}
-        </div>
-        {% else %}
-        <div class="notice notice-muted">Todavia no hay suficiente evidencia post-salida para dibujar la serie de eficiencia.</div>
-        {% endif %}
-
-        <div class="notice notice-{{ dashboard.trade_analytics.confidence_badge }}">
-          <strong>{{ dashboard.trade_analytics.headline }}</strong><br>
-          {{ dashboard.trade_analytics.sample_detail }}. {{ dashboard.trade_analytics.note }}
-        </div>
-      </article>
-
-      <article class="card">
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Queue de revision</p>
-            <h2>Que casos merecen atencion</h2>
-          </div>
-        </div>
-
-        <div class="checklist">
-          {% for row in dashboard.trade_analytics.breakdown_rows %}
-          <div class="check-item check-item-{{ row.signal_badge }}">
-            <div class="check-status {{ row.signal_badge }}"></div>
-            <div class="check-body">
-              <strong>{{ row.label }}</strong>
-              <span>Muestra {{ row.coverage_display }} · eficiencia media {{ row.avg_efficiency_display }}</span>
-            </div>
-            <span class="check-tag check-tag-{{ row.signal_badge }}">{{ row.signal_label }}</span>
-          </div>
-          {% endfor %}
-        </div>
-
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Upside dejado</p>
-            <h2>Top casos para revisar</h2>
-          </div>
-        </div>
-        {% if dashboard.trade_analytics.top_upside_rows %}
-        <div class="list-stack compact">
-          {% for row in dashboard.trade_analytics.top_upside_rows %}
-          <div class="list-row">
-            <div class="check-body">
-              <strong>{{ row.label }}</strong>
-              <span>{{ row.close_reason_label }} · cierre {{ row.close_value_display }} · pico dejado {{ row.upside_left_display }}</span>
-            </div>
-            <span class="badge badge-{{ row.verdict_badge }}">{{ row.efficiency_display }}</span>
-          </div>
-          {% endfor %}
-        </div>
-        {% else %}
-        <div class="notice notice-good">Todavia no hay cierres observados con upside dejado relevante.</div>
-        {% endif %}
-
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Proteccion</p>
-            <h2>Casos donde salir ayudo</h2>
-          </div>
-        </div>
-        {% if dashboard.trade_analytics.top_protection_rows %}
-        <div class="list-stack compact">
-          {% for row in dashboard.trade_analytics.top_protection_rows %}
-          <div class="list-row">
-            <div class="check-body">
-              <strong>{{ row.label }}</strong>
-              <span>{{ row.close_reason_label }} · cierre {{ row.close_value_display }} · downside evitado {{ row.drawdown_avoided_display }}</span>
-            </div>
-            <span class="badge badge-good">{{ row.efficiency_display }}</span>
-          </div>
-          {% endfor %}
-        </div>
-        {% else %}
-        <div class="notice notice-muted">Todavia no hay muestra suficiente de downside evitado para sacar lectura.</div>
-        {% endif %}
-      </article>
-    </section>
-
-    <section class="grid">
-      <article class="card">
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Historico operativo</p>
-            <h2>Ultimos cierres con evidencia post-salida</h2>
-          </div>
-          <span class="badge badge-{{ dashboard.trade_analytics.confidence_badge }}">{{ dashboard.trade_analytics.sample_display }}</span>
-        </div>
-        {% if dashboard.trade_analytics.recent_rows %}
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Mercado</th>
-                <th>Cierre</th>
-                <th>Razón</th>
-                <th>Eficiencia</th>
-                <th>Upside</th>
-                <th>Protección</th>
-                <th>Veredicto</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in dashboard.trade_analytics.recent_rows %}
-              <tr>
-                <td>
-                  <strong>{{ row.label }}</strong>
-                  <span class="table-note">{{ row.closed_at_display }}</span>
-                </td>
-                <td>{{ row.close_value_display }}</td>
-                <td>{{ row.close_reason_label }}</td>
-                <td><span class="badge badge-{{ row.score_badge }}">{{ row.efficiency_display }}</span></td>
-                <td>{{ row.upside_left_display }}</td>
-                <td>{{ row.drawdown_avoided_display }}</td>
-                <td><span class="badge badge-{{ row.verdict_badge }}">{{ row.verdict_label }}</span></td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% else %}
-        <div class="notice notice-muted">Todavia no hay cierres con muestra post-salida util para analisis operativo.</div>
-        {% endif %}
-      </article>
-    </section>
-
-    <section class="layer-block layer-block-secondary" data-tab-shell data-default-panel="ops-summary">
-      <div class="layer-header">
-        <div>
-          <p class="section-kicker">Trade console</p>
-          <h2>Operaciones del bot</h2>
-        </div>
-        <span class="badge badge-accent">Vista operativa</span>
-      </div>
-      <p class="layer-copy">
-        Panel pensado para responder trade por trade qué hizo el bot, por qué entró, por qué salió,
-        qué resultado dejó, qué pasó después y si sigue pendiente `claim/redeem`.
-      </p>
-
-      <div class="focus-tab-bar">
-        <button type="button" class="focus-tab is-active" data-panel-target="ops-summary">Resumen</button>
-        <button type="button" class="focus-tab" data-panel-target="ops-trades">Trades</button>
-      </div>
-
-      <section class="focus-panel is-active" data-panel="ops-summary">
-        <section class="grid cards-4">
-          {% for item in dashboard.trade_analytics.total_cards %}
-          <article class="card mini-card">
-            <span class="stat-label">{{ item.label }}</span>
-            <strong class="stat-value">{{ item.value }}</strong>
-            <span class="stat-sub">{{ item.detail }}</span>
-          </article>
-          {% endfor %}
-        </section>
-
-        <section class="grid layout-main">
-          <article class="card">
-            <div class="card-head">
-              <div>
-                <p class="section-kicker">Buckets</p>
-                <h2>Que tipo de salida estamos haciendo</h2>
-              </div>
-            </div>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Tipo</th>
-                    <th>Muestra</th>
-                    <th>Eficiencia</th>
-                    <th>Dejado</th>
-                    <th>Protegido</th>
-                    <th>Lectura</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {% for row in dashboard.trade_analytics.breakdown_rows %}
-                  <tr>
-                    <td><strong>{{ row.label }}</strong></td>
-                    <td>{{ row.coverage_display }}</td>
-                    <td>{{ row.avg_efficiency_display }}</td>
-                    <td>{{ row.upside_left_display }}</td>
-                    <td>{{ row.drawdown_avoided_display }}</td>
-                    <td><span class="badge badge-{{ row.signal_badge }}">{{ row.signal_label }}</span></td>
-                  </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
-          </article>
-
-          <article class="card">
-            <div class="card-head">
-              <div>
-                <p class="section-kicker">Lectura rapida</p>
-                <h2>Como interpretar este bloque</h2>
-              </div>
-            </div>
-            <div class="list-stack compact">
-              <div class="list-row">
-                <div class="check-body">
-                  <strong>Operaciones / TP / SL / LOSS_TOTAL</strong>
-                  <span>`LOSS_TOTAL` no es un `SELL`: marca posiciones muertas o no vendibles, separadas de los stop-loss normales.</span>
-                </div>
-              </div>
-              <div class="list-row">
-                <div class="check-body">
-                  <strong>Ganadas / SELL negativos / PnL neto</strong>
-                  <span>Los `SELL` cerrados en rojo se leen aparte para no mezclar p&eacute;rdidas de ejecuci&oacute;n con `LOSS_TOTAL` o legado hist&oacute;rico.</span>
-                </div>
-              </div>
-              <div class="list-row">
-                <div class="check-body">
-                  <strong>Legacy / parcial</strong>
-                  <span>Son registros reconstruidos con contexto incompleto: sirven para trazabilidad, pero no pesan igual que un trade completo de la serie actual.</span>
-                </div>
-              </div>
-              <div class="list-row">
-                <div class="check-body">
-                  <strong>Dejado de ganar / Protegido</strong>
-                  <span>Solo se calcula cuando el mercado se volvió a observar tras salir; no todos los trades tienen esa evidencia aún.</span>
-                </div>
-              </div>
-              <div class="list-row">
-                <div class="check-body">
-                  <strong>Entrada / Salida del bot</strong>
-                  <span>Cada trade explica con texto corto qué condición disparó la entrada y qué regla cerró la posición.</span>
-                </div>
-              </div>
-            </div>
-          </article>
-        </section>
-      </section>
-
-      <section class="focus-panel" data-panel="ops-trades" hidden>
-        <article class="card">
-          <div class="card-head">
-            <div>
-              <p class="section-kicker">Trades</p>
-              <h2>Detalle operativo por operación</h2>
-            </div>
-            <span class="badge badge-{{ dashboard.trade_analytics.confidence_badge }}">{{ dashboard.trade_analytics.sample_display }}</span>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Operación</th>
-                  <th>Entrada del bot</th>
-                  <th>Salida del bot</th>
-                  <th>Resultado</th>
-                  <th>Valor</th>
-                  <th>c/share</th>
-                  <th>Dejado</th>
-                  <th>Despues</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for row in dashboard.trade_analytics.trade_rows %}
-                <tr>
-                  <td>
-                    <strong>{{ row.label }}</strong>
-                    <span class="table-note">{{ row.bucket_label }} · abierto {{ row.opened_at_display }} · cerrado {{ row.closed_at_display }}</span>
-                  </td>
-                  <td><span class="table-note">{{ row.entry_condition }}</span></td>
-                  <td><span class="table-note">{{ row.exit_condition }}</span></td>
-                  <td>
-                    <span class="badge badge-{{ row.status_badge }}">{{ row.status_label }}</span>
-                    <span class="table-note">{{ row.pnl_cash_display }} · {{ row.pnl_pct_display }}</span>
-                  </td>
-                  <td>{{ row.trade_value_display }}</td>
-                  <td>{{ row.cents_result_display }}</td>
-                  <td>{{ row.left_to_gain_display }}</td>
-                  <td><span class="table-note">{{ row.after_close_display }} · {{ row.integrity_note }}</span></td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        </article>
-      </section>
     </section>
 
     <section class="grid layout-main">
@@ -1456,33 +946,414 @@
         <div class="notice notice-muted">Todavia no hay registros NOAA en <code>observed_vs_forecast</code>.</div>
         {% endif %}
       </article>
+    </section>
+
+    <details>
+      <summary>Readiness y desbloqueos (detalle)</summary>
+      <section class="grid layout-main">
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <p class="section-kicker">Progreso</p>
+              <h2>Readiness operativo</h2>
+            </div>
+          </div>
+          <div class="checklist">
+            {% for item in dashboard.progress %}
+            <div class="check-item check-item-{{ item.status }}">
+              <div class="check-status {{ item.status }}"></div>
+              <div class="check-body">
+                <strong>{{ item.label }}</strong>
+                <span>{{ item.value }} · {{ item.detail }}</span>
+              </div>
+              <span class="check-tag check-tag-{{ item.status }}">{{ item.tag }}</span>
+            </div>
+            {% endfor %}
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <p class="section-kicker">Desbloqueos</p>
+              <h2>Qué falta para habilitar decisiones</h2>
+            </div>
+          </div>
+          <div class="checklist">
+            {% for item in dashboard.unlocks %}
+            <div class="check-item check-item-{{ item.status }}">
+              <div class="check-status {{ item.status }}"></div>
+              <div class="check-body">
+                <strong>{{ item.label }}</strong>
+                <span>{{ item.value }} · {{ item.detail }}</span>
+              </div>
+              <span class="check-tag check-tag-{{ item.status }}">{{ item.tag }}</span>
+            </div>
+            {% endfor %}
+          </div>
+        </article>
+      </section>
+    </details>
+
+    <section class="grid cards-4">
+      <article class="card mini-card">
+        <span class="stat-label">PnL serie v{{ dashboard.logic_series }}</span>
+        {% if dashboard.series_stats.closed_count < 5 %}
+        <strong class="stat-value">esperando muestra</strong>
+        <span class="stat-sub">menos de 5 cierres</span>
+        {% else %}
+        <strong class="stat-value">{{ dashboard.series_stats.pnl_display }}</strong>
+        {% endif %}
+      </article>
+      <article class="card mini-card">
+        <span class="stat-label">Win rate serie</span>
+        {% if dashboard.series_stats.closed_count < 5 %}
+        <strong class="stat-value">esperando muestra</strong>
+        <span class="stat-sub">menos de 5 cierres</span>
+        {% else %}
+        <strong class="stat-value">{{ dashboard.series_stats.win_rate_display }}</strong>
+        {% endif %}
+      </article>
+      <article class="card mini-card">
+        <span class="stat-label">Cierres serie</span>
+        <strong class="stat-value">{{ dashboard.series_stats.closed_count }}</strong>
+      </article>
+      <article class="card mini-card">
+        <span class="stat-label">Drawdown reciente</span>
+        <strong class="stat-value">{{ dashboard.series_stats.drawdown_display }}</strong>
+        {% if not dashboard.series_stats.has_drawdown_data %}
+        <span class="stat-sub">Sin cierres todavía</span>
+        {% endif %}
+      </article>
+    </section>
+
+    <section class="grid layout-main">
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Operativa observada</p>
+            <h2>Eficiencia de exits</h2>
+          </div>
+          <div class="event-meta">
+            <span class="badge badge-{{ dashboard.trade_analytics.score_badge }}">{{ dashboard.trade_analytics.score_display }}</span>
+            <span class="badge badge-{{ dashboard.trade_analytics.confidence_badge }}">{{ dashboard.trade_analytics.confidence_label }}</span>
+          </div>
+        </div>
+
+        <p class="focus-summary">{{ dashboard.trade_analytics.summary }}</p>
+
+        <div class="progress-block">
+          <div class="progress-copy">
+            <span>Medidor de eficiencia observada</span>
+            <strong>{{ dashboard.trade_analytics.score_display }}</strong>
+          </div>
+          <div class="progress-bar">
+            <div class="progress-fill progress-fill-{{ dashboard.trade_analytics.score_badge }}" style="width: {{ dashboard.trade_analytics.score_pct }}%"></div>
+          </div>
+        </div>
+
+        <section class="grid cards-4 focus-stats-grid">
+          {% for item in dashboard.trade_analytics.quick_stats %}
+          <article class="mini-card focus-mini-card">
+            <span class="stat-label">{{ item.label }}</span>
+            <strong class="stat-value">{{ item.value }}</strong>
+            <span class="stat-sub">{{ item.detail }}</span>
+          </article>
+          {% endfor %}
+        </section>
+
+        {% if dashboard.trade_analytics.timeline_points %}
+        <div class="efficiency-timeline">
+          {% for point in dashboard.trade_analytics.timeline_points %}
+          <div class="efficiency-point">
+            <div class="efficiency-point-rail">
+              <div class="efficiency-point-bar efficiency-point-bar-{{ point.badge }}" style="height: {{ point.height_pct }}%"></div>
+            </div>
+            <strong class="efficiency-point-value">{{ point.score_display }}</strong>
+            <span class="efficiency-point-label">{{ point.short_label }}</span>
+            <span class="table-note">{{ point.reason_tag }} · {{ point.closed_at_display }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="notice notice-muted">Todavia no hay suficiente evidencia post-salida para dibujar la serie de eficiencia.</div>
+        {% endif %}
+
+        <div class="notice notice-{{ dashboard.trade_analytics.confidence_badge }}">
+          <strong>{{ dashboard.trade_analytics.headline }}</strong><br>
+          {{ dashboard.trade_analytics.sample_detail }}. {{ dashboard.trade_analytics.note }}
+        </div>
+      </article>
 
       <article class="card">
         <div class="card-head">
           <div>
-            <p class="section-kicker">Legacy</p>
-            <h2>Drift Open-Meteo (historico - no comparable con NOAA)</h2>
+            <p class="section-kicker">Queue de revision</p>
+            <h2>Que casos merecen atencion</h2>
           </div>
-          <span class="badge badge-muted">n={{ dashboard.legacy_forecast_drift.sample_size }}</span>
         </div>
-        <div class="notice notice-muted">{{ dashboard.legacy_forecast_drift.note }}</div>
-        <dl class="metric-list">
-          <div><dt>n historico</dt><dd>{{ dashboard.legacy_forecast_drift.sample_display }}</dd></div>
-          <div><dt>Ultimo registro</dt><dd>{{ dashboard.legacy_forecast_drift.last_record_display }}</dd></div>
-          <div><dt>MAE drift</dt><dd>{{ dashboard.legacy_forecast_drift.mae_display }}</dd></div>
-          <div><dt>Bias drift</dt><dd>{{ dashboard.legacy_forecast_drift.bias_display }}</dd></div>
-        </dl>
-        {% if dashboard.legacy_forecast_drift.latest_case %}
+
+        <div class="checklist">
+          {% for row in dashboard.trade_analytics.breakdown_rows %}
+          <div class="check-item check-item-{{ row.signal_badge }}">
+            <div class="check-status {{ row.signal_badge }}"></div>
+            <div class="check-body">
+              <strong>{{ row.label }}</strong>
+              <span>Muestra {{ row.coverage_display }} · eficiencia media {{ row.avg_efficiency_display }}</span>
+            </div>
+            <span class="check-tag check-tag-{{ row.signal_badge }}">{{ row.signal_label }}</span>
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Upside dejado</p>
+            <h2>Top casos para revisar</h2>
+          </div>
+        </div>
+        {% if dashboard.trade_analytics.top_upside_rows %}
         <div class="list-stack compact">
+          {% for row in dashboard.trade_analytics.top_upside_rows %}
           <div class="list-row">
             <div class="check-body">
-              <strong>Ultimo caso legacy</strong>
-              <span>{{ dashboard.legacy_forecast_drift.latest_case }}</span>
+              <strong>{{ row.label }}</strong>
+              <span>{{ row.close_reason_label }} · cierre {{ row.close_value_display }} · pico dejado {{ row.upside_left_display }}</span>
             </div>
+            <span class="badge badge-{{ row.verdict_badge }}">{{ row.efficiency_display }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="notice notice-good">Todavia no hay cierres observados con upside dejado relevante.</div>
+        {% endif %}
+
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Proteccion</p>
+            <h2>Casos donde salir ayudo</h2>
           </div>
         </div>
+        {% if dashboard.trade_analytics.top_protection_rows %}
+        <div class="list-stack compact">
+          {% for row in dashboard.trade_analytics.top_protection_rows %}
+          <div class="list-row">
+            <div class="check-body">
+              <strong>{{ row.label }}</strong>
+              <span>{{ row.close_reason_label }} · cierre {{ row.close_value_display }} · downside evitado {{ row.drawdown_avoided_display }}</span>
+            </div>
+            <span class="badge badge-good">{{ row.efficiency_display }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="notice notice-muted">Todavia no hay muestra suficiente de downside evitado para sacar lectura.</div>
         {% endif %}
       </article>
+    </section>
+
+    <section class="grid">
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Historico operativo</p>
+            <h2>Ultimos cierres con evidencia post-salida</h2>
+          </div>
+          <span class="badge badge-{{ dashboard.trade_analytics.confidence_badge }}">{{ dashboard.trade_analytics.sample_display }}</span>
+        </div>
+        {% if dashboard.trade_analytics.recent_rows %}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Mercado</th>
+                <th>Cierre</th>
+                <th>Razón</th>
+                <th>Eficiencia</th>
+                <th>Upside</th>
+                <th>Protección</th>
+                <th>Veredicto</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in dashboard.trade_analytics.recent_rows %}
+              <tr>
+                <td>
+                  <strong>{{ row.label }}</strong>
+                  <span class="table-note">{{ row.closed_at_display }}</span>
+                </td>
+                <td>{{ row.close_value_display }}</td>
+                <td>{{ row.close_reason_label }}</td>
+                <td><span class="badge badge-{{ row.score_badge }}">{{ row.efficiency_display }}</span></td>
+                <td>{{ row.upside_left_display }}</td>
+                <td>{{ row.drawdown_avoided_display }}</td>
+                <td><span class="badge badge-{{ row.verdict_badge }}">{{ row.verdict_label }}</span></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="notice notice-muted">Todavia no hay cierres con muestra post-salida util para analisis operativo.</div>
+        {% endif %}
+      </article>
+    </section>
+
+    <section class="layer-block layer-block-secondary" data-tab-shell data-default-panel="ops-summary">
+      <div class="layer-header">
+        <div>
+          <p class="section-kicker">Trade console</p>
+          <h2>Operaciones del bot</h2>
+        </div>
+        <span class="badge badge-accent">Vista operativa</span>
+      </div>
+      <p class="layer-copy">
+        Panel pensado para responder trade por trade qué hizo el bot, por qué entró, por qué salió,
+        qué resultado dejó, qué pasó después y si sigue pendiente `claim/redeem`.
+      </p>
+
+      <div class="focus-tab-bar">
+        <button type="button" class="focus-tab is-active" data-panel-target="ops-summary">Resumen</button>
+        <button type="button" class="focus-tab" data-panel-target="ops-trades">Trades</button>
+      </div>
+
+      <section class="focus-panel is-active" data-panel="ops-summary">
+        <section class="grid cards-4">
+          {% for item in dashboard.trade_analytics.total_cards %}
+          <article class="card mini-card">
+            <span class="stat-label">{{ item.label }}</span>
+            <strong class="stat-value">{{ item.value }}</strong>
+            <span class="stat-sub">{{ item.detail }}</span>
+          </article>
+          {% endfor %}
+        </section>
+
+        <section class="grid layout-main">
+          <article class="card">
+            <div class="card-head">
+              <div>
+                <p class="section-kicker">Buckets</p>
+                <h2>Que tipo de salida estamos haciendo</h2>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Tipo</th>
+                    <th>Muestra</th>
+                    <th>Eficiencia</th>
+                    <th>Dejado</th>
+                    <th>Protegido</th>
+                    <th>Lectura</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in dashboard.trade_analytics.breakdown_rows %}
+                  <tr>
+                    <td><strong>{{ row.label }}</strong></td>
+                    <td>{{ row.coverage_display }}</td>
+                    <td>{{ row.avg_efficiency_display }}</td>
+                    <td>{{ row.upside_left_display }}</td>
+                    <td>{{ row.drawdown_avoided_display }}</td>
+                    <td><span class="badge badge-{{ row.signal_badge }}">{{ row.signal_label }}</span></td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="card-head">
+              <div>
+                <p class="section-kicker">Lectura rapida</p>
+                <h2>Como interpretar este bloque</h2>
+              </div>
+            </div>
+            <div class="list-stack compact">
+              <div class="list-row">
+                <div class="check-body">
+                  <strong>Operaciones / TP / SL / LOSS_TOTAL</strong>
+                  <span>`LOSS_TOTAL` no es un `SELL`: marca posiciones muertas o no vendibles, separadas de los stop-loss normales.</span>
+                </div>
+              </div>
+              <div class="list-row">
+                <div class="check-body">
+                  <strong>Ganadas / SELL negativos / PnL neto</strong>
+                  <span>Los `SELL` cerrados en rojo se leen aparte para no mezclar p&eacute;rdidas de ejecuci&oacute;n con `LOSS_TOTAL` o legado hist&oacute;rico.</span>
+                </div>
+              </div>
+              <div class="list-row">
+                <div class="check-body">
+                  <strong>Legacy / parcial</strong>
+                  <span>Son registros reconstruidos con contexto incompleto: sirven para trazabilidad, pero no pesan igual que un trade completo de la serie actual.</span>
+                </div>
+              </div>
+              <div class="list-row">
+                <div class="check-body">
+                  <strong>Dejado de ganar / Protegido</strong>
+                  <span>Solo se calcula cuando el mercado se volvió a observar tras salir; no todos los trades tienen esa evidencia aún.</span>
+                </div>
+              </div>
+              <div class="list-row">
+                <div class="check-body">
+                  <strong>Entrada / Salida del bot</strong>
+                  <span>Cada trade explica con texto corto qué condición disparó la entrada y qué regla cerró la posición.</span>
+                </div>
+              </div>
+            </div>
+          </article>
+        </section>
+      </section>
+
+      <section class="focus-panel" data-panel="ops-trades" hidden>
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <p class="section-kicker">Trades</p>
+              <h2>Detalle operativo por operación</h2>
+            </div>
+            <span class="badge badge-{{ dashboard.trade_analytics.confidence_badge }}">{{ dashboard.trade_analytics.sample_display }}</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Operación</th>
+                  <th>Entrada del bot</th>
+                  <th>Salida del bot</th>
+                  <th>Resultado</th>
+                  <th>Valor</th>
+                  <th>c/share</th>
+                  <th>Dejado</th>
+                  <th>Despues</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in dashboard.trade_analytics.trade_rows %}
+                <tr>
+                  <td>
+                    <strong>{{ row.label }}</strong>
+                    <span class="table-note">{{ row.bucket_label }} · abierto {{ row.opened_at_display }} · cerrado {{ row.closed_at_display }}</span>
+                  </td>
+                  <td><span class="table-note">{{ row.entry_condition }}</span></td>
+                  <td><span class="table-note">{{ row.exit_condition }}</span></td>
+                  <td>
+                    <span class="badge badge-{{ row.status_badge }}">{{ row.status_label }}</span>
+                    <span class="table-note">{{ row.pnl_cash_display }} · {{ row.pnl_pct_display }}</span>
+                  </td>
+                  <td>{{ row.trade_value_display }}</td>
+                  <td>{{ row.cents_result_display }}</td>
+                  <td>{{ row.left_to_gain_display }}</td>
+                  <td><span class="table-note">{{ row.after_close_display }} · {{ row.integrity_note }}</span></td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </section>
     </section>
 
     <details class="layer-toggle">
@@ -1586,6 +1457,35 @@
           </div>
           {% endfor %}
         </div>
+      </article>
+    </section>
+
+    <section class="grid">
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Legacy</p>
+            <h2>Drift Open-Meteo (historico - no comparable con NOAA)</h2>
+          </div>
+          <span class="badge badge-muted">n={{ dashboard.legacy_forecast_drift.sample_size }}</span>
+        </div>
+        <div class="notice notice-muted">{{ dashboard.legacy_forecast_drift.note }}</div>
+        <dl class="metric-list">
+          <div><dt>n historico</dt><dd>{{ dashboard.legacy_forecast_drift.sample_display }}</dd></div>
+          <div><dt>Ultimo registro</dt><dd>{{ dashboard.legacy_forecast_drift.last_record_display }}</dd></div>
+          <div><dt>MAE drift</dt><dd>{{ dashboard.legacy_forecast_drift.mae_display }}</dd></div>
+          <div><dt>Bias drift</dt><dd>{{ dashboard.legacy_forecast_drift.bias_display }}</dd></div>
+        </dl>
+        {% if dashboard.legacy_forecast_drift.latest_case %}
+        <div class="list-stack compact">
+          <div class="list-row">
+            <div class="check-body">
+              <strong>Ultimo caso legacy</strong>
+              <span>{{ dashboard.legacy_forecast_drift.latest_case }}</span>
+            </div>
+          </div>
+        </div>
+        {% endif %}
       </article>
     </section>
 

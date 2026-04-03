@@ -5234,6 +5234,32 @@ def build_dashboard_focus_center(
             "badge": badge,
         })
 
+    # Alarma: sin ciclo en >12h
+    try:
+        _cycle_ts = None
+        if os.path.exists(CYCLE_SUMMARY_FILE):
+            _cycle_raw = load_cycle_summary_data()
+            _cycle_ts = (_cycle_raw.get("timestamp_utc") if isinstance(_cycle_raw, dict) else None)
+        if _cycle_ts:
+            _last_cycle = datetime.fromisoformat(
+                str(_cycle_ts).replace("Z", "+00:00")
+            ).replace(tzinfo=None)
+            _hours_ago = (datetime.utcnow() - _last_cycle).total_seconds() / 3600
+            if _hours_ago > 12:
+                incidents.append({
+                    "title": f"sin ciclo en {_hours_ago:.0f}h — verificar que el bot sigue corriendo",
+                    "detail": f"Último ciclo registrado: {str(_cycle_ts)[:16]} UTC",
+                    "badge": "bad",
+                })
+        else:
+            incidents.append({
+                "title": "sin ciclo registrado todavía",
+                "detail": "cycle_summary.json no existe o no contiene timestamp",
+                "badge": "warn",
+            })
+    except Exception:
+        pass
+
     quick_stats = [
         {
             "label": "Universo activo",
