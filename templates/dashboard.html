@@ -331,91 +331,6 @@
     </section>
 
     <section class="grid layout-main">
-      <article class="card card-promotion">
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Checklist</p>
-            <h2>Subida de bankroll</h2>
-          </div>
-          <span class="badge badge-{{ 'good' if dashboard.promotion.decision == 'READY' else 'warn' if dashboard.promotion.decision == 'NEARLY' else 'bad' }}">
-            {{ dashboard.promotion.decision_label }}
-          </span>
-        </div>
-
-        <div class="progress-block">
-          <div class="progress-copy">
-            <span>{{ dashboard.promotion.passed }} / {{ dashboard.promotion.total }} checks cumplidos</span>
-            <strong>{{ dashboard.promotion.progress_pct }}%</strong>
-          </div>
-          <div class="progress-bar">
-            <div class="progress-fill" style="width: {{ dashboard.promotion.progress_pct }}%"></div>
-          </div>
-        </div>
-
-        <div class="checklist">
-          {% for item in dashboard.promotion.checks %}
-          <div class="check-item check-item-{{ item.status }}">
-            <div class="check-status {{ item.status }}"></div>
-            <div class="check-body">
-              <strong>{{ item.label }}</strong>
-              <span>{{ item.scope }} · {{ item.value }}</span>
-            </div>
-            <span class="check-tag check-tag-{{ item.status }}">{{ item.tag }}</span>
-          </div>
-          {% endfor %}
-        </div>
-      </article>
-
-      <article class="card">
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Sistema</p>
-            <h2>Estado operativo</h2>
-          </div>
-        </div>
-
-        <dl class="metric-list">
-          <div><dt>Versión</dt><dd>{{ dashboard.version }}</dd></div>
-          <div><dt>Serie lógica</dt><dd>v{{ dashboard.logic_series }}</dd></div>
-          <div><dt>Próximo ciclo</dt><dd>{{ dashboard.next_run }}</dd></div>
-          <div><dt>Último ciclo</dt><dd>{{ dashboard.last_cycle_label }}</dd></div>
-          <div><dt>Intra-SL</dt><dd>{{ dashboard.intra_label }}</dd></div>
-          <div><dt>Signals</dt><dd>{{ dashboard.alerts.signals.status }}</dd></div>
-        </dl>
-
-        {% if dashboard.portfolio %}
-        <div class="system-snapshot">
-          <div class="pill">
-            <span>Cash</span>
-            <strong>${{ '%.2f'|format(dashboard.portfolio.cash) if dashboard.portfolio.cash is not none else 'n/d' }}</strong>
-          </div>
-          <div class="pill">
-            <span>Posiciones vivas</span>
-            <strong>${{ '%.2f'|format(dashboard.portfolio.active_value) }}</strong>
-          </div>
-          <div class="pill">
-            <span>Total cartera</span>
-            <strong>${{ '%.2f'|format(dashboard.portfolio.portfolio_total) }}</strong>
-          </div>
-        </div>
-        {% endif %}
-
-        {% if dashboard.alerts.active_items %}
-        <div class="alert-stack">
-          {% for alert in dashboard.alerts.active_items %}
-          <div class="alert-card alert-{{ alert.level }}">
-            <strong>{{ alert.title }}</strong>
-            <span>{{ alert.detail }}</span>
-          </div>
-          {% endfor %}
-        </div>
-        {% else %}
-        <div class="notice notice-good">Sin alertas activas relevantes en este momento.</div>
-        {% endif %}
-      </article>
-    </section>
-
-    <section class="grid layout-main">
       <article class="card">
         <div class="card-head">
           <div>
@@ -431,6 +346,7 @@
           <div><dt>MAE NOAA</dt><dd>{{ dashboard.forecast_quality.mae_display }}</dd></div>
           <div><dt>Bias NOAA</dt><dd>{{ dashboard.forecast_quality.bias_display }}</dd></div>
           <div><dt>Cobertura</dt><dd>{{ dashboard.forecast_quality.coverage_display }}</dd></div>
+          <div><dt>Último fetch NOAA</dt><dd>{{ dashboard.forecast_quality.last_record_display }}</dd></div>
         </dl>
         <div class="notice notice-{{ dashboard.forecast_quality.note_level }}">
           <strong>{{ dashboard.forecast_quality.coverage_detail }}</strong><br>
@@ -948,6 +864,128 @@
       </article>
     </section>
 
+    <section class="grid cards-4">
+      <article class="card mini-card">
+        <span class="stat-label">PnL serie v{{ dashboard.logic_series }}</span>
+        {% if dashboard.series_stats.closed_count < 5 %}
+        <strong class="stat-value">esperando muestra</strong>
+        <span class="stat-sub">menos de 5 cierres</span>
+        {% else %}
+        <strong class="stat-value">{{ dashboard.series_stats.pnl_display }}</strong>
+        {% endif %}
+      </article>
+      <article class="card mini-card">
+        <span class="stat-label">Win rate serie</span>
+        {% if dashboard.series_stats.closed_count < 5 %}
+        <strong class="stat-value">esperando muestra</strong>
+        <span class="stat-sub">menos de 5 cierres</span>
+        {% else %}
+        <strong class="stat-value">{{ dashboard.series_stats.win_rate_display }}</strong>
+        {% endif %}
+      </article>
+      <article class="card mini-card">
+        <span class="stat-label">Cierres serie</span>
+        <strong class="stat-value">{{ dashboard.series_stats.closed_count }}</strong>
+      </article>
+      <article class="card mini-card">
+        <span class="stat-label">Drawdown reciente</span>
+        {% if dashboard.series_stats.closed_count < 5 %}
+        <strong class="stat-value">esperando muestra</strong>
+        <span class="stat-sub">menos de 5 cierres</span>
+        {% else %}
+        <strong class="stat-value">{{ dashboard.series_stats.drawdown_display }}</strong>
+        {% if not dashboard.series_stats.has_drawdown_data %}
+        <span class="stat-sub">Sin cierres todavía</span>
+        {% endif %}
+        {% endif %}
+      </article>
+    </section>
+
+    <section class="grid layout-main">
+      <article class="card card-promotion">
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Checklist</p>
+            <h2>Subida de bankroll</h2>
+          </div>
+          <span class="badge badge-{{ 'good' if dashboard.promotion.decision == 'READY' else 'warn' if dashboard.promotion.decision == 'NEARLY' else 'bad' }}">
+            {{ dashboard.promotion.decision_label }}
+          </span>
+        </div>
+
+        <div class="progress-block">
+          <div class="progress-copy">
+            <span>{{ dashboard.promotion.passed }} / {{ dashboard.promotion.total }} checks cumplidos</span>
+            <strong>{{ dashboard.promotion.progress_pct }}%</strong>
+          </div>
+          <div class="progress-bar">
+            <div class="progress-fill" style="width: {{ dashboard.promotion.progress_pct }}%"></div>
+          </div>
+        </div>
+
+        <div class="checklist">
+          {% for item in dashboard.promotion.checks %}
+          <div class="check-item check-item-{{ item.status }}">
+            <div class="check-status {{ item.status }}"></div>
+            <div class="check-body">
+              <strong>{{ item.label }}</strong>
+              <span>{{ item.scope }} · {{ item.value }}</span>
+            </div>
+            <span class="check-tag check-tag-{{ item.status }}">{{ item.tag }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Sistema</p>
+            <h2>Estado operativo</h2>
+          </div>
+        </div>
+
+        <dl class="metric-list">
+          <div><dt>Versión</dt><dd>{{ dashboard.version }}</dd></div>
+          <div><dt>Serie lógica</dt><dd>v{{ dashboard.logic_series }}</dd></div>
+          <div><dt>Próximo ciclo</dt><dd>{{ dashboard.next_run }}</dd></div>
+          <div><dt>Último ciclo</dt><dd>{{ dashboard.last_cycle_label }}</dd></div>
+          <div><dt>Intra-SL</dt><dd>{{ dashboard.intra_label }}</dd></div>
+          <div><dt>Signals</dt><dd>{{ dashboard.alerts.signals.status }}</dd></div>
+        </dl>
+
+        {% if dashboard.portfolio %}
+        <div class="system-snapshot">
+          <div class="pill">
+            <span>Cash</span>
+            <strong>${{ '%.2f'|format(dashboard.portfolio.cash) if dashboard.portfolio.cash is not none else 'n/d' }}</strong>
+          </div>
+          <div class="pill">
+            <span>Posiciones vivas</span>
+            <strong>${{ '%.2f'|format(dashboard.portfolio.active_value) }}</strong>
+          </div>
+          <div class="pill">
+            <span>Total cartera</span>
+            <strong>${{ '%.2f'|format(dashboard.portfolio.portfolio_total) }}</strong>
+          </div>
+        </div>
+        {% endif %}
+
+        {% if dashboard.alerts.active_items %}
+        <div class="alert-stack">
+          {% for alert in dashboard.alerts.active_items %}
+          <div class="alert-card alert-{{ alert.level }}">
+            <strong>{{ alert.title }}</strong>
+            <span>{{ alert.detail }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="notice notice-good">Sin alertas activas relevantes en este momento.</div>
+        {% endif %}
+      </article>
+    </section>
+
     <details>
       <summary>Readiness y desbloqueos (detalle)</summary>
       <section class="grid layout-main">
@@ -994,38 +1032,6 @@
         </article>
       </section>
     </details>
-
-    <section class="grid cards-4">
-      <article class="card mini-card">
-        <span class="stat-label">PnL serie v{{ dashboard.logic_series }}</span>
-        {% if dashboard.series_stats.closed_count < 5 %}
-        <strong class="stat-value">esperando muestra</strong>
-        <span class="stat-sub">menos de 5 cierres</span>
-        {% else %}
-        <strong class="stat-value">{{ dashboard.series_stats.pnl_display }}</strong>
-        {% endif %}
-      </article>
-      <article class="card mini-card">
-        <span class="stat-label">Win rate serie</span>
-        {% if dashboard.series_stats.closed_count < 5 %}
-        <strong class="stat-value">esperando muestra</strong>
-        <span class="stat-sub">menos de 5 cierres</span>
-        {% else %}
-        <strong class="stat-value">{{ dashboard.series_stats.win_rate_display }}</strong>
-        {% endif %}
-      </article>
-      <article class="card mini-card">
-        <span class="stat-label">Cierres serie</span>
-        <strong class="stat-value">{{ dashboard.series_stats.closed_count }}</strong>
-      </article>
-      <article class="card mini-card">
-        <span class="stat-label">Drawdown reciente</span>
-        <strong class="stat-value">{{ dashboard.series_stats.drawdown_display }}</strong>
-        {% if not dashboard.series_stats.has_drawdown_data %}
-        <span class="stat-sub">Sin cierres todavía</span>
-        {% endif %}
-      </article>
-    </section>
 
     <section class="grid layout-main">
       <article class="card">

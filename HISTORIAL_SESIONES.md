@@ -83,6 +83,7 @@ Comandos útiles:
 | 2026-04-03 | Explícita | Sesión 66 | `—` | Implementación local del auto-bloqueo real por ciudad sin tocar trading/NOAA/scheduler: `city_policy_state.json` añade `auto_blocked_cities` con `action/reason/metrics/from_mode/triggered_at`, `get_effective_city_mode()` prioriza ese estado sobre la allowlist activa, `sync_city_policy_state()` registra `active/canary -> blocked` con evidencia persistida, dashboard/decision engine leen la política y la suite pasa en `506/506`. Sin push/deploy todavía; siguiente paso validar en Railway. |
 | 2026-04-02 | Explícita | Sesión 58 | `—` | Cierre operativo sin tocar el bot: se fija como siguiente prioridad la auditoría de la captura del `Mission HUD`, se formaliza la regla `1 sesión = 1 tarea` con contexto mínimo, se añade una sección de `token economics` para Codex + Claude Code y se crea `.codex/config.toml` del proyecto con `medium` por defecto y perfiles `low/deep/max`. Sin deploy ni cambios de trading/NOAA. |
 | 2026-04-02 | Explícita | Sesión 59 | `—` | Cierre completo: `python verify_before_deploy.py` vuelve a pasar `483/483`, se versionan el saneamiento local de `trade_lifecycle/trade console`, el handoff y los guardrails de contexto/tokens, y se hace `commit + push` a `origin/main`. No se tocan reglas de trading ni NOAA; queda pendiente revalidación live del nuevo push. |
+| 2026-04-03 | Explícita | Sesión 72 | `—` | Cobertura funcional de la alarma `sin ciclo en >12h` en `build_dashboard_focus_center()`: el test fuerza ausencia de `cycle_summary.json`, valida `incidents` + `badge="warn"` y sincroniza `agent_events.jsonl` con la sesión documentada más reciente. Suite local `507/507`, sin tocar trading/NOAA/scheduler. |
 
 ---
 
@@ -2090,3 +2091,32 @@ Regla recomendada:
 - No se editó `postmortem.json` live porque la fila Apr1 ya estaba cerrada.
 - No se tocó `bot.py`, trading, NOAA, scheduler ni reglas de salida.
 - Solo se corrigió la trazabilidad documental para retirar el aviso stale de Apr1 y mover la siguiente tarea al saneamiento de esas 3 filas Chicago antiguas.
+
+---
+
+## Sesión 73 — quick wins Control Center: QW3 + QW5 + QW6 (4 abr 2026)
+
+**Disparador:** completar el bloque de quick wins pendientes de Fase 1 del roadmap `docs/control-center-roadmap.md` en una sola sesión.
+
+**QW5 — Timestamp "último fetch NOAA exitoso":**
+- `build_dashboard_forecast_quality()` ya devolvía `last_record_display` (línea 4114 de `bot.py`), pero el template no lo mostraba.
+- Se añadió `<div><dt>Último fetch NOAA</dt><dd>{{ dashboard.forecast_quality.last_record_display }}</dd></div>` en el `metric-list` de "Calidad Forecast Observada (NOAA)".
+- Riesgo: ninguno. Solo template.
+
+**QW3 — Reordenar capa 2: NOAA y Decision engine primero:**
+- Orden anterior: stats de promoción → bankroll/estado operativo → NOAA (line 418) → readiness → trading stats.
+- Orden nuevo: stats de promoción → NOAA → trading stats → bankroll/estado operativo → readiness.
+- Implementado con un script Python que reordena bloques por line numbers exactos (sin editar contenido). 1689 líneas antes = 1689 líneas después.
+
+**QW1, QW2, QW7 — ya estaban hechos:**
+- `legacy-focus-shell`: no encontrado en el template (ya eliminado en sesión anterior).
+- Legacy drift: ya estaba en línea 1464 (fuera de capa 2, en zona reporting).
+- Readiness y desbloqueos: ya estaba en `<details>` (colapsado por defecto).
+
+**QW6 — "esperando muestra" en Drawdown:**
+- PnL y Win rate ya tenían la condición `closed_count < 5`. Drawdown no.
+- Se añadió el mismo guard: cuando `closed_count < 5`, muestra "esperando muestra / menos de 5 cierres" en lugar de `drawdown_display`.
+
+**Validación:** `verify_before_deploy.py` = 507/507 tras todos los cambios.
+
+**Fase 1 del roadmap Control Center completada.** Siguiente: M3 (cerrar 3 filas Chicago legacy open que sesgan WR).

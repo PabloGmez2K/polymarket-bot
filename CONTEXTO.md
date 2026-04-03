@@ -1,6 +1,6 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 3 de abril de 2026 (Sesión 71 — quick wins Control Center + alarma sin ciclo)
+**Última actualización:** 4 de abril de 2026 (Sesión 73 — QW3+QW5+QW6 Control Center, Fase 1 roadmap CC completa)
 **Próxima sesión (M3):** cerrar 3 filas legacy Chicago (`2026-03-26`, `2026-03-27`, `2026-03-28`) que sesgan WR. Verificar antes con `MSYS_NO_PATHCONV=1 railway ssh ls /app/data/` que `trade_lifecycle.json` tiene esas filas como `open`, luego cerrarlas como `LOSS_TOTAL/legacy`. Ver roadmap `docs/control-center-roadmap.md` sesión M3.
 
 **Estado real de la cuenta a cierre de sesión 68 (3 abr 2026, ~17:00 UTC):**
@@ -24,7 +24,7 @@
 - `get_effective_city_mode()` ahora da prioridad a `auto_blocked_cities`, así que una ciudad auto-bloqueada queda en `blocked` aunque siga en `ACTIVE_TRADING_CITIES`; el scan de BUYs ya respeta ese modo sin depender solo de Telegram.
 - `sync_city_policy_state()` pasa de degradar `active/canary -> shadow` a registrar `active/canary -> blocked` con evidencia estructurada y sin reactivación automática agresiva; la salida de esa política queda deliberadamente manual/conservadora retirando la entrada persistida.
 - `build_dashboard_city_observation()` y `build_dashboard_city_decisions()` ya leen el bloqueo automático persistido y exponen `policy_action`, `policy_reason`, `policy_metrics` y `policy_changed_at`.
-- Validación local: `python verify_before_deploy.py` pasa en `506/506`.
+- Validación local: `python verify_before_deploy.py` sube a `507/507` tras cubrir en test la alarma de `build_dashboard_focus_center()` cuando falta `cycle_summary.json`.
 
 **Hardening del relogin Railway CLI — sesión 67 (3 abr 2026):**
 - Evidencia base de recurrencia: el 3 abr `tools/railway_auth_repair.ps1 doctor` llegó a ver `accessToken present=True`, `refreshToken present=True`, `tokenExpiresAtUtc=2026-04-03T10:03:11Z`, sin proxies persistentes ni de proceso, pero `Auth check via clean env` seguía devolviendo `Unauthorized`; el workaround manual `reset + launch-login -Browserless + railway_safe.ps1 whoami/status` volvió a recuperar la CLI.
@@ -156,6 +156,8 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 
 **Auto-bloqueo persistido por ciudad (3 abr, sin bump):** Se cierra el bug de diseño sin duplicar mecanismo: `load_city_policy_state/save_city_policy_state/get_effective_city_mode/sync_city_policy_state` pasan a manejar `auto_blocked_cities` dentro de `city_policy_state.json`. Cuando una ciudad activa/canary dispara la regla de salida por mala accuracy, se persisten `action`, `reason`, `metrics`, `from_mode` y `triggered_at`, `get_effective_city_mode()` la resuelve como `blocked`, y el scan de BUYs la salta aunque permanezca en la allowlist manual. No hay reactivación automática agresiva desde `blocked`; la reversión queda manual o muy conservadora editando la política persistida. `verify_before_deploy.py` sube a `506/506`.
 
+**Cobertura alarma sin ciclo + sync docs/scoreboard (3 abr, sin bump):** Se confirma que el bloque `sin ciclo en >12h` de `build_dashboard_focus_center()` no tenía una prueba funcional real porque el harness no inyectaba `os/datetime/CYCLE_SUMMARY_FILE/load_cycle_summary_data` y el `try/except` del builder tragaba esa ruta. `verify_before_deploy.py` añade un test que fuerza `cycle_summary.json` inexistente y comprueba que el builder devuelve un `dict` con clave `incidents` y al menos un incidente `badge="warn"`. Además se registra la sesión nueva en `agent_events.jsonl` para corregir el drift docs-scoreboard. Suite local final: `507/507`.
+
 **Integración `/accuracy` + revisión crítica (v10.5.3):** `/accuracy` queda visible en el menú, responde siempre con menú, `/estado` muestra explícitamente el intervalo intra-SL y la trazabilidad de sesión 20 queda corregida para reflejar mejor lo que realmente introdujeron los commits de la mañana.
 
 ---
@@ -166,7 +168,7 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 **Ubicación local:** `C:\Projects\polymarket-bot`
 **Producción (último deploy lanzado):** Railway — EU West Amsterdam, MODO REAL, DRY_RUN=false. Tras la sesión 62, `origin/main` ya incluye tanto el overlay `shadow/canary` como la nueva vista de ranking operacional por ciudad, y el deploy quedó lanzado desde el push del commit `e4dce44`. La validación funcional explícita del deploy sigue pendiente hasta revisar el siguiente ciclo live.
 **Estado actual tras sesión 67:** el dashboard ya no se queda en una capa descriptiva por ciudad. `bot.py` calcula un `readiness_score` y una prioridad operativa por ciudad combinando histórico real, evidencia NOAA, actividad shadow y overlay de política, y además el overlay persistente ya soporta `auto_blocked_cities` con evidencia estructurada para cortar BUYs de ciudades perdedoras sin depender solo de Telegram. En paralelo, el tooling de Railway queda más protegido contra relogin recurrente por refresh frágil: mutex global, preflight de escritura del config y telemetría extra en `doctor`. La salida desde `blocked` queda manual/conservadora, no automática agresiva.
-**Validación local:** `python verify_before_deploy.py` cierra en `506/506` tras añadir persistencia de `auto_blocked_cities`, prioridad de `blocked` sobre allowlist activa, tests funcionales de transición y lectura en dashboard/decision engine.
+**Validación local:** `python verify_before_deploy.py` cierra en `507/507` tras añadir cobertura para la alarma de `cycle_summary.json` ausente en `build_dashboard_focus_center()` y sincronizar `agent_events.jsonl` con la sesión documentada más reciente.
 **Versión local / remoto GitHub:** `origin/main` aún no incluye las sesiones 66-67; el siguiente paso operativo es hacer push/deploy, validar en Railway que `city_policy_state.json` registra el auto-bloqueo, confirmar que el scan de BUYs respeta `blocked` aunque la ciudad siga listada como activa, y observar si Railway CLI aguanta el siguiente refresh OAuth sin pedir relogin.
 **Tooling local verificado (2 abr, sin bump):** RTK ya quedó operativo como tooling global del usuario para Codex (`rtk --version`, `rtk init -g --codex`, `rtk git status`, `rtk git diff` verificados en uso real), mientras que Engram también quedó operativo como memoria complementaria tras `engram setup codex` y el alta manual por UI del servidor MCP `engram` en la extensión de Codex para VS Code (`C:\Users\USUARIO\go\bin\engram.exe`, `mcp`). Nada de esto sustituye `CONTEXTO.md`/`HISTORIAL_SESIONES.md`/`agent_events.jsonl` como fuente de verdad del repo.
 **Siguiente paso prioritario:** validar en live que el ranking operacional refleja bien `degradadas vs candidatas reales` tras el deploy.
