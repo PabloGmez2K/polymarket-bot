@@ -279,7 +279,8 @@
               </div>
               {% endfor %}
             </div>
-          </article>
+          
+      </article>
         </section>
       </section>
     </section>
@@ -331,7 +332,22 @@
     </section>
 
     <section class="grid layout-main">
-      <article class="card">
+      <article class="card" data-tab-shell data-default-panel="obs-noaa">
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Observabilidad</p>
+            <h2>Capa 2 · NOAA, ciudades y decisiones</h2>
+          </div>
+          <span class="badge badge-accent">3 vistas</span>
+        </div>
+
+        <div class="focus-tab-bar">
+          <button type="button" class="focus-tab is-active" data-panel-target="obs-noaa">NOAA</button>
+          <button type="button" class="focus-tab" data-panel-target="obs-cities">Ciudades</button>
+          <button type="button" class="focus-tab" data-panel-target="obs-decisions">Decisiones</button>
+        </div>
+
+        <section class="focus-panel is-active" data-panel="obs-noaa">
         <div class="card-head">
           <div>
             <p class="section-kicker">Observabilidad</p>
@@ -355,6 +371,44 @@
 
         <div class="card-head">
           <div>
+            <p class="section-kicker">Ultimos 20 casos</p>
+          </div>
+        </div>
+        {% if dashboard.forecast_quality.latest_rows %}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Ciudad</th>
+                <th>Fecha</th>
+                <th>Forecast</th>
+                <th>Observado</th>
+                <th>Error</th>
+                <th>Source</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in dashboard.forecast_quality.latest_rows %}
+              <tr>
+                <td>{{ row.city }}</td>
+                <td>{{ row.date }}</td>
+                <td>{{ row.forecast_display }}</td>
+                <td>{{ row.observed_display }}</td>
+                <td><span class="badge badge-{{ row.error_badge }}">{{ row.error_display }}</span></td>
+                <td>{{ row.source }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="notice notice-muted">Todavia no hay registros NOAA en <code>observed_vs_forecast</code>.</div>
+        {% endif %}
+        </section>
+
+        <section class="focus-panel" data-panel="obs-cities" hidden>
+        <div class="card-head">
+          <div>
             <p class="section-kicker">Estado por ciudad</p>
             <h2>Estado de observacion por ciudad</h2>
           </div>
@@ -364,7 +418,97 @@
           <strong>{{ dashboard.city_observation.summary }}</strong><br>
           {{ dashboard.city_observation.note }}
         </div>
+        <div class="city-zone-grid">
+          <section class="city-zone-card">
+            <div class="card-head">
+              <div>
+                <p class="section-kicker">Activo ahora</p>
+                <h2>Universo operativo</h2>
+              </div>
+              <span class="badge badge-good">{{ dashboard.city_observation.active_count }} activas</span>
+            </div>
+            <div class="city-card-grid">
+              {% for row in dashboard.city_observation.active_rows %}
+              <article class="city-card city-card-{{ row.state_badge }}">
+                <div class="city-card-head">
+                  <strong>{{ row.city }}</strong>
+                  <span class="badge badge-{{ row.state_badge }}">{{ row.state_label }}</span>
+                </div>
+                <p class="city-card-copy">{{ row.trading_detail }}</p>
+                <div class="city-progress-head">
+                  <span>NOAA</span>
+                  <span>{{ row.observed_count }}/{{ row.observed_goal }}</span>
+                </div>
+                <div class="city-progress-bar">
+                  <div class="city-progress-fill city-progress-fill-{{ row.noaa_badge }}" style="width: {{ row.observed_progress_pct }}%"></div>
+                </div>
+                <div class="city-card-meta">
+                  <span>{{ row.noaa_label }} · {{ row.noaa_detail }}</span>
+                  <span>{{ row.history_label }}</span>
+                </div>
+              </article>
+              {% endfor %}
+            </div>
+          </section>
 
+          {% if dashboard.city_observation.watch_rows %}
+          <section class="city-zone-card">
+            <div class="card-head">
+              <div>
+                <p class="section-kicker">Discovery</p>
+                <h2>Seguimiento y referencia</h2>
+              </div>
+              <span class="badge badge-accent">{{ dashboard.city_observation.watch_rows|length }} en seguimiento</span>
+            </div>
+            <div class="city-card-grid">
+              {% for row in dashboard.city_observation.watch_rows %}
+              <article class="city-card city-card-{{ row.state_badge }}">
+                <div class="city-card-head">
+                  <strong>{{ row.city }}</strong>
+                  <span class="badge badge-{{ row.state_badge }}">{{ row.state_label }}</span>
+                </div>
+                <p class="city-card-copy">{{ row.state_detail }}</p>
+                <div class="city-progress-head">
+                  <span>NOAA</span>
+                  <span>{{ row.observed_count }}/{{ row.observed_goal }}</span>
+                </div>
+                <div class="city-progress-bar">
+                  <div class="city-progress-fill city-progress-fill-{{ row.noaa_badge }}" style="width: {{ row.observed_progress_pct }}%"></div>
+                </div>
+                <div class="city-card-meta">
+                  <span>{{ row.noaa_label }} · {{ row.noaa_detail }}</span>
+                  <span>{{ row.history_label }}</span>
+                </div>
+              </article>
+              {% endfor %}
+            </div>
+          </section>
+          {% endif %}
+        </div>
+
+        <section class="blocked-city-section">
+          <div class="card-head">
+            <div>
+              <p class="section-kicker">Bloqueadas</p>
+              <h2>Archivo de ciudades fuera de juego</h2>
+            </div>
+            <span class="badge badge-bad">{{ dashboard.city_observation.blocked_count }} bloqueadas</span>
+          </div>
+          <div class="blocked-pill-list">
+            {% for row in dashboard.city_observation.blocked_rows %}
+            <article class="blocked-pill-card">
+              <div class="blocked-pill-head">
+                <strong>{{ row.city }}</strong>
+                <span class="badge badge-{{ row.state_badge }}">{{ row.state_label }}</span>
+              </div>
+              <span>{{ row.state_detail }}</span>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+        </section>
+
+        <section class="focus-panel" data-panel="obs-decisions" hidden>
         <div class="card-head">
           <div>
             <p class="section-kicker">Decision engine</p>
@@ -736,131 +880,8 @@
           </table>
         </div>
         {% endif %}
-
-        <div class="city-zone-grid">
-          <section class="city-zone-card">
-            <div class="card-head">
-              <div>
-                <p class="section-kicker">Activo ahora</p>
-                <h2>Universo operativo</h2>
-              </div>
-              <span class="badge badge-good">{{ dashboard.city_observation.active_count }} activas</span>
-            </div>
-            <div class="city-card-grid">
-              {% for row in dashboard.city_observation.active_rows %}
-              <article class="city-card city-card-{{ row.state_badge }}">
-                <div class="city-card-head">
-                  <strong>{{ row.city }}</strong>
-                  <span class="badge badge-{{ row.state_badge }}">{{ row.state_label }}</span>
-                </div>
-                <p class="city-card-copy">{{ row.trading_detail }}</p>
-                <div class="city-progress-head">
-                  <span>NOAA</span>
-                  <span>{{ row.observed_count }}/{{ row.observed_goal }}</span>
-                </div>
-                <div class="city-progress-bar">
-                  <div class="city-progress-fill city-progress-fill-{{ row.noaa_badge }}" style="width: {{ row.observed_progress_pct }}%"></div>
-                </div>
-                <div class="city-card-meta">
-                  <span>{{ row.noaa_label }} · {{ row.noaa_detail }}</span>
-                  <span>{{ row.history_label }}</span>
-                </div>
-              </article>
-              {% endfor %}
-            </div>
-          </section>
-
-          {% if dashboard.city_observation.watch_rows %}
-          <section class="city-zone-card">
-            <div class="card-head">
-              <div>
-                <p class="section-kicker">Discovery</p>
-                <h2>Seguimiento y referencia</h2>
-              </div>
-              <span class="badge badge-accent">{{ dashboard.city_observation.watch_rows|length }} en seguimiento</span>
-            </div>
-            <div class="city-card-grid">
-              {% for row in dashboard.city_observation.watch_rows %}
-              <article class="city-card city-card-{{ row.state_badge }}">
-                <div class="city-card-head">
-                  <strong>{{ row.city }}</strong>
-                  <span class="badge badge-{{ row.state_badge }}">{{ row.state_label }}</span>
-                </div>
-                <p class="city-card-copy">{{ row.state_detail }}</p>
-                <div class="city-progress-head">
-                  <span>NOAA</span>
-                  <span>{{ row.observed_count }}/{{ row.observed_goal }}</span>
-                </div>
-                <div class="city-progress-bar">
-                  <div class="city-progress-fill city-progress-fill-{{ row.noaa_badge }}" style="width: {{ row.observed_progress_pct }}%"></div>
-                </div>
-                <div class="city-card-meta">
-                  <span>{{ row.noaa_label }} · {{ row.noaa_detail }}</span>
-                  <span>{{ row.history_label }}</span>
-                </div>
-              </article>
-              {% endfor %}
-            </div>
-          </section>
-          {% endif %}
-        </div>
-
-        <section class="blocked-city-section">
-          <div class="card-head">
-            <div>
-              <p class="section-kicker">Bloqueadas</p>
-              <h2>Archivo de ciudades fuera de juego</h2>
-            </div>
-            <span class="badge badge-bad">{{ dashboard.city_observation.blocked_count }} bloqueadas</span>
-          </div>
-          <div class="blocked-pill-list">
-            {% for row in dashboard.city_observation.blocked_rows %}
-            <article class="blocked-pill-card">
-              <div class="blocked-pill-head">
-                <strong>{{ row.city }}</strong>
-                <span class="badge badge-{{ row.state_badge }}">{{ row.state_label }}</span>
-              </div>
-              <span>{{ row.state_detail }}</span>
-            </article>
-            {% endfor %}
-          </div>
         </section>
 
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Ultimos 20 casos</p>
-          </div>
-        </div>
-        {% if dashboard.forecast_quality.latest_rows %}
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Ciudad</th>
-                <th>Fecha</th>
-                <th>Forecast</th>
-                <th>Observado</th>
-                <th>Error</th>
-                <th>Source</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in dashboard.forecast_quality.latest_rows %}
-              <tr>
-                <td>{{ row.city }}</td>
-                <td>{{ row.date }}</td>
-                <td>{{ row.forecast_display }}</td>
-                <td>{{ row.observed_display }}</td>
-                <td><span class="badge badge-{{ row.error_badge }}">{{ row.error_display }}</span></td>
-                <td>{{ row.source }}</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% else %}
-        <div class="notice notice-muted">Todavia no hay registros NOAA en <code>observed_vs_forecast</code>.</div>
-        {% endif %}
       </article>
     </section>
 

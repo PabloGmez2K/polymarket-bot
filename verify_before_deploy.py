@@ -1284,7 +1284,18 @@ def run_tests():
                  "Chicago": effective_mode_ns["get_effective_city_mode"]("Chicago"),
              })
 
+        missing_cycle_summary = os.path.join(
+            tempfile.gettempdir(),
+            "_tmp_cycle_summary_missing_focus_center_test.json",
+        )
+        if os.path.exists(missing_cycle_summary):
+            os.remove(missing_cycle_summary)
+
         focus_ns = {
+            "datetime": datetime,
+            "os": os,
+            "CYCLE_SUMMARY_FILE": missing_cycle_summary,
+            "load_cycle_summary_data": lambda: {},
             "OBSERVED_AUDIT_CITIES": {"Chicago", "Atlanta", "Buenos Aires", "Dallas"},
             "OBSERVED_FORECAST_MIN_SAMPLE": 3,
             "OBSERVED_FORECAST_GLOBAL_TARGET": 10,
@@ -1338,6 +1349,11 @@ def run_tests():
              len(focus_center["stage_path"]) == 4
              and focus_center["health_score"] > 0,
              focus_center)
+        test("focus center: alerta warn si falta cycle_summary.json",
+             isinstance(focus_center, dict)
+             and "incidents" in focus_center
+             and any(item.get("badge") == "warn" for item in focus_center["incidents"]),
+             focus_center.get("incidents") if isinstance(focus_center, dict) else focus_center)
 
         focus_low_bankroll = focus_ns["build_dashboard_focus_center"](
             alerts={
