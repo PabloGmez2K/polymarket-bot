@@ -507,7 +507,7 @@ def run_tests():
     test("template dashboard incluye Road to Real", "dashboard.road_to_real" in dashboard_template_code and "Road to Real" in dashboard_template_code and "requisitos cumplidos" in dashboard_template_code)
     test("template dashboard incluye Estado del bot", "Estado del bot" in dashboard_template_code and "Mercados escaneados" in dashboard_template_code and "markets_evaluated" in dashboard_template_code)
     test("template dashboard incluye shadow direccional", "Senales shadow direccionales" in dashboard_template_code and "Condicion" in dashboard_template_code and "Resolucion" in dashboard_template_code)
-    test("template dashboard incluye WR simulado shadow", "simulated_wr_display" in dashboard_template_code)
+    test("template dashboard incluye contadores shadow consistentes", "direccionales visibles" in dashboard_template_code and "historicas totales" in dashboard_template_code)
     test("template dashboard incluye Salud del sistema", "Salud del sistema" in dashboard_template_code and "<details class=\"layer-toggle\">" in dashboard_template_code)
     test("template dashboard incluye NOAA observado", "dashboard.forecast_quality" in dashboard_template_code and "Calidad NOAA observada" in dashboard_template_code)
     test("template dashboard incluye NOAA observado", "dashboard.forecast_quality" in dashboard_template_code and "Calidad NOAA observada" in dashboard_template_code)

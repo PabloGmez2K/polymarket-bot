@@ -179,7 +179,8 @@
           <h2>Senales shadow direccionales</h2>
         </div>
         <span class="badge badge-accent">
-          {{ dashboard.city_decisions.shadow_summary.edge_hits }} direccionales
+          {{ dashboard.city_decisions.recent_shadow_rows|length }} recientes
+          ({{ dashboard.city_decisions.shadow_summary.edge_hits }} historicas)
         </span>
       </div>
 
@@ -223,11 +224,9 @@
         </table>
       </div>
       <div class="notice notice-accent">
-        {{ dashboard.city_decisions.shadow_summary.opportunities_seen }} senales en
-        {{ dashboard.city_decisions.shadow_summary.cycles_with_shadow }} ciclos |
-        {{ dashboard.city_decisions.shadow_summary.resolved_count|default(0) }} resueltas |
-        {{ dashboard.city_decisions.shadow_summary.would_win_count|default(0) }} habrian acertado
-        (WR simulado: {{ dashboard.city_decisions.shadow_summary.simulated_wr_display|default('n/d') }})
+        {{ dashboard.city_decisions.recent_shadow_rows|length }} direccionales visibles |
+        {{ dashboard.city_decisions.shadow_summary.edge_hits }} historicas totales |
+        {{ dashboard.city_decisions.shadow_summary.cycles_with_shadow }} ciclos con shadow
       </div>
       {% else %}
       <div class="notice notice-muted">

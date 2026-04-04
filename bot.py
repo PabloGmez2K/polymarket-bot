@@ -4408,11 +4408,12 @@ def _shadow_condition_label(question):
 
 
 def _build_recent_shadow_rows(shadow_tracking):
-    """Build shadow signal rows for the dashboard, prioritizing directional.
+    """Build shadow signal rows for the dashboard — only directional signals.
 
     Strategy: first try recent_opportunities with edge_hit=True.
-    If empty (legacy data), fall back to per-city recent_edges which are
-    always directional (they come from edge-qualifying opportunities).
+    If empty (legacy data where recent_opportunities is overwhelmed by
+    condition_filtered entries), fall back to per-city recent_edges
+    filtered to directional questions (above/below) with edge > 0.
     """
     if not isinstance(shadow_tracking, dict):
         return []
@@ -4427,7 +4428,7 @@ def _build_recent_shadow_rows(shadow_tracking):
     if directional:
         return directional[:15]
 
-    # Fallback: gather from per-city recent_edges (always edge-qualifying)
+    # Fallback: per-city recent_edges, filtered to directional only
     cities = shadow_tracking.get("cities", {})
     all_edges = []
     for city_name, city_data in cities.items():
@@ -4436,18 +4437,24 @@ def _build_recent_shadow_rows(shadow_tracking):
         for edge in city_data.get("recent_edges", []):
             if not isinstance(edge, dict):
                 continue
+            condition = _shadow_condition_label(edge.get("question"))
+            if condition not in ("at_or_above", "at_or_below"):
+                continue
+            edge_pct = float(edge.get("edge_pct", 0) or 0)
+            if edge_pct <= 0:
+                continue
             all_edges.append({
                 "city": city_name,
                 "date": edge.get("date", ""),
                 "question": edge.get("question", ""),
                 "side": edge.get("side", ""),
-                "edge_pct": float(edge.get("edge_pct", 0) or 0),
+                "edge_pct": edge_pct,
                 "expected_value": float(edge.get("expected_value", 0) or 0),
                 "market_price": edge.get("market_price"),
                 "our_prob": edge.get("our_prob"),
                 "forecast_max": edge.get("forecast_max"),
                 "seen_at": edge.get("seen_at", ""),
-                "condition_label": _shadow_condition_label(edge.get("question")),
+                "condition_label": condition,
             })
     all_edges.sort(key=lambda r: str(r.get("seen_at", "")), reverse=True)
     return all_edges[:15]
