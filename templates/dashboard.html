@@ -971,6 +971,7 @@
           <div><dt>Serie lógica</dt><dd>v{{ dashboard.logic_series }}</dd></div>
           <div><dt>Próximo ciclo</dt><dd>{{ dashboard.next_run }}</dd></div>
           <div><dt>Último ciclo</dt><dd>{{ dashboard.last_cycle_label }}</dd></div>
+          <div><dt>Condición filtrada</dt><dd>{{ dashboard.cycle_summary.scan.condition_filtered|default(0) }} mercados</dd></div>
           <div><dt>Intra-SL</dt><dd>{{ dashboard.intra_label }}</dd></div>
           <div><dt>Signals</dt><dd>{{ dashboard.alerts.signals.status }}</dd></div>
         </dl>

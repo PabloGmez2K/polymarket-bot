@@ -1,9 +1,11 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 4 de abril de 2026 (Sesión 74 — M3 auditada, M1 implementada, alerta estratégica)
+**Última actualización:** 4 de abril de 2026 (Sesión 76 — Camino A direccional + sigma empírica)
 **M3 COMPLETADA (sesión 72, auditada sesión 74):** Las 3 filas legacy Chicago `2026-03-26/27/28` ya están `closed/LOSS_TOTAL/legacy_unresolved` en producción. Chicago accuracy real: `trades=8, wins=1, WR=12.5%, PnL=-$7.85`. Hay una fila sin fecha (take_profit, la única win) — dato menor.
 **M1 COMPLETADA (sesión 74, Codex):** Mega-card Observabilidad dividida en 3 tabs: `NOAA | Ciudades | Decisiones` en `templates/dashboard.html`. Usa patrón existente `data-tab-shell`. DOM order: NOAA → Ciudades → Decisiones. 507/507 OK.
 **ALERTA ESTRATÉGICA — próxima sesión con Opus:** WR últimos 15 trades pasó de 53% (16:00 UTC 3 abr) a 27% (23:00 UTC 3 abr) en 7 horas. Revisar trades del ciclo 23:00 UTC, lógica de entrada y sigma. M4 y R1 quedan desbloqueados para Fase 2 CC.
+**Fase 1 forecast accuracy audit (sesión 75, Codex):** se añade `tools/forecast_accuracy_audit.py`, `docs/forecast_accuracy_audit.md` y `data/forecast_accuracy_raw.json` sin tocar `bot.py` ni variables Railway. Resultado crítico para Opus: sobre `34` cierres con BUY context recuperable, `real_edge < 0` en `23.5%`, `11.8%` no pasarían `MIN_EDGE` con sigma empírica, sesgo de lado `YES=61.8% / NO=38.2%`, y Chicago muestra `sigma_empirica` muy por encima del modelo (`3.074 °C` global ciudad; `2.573-2.587 °C` en days_ahead 0-1 vs `1.2-1.5`). Limitación explícita: `82` cierres legacy/orphan de `postmortem.json` no traen `forecast_max/question/date` y quedan omitidos, así que esta tabla no representa aún los `91` cierres de serie v10.6 completos.
+**Camino A implementado localmente (sesión 76, Codex):** `bot.py` pasa a operar solo condiciones direccionales por default (`ALLOWED_CONDITIONS=at_or_above,at_or_below`), filtra `range/exact` antes de `estimate_prob`, las registra en `shadow_city_tracking` con `edge_hit=False` y expone `condition_filtered` en `cycle_summary`, Telegram `/log`/`/info` y dashboard. `get_uncertainty(days_ahead, city=None)` ahora usa sigma empírica por ciudad solo si `n>=3`, cae a `EMPIRICAL_SIGMA_GLOBAL` si la muestra es insuficiente y deja la sigma original v10.3 como fallback final; `MIN_EDGE` default sube a `15.0`. `ACTIVE_TRADING_CITIES` Railway no se toca y `verify_before_deploy.py` cierra en `515/515`.
 **Workflow CC con Codex:** Codex puede hacer tareas HTML/JS puras (M1, QW7) sin fricción. Evitar darle tareas que requieran Railway o contexto de producción.
 
 **Estado real de la cuenta a cierre de sesión 68 (3 abr 2026, ~17:00 UTC):**
@@ -41,7 +43,7 @@
 
 Un bot automatizado de arbitraje meteorológico en Polymarket. El bot detecta mercados donde las previsiones meteorológicas profesionales difieren de lo que creen los traders, calcula cuánto apostar usando gestión de riesgo matemática, ejecuta las órdenes automáticamente, y gestiona activamente las posiciones (stop-loss, take-profit, re-evaluación). Objetivo: que funcione 24/7 en la nube sin intervención humana.
 
-**Cómo gana dinero:** Consulta la previsión meteorológica profesional (Open-Meteo, coordenadas exactas del aeropuerto), calcula la probabilidad real con un modelo matemático (distribución normal + redondeo a °C enteros), y cuando detecta que el precio del mercado está equivocado por más de 7%, apuesta en la dirección correcta.
+**Cómo gana dinero:** Consulta la previsión meteorológica profesional (Open-Meteo, coordenadas exactas del aeropuerto), calcula la probabilidad real con un modelo matemático (distribución normal + redondeo a °C enteros), y cuando detecta que el precio del mercado direccional está equivocado por más de 15%, apuesta en la dirección correcta.
 
 **Bankroll configurado:** $25.00 en Railway. El 30 mar se depositaron `+$14.99` para volver a la zona objetivo de operación.
 
@@ -244,7 +246,8 @@ BLOCKED_CITIES="London,Miami,Seattle,Paris,Tel Aviv,Wellington,Toronto,Madrid,Si
 
 ### Configuración en código (defaults bot.py v10.6.10):
 ```python
-MIN_EDGE = 7.0%
+MIN_EDGE = 15.0%
+ALLOWED_CONDITIONS = at_or_above,at_or_below
 STOP_LOSS_PCT = -25.0%
 TAKE_PROFIT_PCT = +40.0%
 MAX_EXPOSURE_PCT = 40%
@@ -259,7 +262,7 @@ CITY_MIN_TRADES_FOR_BLOCK = 3
 CITY_BLOCK_WIN_RATE = 25.0%
 LOW_BANKROLL_THRESHOLD = $5.00
 LOW_BANKROLL_RESET_MARGIN = $1.00
-Sigma: Día 0: 1.2 | Día 1: 1.5 | Día 2: 2.0 | Día 3: 2.5 | Día 4-5: 3.0  # v10.6.x: restaurada de v10.3
+Sigma: empírica por ciudad si n>=3; fallback global D0=2.0 D1=1.9 D2=2.5 D3=3.0; fallback final v10.3 D0=1.2 D1=1.5 D2=2.0 D3=2.5 D4-5=3.0
 Schedule: 08:00, 16:00, 23:00 UTC
 ```
 

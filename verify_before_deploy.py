@@ -219,6 +219,45 @@ def run_tests():
     else:
         test("BANKROLL definido con getenv", False)
 
+    print("\n Camino A: filtro direccional + sigma empírica")
+    min_edge_match = re.search(r'MIN_EDGE\s*=\s*float\(os\.getenv\("MIN_EDGE",\s*"([^"]+)"\)', code)
+    if min_edge_match:
+        test("MIN_EDGE default es 15.0", min_edge_match.group(1) == "15.0",
+             f"encontrado: {min_edge_match.group(1)}")
+    else:
+        test("MIN_EDGE definido con getenv", False)
+
+    test("ALLOWED_CONDITIONS default solo direccionales",
+         '"at_or_above,at_or_below"' in code and "ALLOWED_CONDITIONS" in code)
+
+    main_cycle_src = get_function_source(module_ast, code_lines, "main")
+    test("run_main_cycle filtra condiciones no allowlisted",
+         "condition_name not in ALLOWED_CONDITIONS" in main_cycle_src)
+    test("run_main_cycle manda range/exact filtrados a shadow tracking",
+         "condition_filtered_shadow.append" in main_cycle_src and '"edge_hit": False' in main_cycle_src)
+    test("cycle_summary guarda condition_filtered",
+         '"condition_filtered": condition_filtered_skip' in main_cycle_src)
+
+    get_uncertainty_src = get_function_source(module_ast, code_lines, "get_uncertainty")
+    sigma_ns = {
+        "EMPIRICAL_SIGMA": {
+            "Chicago": {0: 2.57, 1: 2.59, 2: 3.0},
+            "Dallas": {0: 0.21, 1: 1.30, 2: 2.0},
+        },
+        "EMPIRICAL_SIGMA_SAMPLES": {
+            "Chicago": {0: 4, 1: 3, 2: 0},
+            "Dallas": {0: 2, 1: 1, 2: 0},
+        },
+        "EMPIRICAL_SIGMA_GLOBAL": {0: 2.0, 1: 1.9, 2: 2.5, 3: 3.0},
+        "MODEL_SIGMA_REFERENCE": {0: 1.2, 1: 1.5, 2: 2.0, 3: 2.5},
+        "_UNCERTAINTY_CITY_CONTEXT": None,
+    }
+    exec(get_uncertainty_src, sigma_ns)
+    test("get_uncertainty(city=Chicago, days=1) usa sigma empírica con n>=3",
+         abs(sigma_ns["get_uncertainty"](1, city="Chicago") - 2.59) < 1e-9)
+    test("get_uncertainty(city=Dallas, days=0) cae a sigma global si n<3",
+         abs(sigma_ns["get_uncertainty"](0, city="Dallas") - 2.0) < 1e-9)
+
     # ---- Test 3: Bug #12 — Resueltas no en keeping ----
     print("\n Bug #12: Resueltas excluidas de keeping")
     # Buscar el bloque de curPrice >= 0.98 en manage_positions
@@ -341,7 +380,7 @@ def run_tests():
     test("STOP_LOSS_PCT es negativo", 'STOP_LOSS_PCT' in code and '"-25.0"' in code)
     test("TAKE_PROFIT_PCT es positivo", 'TAKE_PROFIT_PCT' in code and '"40.0"' in code)
     test("MAX_EXPOSURE_PCT es 0.40", '"0.40"' in code)
-    test("MIN_EDGE default es 7.0", '"7.0"' in code)
+    test("MIN_EDGE default es 15.0", '"15.0"' in code)
     test("SCHEDULE_HOURS_UTC configurable", 'SCHEDULE_HOURS_UTC' in code)
     test("BLOCKED_CITIES default incluye ciudades perdedoras", '"London,Miami,Seattle,Paris,Tel Aviv,Wellington,Toronto,Madrid,Singapore,Ankara"' in code)
     test("ACTIVE_TRADING_CITIES definida", "ACTIVE_TRADING_CITIES = {" in code)
@@ -3452,16 +3491,24 @@ def run_tests():
     # ---- Test v10.5.0: Sigma widening ----
     print("\n v10.5.0: Sigma widening")
     try:
-        sigma_ns = {"math": __import__("math")}
+        sigma_ns = {
+            "math": __import__("math"),
+            "MODEL_SIGMA_REFERENCE": {0: 1.2, 1: 1.5, 2: 2.0, 3: 2.5},
+            "EMPIRICAL_SIGMA": {"Chicago": {0: 2.57, 1: 2.59, 2: 3.0}},
+            "EMPIRICAL_SIGMA_SAMPLES": {"Chicago": {0: 4, 1: 3, 2: 0}},
+            "EMPIRICAL_SIGMA_GLOBAL": {0: 2.0, 1: 1.9, 2: 2.5, 3: 3.0},
+            "_UNCERTAINTY_CITY_CONTEXT": None,
+        }
         exec(get_function_source(module_ast, code_lines, "get_uncertainty"), sigma_ns)
         gu = sigma_ns["get_uncertainty"]
-        test("sigma day 0 = 1.2", gu(0) == 1.2, f"got {gu(0)}")
-        test("sigma day 1 = 1.5", gu(1) == 1.5, f"got {gu(1)}")
-        test("sigma day 2 = 2.0", gu(2) == 2.0, f"got {gu(2)}")
-        test("sigma day 3 = 2.5", gu(3) == 2.5, f"got {gu(3)}")
+        test("sigma day 0 global = 2.0", gu(0) == 2.0, f"got {gu(0)}")
+        test("sigma day 1 global = 1.9", gu(1) == 1.9, f"got {gu(1)}")
+        test("sigma day 2 global = 2.5", gu(2) == 2.5, f"got {gu(2)}")
+        test("sigma day 3 global = 3.0", gu(3) == 3.0, f"got {gu(3)}")
         test("sigma day 4 = 3.0", gu(4) == 3.0, f"got {gu(4)}")
         test("sigma day 5 = 3.0", gu(5) == 3.0, f"got {gu(5)}")
         test("sigma day 6+ = 3.5", gu(7) == 3.5, f"got {gu(7)}")
+        test("sigma Chicago d1 usa empírica", gu(1, city="Chicago") == 2.59, f"got {gu(1, city='Chicago')}")
     except Exception as e:
         test("sigma funcional ejecuta sin excepción", False, str(e))
 

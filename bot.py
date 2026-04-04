@@ -93,7 +93,7 @@ load_dotenv()
 DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
 BANKROLL = float(os.getenv("BANKROLL", "25.00"))
 
-MIN_EDGE = float(os.getenv("MIN_EDGE", "7.0"))
+MIN_EDGE = float(os.getenv("MIN_EDGE", "15.0"))
 MIN_BET = float(os.getenv("MIN_BET", "1.00"))           # v10.4: default alineado con Railway
 MAX_BET_PCT = float(os.getenv("MAX_BET_PCT", "0.10"))   # v9: subido de 0.05 a 0.10 (10%)
 MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
@@ -174,6 +174,15 @@ CANARY_TRADING_CITIES = {
     if city.strip()
 }
 CANARY_POSITION_SCALE = float(os.getenv("CANARY_POSITION_SCALE", "0.50"))
+
+ALLOWED_CONDITIONS = {
+    condition.strip().lower()
+    for condition in os.getenv(
+        "ALLOWED_CONDITIONS",
+        "at_or_above,at_or_below",
+    ).split(",")
+    if condition.strip()
+}
 
 
 def get_min_days_ahead():
@@ -7948,7 +7957,10 @@ def cmd_log():
             n_mkts = scan.get("markets_evaluated", 0)
             n_edge = scan.get("with_edge", 0)
             n_sel = scan.get("selected", 0)
+            n_condition_filtered = scan.get("condition_filtered", 0)
             msg += f"<b>Escaneo:</b> {n_mkts} mercados → {n_edge} con edge → {n_sel} seleccionados\n"
+
+            msg += f"Condición filtrada: {n_condition_filtered} mercados (range/exact)\n"
 
             # Compras
             if buys:
@@ -8452,6 +8464,7 @@ def cmd_info():
                 f"{scan.get('selected',0)} seleccionados\n"
                 f"  Compras: {buys_str}\n"
             )
+            cycle_block += f"  Condición filtrada: {scan.get('condition_filtered',0)} mercados (range/exact)\n"
             if exp is not None:
                 cycle_block += f"  Exposición: ${exp:.2f}"
             if bud is not None:
@@ -9165,7 +9178,14 @@ def manage_positions(client, dl):
         if threshold_high is not None:
             threshold_high_c = (threshold_high - 32) * 5 / 9 if parsed["unit"] == "F" else float(threshold_high)
 
-        our_prob_yes = estimate_prob(forecast_max, threshold_c, parsed["condition"], days_ahead, threshold_high_c)
+        our_prob_yes = estimate_prob_with_city(
+            forecast_max,
+            threshold_c,
+            parsed["condition"],
+            days_ahead,
+            threshold_high_c,
+            city=city,
+        )
 
         # ¿Qué lado tenemos? Calcular edge actual
         if outcome.upper() == "YES":
@@ -10166,11 +10186,37 @@ def normal_cdf(x, mu, sigma):
     return 0.5 * (1.0 + math.erf((x - mu) / (sigma * math.sqrt(2))))
 
 
-def get_uncertainty(days_ahead):
+MODEL_SIGMA_REFERENCE = {0: 1.2, 1: 1.5, 2: 2.0, 3: 2.5}
+EMPIRICAL_SIGMA = {
+    "Chicago": {0: 2.57, 1: 2.59, 2: 3.0},
+    "Atlanta": {0: 0.78, 1: 3.50, 2: 2.5},
+    "Buenos Aires": {0: 1.10, 1: 1.5, 2: 2.0},
+    "New York City": {0: 0.28, 1: 1.5, 2: 2.15},
+    "Dallas": {0: 0.21, 1: 1.30, 2: 2.0},
+}
+EMPIRICAL_SIGMA_SAMPLES = {
+    "Chicago": {0: 4, 1: 3, 2: 0},
+    "Atlanta": {0: 5, 1: 1, 2: 0},
+    "Buenos Aires": {0: 3, 1: 0, 2: 0},
+    "New York City": {0: 2, 1: 0, 2: 1},
+    "Dallas": {0: 2, 1: 1, 2: 0},
+}
+EMPIRICAL_SIGMA_GLOBAL = {0: 2.0, 1: 1.9, 2: 2.5, 3: 3.0}
+_UNCERTAINTY_CITY_CONTEXT = None
+
+
+def get_uncertainty(days_ahead, city=None):
     # v10.6: revertida a v10.3 — la sigma ampliada de v10.5 vendía posiciones ganadoras
     # en re-eval y bloqueaba entradas. El problema real es la fuente de datos (Open-Meteo
     # vs Weather Underground), no la confianza del modelo. Recoger datos con sigma original.
-    return {0: 1.2, 1: 1.5, 2: 2.0, 3: 2.5}.get(days_ahead, 3.0 if days_ahead <= 5 else 3.5)
+    selected_city = city or _UNCERTAINTY_CITY_CONTEXT
+    city_samples = EMPIRICAL_SIGMA_SAMPLES.get(selected_city, {}) if selected_city else {}
+    city_sigmas = EMPIRICAL_SIGMA.get(selected_city, {}) if selected_city else {}
+    if int(city_samples.get(days_ahead, 0) or 0) >= 3 and city_sigmas.get(days_ahead) is not None:
+        return float(city_sigmas[days_ahead])
+    if days_ahead in EMPIRICAL_SIGMA_GLOBAL:
+        return float(EMPIRICAL_SIGMA_GLOBAL[days_ahead])
+    return MODEL_SIGMA_REFERENCE.get(days_ahead, 3.0 if days_ahead <= 5 else 3.5)
 
 
 def estimate_prob(forecast_max, threshold_c, condition, days_ahead, threshold_high_c=None):
@@ -10196,6 +10242,16 @@ def estimate_prob(forecast_max, threshold_c, condition, days_ahead, threshold_hi
     else:
         prob = 0.5
     return max(0.01, min(0.99, prob))
+
+
+def estimate_prob_with_city(forecast_max, threshold_c, condition, days_ahead, threshold_high_c=None, city=None):
+    global _UNCERTAINTY_CITY_CONTEXT
+    previous_city = _UNCERTAINTY_CITY_CONTEXT
+    _UNCERTAINTY_CITY_CONTEXT = city
+    try:
+        return estimate_prob(forecast_max, threshold_c, condition, days_ahead, threshold_high_c)
+    finally:
+        _UNCERTAINTY_CITY_CONTEXT = previous_city
 
 
 # =============================================================
@@ -10533,6 +10589,9 @@ def main(client):
     # ---- PASO 4: Edge ----
     trades = []
     shadow_trades = []
+    condition_filtered_shadow = []
+    condition_filtered_skip = 0
+    condition_filtered_seen = set()
     skipped_dup = 0
     edge_analysis = []  # Para el log detallado
     # v10.4 Fix Bug #9: token_ids vendidos en manage_positions → no re-comprar
@@ -10556,7 +10615,41 @@ def main(client):
         # Label para logs (muestra rango si aplica)
         temp_label = f"{threshold}-{threshold_high}°{c['unit']}" if threshold_high else f"{threshold}°{c['unit']}"
 
-        our_prob_yes = estimate_prob(forecast_max, threshold_c, c["condition"], c["days_ahead"], threshold_high_c)
+        condition_name = str(c.get("condition", "") or "").strip().lower()
+        if condition_name not in ALLOWED_CONDITIONS:
+            condition_filtered_skip += 1
+            condition_filtered_shadow.append({
+                "question": c["question"],
+                "city": city,
+                "date": c["date_iso"],
+                "side": "FILTERED",
+                "edge_pct": 0.0,
+                "expected_value": 0.0,
+                "mkt_price": round(max(c["mkt_prob_yes"], c["mkt_prob_no"]) * 100, 1),
+                "our_prob": 0.0,
+                "forecast_max": forecast_max,
+                "condition": condition_name,
+            })
+            if condition_name not in condition_filtered_seen:
+                dl.append(
+                    f"SKIP condicion '{condition_name}': fuera de ALLOWED_CONDITIONS "
+                    f"(se mueve a shadow tracking, no se compra)"
+                )
+                condition_filtered_seen.add(condition_name)
+            edge_analysis.append(
+                f"  SHADOW-FILTER {city} {temp_label} {c['date_iso']} | "
+                f"condicion={condition_name} fuera de ALLOWED_CONDITIONS"
+            )
+            continue
+
+        our_prob_yes = estimate_prob_with_city(
+            forecast_max,
+            threshold_c,
+            c["condition"],
+            c["days_ahead"],
+            threshold_high_c,
+            city=city,
+        )
         our_prob_no = 1.0 - our_prob_yes
         edge_yes = our_prob_yes - c["mkt_prob_yes"]
         edge_no = our_prob_no - c["mkt_prob_no"]
@@ -10659,6 +10752,12 @@ def main(client):
     dl.append(f"\nRESULTADO: {len(trades)} oportunidades operables con edge")
     if shadow_trades:
         dl.append(f"SHADOW: {len(shadow_trades)} oportunidades fuera de allowlist registradas para aprendizaje")
+    if condition_filtered_skip:
+        allowed_display = ", ".join(sorted(ALLOWED_CONDITIONS)) if ALLOWED_CONDITIONS else "ninguna"
+        dl.append(
+            f"CONDICION FILTRADA: {condition_filtered_skip} mercados fuera de ALLOWED_CONDITIONS "
+            f"({allowed_display}) enviados a shadow tracking"
+        )
 
     # ---- PASO 5: Presupuesto (v10: acumulativo) ----
     # Consultar cuánto hay REALMENTE invertido en posiciones
@@ -10771,6 +10870,22 @@ def main(client):
             "first_for_cycle": trade["city"] not in shadow_seen_cities,
         })
         shadow_seen_cities.add(trade["city"])
+    for trade in condition_filtered_shadow:
+        shadow_payload.append({
+            "city": trade["city"],
+            "question": trade["question"],
+            "date": trade["date"],
+            "side": trade["side"],
+            "edge_pct": trade["edge_pct"],
+            "expected_value": trade["expected_value"],
+            "mkt_price": trade["mkt_price"],
+            "our_prob": trade["our_prob"],
+            "forecast_max": trade["forecast_max"],
+            "seen_at": shadow_timestamp,
+            "edge_hit": False,
+            "first_for_cycle": trade["city"] not in shadow_seen_cities,
+        })
+        shadow_seen_cities.add(trade["city"])
     if shadow_payload:
         record_shadow_city_opportunities(
             shadow_payload,
@@ -10808,6 +10923,7 @@ def main(client):
         # Estado
         summary += f"{'─' * 25}\n"
         summary += f"Evaluados: {len(candidates)} | Edge: {len(trades)} | Shadow: {len(shadow_trades)}\n"
+        summary += f"Condición filtrada: {condition_filtered_skip} mercados (range/exact)\n"
         summary += f"Exposición actual: ${current_exposure:.2f} | Presupuesto libre: ${budget_left:.2f}\n"
 
         send_telegram(summary, with_menu=True)
@@ -10837,6 +10953,7 @@ def main(client):
                 "with_edge": len(trades) if 'trades' in locals() else 0,
                 "selected": len(selected) if 'selected' in locals() else 0,
                 "shadow": len(shadow_trades) if 'shadow_trades' in locals() else 0,
+                "condition_filtered": condition_filtered_skip if 'condition_filtered_skip' in locals() else 0,
             },
             "buys": [
                 {

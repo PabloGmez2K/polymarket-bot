@@ -84,6 +84,7 @@ Comandos útiles:
 | 2026-04-02 | Explícita | Sesión 58 | `—` | Cierre operativo sin tocar el bot: se fija como siguiente prioridad la auditoría de la captura del `Mission HUD`, se formaliza la regla `1 sesión = 1 tarea` con contexto mínimo, se añade una sección de `token economics` para Codex + Claude Code y se crea `.codex/config.toml` del proyecto con `medium` por defecto y perfiles `low/deep/max`. Sin deploy ni cambios de trading/NOAA. |
 | 2026-04-02 | Explícita | Sesión 59 | `—` | Cierre completo: `python verify_before_deploy.py` vuelve a pasar `483/483`, se versionan el saneamiento local de `trade_lifecycle/trade console`, el handoff y los guardrails de contexto/tokens, y se hace `commit + push` a `origin/main`. No se tocan reglas de trading ni NOAA; queda pendiente revalidación live del nuevo push. |
 | 2026-04-03 | Explícita | Sesión 72 | `—` | Cobertura funcional de la alarma `sin ciclo en >12h` en `build_dashboard_focus_center()`: el test fuerza ausencia de `cycle_summary.json`, valida `incidents` + `badge="warn"` y sincroniza `agent_events.jsonl` con la sesión documentada más reciente. Suite local `507/507`, sin tocar trading/NOAA/scheduler. |
+| 2026-04-04 | Explícita | Sesión 76 | `—` | Implementación local de Camino A shadow-only: filtro `ALLOWED_CONDITIONS` para dejar solo `at_or_above/at_or_below`, `range/exact` enviados a shadow tracking con `edge_hit=False`, sigma empírica por ciudad con fallback global, `MIN_EDGE=15.0`, `condition_filtered` en dashboard/Telegram/cycle_summary y suite `515/515`; sin tocar scheduler/NOAA/trade_lifecycle/deploy ni env vars Railway. |
 
 ---
 
@@ -2120,3 +2121,92 @@ Regla recomendada:
 **Validación:** `verify_before_deploy.py` = 507/507 tras todos los cambios.
 
 **Fase 1 del roadmap Control Center completada.** Siguiente: M3 (cerrar 3 filas Chicago legacy open que sesgan WR).
+
+---
+
+## Sesión 74 — tabs de Observabilidad capa 2 en dashboard (4 abr 2026)
+
+**Disparador:** convertir el mega-card monolítico de `Observabilidad (capa 2)` en 3 tabs legibles, sin tocar Python ni `bot.py`, siguiendo el patrón de activación ya existente en `static/dashboard.js`.
+
+**Cambios implementados:**
+
+- `templates/dashboard.html` envuelve el bloque de Observabilidad en `data-tab-shell` con `data-default-panel="obs-noaa"`.
+- Se añaden 3 tabs: `NOAA`, `Ciudades`, `Decisiones`, reutilizando `focus-tab-bar`, `focus-tab`, `focus-panel`, `data-panel-target` y `data-panel`.
+- La vista `NOAA` agrupa el resumen de calidad forecast y la tabla de últimos 20 casos.
+- La vista `Ciudades` agrupa el resumen de estado por ciudad, el universo operativo, seguimiento/referencia y bloqueadas.
+- La vista `Decisiones` agrupa decision engine, reglas de promoción/salida, ranking operacional, overlays canary/shadow, observación, shadow reciente y transiciones.
+
+**Límite de alcance respetado:**
+
+- no se tocó `bot.py`;
+- no se tocó ningún archivo Python;
+- no se modificó `static/dashboard.js` porque el patrón genérico ya soportaba el nuevo shell de tabs;
+- no se corrieron tests, al ser una reestructuración solo de plantilla.
+
+---
+
+## Sesión 75 — auditoría forecast accuracy Fase 1 (4 abr 2026)
+
+**Disparador:** crear un script local para auditar si el edge histórico del bot era ficticio por sigma demasiado estrecha o forecast Open-Meteo malo, sin tocar `bot.py`, trading, scheduler, deploy ni variables Railway.
+
+**Cambios implementados:**
+
+- Se añade `tools/forecast_accuracy_audit.py`, ejecutable localmente con:
+- `python tools/forecast_accuracy_audit.py`
+- `python tools/forecast_accuracy_audit.py --postmortem-source railway`
+- El script carga `postmortem.json` desde copia local, dashboard JSON o Railway via `tools/railway_safe.ps1`, recupera temperatura observada con NOAA (`daily-summaries/TMAX -> global-hourly/TMP`) y cae a Open-Meteo historical si NOAA no devuelve dato.
+- Calcula por trade `forecast_error = forecast_max - observed_real`, `prob_with_real_temp`, `real_edge`, `would_have_traded`, `outcome_correct`, `sigma_empirical_used` y `would_have_traded_empirical_sigma`.
+- Genera `data/forecast_accuracy_raw.json` y `docs/forecast_accuracy_audit.md` con resumen global, tabla crítica `city × days_ahead`, resumen por ciudad, sesgo `YES/NO`, porcentaje de `real_edge < 0`, porcentaje de trades que no pasarían `MIN_EDGE` con sigma empírica, y top 5 peores gaps de edge ficticio.
+- Como `postmortem.json` live tiene muchas filas con `question=""`, el script infiere `threshold_c` por grid-search contra `our_prob` cuando hay `condition/forecast_max/side/days_ahead` pero no `question`, y marca ese fallback en `threshold_source`.
+
+**Resultado observado en la primera corrida live:**
+
+- Fuente: `railway:/app/data/postmortem.json`
+- `127` registros input, `34` trades cerrados analizables con BUY context suficiente, `82` cierres omitidos por `missing_forecast_max`, `11` todavía `open`.
+- Sobre esos 34 trades: `WR ex-post 52.9%`, `LOSS_TOTAL 41.2%`, `forecast_error_mean -1.444 °C`, `sigma global 2.248 °C`, `real_edge < 0` en `23.5%`, `11.8%` no pasarían `MIN_EDGE` con sigma empírica, sesgo `YES=61.8% / NO=38.2%`.
+- Hallazgo más accionable para Opus Fase 2: Chicago muestra sigma empírica claramente por encima del modelo (`3.074 °C` en agregado ciudad; `2.573 °C` en day 0 y `2.587 °C` en day 1 frente a `1.2-1.5 °C` del modelo), mientras Atlanta/Dallas/Buenos Aires no presentan ese gap de forma tan marcada con esta muestra.
+
+**Limitación importante:**
+
+- Esta auditoría aún no explica sola el `79% LOSS_TOTAL` sobre `91` cierres de serie v10.6, porque `postmortem.json` contiene `82` cierres legacy/orphan sin `forecast_max/question/date` recuperables desde la propia fila.
+- Si Opus necesita cerrar cobertura sobre los 91 trades completos, la siguiente fase técnica debería enriquecer esos cierres huérfanos desde `performance.json` y/o `trade_lifecycle.json`, manteniendo explícito qué parte es observación directa vs reconstrucción.
+
+**Validación:**
+
+- `python -c "from pathlib import Path; import ast; ast.parse(Path('tools/forecast_accuracy_audit.py').read_text(encoding='utf-8')); print('AST OK')"` -> `AST OK`
+- `python tools/forecast_accuracy_audit.py --help` -> parser OK
+- `python tools/forecast_accuracy_audit.py --postmortem-source railway --output-json data/forecast_accuracy_raw.json --output-md docs/forecast_accuracy_audit.md` -> `analyzed=34`, `missing_observed=0`
+
+**Límite de alcance respetado:**
+
+- no se tocó `bot.py`;
+- no se tocaron trading, NOAA del bot, scheduler, execution ni env vars;
+- no hubo push ni deploy;
+- sí se actualizaron `CONTEXTO.md`, `HISTORIAL_SESIONES.md` y se debe registrar evento en `agent_events.jsonl` para cerrar trazabilidad.
+
+---
+
+## Sesión 76 — Camino A direccional + sigma empírica en shadow-only (4 abr 2026)
+
+**Disparador:** aplicar el diagnóstico de Opus Fase 2 sobre pérdidas en `range/exact` sin reactivar trading, sin tocar scheduler/NOAA/trade_lifecycle/deploy y manteniendo `ACTIVE_TRADING_CITIES=NONE` en Railway.
+
+**Cambios implementados:**
+
+- `bot.py` añade `ALLOWED_CONDITIONS` con default `at_or_above,at_or_below`.
+- En el ciclo principal, antes de `estimate_prob`, los mercados `range/exact` quedan filtrados con log explícito, contador `condition_filtered_skip` y envío a `shadow_city_tracking` como observación `edge_hit=False`, evitando descartarlos silenciosamente.
+- `get_uncertainty(days_ahead, city=None)` pasa a priorizar sigma empírica por ciudad solo si `n>=3`; si la ciudad/día no tiene muestra suficiente, cae a `EMPIRICAL_SIGMA_GLOBAL`, y solo si tampoco hay bucket global usa la sigma original v10.3 como fallback final.
+- Se preserva `estimate_prob()` intacta y se añade una envoltura mínima `estimate_prob_with_city(...)` para inyectar el contexto de ciudad en BUY y re-eval sin cambiar la fórmula.
+- `MIN_EDGE` default sube de `7.0` a `15.0`.
+- `cycle_summary.scan` añade `condition_filtered`; Telegram de ciclo, `/log`, `/info` y el dashboard muestran cuántos mercados se filtraron por condición.
+- `templates/dashboard.html` expone `Condición filtrada` en `Estado operativo`.
+- `verify_before_deploy.py` añade tests para `ALLOWED_CONDITIONS`, `get_uncertainty(city=...)`, fallback global si `n<3`, `MIN_EDGE=15.0` y persistencia de `condition_filtered`.
+
+**Límites de alcance respetados:**
+
+- no se tocó scheduler, NOAA, `trade_lifecycle`, deploy ni variables Railway;
+- no se cambió `ACTIVE_TRADING_CITIES` local ni Railway;
+- los mercados filtrados por condición no se descartan: quedan en shadow tracking.
+
+**Validación:**
+
+- `python verify_before_deploy.py` → `515/515`
