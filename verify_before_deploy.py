@@ -1163,6 +1163,8 @@ def run_tests():
             "load_shadow_city_tracking": lambda: {},
             "load_city_policy_state": lambda: {"auto_canary_cities": {}, "auto_shadow_cities": {}, "transition_history": []},
         }
+        exec(get_function_source(module_ast, code_lines, "_shadow_condition_label"), city_decisions_ns)
+        exec(get_function_source(module_ast, code_lines, "_build_recent_shadow_rows"), city_decisions_ns)
         exec(get_function_source(module_ast, code_lines, "build_dashboard_city_decisions"), city_decisions_ns)
         city_observation_for_decisions = {
             **city_observation,

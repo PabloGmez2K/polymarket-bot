@@ -4395,6 +4395,64 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None):
     }
 
 
+def _shadow_condition_label(question):
+    """Extract directional condition label from question text."""
+    q = str(question or "").lower()
+    if "above" in q:
+        return "at_or_above"
+    if "below" in q:
+        return "at_or_below"
+    if "between" in q or "exactly" in q:
+        return "range/exact"
+    return "otro"
+
+
+def _build_recent_shadow_rows(shadow_tracking):
+    """Build shadow signal rows for the dashboard, prioritizing directional.
+
+    Strategy: first try recent_opportunities with edge_hit=True.
+    If empty (legacy data), fall back to per-city recent_edges which are
+    always directional (they come from edge-qualifying opportunities).
+    """
+    if not isinstance(shadow_tracking, dict):
+        return []
+
+    # Primary: directional signals from recent_opportunities
+    recent = shadow_tracking.get("recent_opportunities", [])
+    directional = [
+        {**row, "condition_label": _shadow_condition_label(row.get("question"))}
+        for row in recent
+        if row.get("edge_hit")
+    ]
+    if directional:
+        return directional[:15]
+
+    # Fallback: gather from per-city recent_edges (always edge-qualifying)
+    cities = shadow_tracking.get("cities", {})
+    all_edges = []
+    for city_name, city_data in cities.items():
+        if not isinstance(city_data, dict):
+            continue
+        for edge in city_data.get("recent_edges", []):
+            if not isinstance(edge, dict):
+                continue
+            all_edges.append({
+                "city": city_name,
+                "date": edge.get("date", ""),
+                "question": edge.get("question", ""),
+                "side": edge.get("side", ""),
+                "edge_pct": float(edge.get("edge_pct", 0) or 0),
+                "expected_value": float(edge.get("expected_value", 0) or 0),
+                "market_price": edge.get("market_price"),
+                "our_prob": edge.get("our_prob"),
+                "forecast_max": edge.get("forecast_max"),
+                "seen_at": edge.get("seen_at", ""),
+                "condition_label": _shadow_condition_label(edge.get("question")),
+            })
+    all_edges.sort(key=lambda r: str(r.get("seen_at", "")), reverse=True)
+    return all_edges[:15]
+
+
 def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, shadow_tracking=None):
     """
     Convierte el seguimiento de ciudades en una lectura decisional:
@@ -4863,18 +4921,7 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
             ],
             "transitions": list((policy_state.get("transition_history", []) if isinstance(policy_state, dict) else [])[:10]),
         },
-        "recent_shadow_rows": [
-            {
-                **row,
-                "condition_label": (
-                    "at_or_above" if "above" in str(row.get("question", "")).lower()
-                    else "at_or_below" if "below" in str(row.get("question", "")).lower()
-                    else "direccional"
-                ),
-            }
-            for row in (shadow_tracking.get("recent_opportunities", []) if isinstance(shadow_tracking, dict) else [])
-            if row.get("edge_hit")
-        ][:10],
+        "recent_shadow_rows": _build_recent_shadow_rows(shadow_tracking),
     }
 
 
