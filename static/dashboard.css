@@ -405,6 +405,38 @@ body {
   display: none !important;
 }
 
+.road-to-real-block {
+  margin-bottom: 24px;
+}
+
+.progress-bar-big {
+  height: 22px;
+}
+
+.road-to-real-checklist {
+  margin-top: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.road-to-real-checklist .check-item {
+  align-items: flex-start;
+}
+
+.cards-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.notice-accent {
+  margin-top: 16px;
+  background: rgba(21, 126, 189, 0.08);
+  border-color: rgba(21, 126, 189, 0.18);
+}
+
+.shadow-table th:nth-child(7),
+.shadow-table td:nth-child(7) {
+  min-width: 260px;
+}
+
 .focus-mini-card {
   padding: 18px;
   border-radius: 18px;
@@ -1291,7 +1323,9 @@ th {
   .mission-track-grid,
   .focus-city-grid,
   .blocked-pill-list,
+  .cards-3,
   .cards-4,
+  .road-to-real-checklist,
   .layout-main {
     grid-template-columns: 1fr 1fr;
   }
@@ -1325,7 +1359,9 @@ th {
   .focus-city-grid,
   .city-card-grid,
   .blocked-pill-list,
+  .cards-3,
   .cards-4,
+  .road-to-real-checklist,
   .layout-main,
   .metric-list {
     grid-template-columns: 1fr;

@@ -2210,3 +2210,31 @@ Regla recomendada:
 **Validación:**
 
 - `python verify_before_deploy.py` → `515/515`
+
+---
+
+## Sesión 77 — rediseño Control Center shadow-only direccional (4 abr 2026)
+
+**Disparador:** rehacer la capa visual del dashboard para que Pablo pueda leer en desktop si el bot está sano, si las señales shadow direccionales son buenas y cuánto falta para volver a REAL, dejando la parte Python/backend en manos de Claude en paralelo.
+
+**Cambios implementados por Codex (solo capa UI/tests/docs):**
+
+- `templates/dashboard.html` queda organizado alrededor de:
+- barra `Road to Real`;
+- `Bloque 1` compacto de estado del bot;
+- `Bloque 2` de señales shadow direccionales con columnas `Condicion / Side / Edge / Forecast / Mercado / Resolucion`;
+- `Bloque 3` colapsable de salud del sistema.
+- Se quitan del flujo visible principal Mission HUD gamificado, trofeos, desbloqueos, scoreboards/rivalry, trade console larga y la tabla larga de ciclos.
+- `static/dashboard.css` añade estilos para `progress-bar-big`, `road-to-real-checklist`, `cards-3` y `notice-accent`.
+- `verify_before_deploy.py` gana un check estructural para `build_dashboard_road_to_real`, validaciones del nuevo layout y un stub del builder en el harness de `build_dashboard_snapshot()`.
+- `docs/control-center-roadmap.md` queda actualizado con el estado de este rediseño y deja como item futuro subir la frecuencia de ciclos a `4-6x/dia` solo después de que el dashboard sea legible.
+
+**Límites de alcance respetados:**
+
+- no se tocó scheduler, NOAA fetch, `manage_positions`, reglas de entrada/salida ni variables Railway desde esta capa Codex;
+- `bot.py` sí aparece modificado en el worktree, pero ese cambio corresponde a trabajo paralelo de Claude y no se revirtió;
+- `templates/dashboard_legacy.html` quedó creado por un intento fallido de mover el template y Windows devuelve `Access denied` al borrarlo; es un backup no usado por Flask.
+
+**Validación:**
+
+- `python verify_before_deploy.py` -> `516/516`

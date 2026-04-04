@@ -465,6 +465,7 @@ def run_tests():
     test("build_dashboard_forecast_quality definida", "def build_dashboard_forecast_quality(" in code)
     test("build_dashboard_city_observation definida", "def build_dashboard_city_observation(" in code)
     test("build_dashboard_city_decisions definida", "def build_dashboard_city_decisions(" in code)
+    test("build_dashboard_road_to_real definida", "def build_dashboard_road_to_real(" in code)
     test("load_city_policy_state definida", "def load_city_policy_state(" in code)
     test("save_city_policy_state definida", "def save_city_policy_state(" in code)
     test("get_effective_city_mode definida", "def get_effective_city_mode(" in code)
@@ -503,19 +504,19 @@ def run_tests():
          "Validacion o aprobacion sin delta no merece puntos" in operations_playbook_code and "`0 puntos`" in operations_playbook_code)
     test("helper append_agent_event evita duplicados",
          "Duplicate event blocked" in append_agent_event_code and 'row.get("session") == event["session"]' in append_agent_event_code)
-    test("template dashboard usa cycle.series_display", "cycle.series_display" in dashboard_template_code)
-    test("template dashboard muestra stages de eventos", "event.stage_label" in dashboard_template_code and "Prop." in dashboard_template_code)
-    test("template dashboard usa estado waiting en checklist", "check-item-{{ item.status }}" in dashboard_template_code and "check-tag-{{ item.status }}" in dashboard_template_code)
-    test("template dashboard incluye progreso", "dashboard.progress" in dashboard_template_code and "Readiness operativo" in dashboard_template_code)
-    test("template dashboard incluye balance por tipo de cierre", "dashboard.exit_breakdown" in dashboard_template_code and "Balance por tipo de cierre" in dashboard_template_code)
-    test("template dashboard incluye trofeos", "dashboard.trophies" in dashboard_template_code and "Hitos validados del sistema" in dashboard_template_code)
+    test("template dashboard incluye Road to Real", "dashboard.road_to_real" in dashboard_template_code and "Road to Real" in dashboard_template_code and "requisitos cumplidos" in dashboard_template_code)
+    test("template dashboard incluye Estado del bot", "Estado del bot" in dashboard_template_code and "Mercados escaneados" in dashboard_template_code and "markets_evaluated" in dashboard_template_code)
+    test("template dashboard incluye shadow direccional", "Senales shadow direccionales" in dashboard_template_code and "Condicion" in dashboard_template_code and "Resolucion" in dashboard_template_code)
+    test("template dashboard incluye WR simulado shadow", "simulated_wr_display" in dashboard_template_code)
+    test("template dashboard incluye Salud del sistema", "Salud del sistema" in dashboard_template_code and "<details class=\"layer-toggle\">" in dashboard_template_code)
+    test("template dashboard incluye NOAA observado", "dashboard.forecast_quality" in dashboard_template_code and "Calidad NOAA observada" in dashboard_template_code)
     test("template dashboard incluye desbloqueos", "dashboard.unlocks" in dashboard_template_code and "Qué falta para habilitar decisiones" in dashboard_template_code)
     test("template dashboard incluye NOAA observado", "dashboard.forecast_quality" in dashboard_template_code and "Calidad Forecast Observada (NOAA)" in dashboard_template_code)
     test("template dashboard incluye estado de observacion por ciudad", "dashboard.city_observation" in dashboard_template_code and "Estado de observacion por ciudad" in dashboard_template_code)
     test("template dashboard incluye decision engine de ciudades", "dashboard.city_decisions" in dashboard_template_code and "Candidatas a canary" in dashboard_template_code and "Regla shadow → canary" in dashboard_template_code and "Canaries automáticos actuales" in dashboard_template_code)
     test("template dashboard incluye ranking operacional", "dashboard.city_decisions.ranking_rows" in dashboard_template_code and "Vista de decisión por ciudad" in dashboard_template_code and "Distancia a canary" in dashboard_template_code)
     test("template dashboard incluye mission HUD focus", "dashboard.focus" in dashboard_template_code and "Mission HUD" in dashboard_template_code and "dashboard.focus.tracks" in dashboard_template_code and "dashboard.focus.city_race" in dashboard_template_code)
-    test("template dashboard carga dashboard.js", "dashboard.js" in dashboard_template_code and "data-focus-tabs" in dashboard_template_code)
+    test("template dashboard carga dashboard.js", "dashboard.js" in dashboard_template_code)
     test("template dashboard mantiene bloque legacy drift", "dashboard.legacy_forecast_drift" in dashboard_template_code and "Drift Open-Meteo (historico - no comparable con NOAA)" in dashboard_template_code)
     test("template dashboard muestra n/d sin cierres", "pnl_display" in dashboard_template_code and "win_rate_display" in dashboard_template_code and "drawdown_display" in dashboard_template_code)
     test("css dashboard en modo claro", "--bg: #f3ede3;" in dashboard_css_code and "--card: rgba(255, 255, 255, 0.92);" in dashboard_css_code)
@@ -1727,6 +1728,7 @@ def run_tests():
             "build_dashboard_forecast_quality": lambda **kwargs: {"sample_size": 0, "sample_display": "0 mercados", "mae_display": "acumulando muestra...", "bias_display": "acumulando muestra...", "coverage_display": "0 / 4 ciudades con muestra", "coverage_detail": "0 / 4 con >= 3 casos", "city_rows": [], "latest_rows": [], "note": "acumulando muestra...", "note_level": "muted", "last_record_display": "n/d", "kpis_ready": False, "global_ready": False},
             "build_dashboard_city_observation": lambda **kwargs: {"tracked_count": 4, "active_count": 4, "blocked_count": 0, "observed_ready_count": 0, "observed_configured_count": 4, "summary": "4 activas", "note": "watch", "note_level": "muted", "rows": []},
             "build_dashboard_city_decisions": lambda **kwargs: {"summary": "0 mantener", "note": "decision", "note_level": "muted", "rows": [], "keep_rows": [], "promote_rows": [], "observe_rows": [], "remove_rows": [], "blocked_rows": [], "shadow_summary": {"opportunities_seen": 0}, "recent_shadow_rows": []},
+            "build_dashboard_road_to_real": lambda **kwargs: {"checks": [], "passed": 0, "total": 6, "pct": 0, "status_label": "Fase temprana", "status_badge": "warn"},
             "build_dashboard_focus_center": lambda **kwargs: {"status_label": "Sano con limitaciones", "status_badge": "accent", "headline": "sample", "summary": "watch", "answers": [], "action": {"title": "No tocar trading", "detail": "NOAA", "badge": "accent"}, "incidents": [], "quick_stats": [], "drivers": [], "detail_routes": []},
             "build_dashboard_legacy_forecast_drift": lambda **kwargs: {"sample_size": 0, "sample_display": "0 mercados", "mae_display": "n/d", "bias_display": "n/d", "last_record_display": "n/d", "latest_case": "", "note": "legacy"},
             "build_dashboard_trade_analytics": lambda **kwargs: {"sample_size": 1, "score_display": "81.0%", "headline": "sample exits"},

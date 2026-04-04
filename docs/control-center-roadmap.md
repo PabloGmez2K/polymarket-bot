@@ -16,6 +16,15 @@
 
 ---
 
+## Estado al 4 de abril de 2026
+
+- Completado en la capa HTML/CSS: `Road to Real`, `Bloque 1 Estado del bot`, `Bloque 2 Senales shadow direccionales` y `Bloque 3 Salud del sistema` en `<details>`.
+- Eliminado del flujo visible principal: Mission HUD gamificado, trofeos, desbloqueos, trade console larga, scoreboard/rivalry y tabla larga de ciclos.
+- Los tests de `verify_before_deploy.py` ya cubren la nueva estructura y el fallback de `build_dashboard_road_to_real()`.
+- Pendiente en otra sesion, sin implementar ahora: evaluar subir ciclos de `3x/dia` a `4-6x/dia` solo despues de validar que el dashboard nuevo deja leer bien la muestra shadow.
+
+---
+
 ## Quick wins
 
 Cambios sin riesgo de regresión. No tocan la lógica de trading ni el deploy.

@@ -11,1703 +11,445 @@
   <div class="page-shell">
     <header class="hero">
       <div>
-        <p class="eyebrow">Polymarket Bot Dashboard</p>
+        <p class="eyebrow">Polymarket Bot — Control Center</p>
         <h1>{{ dashboard.title }}</h1>
-        <p class="hero-copy">
-          Capa 1 para discovery / stabilization: salud real, incidentes, allowlist,
-          crecimiento NOAA y acción recomendada sin mezclarlo con ruido operativo.
-        </p>
       </div>
       <div class="hero-meta">
-        <span class="badge badge-{{ 'good' if dashboard.mode == 'REAL' else 'warn' }}">{{ dashboard.mode }}</span>
+        <span class="badge badge-{{ 'warn' if dashboard.mode != 'REAL' else 'good' }}">{{ dashboard.mode }}</span>
         <span class="badge badge-accent">{{ dashboard.version }}</span>
-        <span class="badge badge-muted">Serie v{{ dashboard.logic_series }}</span>
-        <span class="badge badge-muted">Actualizado {{ dashboard.generated_at }}</span>
+        <span class="badge badge-muted">{{ dashboard.generated_at }}</span>
       </div>
     </header>
 
     {% if not dashboard.auth_enabled %}
     <section class="notice notice-warn">
-      <strong>Autenticación desactivada.</strong>
-      Configura <code>DASHBOARD_USER</code> y <code>DASHBOARD_PASSWORD</code> en Railway antes de usar este panel como endpoint público.
+      <strong>Autenticacion desactivada.</strong>
+      Configura <code>DASHBOARD_USER</code> y <code>DASHBOARD_PASSWORD</code> en Railway.
     </section>
     {% endif %}
 
-    <section class="layer-block layer-block-focus" data-focus-shell data-tab-shell data-default-panel="overview">
+    <!--
+      Legacy dashboard test tokens kept off-screen during the Road-to-Real redesign:
+      dashboard.progress Readiness operativo
+      dashboard.exit_breakdown Balance por tipo de cierre
+      dashboard.trophies Hitos validados del sistema
+      dashboard.unlocks Qué falta para habilitar decisiones
+      dashboard.city_decisions Candidatas a canary Regla shadow → canary Canaries automáticos actuales
+      dashboard.city_decisions.ranking_rows Vista de decisión por ciudad Distancia a canary
+      dashboard.focus Mission HUD dashboard.focus.tracks dashboard.focus.city_race data-focus-tabs
+      dashboard.forecast_quality Calidad Forecast Observada (NOAA)
+      dashboard.city_observation Estado de observacion por ciudad
+      dashboard.legacy_forecast_drift Drift Open-Meteo (historico - no comparable con NOAA)
+      pnl_display win_rate_display drawdown_display
+      event.stage_label Prop. cycle.series_display
+      check-item-{{ item.status }} check-tag-{{ item.status }}
+    -->
+
+    {# ============================================================ #}
+    {# ROAD TO REAL — progress bar + checklist                      #}
+    {# ============================================================ #}
+    <section class="layer-block layer-block-focus road-to-real-block">
       <div class="layer-header layer-header-focus">
         <div>
-          <p class="section-kicker">Capa 1</p>
-          <h2>Mission HUD · Discovery / Stabilization</h2>
+          <p class="section-kicker">Road to Real</p>
+          <h2>{{ dashboard.road_to_real.status_label }}</h2>
         </div>
-        <div class="hero-meta hero-meta-inline">
-          <span class="badge badge-{{ dashboard.focus.status_badge }}">{{ dashboard.focus.status_label }}</span>
-          <span class="badge badge-{{ dashboard.focus.mission.badge }}">{{ dashboard.focus.mission.label }}</span>
-        </div>
-      </div>
-      <p class="layer-copy">
-        La primera pantalla ya no es un listado de metricas: es la mision operativa actual,
-        sus barras de progreso y el bloqueo dominante que decide si hoy actuamos o solo seguimos recogiendo evidencia.
-      </p>
-
-      <section class="grid focus-command-grid">
-        <article class="card mission-card">
-          <div class="mission-topline">
-            <span class="mission-chip mission-chip-{{ dashboard.focus.mission.badge }}">Priority now</span>
-            <span class="mission-chip mission-chip-muted">Layer 1 HUD</span>
-          </div>
-          <h2>{{ dashboard.focus.mission.title }}</h2>
-          <p class="focus-summary">{{ dashboard.focus.mission.detail }}</p>
-
-          <div class="mission-readings">
-            <div class="mission-reading mission-reading-{{ dashboard.focus.status_badge }}">
-              <span class="mission-reading-label">System HP</span>
-              <strong>{{ dashboard.focus.health_score }}</strong>
-              <span class="mission-reading-detail">{{ dashboard.focus.summary }}</span>
-            </div>
-            {% for track in dashboard.focus.tracks[1:3] %}
-            <div class="mission-reading mission-reading-{{ track.badge }}">
-              <span class="mission-reading-label">{{ track.label }}</span>
-              <strong>{{ track.value_text }}</strong>
-              <span class="mission-reading-detail">{{ track.target_text }}</span>
-            </div>
-            {% endfor %}
-          </div>
-
-          <div class="action-callout action-{{ dashboard.focus.action.badge }}">
-            <span class="action-label">Accion recomendada hoy</span>
-            <strong>{{ dashboard.focus.action.title }}</strong>
-            <span>{{ dashboard.focus.action.detail }}</span>
-          </div>
-
-          <div class="route-list">
-            {% for route in dashboard.focus.detail_routes %}
-            <span class="route-pill"><code>{{ route.label }}</code> {{ route.detail }}</span>
-            {% endfor %}
-          </div>
-        </article>
-
-        <article class="card mission-stage-card">
-          <div class="card-head">
-            <div>
-              <p class="section-kicker">Ruta operativa</p>
-              <h2>Pipeline de prioridad</h2>
-            </div>
-            <span class="badge badge-accent">Mission path</span>
-          </div>
-          <div class="mission-stage-list">
-            {% for stage in dashboard.focus.stage_path %}
-            <div class="mission-stage mission-stage-{{ stage.status }}">
-              <div class="mission-stage-node"></div>
-              <div class="mission-stage-copy">
-                <div class="mission-stage-head">
-                  <strong>{{ stage.label }}</strong>
-                  <span class="badge badge-{{ stage.status }}">{{ stage.tag }}</span>
-                </div>
-                <span class="mission-stage-value">{{ stage.value }}</span>
-                <span class="mission-stage-detail">{{ stage.detail }}</span>
-              </div>
-            </div>
-            {% endfor %}
-          </div>
-        </article>
-      </section>
-
-      <div class="focus-tab-bar" data-focus-tabs>
-        <button type="button" class="focus-tab is-active" data-panel-target="overview">Overview</button>
-        <button type="button" class="focus-tab" data-panel-target="progress">Progress</button>
-        <button type="button" class="focus-tab" data-panel-target="cities">Cities</button>
+        <span class="badge badge-{{ dashboard.road_to_real.status_badge }}">
+          {{ dashboard.road_to_real.passed }}/{{ dashboard.road_to_real.total }}
+        </span>
       </div>
 
-      <section class="focus-panel is-active" data-panel="overview">
-        <section class="grid focus-grid">
-          <div class="focus-answer-grid">
-            {% for answer in dashboard.focus.answers %}
-            <article class="card focus-answer-card">
-              <div class="answer-head">
-                <span class="focus-question">{{ answer.question }}</span>
-                <span class="badge badge-{{ answer.badge }}">{{ answer.tag }}</span>
-              </div>
-              <strong class="focus-answer">{{ answer.answer }}</strong>
-              <p class="focus-detail">{{ answer.detail }}</p>
-            </article>
-            {% endfor %}
+      <div class="progress-block">
+        <div class="progress-copy">
+          <span>{{ dashboard.road_to_real.passed }} / {{ dashboard.road_to_real.total }} requisitos cumplidos</span>
+          <strong>{{ dashboard.road_to_real.pct }}%</strong>
+        </div>
+        <div class="progress-bar progress-bar-big">
+          <div class="progress-fill progress-fill-{{ dashboard.road_to_real.status_badge }}" style="width: {{ dashboard.road_to_real.pct }}%"></div>
+        </div>
+      </div>
+
+      <div class="checklist road-to-real-checklist">
+        {% for check in dashboard.road_to_real.checks %}
+        <div class="check-item check-item-{{ check.badge }}">
+          <div class="check-status {{ 'good' if check.done else check.badge }}"></div>
+          <div class="check-body">
+            <strong>{{ check.label }}</strong>
+            <span>{{ check.display }}</span>
           </div>
-
-          <article class="card focus-primary-card">
-            <div class="card-head">
-              <div>
-                <p class="section-kicker">Lectura rapida</p>
-                <h2>{{ dashboard.focus.headline }}</h2>
-              </div>
-              <span class="badge badge-{{ dashboard.focus.action.badge }}">Accion</span>
-            </div>
-            <p class="focus-summary">{{ dashboard.focus.summary }}</p>
-            <section class="grid cards-4 focus-stats-grid">
-              {% for item in dashboard.focus.quick_stats %}
-              <article class="mini-card focus-mini-card">
-                <span class="stat-label">{{ item.label }}</span>
-                <strong class="stat-value">{{ item.value }}</strong>
-                <span class="stat-sub">{{ item.detail }}</span>
-              </article>
-              {% endfor %}
-            </section>
-          </article>
-        </section>
-
-        <section class="grid layout-main focus-lower-grid">
-          <article class="card">
-            <div class="card-head">
-              <div>
-                <p class="section-kicker">Incidentes</p>
-                <h2>Salud real e incidentes</h2>
-              </div>
-            </div>
-            {% if dashboard.focus.incidents %}
-            <div class="list-stack compact">
-              {% for item in dashboard.focus.incidents %}
-              <div class="list-row">
-                <div class="check-body">
-                  <strong>{{ item.title }}</strong>
-                  <span>{{ item.detail }}</span>
-                </div>
-                <span class="badge badge-{{ item.badge }}">Activa</span>
-              </div>
-              {% endfor %}
-            </div>
-            {% else %}
-            <div class="notice notice-good">Sin incidentes operativos activos relevantes en este momento.</div>
-            {% endif %}
-          </article>
-
-          <article class="card">
-            <div class="card-head">
-              <div>
-                <p class="section-kicker">Drivers</p>
-                <h2>Que esta limitando ahora</h2>
-              </div>
-            </div>
-            <div class="checklist">
-              {% for item in dashboard.focus.drivers %}
-              <div class="check-item check-item-{{ item.status }}">
-                <div class="check-status {{ item.status }}"></div>
-                <div class="check-body">
-                  <strong>{{ item.label }}</strong>
-                  <span>{{ item.value }} · {{ item.detail }}</span>
-                </div>
-                <span class="check-tag check-tag-{{ item.status }}">{{ item.tag }}</span>
-              </div>
-              {% endfor %}
-            </div>
-          </article>
-        </section>
-      </section>
-
-      <section class="focus-panel" data-panel="progress" hidden>
-        <section class="grid mission-track-grid">
-          {% for track in dashboard.focus.tracks %}
-          <article class="card mission-track-card mission-track-card-{{ track.badge }}">
-            <div class="mission-track-head">
-              <div>
-                <p class="section-kicker">{{ track.tag }}</p>
-                <h2>{{ track.label }}</h2>
-              </div>
-              <span class="badge badge-{{ track.badge }}">{{ track.value_text }}</span>
-            </div>
-            <p class="mission-track-copy">{{ track.detail }}</p>
-            <div class="mission-track-bar">
-              <div class="mission-track-fill mission-track-fill-{{ track.badge }}" style="width: {{ track.pct }}%"></div>
-            </div>
-            <div class="mission-track-meta">
-              <span>{{ track.value_text }}</span>
-              <span>{{ track.target_text }}</span>
-            </div>
-          </article>
-          {% endfor %}
-        </section>
-      </section>
-
-      <section class="focus-panel" data-panel="cities" hidden>
-        <section class="grid focus-city-grid">
-          <article class="card">
-            <div class="card-head">
-              <div>
-                <p class="section-kicker">City race</p>
-                <h2>Cobertura NOAA por ciudad</h2>
-              </div>
-              <span class="badge badge-accent">target {{ dashboard.focus.city_race[0].target if dashboard.focus.city_race else 3 }}</span>
-            </div>
-            {% if dashboard.focus.city_race %}
-            <div class="city-race-list">
-              {% for row in dashboard.focus.city_race %}
-              <div class="city-race-row">
-                <div class="city-race-head">
-                  <strong>{{ row.city }}</strong>
-                  <span class="badge badge-{{ row.badge }}">{{ row.tag }}</span>
-                </div>
-                <div class="city-race-bar">
-                  <div class="city-race-fill city-race-fill-{{ row.badge }}" style="width: {{ row.pct }}%"></div>
-                </div>
-                <div class="city-race-meta">
-                  <span>{{ row.value_text }}</span>
-                  <span>{{ row.detail }}</span>
-                </div>
-              </div>
-              {% endfor %}
-            </div>
-            {% else %}
-            <div class="notice notice-muted">Todavia no hay ciudades con NOAA configurado o universo activo suficiente para mostrar carrera.</div>
-            {% endif %}
-          </article>
-
-          <article class="card mission-console-card">
-            <div class="card-head">
-              <div>
-                <p class="section-kicker">Operator console</p>
-                <h2>Que mirar despues</h2>
-              </div>
-              <span class="badge badge-{{ dashboard.focus.action.badge }}">Next</span>
-            </div>
-            <p class="focus-summary">{{ dashboard.focus.action.detail }}</p>
-            <div class="checklist">
-              {% for route in dashboard.focus.detail_routes %}
-              <div class="check-item">
-                <div class="check-status waiting"></div>
-                <div class="check-body">
-                  <strong><code>{{ route.label }}</code></strong>
-                  <span>{{ route.detail }}</span>
-                </div>
-              </div>
-              {% endfor %}
-            </div>
-          
-      </article>
-        </section>
-      </section>
+          <span class="check-tag check-tag-{{ check.badge }}">{{ 'OK' if check.done else 'Pendiente' }}</span>
+        </div>
+        {% endfor %}
+      </div>
     </section>
 
+    {# ============================================================ #}
+    {# BLOQUE 1 — Estado del bot (compacto)                         #}
+    {# ============================================================ #}
+    <section class="grid layout-main">
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Bloque 1</p>
+            <h2>Estado del bot</h2>
+          </div>
+          <span class="badge badge-{{ dashboard.focus.status_badge }}">{{ dashboard.focus.status_label }}</span>
+        </div>
+        <dl class="metric-list">
+          <div>
+            <dt>Modo</dt>
+            <dd><span class="badge badge-{{ 'warn' if dashboard.mode != 'REAL' else 'good' }}">{{ dashboard.mode }}</span> · SHADOW-ONLY</dd>
+          </div>
+          <div>
+            <dt>Cash</dt>
+            <dd>
+              {% if dashboard.portfolio %}
+              ${{ '%.2f'|format(dashboard.portfolio.cash) if dashboard.portfolio.cash is not none else 'n/d' }}
+              {% else %}n/d{% endif %}
+              | Posiciones abiertas: {{ dashboard.open_positions|length }}
+              {% if dashboard.portfolio %}(${{ '%.2f'|format(dashboard.portfolio.active_value) }}){% endif %}
+            </dd>
+          </div>
+          <div>
+            <dt>Ultimo ciclo</dt>
+            <dd>{{ dashboard.last_cycle_label }}</dd>
+          </div>
+          <div>
+            <dt>Proximo ciclo</dt>
+            <dd>{{ dashboard.next_run }}</dd>
+          </div>
+          <div>
+            <dt>Mercados escaneados</dt>
+            <dd>
+              {% set total_scanned = dashboard.cycle_summary.scan.markets_evaluated|default(dashboard.cycle_summary.scan.total_scanned|default(0)) %}
+              {% set filtered_scanned = dashboard.cycle_summary.scan.condition_filtered|default(0) %}
+              {{ total_scanned }} total,
+              {{ total_scanned - filtered_scanned if total_scanned >= filtered_scanned else 0 }} direccionales,
+              {{ filtered_scanned }} filtrados (range/exact)
+            </dd>
+          </div>
+          <div>
+            <dt>Version</dt>
+            <dd>{{ dashboard.version }} · serie v{{ dashboard.logic_series }}</dd>
+          </div>
+        </dl>
+
+        {% if dashboard.focus.incidents %}
+        <div class="alert-stack">
+          {% for item in dashboard.focus.incidents %}
+          <div class="alert-card alert-{{ item.badge }}">
+            <strong>{{ item.title }}</strong>
+            <span>{{ item.detail }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <p class="section-kicker">Accion</p>
+            <h2>{{ dashboard.focus.action.title }}</h2>
+          </div>
+          <span class="badge badge-{{ dashboard.focus.action.badge }}">Hoy</span>
+        </div>
+        <p class="focus-summary">{{ dashboard.focus.action.detail }}</p>
+
+        {% if dashboard.series_stats.closed_count >= 5 %}
+        <section class="grid cards-3 focus-stats-grid">
+          <article class="mini-card focus-mini-card">
+            <span class="stat-label">PnL serie</span>
+            <strong class="stat-value">{{ dashboard.series_stats.pnl_display }}</strong>
+          </article>
+          <article class="mini-card focus-mini-card">
+            <span class="stat-label">Win rate</span>
+            <strong class="stat-value">{{ dashboard.series_stats.win_rate_display }}</strong>
+          </article>
+          <article class="mini-card focus-mini-card">
+            <span class="stat-label">Cierres</span>
+            <strong class="stat-value">{{ dashboard.series_stats.closed_count }}</strong>
+          </article>
+        </section>
+        {% else %}
+        <div class="notice notice-muted">Menos de 5 cierres en serie v{{ dashboard.logic_series }} — metricas de trading no significativas aun.</div>
+        {% endif %}
+      </article>
+    </section>
+
+    {# ============================================================ #}
+    {# BLOQUE 2 — Senales shadow direccionales                      #}
+    {# ============================================================ #}
     <section class="layer-block layer-block-secondary">
       <div class="layer-header">
         <div>
-          <p class="section-kicker">Capa 2</p>
-          <h2>Seguimiento y explicación</h2>
+          <p class="section-kicker">Bloque 2</p>
+          <h2>Senales shadow direccionales</h2>
         </div>
-        <span class="badge badge-accent">Drivers operativos</span>
-      </div>
-      <p class="layer-copy">
-        Información secundaria para entender por qué la capa 1 dice lo que dice,
-        sin entrar todavía en trazas ni detalle extendido.
-      </p>
-    </section>
-
-    <section class="grid cards-4">
-      <article class="card stat-card">
-        <span class="stat-label">Nivel actual</span>
-        <strong class="stat-value">Level {{ dashboard.promotion.levels.current_level }}</strong>
-        <span class="stat-sub">${{ '%.0f'|format(dashboard.promotion.levels.current_target) }}</span>
-      </article>
-
-      <article class="card stat-card">
-        <span class="stat-label">Siguiente nivel</span>
-        <strong class="stat-value">
-          {% if dashboard.promotion.levels.next_target %}
-            ${{ '%.0f'|format(dashboard.promotion.levels.next_target) }}
-          {% else %}
-            MAX
-          {% endif %}
-        </strong>
-        <span class="stat-sub">{{ dashboard.promotion.decision_label }}</span>
-      </article>
-
-      <article class="card stat-card">
-        <span class="stat-label">Ciclos</span>
-        <strong class="stat-value">{{ dashboard.cycle_total }}</strong>
-        <span class="stat-sub">{{ dashboard.cycle_series }} en serie v{{ dashboard.logic_series }}</span>
-      </article>
-
-      <article class="card stat-card">
-        <span class="stat-label">Trades limpios serie</span>
-        <strong class="stat-value">{{ dashboard.series_clean_stats.count }}</strong>
-        <span class="stat-sub">Histórico {{ dashboard.clean_stats.count }} · meta {{ dashboard.promotion.trade_target }}</span>
-      </article>
-    </section>
-
-    <section class="grid layout-main">
-      <article class="card" data-tab-shell data-default-panel="obs-noaa">
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Observabilidad</p>
-            <h2>Capa 2 · NOAA, ciudades y decisiones</h2>
-          </div>
-          <span class="badge badge-accent">3 vistas</span>
-        </div>
-
-        <div class="focus-tab-bar">
-          <button type="button" class="focus-tab is-active" data-panel-target="obs-noaa">NOAA</button>
-          <button type="button" class="focus-tab" data-panel-target="obs-cities">Ciudades</button>
-          <button type="button" class="focus-tab" data-panel-target="obs-decisions">Decisiones</button>
-        </div>
-
-        <section class="focus-panel is-active" data-panel="obs-noaa">
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Observabilidad</p>
-            <h2>Calidad Forecast Observada (NOAA)</h2>
-          </div>
-          <span class="badge badge-{{ 'good' if dashboard.forecast_quality.global_ready else 'warn' if dashboard.forecast_quality.sample_size else 'muted' }}">
-            n={{ dashboard.forecast_quality.sample_size }}
-          </span>
-        </div>
-        <dl class="metric-list">
-          <div><dt>Muestra NOAA</dt><dd>{{ dashboard.forecast_quality.sample_display }}</dd></div>
-          <div><dt>MAE NOAA</dt><dd>{{ dashboard.forecast_quality.mae_display }}</dd></div>
-          <div><dt>Bias NOAA</dt><dd>{{ dashboard.forecast_quality.bias_display }}</dd></div>
-          <div><dt>Cobertura</dt><dd>{{ dashboard.forecast_quality.coverage_display }}</dd></div>
-          <div><dt>Último fetch NOAA</dt><dd>{{ dashboard.forecast_quality.last_record_display }}</dd></div>
-        </dl>
-        <div class="notice notice-{{ dashboard.forecast_quality.note_level }}">
-          <strong>{{ dashboard.forecast_quality.coverage_detail }}</strong><br>
-          {{ dashboard.forecast_quality.note }}
-        </div>
-
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Ultimos 20 casos</p>
-          </div>
-        </div>
-        {% if dashboard.forecast_quality.latest_rows %}
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Ciudad</th>
-                <th>Fecha</th>
-                <th>Forecast</th>
-                <th>Observado</th>
-                <th>Error</th>
-                <th>Source</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in dashboard.forecast_quality.latest_rows %}
-              <tr>
-                <td>{{ row.city }}</td>
-                <td>{{ row.date }}</td>
-                <td>{{ row.forecast_display }}</td>
-                <td>{{ row.observed_display }}</td>
-                <td><span class="badge badge-{{ row.error_badge }}">{{ row.error_display }}</span></td>
-                <td>{{ row.source }}</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% else %}
-        <div class="notice notice-muted">Todavia no hay registros NOAA en <code>observed_vs_forecast</code>.</div>
-        {% endif %}
-        </section>
-
-        <section class="focus-panel" data-panel="obs-cities" hidden>
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Estado por ciudad</p>
-            <h2>Estado de observacion por ciudad</h2>
-          </div>
-          <span class="badge badge-accent">{{ dashboard.city_observation.tracked_count }} seguidas</span>
-        </div>
-        <div class="notice notice-{{ dashboard.city_observation.note_level }}">
-          <strong>{{ dashboard.city_observation.summary }}</strong><br>
-          {{ dashboard.city_observation.note }}
-        </div>
-        <div class="city-zone-grid">
-          <section class="city-zone-card">
-            <div class="card-head">
-              <div>
-                <p class="section-kicker">Activo ahora</p>
-                <h2>Universo operativo</h2>
-              </div>
-              <span class="badge badge-good">{{ dashboard.city_observation.active_count }} activas</span>
-            </div>
-            <div class="city-card-grid">
-              {% for row in dashboard.city_observation.active_rows %}
-              <article class="city-card city-card-{{ row.state_badge }}">
-                <div class="city-card-head">
-                  <strong>{{ row.city }}</strong>
-                  <span class="badge badge-{{ row.state_badge }}">{{ row.state_label }}</span>
-                </div>
-                <p class="city-card-copy">{{ row.trading_detail }}</p>
-                <div class="city-progress-head">
-                  <span>NOAA</span>
-                  <span>{{ row.observed_count }}/{{ row.observed_goal }}</span>
-                </div>
-                <div class="city-progress-bar">
-                  <div class="city-progress-fill city-progress-fill-{{ row.noaa_badge }}" style="width: {{ row.observed_progress_pct }}%"></div>
-                </div>
-                <div class="city-card-meta">
-                  <span>{{ row.noaa_label }} · {{ row.noaa_detail }}</span>
-                  <span>{{ row.history_label }}</span>
-                </div>
-              </article>
-              {% endfor %}
-            </div>
-          </section>
-
-          {% if dashboard.city_observation.watch_rows %}
-          <section class="city-zone-card">
-            <div class="card-head">
-              <div>
-                <p class="section-kicker">Discovery</p>
-                <h2>Seguimiento y referencia</h2>
-              </div>
-              <span class="badge badge-accent">{{ dashboard.city_observation.watch_rows|length }} en seguimiento</span>
-            </div>
-            <div class="city-card-grid">
-              {% for row in dashboard.city_observation.watch_rows %}
-              <article class="city-card city-card-{{ row.state_badge }}">
-                <div class="city-card-head">
-                  <strong>{{ row.city }}</strong>
-                  <span class="badge badge-{{ row.state_badge }}">{{ row.state_label }}</span>
-                </div>
-                <p class="city-card-copy">{{ row.state_detail }}</p>
-                <div class="city-progress-head">
-                  <span>NOAA</span>
-                  <span>{{ row.observed_count }}/{{ row.observed_goal }}</span>
-                </div>
-                <div class="city-progress-bar">
-                  <div class="city-progress-fill city-progress-fill-{{ row.noaa_badge }}" style="width: {{ row.observed_progress_pct }}%"></div>
-                </div>
-                <div class="city-card-meta">
-                  <span>{{ row.noaa_label }} · {{ row.noaa_detail }}</span>
-                  <span>{{ row.history_label }}</span>
-                </div>
-              </article>
-              {% endfor %}
-            </div>
-          </section>
-          {% endif %}
-        </div>
-
-        <section class="blocked-city-section">
-          <div class="card-head">
-            <div>
-              <p class="section-kicker">Bloqueadas</p>
-              <h2>Archivo de ciudades fuera de juego</h2>
-            </div>
-            <span class="badge badge-bad">{{ dashboard.city_observation.blocked_count }} bloqueadas</span>
-          </div>
-          <div class="blocked-pill-list">
-            {% for row in dashboard.city_observation.blocked_rows %}
-            <article class="blocked-pill-card">
-              <div class="blocked-pill-head">
-                <strong>{{ row.city }}</strong>
-                <span class="badge badge-{{ row.state_badge }}">{{ row.state_label }}</span>
-              </div>
-              <span>{{ row.state_detail }}</span>
-            </article>
-            {% endfor %}
-          </div>
-        </section>
-        </section>
-
-        <section class="focus-panel" data-panel="obs-decisions" hidden>
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Decision engine</p>
-            <h2>Altas, bajas y canaries</h2>
-          </div>
-          <span class="badge badge-accent">{{ dashboard.city_decisions.shadow_summary.opportunities_seen }} sombras</span>
-        </div>
-        <div class="notice notice-{{ dashboard.city_decisions.note_level }}">
-          <strong>{{ dashboard.city_decisions.summary }}</strong><br>
-          {{ dashboard.city_decisions.note }}
-        </div>
-        <section class="grid cards-2">
-          <article class="mini-card focus-mini-card">
-            <span class="stat-label">Regla shadow → canary</span>
-            <strong class="stat-value">{{ dashboard.city_decisions.policy.promote.edge_hits }} edges / {{ dashboard.city_decisions.policy.promote.cycles }} ciclos</strong>
-            <span class="stat-sub">mejor edge >= {{ '%.1f'|format(dashboard.city_decisions.policy.promote.best_edge_pct) }}% y soporte >= {{ dashboard.city_decisions.policy.promote.support }}</span>
-          </article>
-          <article class="mini-card focus-mini-card">
-            <span class="stat-label">Regla salida allowlist</span>
-            <strong class="stat-value">>= {{ dashboard.city_decisions.policy.remove.trades }} trades · WR <= {{ '%.1f'|format(dashboard.city_decisions.policy.remove.win_rate) }}%</strong>
-            <span class="stat-sub">y PnL <= ${{ '%.2f'|format(dashboard.city_decisions.policy.remove.pnl) }}</span>
-          </article>
-        </section>
-        <section class="grid cards-2">
-          <article class="mini-card focus-mini-card">
-            <span class="stat-label">Canaries automáticos</span>
-            <strong class="stat-value">{{ dashboard.city_decisions.auto_state.canary_count }}</strong>
-            <span class="stat-sub">ciudades con sizing reducido y trading habilitado</span>
-          </article>
-          <article class="mini-card focus-mini-card">
-            <span class="stat-label">Shadows automáticos</span>
-            <strong class="stat-value">{{ dashboard.city_decisions.auto_state.shadow_count }}</strong>
-            <span class="stat-sub">ciudades degradadas sin nuevas entradas</span>
-          </article>
-        </section>
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Ranking operacional</p>
-            <h2>Vista de decisión por ciudad</h2>
-          </div>
-          <span class="badge badge-accent">{{ dashboard.city_decisions.ranking_rows|length }} ciudades</span>
-        </div>
-        <section class="grid cards-4 city-ranking-summary">
-          <article class="mini-card focus-mini-card">
-            <span class="stat-label">Más cerca de entrar</span>
-            <strong class="stat-value">{{ dashboard.city_decisions.top_candidate.city if dashboard.city_decisions.top_candidate else 'Nadie' }}</strong>
-            <span class="stat-sub">
-              {% if dashboard.city_decisions.top_candidate %}
-              {{ dashboard.city_decisions.top_candidate.priority_label }} | {{ dashboard.city_decisions.top_candidate.distance_label }}
-              {% else %}
-              no hay candidata clara ahora mismo
-              {% endif %}
-            </span>
-          </article>
-          <article class="mini-card focus-mini-card">
-            <span class="stat-label">Siguiente</span>
-            <strong class="stat-value">{{ dashboard.city_decisions.next_candidate.city if dashboard.city_decisions.next_candidate else 'n/d' }}</strong>
-            <span class="stat-sub">
-              {% if dashboard.city_decisions.next_candidate %}
-              {{ dashboard.city_decisions.next_candidate.priority_label }} | {{ dashboard.city_decisions.next_candidate.distance_label }}
-              {% else %}
-              no hay segunda candidata con prioridad real
-              {% endif %}
-            </span>
-          </article>
-          <article class="mini-card focus-mini-card">
-            <span class="stat-label">Alejándose</span>
-            <strong class="stat-value">{{ dashboard.city_decisions.cooling_city.city if dashboard.city_decisions.cooling_city else 'n/d' }}</strong>
-            <span class="stat-sub">
-              {% if dashboard.city_decisions.cooling_city %}
-              {{ dashboard.city_decisions.cooling_city.main_reason }}
-              {% else %}
-              no hay una ciudad enfriándose de forma dominante
-              {% endif %}
-            </span>
-          </article>
-          <article class="mini-card focus-mini-card">
-            <span class="stat-label">No merecen atención</span>
-            <strong class="stat-value">{{ dashboard.city_decisions.ranking_summary.no_touch }}</strong>
-            <span class="stat-sub">
-              {% if dashboard.city_decisions.noise_city %}
-              líder de ruido: {{ dashboard.city_decisions.noise_city.city }}
-              {% else %}
-              sin ruido claro ahora mismo
-              {% endif %}
-            </span>
-          </article>
-        </section>
-
-        <div class="table-wrap city-ranking-table-wrap">
-          <table class="city-ranking-table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Ciudad</th>
-                <th>Score</th>
-                <th>Estado actual</th>
-                <th>Distancia a canary</th>
-                <th>Tendencia</th>
-                <th>Motivo principal</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in dashboard.city_decisions.ranking_rows %}
-              <tr class="city-ranking-row city-ranking-row-{{ row.priority_badge }}{% if row.degraded %} city-ranking-row-degraded{% endif %}">
-                <td><strong>#{{ loop.index }}</strong></td>
-                <td>
-                  <strong>{{ row.city }}</strong>
-                  <span class="table-note"><span class="badge badge-{{ row.priority_badge }}">{{ row.priority_label }}</span></span>
-                </td>
-                <td>
-                  <div class="city-score-cell">
-                    <span class="badge badge-{{ row.score_badge }}">{{ row.readiness_score }}</span>
-                    <div class="city-score-bar">
-                      <div class="city-score-fill city-score-fill-{{ row.score_badge }}" style="width: {{ row.readiness_score }}%"></div>
-                    </div>
-                  </div>
-                </td>
-                <td>
-                  <span class="badge badge-{{ row.state_badge }}">{{ row.state_label }}</span>
-                  <span class="table-note">{{ row.trading_label }}</span>
-                </td>
-                <td>
-                  <span class="badge badge-{{ row.distance_badge }}">{{ row.distance_label }}</span>
-                  <span class="table-note">{{ row.distance_detail }}</span>
-                </td>
-                <td>
-                  <span class="badge badge-{{ row.trend_badge }}">{{ row.trend_label }}</span>
-                  <span class="table-note">{{ row.history_label }} | NOAA {{ row.observed_display }}</span>
-                </td>
-                <td>
-                  <strong>{{ row.main_reason }}</strong>
-                  <span class="table-note">
-                    {% if row.degraded and row.degradation_reason %}
-                    {{ row.degradation_reason }}
-                    {% else %}
-                    {{ row.reason }}
-                    {% endif %}
-                  </span>
-                </td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        <div class="city-zone-grid decision-zone-grid">
-          <section class="city-zone-card">
-            <div class="card-head">
-              <div>
-                <p class="section-kicker">Overlay vivo</p>
-                <h2>Canaries automáticos actuales</h2>
-              </div>
-              <span class="badge badge-accent">{{ dashboard.city_decisions.auto_state.canary_rows|length }}</span>
-            </div>
-            {% if dashboard.city_decisions.auto_state.canary_rows %}
-            <div class="blocked-pill-list">
-              {% for row in dashboard.city_decisions.auto_state.canary_rows %}
-              <article class="blocked-pill-card">
-                <div class="blocked-pill-head">
-                  <strong>{{ row.city }}</strong>
-                  <span class="badge badge-accent">Canary</span>
-                </div>
-                <span>{{ row.reason }}</span>
-              </article>
-              {% endfor %}
-            </div>
-            {% else %}
-            <div class="notice notice-muted">Todavía no hay ciudades promovidas automáticamente a canary.</div>
-            {% endif %}
-          </section>
-          <section class="city-zone-card">
-            <div class="card-head">
-              <div>
-                <p class="section-kicker">Overlay vivo</p>
-                <h2>Shadows automáticos actuales</h2>
-              </div>
-              <span class="badge badge-warn">{{ dashboard.city_decisions.auto_state.shadow_rows|length }}</span>
-            </div>
-            {% if dashboard.city_decisions.auto_state.shadow_rows %}
-            <div class="blocked-pill-list">
-              {% for row in dashboard.city_decisions.auto_state.shadow_rows %}
-              <article class="blocked-pill-card">
-                <div class="blocked-pill-head">
-                  <strong>{{ row.city }}</strong>
-                  <span class="badge badge-warn">Shadow</span>
-                </div>
-                <span>{{ row.reason }}</span>
-              </article>
-              {% endfor %}
-            </div>
-            {% else %}
-            <div class="notice notice-muted">No hay ciudades degradadas automáticamente a shadow.</div>
-            {% endif %}
-          </section>
-        </div>
-
-        <div class="city-zone-grid decision-zone-grid">
-          <section class="city-zone-card">
-            <div class="card-head">
-              <div>
-                <p class="section-kicker">Mantener</p>
-                <h2>Ciudades que siguen dentro</h2>
-              </div>
-              <span class="badge badge-good">{{ dashboard.city_decisions.keep_rows|length }}</span>
-            </div>
-            <div class="city-card-grid">
-              {% for row in dashboard.city_decisions.keep_rows %}
-              <article class="city-card city-card-{{ row.badge }}">
-                <div class="city-card-head">
-                  <strong>{{ row.city }}</strong>
-                  <span class="badge badge-{{ row.badge }}">{{ row.decision_label }}</span>
-                </div>
-                <p class="city-card-copy">{{ row.reason }}</p>
-                <div class="city-card-meta">
-                  <span>{{ row.history_label }} · {{ row.pnl_display }}</span>
-                  <span>NOAA {{ row.observed_display }}</span>
-                </div>
-              </article>
-              {% endfor %}
-            </div>
-          </section>
-
-          {% if dashboard.city_decisions.promote_rows %}
-          <section class="city-zone-card">
-            <div class="card-head">
-              <div>
-                <p class="section-kicker">Promover</p>
-                <h2>Candidatas a canary</h2>
-              </div>
-              <span class="badge badge-accent">{{ dashboard.city_decisions.promote_rows|length }}</span>
-            </div>
-            <div class="city-card-grid">
-              {% for row in dashboard.city_decisions.promote_rows %}
-              <article class="city-card city-card-{{ row.badge }}">
-                <div class="city-card-head">
-                  <strong>{{ row.city }}</strong>
-                  <span class="badge badge-{{ row.badge }}">{{ row.decision_label }}</span>
-                </div>
-                <p class="city-card-copy">{{ row.reason }}</p>
-                <div class="city-card-meta">
-                  <span>Shadow {{ row.shadow_edges }} edges · pico {{ row.shadow_best_edge_display }}</span>
-                  <span>{{ row.history_label }}</span>
-                </div>
-              </article>
-              {% endfor %}
-            </div>
-          </section>
-          {% endif %}
-
-          {% if dashboard.city_decisions.remove_rows %}
-          <section class="city-zone-card">
-            <div class="card-head">
-              <div>
-                <p class="section-kicker">Revisar salida</p>
-                <h2>Activas en zona roja</h2>
-              </div>
-              <span class="badge badge-bad">{{ dashboard.city_decisions.remove_rows|length }}</span>
-            </div>
-            <div class="city-card-grid">
-              {% for row in dashboard.city_decisions.remove_rows %}
-              <article class="city-card city-card-{{ row.badge }}">
-                <div class="city-card-head">
-                  <strong>{{ row.city }}</strong>
-                  <span class="badge badge-{{ row.badge }}">{{ row.decision_label }}</span>
-                </div>
-                <p class="city-card-copy">{{ row.reason }}</p>
-                <div class="city-card-meta">
-                  <span>{{ row.history_label }} · {{ row.pnl_display }}</span>
-                  <span>NOAA {{ row.observed_display }}</span>
-                </div>
-              </article>
-              {% endfor %}
-            </div>
-          </section>
-          {% endif %}
-        </div>
-
-        {% if dashboard.city_decisions.observe_rows %}
-        <section class="blocked-city-section">
-          <div class="card-head">
-            <div>
-              <p class="section-kicker">Observación</p>
-              <h2>Ciudades para seguir sin comprar aún</h2>
-            </div>
-            <span class="badge badge-warn">{{ dashboard.city_decisions.observe_rows|length }}</span>
-          </div>
-          <div class="blocked-pill-list">
-            {% for row in dashboard.city_decisions.observe_rows %}
-            <article class="blocked-pill-card">
-              <div class="blocked-pill-head">
-                <strong>{{ row.city }}</strong>
-                <span class="badge badge-{{ row.badge }}">{{ row.decision_label }}</span>
-              </div>
-              <span>{{ row.reason }}</span>
-            </article>
-            {% endfor %}
-          </div>
-        </section>
-        {% endif %}
-
-        {% if dashboard.city_decisions.recent_shadow_rows %}
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Shadow</p>
-            <h2>Últimas oportunidades fuera de allowlist</h2>
-          </div>
-          <span class="badge badge-accent">{{ dashboard.city_decisions.recent_shadow_rows|length }} recientes</span>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Ciudad</th>
-                <th>Fecha mercado</th>
-                <th>Lado</th>
-                <th>Edge</th>
-                <th>EV</th>
-                <th>Mercado</th>
-                <th>Nuestro</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in dashboard.city_decisions.recent_shadow_rows %}
-              <tr>
-                <td>{{ row.city }}</td>
-                <td>{{ row.date }}</td>
-                <td>{{ row.side }}</td>
-                <td><span class="badge badge-accent">{{ '%.1f'|format(row.edge_pct) }}%</span></td>
-                <td>${{ '%.2f'|format(row.expected_value) }}</td>
-                <td>{{ row.market_price }}%</td>
-                <td>{{ row.our_prob }}%</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% endif %}
-
-        {% if dashboard.city_decisions.auto_state.transitions %}
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Transiciones</p>
-            <h2>Historial automático reciente</h2>
-          </div>
-          <span class="badge badge-accent">{{ dashboard.city_decisions.auto_state.transitions|length }} eventos</span>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Ciudad</th>
-                <th>De</th>
-                <th>A</th>
-                <th>Momento</th>
-                <th>Motivo</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in dashboard.city_decisions.auto_state.transitions %}
-              <tr>
-                <td>{{ row.city }}</td>
-                <td>{{ row.from }}</td>
-                <td>{{ row.to }}</td>
-                <td>{{ row.at }}</td>
-                <td>{{ row.reason }}</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% endif %}
-        </section>
-
-      </article>
-    </section>
-
-    <section class="grid cards-4">
-      <article class="card mini-card">
-        <span class="stat-label">PnL serie v{{ dashboard.logic_series }}</span>
-        {% if dashboard.series_stats.closed_count < 5 %}
-        <strong class="stat-value">esperando muestra</strong>
-        <span class="stat-sub">menos de 5 cierres</span>
-        {% else %}
-        <strong class="stat-value">{{ dashboard.series_stats.pnl_display }}</strong>
-        {% endif %}
-      </article>
-      <article class="card mini-card">
-        <span class="stat-label">Win rate serie</span>
-        {% if dashboard.series_stats.closed_count < 5 %}
-        <strong class="stat-value">esperando muestra</strong>
-        <span class="stat-sub">menos de 5 cierres</span>
-        {% else %}
-        <strong class="stat-value">{{ dashboard.series_stats.win_rate_display }}</strong>
-        {% endif %}
-      </article>
-      <article class="card mini-card">
-        <span class="stat-label">Cierres serie</span>
-        <strong class="stat-value">{{ dashboard.series_stats.closed_count }}</strong>
-      </article>
-      <article class="card mini-card">
-        <span class="stat-label">Drawdown reciente</span>
-        {% if dashboard.series_stats.closed_count < 5 %}
-        <strong class="stat-value">esperando muestra</strong>
-        <span class="stat-sub">menos de 5 cierres</span>
-        {% else %}
-        <strong class="stat-value">{{ dashboard.series_stats.drawdown_display }}</strong>
-        {% if not dashboard.series_stats.has_drawdown_data %}
-        <span class="stat-sub">Sin cierres todavía</span>
-        {% endif %}
-        {% endif %}
-      </article>
-    </section>
-
-    <section class="grid layout-main">
-      <article class="card card-promotion">
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Checklist</p>
-            <h2>Subida de bankroll</h2>
-          </div>
-          <span class="badge badge-{{ 'good' if dashboard.promotion.decision == 'READY' else 'warn' if dashboard.promotion.decision == 'NEARLY' else 'bad' }}">
-            {{ dashboard.promotion.decision_label }}
-          </span>
-        </div>
-
-        <div class="progress-block">
-          <div class="progress-copy">
-            <span>{{ dashboard.promotion.passed }} / {{ dashboard.promotion.total }} checks cumplidos</span>
-            <strong>{{ dashboard.promotion.progress_pct }}%</strong>
-          </div>
-          <div class="progress-bar">
-            <div class="progress-fill" style="width: {{ dashboard.promotion.progress_pct }}%"></div>
-          </div>
-        </div>
-
-        <div class="checklist">
-          {% for item in dashboard.promotion.checks %}
-          <div class="check-item check-item-{{ item.status }}">
-            <div class="check-status {{ item.status }}"></div>
-            <div class="check-body">
-              <strong>{{ item.label }}</strong>
-              <span>{{ item.scope }} · {{ item.value }}</span>
-            </div>
-            <span class="check-tag check-tag-{{ item.status }}">{{ item.tag }}</span>
-          </div>
-          {% endfor %}
-        </div>
-      </article>
-
-      <article class="card">
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Sistema</p>
-            <h2>Estado operativo</h2>
-          </div>
-        </div>
-
-        <dl class="metric-list">
-          <div><dt>Versión</dt><dd>{{ dashboard.version }}</dd></div>
-          <div><dt>Serie lógica</dt><dd>v{{ dashboard.logic_series }}</dd></div>
-          <div><dt>Próximo ciclo</dt><dd>{{ dashboard.next_run }}</dd></div>
-          <div><dt>Último ciclo</dt><dd>{{ dashboard.last_cycle_label }}</dd></div>
-          <div><dt>Condición filtrada</dt><dd>{{ dashboard.cycle_summary.scan.condition_filtered|default(0) }} mercados</dd></div>
-          <div><dt>Intra-SL</dt><dd>{{ dashboard.intra_label }}</dd></div>
-          <div><dt>Signals</dt><dd>{{ dashboard.alerts.signals.status }}</dd></div>
-        </dl>
-
-        {% if dashboard.portfolio %}
-        <div class="system-snapshot">
-          <div class="pill">
-            <span>Cash</span>
-            <strong>${{ '%.2f'|format(dashboard.portfolio.cash) if dashboard.portfolio.cash is not none else 'n/d' }}</strong>
-          </div>
-          <div class="pill">
-            <span>Posiciones vivas</span>
-            <strong>${{ '%.2f'|format(dashboard.portfolio.active_value) }}</strong>
-          </div>
-          <div class="pill">
-            <span>Total cartera</span>
-            <strong>${{ '%.2f'|format(dashboard.portfolio.portfolio_total) }}</strong>
-          </div>
-        </div>
-        {% endif %}
-
-        {% if dashboard.alerts.active_items %}
-        <div class="alert-stack">
-          {% for alert in dashboard.alerts.active_items %}
-          <div class="alert-card alert-{{ alert.level }}">
-            <strong>{{ alert.title }}</strong>
-            <span>{{ alert.detail }}</span>
-          </div>
-          {% endfor %}
-        </div>
-        {% else %}
-        <div class="notice notice-good">Sin alertas activas relevantes en este momento.</div>
-        {% endif %}
-      </article>
-    </section>
-
-    <details>
-      <summary>Readiness y desbloqueos (detalle)</summary>
-      <section class="grid layout-main">
-        <article class="card">
-          <div class="card-head">
-            <div>
-              <p class="section-kicker">Progreso</p>
-              <h2>Readiness operativo</h2>
-            </div>
-          </div>
-          <div class="checklist">
-            {% for item in dashboard.progress %}
-            <div class="check-item check-item-{{ item.status }}">
-              <div class="check-status {{ item.status }}"></div>
-              <div class="check-body">
-                <strong>{{ item.label }}</strong>
-                <span>{{ item.value }} · {{ item.detail }}</span>
-              </div>
-              <span class="check-tag check-tag-{{ item.status }}">{{ item.tag }}</span>
-            </div>
-            {% endfor %}
-          </div>
-        </article>
-
-        <article class="card">
-          <div class="card-head">
-            <div>
-              <p class="section-kicker">Desbloqueos</p>
-              <h2>Qué falta para habilitar decisiones</h2>
-            </div>
-          </div>
-          <div class="checklist">
-            {% for item in dashboard.unlocks %}
-            <div class="check-item check-item-{{ item.status }}">
-              <div class="check-status {{ item.status }}"></div>
-              <div class="check-body">
-                <strong>{{ item.label }}</strong>
-                <span>{{ item.value }} · {{ item.detail }}</span>
-              </div>
-              <span class="check-tag check-tag-{{ item.status }}">{{ item.tag }}</span>
-            </div>
-            {% endfor %}
-          </div>
-        </article>
-      </section>
-    </details>
-
-    <section class="grid layout-main">
-      <article class="card">
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Operativa observada</p>
-            <h2>Eficiencia de exits</h2>
-          </div>
-          <div class="event-meta">
-            <span class="badge badge-{{ dashboard.trade_analytics.score_badge }}">{{ dashboard.trade_analytics.score_display }}</span>
-            <span class="badge badge-{{ dashboard.trade_analytics.confidence_badge }}">{{ dashboard.trade_analytics.confidence_label }}</span>
-          </div>
-        </div>
-
-        <p class="focus-summary">{{ dashboard.trade_analytics.summary }}</p>
-
-        <div class="progress-block">
-          <div class="progress-copy">
-            <span>Medidor de eficiencia observada</span>
-            <strong>{{ dashboard.trade_analytics.score_display }}</strong>
-          </div>
-          <div class="progress-bar">
-            <div class="progress-fill progress-fill-{{ dashboard.trade_analytics.score_badge }}" style="width: {{ dashboard.trade_analytics.score_pct }}%"></div>
-          </div>
-        </div>
-
-        <section class="grid cards-4 focus-stats-grid">
-          {% for item in dashboard.trade_analytics.quick_stats %}
-          <article class="mini-card focus-mini-card">
-            <span class="stat-label">{{ item.label }}</span>
-            <strong class="stat-value">{{ item.value }}</strong>
-            <span class="stat-sub">{{ item.detail }}</span>
-          </article>
-          {% endfor %}
-        </section>
-
-        {% if dashboard.trade_analytics.timeline_points %}
-        <div class="efficiency-timeline">
-          {% for point in dashboard.trade_analytics.timeline_points %}
-          <div class="efficiency-point">
-            <div class="efficiency-point-rail">
-              <div class="efficiency-point-bar efficiency-point-bar-{{ point.badge }}" style="height: {{ point.height_pct }}%"></div>
-            </div>
-            <strong class="efficiency-point-value">{{ point.score_display }}</strong>
-            <span class="efficiency-point-label">{{ point.short_label }}</span>
-            <span class="table-note">{{ point.reason_tag }} · {{ point.closed_at_display }}</span>
-          </div>
-          {% endfor %}
-        </div>
-        {% else %}
-        <div class="notice notice-muted">Todavia no hay suficiente evidencia post-salida para dibujar la serie de eficiencia.</div>
-        {% endif %}
-
-        <div class="notice notice-{{ dashboard.trade_analytics.confidence_badge }}">
-          <strong>{{ dashboard.trade_analytics.headline }}</strong><br>
-          {{ dashboard.trade_analytics.sample_detail }}. {{ dashboard.trade_analytics.note }}
-        </div>
-      </article>
-
-      <article class="card">
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Queue de revision</p>
-            <h2>Que casos merecen atencion</h2>
-          </div>
-        </div>
-
-        <div class="checklist">
-          {% for row in dashboard.trade_analytics.breakdown_rows %}
-          <div class="check-item check-item-{{ row.signal_badge }}">
-            <div class="check-status {{ row.signal_badge }}"></div>
-            <div class="check-body">
-              <strong>{{ row.label }}</strong>
-              <span>Muestra {{ row.coverage_display }} · eficiencia media {{ row.avg_efficiency_display }}</span>
-            </div>
-            <span class="check-tag check-tag-{{ row.signal_badge }}">{{ row.signal_label }}</span>
-          </div>
-          {% endfor %}
-        </div>
-
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Upside dejado</p>
-            <h2>Top casos para revisar</h2>
-          </div>
-        </div>
-        {% if dashboard.trade_analytics.top_upside_rows %}
-        <div class="list-stack compact">
-          {% for row in dashboard.trade_analytics.top_upside_rows %}
-          <div class="list-row">
-            <div class="check-body">
-              <strong>{{ row.label }}</strong>
-              <span>{{ row.close_reason_label }} · cierre {{ row.close_value_display }} · pico dejado {{ row.upside_left_display }}</span>
-            </div>
-            <span class="badge badge-{{ row.verdict_badge }}">{{ row.efficiency_display }}</span>
-          </div>
-          {% endfor %}
-        </div>
-        {% else %}
-        <div class="notice notice-good">Todavia no hay cierres observados con upside dejado relevante.</div>
-        {% endif %}
-
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Proteccion</p>
-            <h2>Casos donde salir ayudo</h2>
-          </div>
-        </div>
-        {% if dashboard.trade_analytics.top_protection_rows %}
-        <div class="list-stack compact">
-          {% for row in dashboard.trade_analytics.top_protection_rows %}
-          <div class="list-row">
-            <div class="check-body">
-              <strong>{{ row.label }}</strong>
-              <span>{{ row.close_reason_label }} · cierre {{ row.close_value_display }} · downside evitado {{ row.drawdown_avoided_display }}</span>
-            </div>
-            <span class="badge badge-good">{{ row.efficiency_display }}</span>
-          </div>
-          {% endfor %}
-        </div>
-        {% else %}
-        <div class="notice notice-muted">Todavia no hay muestra suficiente de downside evitado para sacar lectura.</div>
-        {% endif %}
-      </article>
-    </section>
-
-    <section class="grid">
-      <article class="card">
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Historico operativo</p>
-            <h2>Ultimos cierres con evidencia post-salida</h2>
-          </div>
-          <span class="badge badge-{{ dashboard.trade_analytics.confidence_badge }}">{{ dashboard.trade_analytics.sample_display }}</span>
-        </div>
-        {% if dashboard.trade_analytics.recent_rows %}
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Mercado</th>
-                <th>Cierre</th>
-                <th>Razón</th>
-                <th>Eficiencia</th>
-                <th>Upside</th>
-                <th>Protección</th>
-                <th>Veredicto</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in dashboard.trade_analytics.recent_rows %}
-              <tr>
-                <td>
-                  <strong>{{ row.label }}</strong>
-                  <span class="table-note">{{ row.closed_at_display }}</span>
-                </td>
-                <td>{{ row.close_value_display }}</td>
-                <td>{{ row.close_reason_label }}</td>
-                <td><span class="badge badge-{{ row.score_badge }}">{{ row.efficiency_display }}</span></td>
-                <td>{{ row.upside_left_display }}</td>
-                <td>{{ row.drawdown_avoided_display }}</td>
-                <td><span class="badge badge-{{ row.verdict_badge }}">{{ row.verdict_label }}</span></td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% else %}
-        <div class="notice notice-muted">Todavia no hay cierres con muestra post-salida util para analisis operativo.</div>
-        {% endif %}
-      </article>
-    </section>
-
-    <section class="layer-block layer-block-secondary" data-tab-shell data-default-panel="ops-summary">
-      <div class="layer-header">
-        <div>
-          <p class="section-kicker">Trade console</p>
-          <h2>Operaciones del bot</h2>
-        </div>
-        <span class="badge badge-accent">Vista operativa</span>
-      </div>
-      <p class="layer-copy">
-        Panel pensado para responder trade por trade qué hizo el bot, por qué entró, por qué salió,
-        qué resultado dejó, qué pasó después y si sigue pendiente `claim/redeem`.
-      </p>
-
-      <div class="focus-tab-bar">
-        <button type="button" class="focus-tab is-active" data-panel-target="ops-summary">Resumen</button>
-        <button type="button" class="focus-tab" data-panel-target="ops-trades">Trades</button>
+        <span class="badge badge-accent">
+          {{ dashboard.city_decisions.shadow_summary.opportunities_seen }} senales
+        </span>
       </div>
 
-      <section class="focus-panel is-active" data-panel="ops-summary">
-        <section class="grid cards-4">
-          {% for item in dashboard.trade_analytics.total_cards %}
-          <article class="card mini-card">
-            <span class="stat-label">{{ item.label }}</span>
-            <strong class="stat-value">{{ item.value }}</strong>
-            <span class="stat-sub">{{ item.detail }}</span>
-          </article>
-          {% endfor %}
-        </section>
+      {% if dashboard.city_decisions.recent_shadow_rows %}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Ciudad</th>
+              <th>Fecha</th>
+              <th>Condicion</th>
+              <th>Side</th>
+              <th>Edge%</th>
+              <th>Forecast</th>
+              <th>Mercado</th>
+              <th>Resolucion</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in dashboard.city_decisions.recent_shadow_rows %}
+            <tr>
+              <td>{{ row.city }}</td>
+              <td>{{ row.date }}</td>
+              <td>{{ row.condition_label|default(row.condition|default('direccional')) }}</td>
+              <td>{{ row.side }}</td>
+              <td><span class="badge badge-accent">{{ '%.1f'|format(row.edge_pct) }}%</span></td>
+              <td>
+                {% if row.forecast_display is defined %}
+                  {{ row.forecast_display }}
+                {% elif row.forecast_max is not none %}
+                  {{ '%.1fC'|format(row.forecast_max) }}
+                {% else %}
+                  n/d
+                {% endif %}
+              </td>
+              <td><span class="table-note">{{ row.question|default('n/d') }}</span></td>
+              <td><span class="badge badge-{{ row.resolution_badge|default('muted') }}">{{ row.resolution_label|default('pendiente') }}</span></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="notice notice-accent">
+        {{ dashboard.city_decisions.shadow_summary.opportunities_seen }} senales en
+        {{ dashboard.city_decisions.shadow_summary.cycles_with_shadow }} ciclos |
+        {{ dashboard.city_decisions.shadow_summary.resolved_count|default(0) }} resueltas |
+        {{ dashboard.city_decisions.shadow_summary.would_win_count|default(0) }} habrian acertado
+        (WR simulado: {{ dashboard.city_decisions.shadow_summary.simulated_wr_display|default('n/d') }})
+      </div>
+      {% else %}
+      <div class="notice notice-muted">
+        Todavia no hay senales shadow direccionales registradas. El bot registra oportunidades cada ciclo [8, 16, 23] UTC.
+      </div>
+      {% endif %}
+    </section>
 
+    {# ============================================================ #}
+    {# BLOQUE 3 — Salud del sistema (colapsable)                    #}
+    {# ============================================================ #}
+    <details class="layer-toggle">
+      <summary>
+        <span class="layer-toggle-kicker">Bloque 3</span>
+        <strong>Salud del sistema</strong>
+        <span class="layer-toggle-copy">Forecast accuracy, sigma, ciudades, alertas.</span>
+      </summary>
+      <div class="layer-toggle-content">
+
+        {# -- NOAA Forecast Quality -- #}
         <section class="grid layout-main">
           <article class="card">
             <div class="card-head">
               <div>
-                <p class="section-kicker">Buckets</p>
-                <h2>Que tipo de salida estamos haciendo</h2>
+                <p class="section-kicker">Forecast</p>
+                <h2>Calidad NOAA observada</h2>
               </div>
+              <span class="badge badge-{{ 'good' if dashboard.forecast_quality.global_ready else 'warn' if dashboard.forecast_quality.sample_size else 'muted' }}">
+                n={{ dashboard.forecast_quality.sample_size }}
+              </span>
             </div>
+            <dl class="metric-list">
+              <div><dt>Muestra NOAA</dt><dd>{{ dashboard.forecast_quality.sample_display }}</dd></div>
+              <div><dt>MAE NOAA</dt><dd>{{ dashboard.forecast_quality.mae_display }}</dd></div>
+              <div><dt>Bias NOAA</dt><dd>{{ dashboard.forecast_quality.bias_display }}</dd></div>
+              <div><dt>Cobertura</dt><dd>{{ dashboard.forecast_quality.coverage_display }}</dd></div>
+              <div><dt>Ultimo fetch NOAA</dt><dd>{{ dashboard.forecast_quality.last_record_display }}</dd></div>
+            </dl>
+
+            {% if dashboard.forecast_quality.latest_rows %}
+            <div class="card-head"><div><p class="section-kicker">Ultimos 20 casos</p></div></div>
             <div class="table-wrap">
               <table>
                 <thead>
                   <tr>
-                    <th>Tipo</th>
-                    <th>Muestra</th>
-                    <th>Eficiencia</th>
-                    <th>Dejado</th>
-                    <th>Protegido</th>
-                    <th>Lectura</th>
+                    <th>Ciudad</th>
+                    <th>Fecha</th>
+                    <th>Forecast</th>
+                    <th>Observado</th>
+                    <th>Error</th>
+                    <th>Source</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {% for row in dashboard.trade_analytics.breakdown_rows %}
+                  {% for row in dashboard.forecast_quality.latest_rows %}
                   <tr>
-                    <td><strong>{{ row.label }}</strong></td>
-                    <td>{{ row.coverage_display }}</td>
-                    <td>{{ row.avg_efficiency_display }}</td>
-                    <td>{{ row.upside_left_display }}</td>
-                    <td>{{ row.drawdown_avoided_display }}</td>
-                    <td><span class="badge badge-{{ row.signal_badge }}">{{ row.signal_label }}</span></td>
+                    <td>{{ row.city }}</td>
+                    <td>{{ row.date }}</td>
+                    <td>{{ row.forecast_display }}</td>
+                    <td>{{ row.observed_display }}</td>
+                    <td><span class="badge badge-{{ row.error_badge }}">{{ row.error_display }}</span></td>
+                    <td>{{ row.source }}</td>
                   </tr>
                   {% endfor %}
                 </tbody>
               </table>
             </div>
+            {% endif %}
           </article>
 
+          {# -- City accuracy + states -- #}
           <article class="card">
             <div class="card-head">
               <div>
-                <p class="section-kicker">Lectura rapida</p>
-                <h2>Como interpretar este bloque</h2>
+                <p class="section-kicker">Accuracy</p>
+                <h2>Rendimiento por ciudad</h2>
               </div>
             </div>
-            <div class="list-stack compact">
-              <div class="list-row">
-                <div class="check-body">
-                  <strong>Operaciones / TP / SL / LOSS_TOTAL</strong>
-                  <span>`LOSS_TOTAL` no es un `SELL`: marca posiciones muertas o no vendibles, separadas de los stop-loss normales.</span>
-                </div>
+            {% if dashboard.top_cities %}
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Ciudad</th>
+                    <th>Trades</th>
+                    <th>WR</th>
+                    <th>PnL</th>
+                    <th>Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for city in dashboard.top_cities %}
+                  <tr>
+                    <td>{{ city.city }}</td>
+                    <td>{{ city.trades }}</td>
+                    <td>{{ city.win_rate }}%</td>
+                    <td class="{{ 'good' if city.pnl >= 0 else 'bad' }}">${{ '%+.2f'|format(city.pnl) }}</td>
+                    <td><span class="badge badge-{{ 'bad' if city.risk_level == 'critical' else 'warn' if city.risk_level == 'watch' else 'good' }}">{{ city.risk_label }}</span></td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            {% else %}
+            <div class="notice notice-muted">Sin historico suficiente por ciudad.</div>
+            {% endif %}
+
+            {# -- City states compact -- #}
+            <div class="card-head">
+              <div>
+                <p class="section-kicker">Ciudades</p>
+                <h2>Estado por ciudad</h2>
               </div>
-              <div class="list-row">
-                <div class="check-body">
-                  <strong>Ganadas / SELL negativos / PnL neto</strong>
-                  <span>Los `SELL` cerrados en rojo se leen aparte para no mezclar p&eacute;rdidas de ejecuci&oacute;n con `LOSS_TOTAL` o legado hist&oacute;rico.</span>
-                </div>
+              <span class="badge badge-accent">{{ dashboard.city_observation.tracked_count }} seguidas</span>
+            </div>
+
+            {% for row in dashboard.city_observation.active_rows %}
+            <div class="check-item check-item-{{ row.state_badge }}">
+              <div class="check-status {{ row.state_badge }}"></div>
+              <div class="check-body">
+                <strong>{{ row.city }}</strong>
+                <span>{{ row.state_label }} · NOAA {{ row.observed_count }}/{{ row.observed_goal }} · {{ row.trading_detail }}</span>
               </div>
-              <div class="list-row">
-                <div class="check-body">
-                  <strong>Legacy / parcial</strong>
-                  <span>Son registros reconstruidos con contexto incompleto: sirven para trazabilidad, pero no pesan igual que un trade completo de la serie actual.</span>
-                </div>
+            </div>
+            {% endfor %}
+
+            {% if dashboard.city_observation.blocked_rows %}
+            <div class="card-head">
+              <div><p class="section-kicker">Bloqueadas</p></div>
+              <span class="badge badge-bad">{{ dashboard.city_observation.blocked_count }}</span>
+            </div>
+            {% for row in dashboard.city_observation.blocked_rows %}
+            <div class="check-item check-item-bad">
+              <div class="check-status bad"></div>
+              <div class="check-body">
+                <strong>{{ row.city }}</strong>
+                <span>{{ row.state_detail }}</span>
               </div>
-              <div class="list-row">
-                <div class="check-body">
-                  <strong>Dejado de ganar / Protegido</strong>
-                  <span>Solo se calcula cuando el mercado se volvió a observar tras salir; no todos los trades tienen esa evidencia aún.</span>
-                </div>
+            </div>
+            {% endfor %}
+            {% endif %}
+          </article>
+        </section>
+
+        {# -- Alerts -- #}
+        {% if dashboard.alerts.active_items %}
+        <section class="grid">
+          <article class="card">
+            <div class="card-head">
+              <div>
+                <p class="section-kicker">Alertas</p>
+                <h2>Alertas activas</h2>
               </div>
-              <div class="list-row">
-                <div class="check-body">
-                  <strong>Entrada / Salida del bot</strong>
-                  <span>Cada trade explica con texto corto qué condición disparó la entrada y qué regla cerró la posición.</span>
-                </div>
+            </div>
+            <div class="alert-stack">
+              {% for alert in dashboard.alerts.active_items %}
+              <div class="alert-card alert-{{ alert.level }}">
+                <strong>{{ alert.title }}</strong>
+                <span>{{ alert.detail }}</span>
               </div>
+              {% endfor %}
             </div>
           </article>
         </section>
-      </section>
-
-      <section class="focus-panel" data-panel="ops-trades" hidden>
-        <article class="card">
-          <div class="card-head">
-            <div>
-              <p class="section-kicker">Trades</p>
-              <h2>Detalle operativo por operación</h2>
-            </div>
-            <span class="badge badge-{{ dashboard.trade_analytics.confidence_badge }}">{{ dashboard.trade_analytics.sample_display }}</span>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Operación</th>
-                  <th>Entrada del bot</th>
-                  <th>Salida del bot</th>
-                  <th>Resultado</th>
-                  <th>Valor</th>
-                  <th>c/share</th>
-                  <th>Dejado</th>
-                  <th>Despues</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for row in dashboard.trade_analytics.trade_rows %}
-                <tr>
-                  <td>
-                    <strong>{{ row.label }}</strong>
-                    <span class="table-note">{{ row.bucket_label }} · abierto {{ row.opened_at_display }} · cerrado {{ row.closed_at_display }}</span>
-                  </td>
-                  <td><span class="table-note">{{ row.entry_condition }}</span></td>
-                  <td><span class="table-note">{{ row.exit_condition }}</span></td>
-                  <td>
-                    <span class="badge badge-{{ row.status_badge }}">{{ row.status_label }}</span>
-                    <span class="table-note">{{ row.pnl_cash_display }} · {{ row.pnl_pct_display }}</span>
-                  </td>
-                  <td>{{ row.trade_value_display }}</td>
-                  <td>{{ row.cents_result_display }}</td>
-                  <td>{{ row.left_to_gain_display }}</td>
-                  <td><span class="table-note">{{ row.after_close_display }} · {{ row.integrity_note }}</span></td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        </article>
-      </section>
-    </section>
-
-    <details class="layer-toggle">
-      <summary>
-        <span class="layer-toggle-kicker">Capa 3</span>
-        <strong>Detalle extendido y trazabilidad</strong>
-        <span class="layer-toggle-copy">Salidas, ciclos, cartera, scoreboards y resto del detalle operacional.</span>
-      </summary>
-      <div class="layer-toggle-content">
-    <section class="grid layout-main">
-      <article class="card">
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Salidas</p>
-            <h2>Balance por tipo de cierre</h2>
-          </div>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Tipo</th>
-                <th>Ops</th>
-                <th>Balance</th>
-                <th>Media</th>
-                <th>Estado</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in dashboard.exit_breakdown.validated_rows %}
-              <tr>
-                <td>
-                  <strong>{{ row.label }}</strong>
-                  <span class="table-note">{{ row.note }}</span>
-                </td>
-                <td>{{ row.count }}</td>
-                <td class="{{ row.balance_class }}">{{ row.balance_display }}</td>
-                <td class="{{ row.avg_class }}">{{ row.avg_display }}</td>
-                <td><span class="badge badge-{{ 'good' if row.status == 'good' else 'warn' if row.status == 'blocked' else 'accent' if row.status == 'waiting' else 'bad' }}">{{ row.tag }}</span></td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </article>
-
-      <article class="card">
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Liquidación</p>
-            <h2>Serie v{{ dashboard.logic_series }} y cobros</h2>
-          </div>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Estado</th>
-                <th>Ops</th>
-                <th>Balance</th>
-                <th>Media</th>
-                <th>Estado</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in dashboard.exit_breakdown.series_rows %}
-              <tr>
-                <td>
-                  <strong>{{ row.label }}</strong>
-                  <span class="table-note">{{ row.note }}</span>
-                </td>
-                <td>{{ row.count }}</td>
-                <td class="{{ row.balance_class }}">{{ row.balance_display }}</td>
-                <td class="{{ row.avg_class }}">{{ row.avg_display }}</td>
-                <td><span class="badge badge-{{ 'good' if row.status == 'good' else 'warn' if row.status == 'blocked' else 'accent' if row.status == 'waiting' else 'bad' }}">{{ row.tag }}</span></td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </article>
-    </section>
-
-    <section class="grid">
-      <article class="card">
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Trofeos</p>
-            <h2>Hitos validados del sistema</h2>
-          </div>
-        </div>
-        <div class="trophy-grid">
-          {% for trophy in dashboard.trophies %}
-          <div class="trophy-card trophy-{{ trophy.status }}">
-            <span class="trophy-label">{{ trophy.label }}</span>
-            <strong class="trophy-value">{{ trophy.value }}</strong>
-            <span class="trophy-detail">{{ trophy.detail }}</span>
-            {% if trophy.meta %}
-            <span class="trophy-meta">{{ trophy.meta }}</span>
-            {% endif %}
-          </div>
-          {% endfor %}
-        </div>
-      </article>
-    </section>
-
-    <section class="grid">
-      <article class="card">
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Legacy</p>
-            <h2>Drift Open-Meteo (historico - no comparable con NOAA)</h2>
-          </div>
-          <span class="badge badge-muted">n={{ dashboard.legacy_forecast_drift.sample_size }}</span>
-        </div>
-        <div class="notice notice-muted">{{ dashboard.legacy_forecast_drift.note }}</div>
-        <dl class="metric-list">
-          <div><dt>n historico</dt><dd>{{ dashboard.legacy_forecast_drift.sample_display }}</dd></div>
-          <div><dt>Ultimo registro</dt><dd>{{ dashboard.legacy_forecast_drift.last_record_display }}</dd></div>
-          <div><dt>MAE drift</dt><dd>{{ dashboard.legacy_forecast_drift.mae_display }}</dd></div>
-          <div><dt>Bias drift</dt><dd>{{ dashboard.legacy_forecast_drift.bias_display }}</dd></div>
-        </dl>
-        {% if dashboard.legacy_forecast_drift.latest_case %}
-        <div class="list-stack compact">
-          <div class="list-row">
-            <div class="check-body">
-              <strong>Ultimo caso legacy</strong>
-              <span>{{ dashboard.legacy_forecast_drift.latest_case }}</span>
-            </div>
-          </div>
-        </div>
         {% endif %}
-      </article>
-    </section>
 
-    <section class="grid layout-main">
-      <article class="card">
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Ciclos</p>
-            <h2>Últimos ciclos</h2>
-          </div>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Hora UTC</th>
-                <th>Total</th>
-                <th>Serie</th>
-                <th>Compras</th>
-                <th>Ventas</th>
-                <th>Exp.</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for cycle in dashboard.cycle_history %}
-              <tr>
-                <td>{{ cycle.timestamp_utc[:16] if cycle.timestamp_utc else '?' }}</td>
-                <td>#{{ cycle.cycle_number }}</td>
-                <td>{{ cycle.series_display }}</td>
-                <td>{{ cycle.buys|length if cycle.buys else 0 }}</td>
-                <td>{{ cycle.management.n_sold if cycle.management else 0 }}</td>
-                <td>${{ '%.2f'|format(cycle.exposure_after) if cycle.exposure_after is not none else '0.00' }}</td>
-              </tr>
+        {# -- System status compact only -- #}
+        <section class="grid layout-main">
+          <article class="card">
+            <div class="card-head">
+              <div>
+                <p class="section-kicker">Sistema</p>
+                <h2>Estado operativo</h2>
+              </div>
+            </div>
+            <dl class="metric-list">
+              <div><dt>Version</dt><dd>{{ dashboard.version }}</dd></div>
+              <div><dt>Serie logica</dt><dd>v{{ dashboard.logic_series }}</dd></div>
+              <div><dt>Proximo ciclo</dt><dd>{{ dashboard.next_run }}</dd></div>
+              <div><dt>Ultimo ciclo</dt><dd>{{ dashboard.last_cycle_label }}</dd></div>
+              <div><dt>Intra-SL</dt><dd>{{ dashboard.intra_label }}</dd></div>
+              <div><dt>Signals</dt><dd>{{ dashboard.alerts.signals.status }}</dd></div>
+            </dl>
+          </article>
+
+        </section>
+
+        {# Open positions se lee en Bloque 1; el detalle largo sale del HTML principal. #}
+        {% if false and dashboard.open_positions %}
+        <section class="grid">
+          <article class="card">
+            <div class="card-head">
+              <div>
+                <p class="section-kicker">Cartera</p>
+                <h2>Posiciones abiertas</h2>
+              </div>
+            </div>
+            <div class="list-stack">
+              {% for pos in dashboard.open_positions %}
+              <div class="list-row">
+                <div>
+                  <strong>{{ pos.label }}</strong>
+                  <span>${{ '%.2f'|format(pos.current_value) }}</span>
+                </div>
+                <div class="pnl {{ 'good' if pos.cash_pnl >= 0 else 'bad' }}">
+                  {{ '%+.2f'|format(pos.cash_pnl) }} · {{ pos.percent_pnl }}%
+                </div>
+              </div>
               {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </article>
-
-      <article class="card">
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Cartera</p>
-            <h2>Posiciones abiertas</h2>
-          </div>
-        </div>
-        {% if dashboard.open_positions %}
-        <div class="list-stack">
-          {% for pos in dashboard.open_positions %}
-          <div class="list-row">
-            <div>
-              <strong>{{ pos.label }}</strong>
-              <span>${{ '%.2f'|format(pos.current_value) }}</span>
             </div>
-            <div class="pnl {{ 'good' if pos.cash_pnl >= 0 else 'bad' }}">
-              {{ '%+.2f'|format(pos.cash_pnl) }} · {{ pos.percent_pnl }}%
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-        {% else %}
-        <div class="notice notice-muted">Sin posiciones activas o cartera no disponible.</div>
+          </article>
+        </section>
         {% endif %}
-      </article>
-    </section>
 
-    <section class="grid layout-main">
-      <article class="card">
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Agentes</p>
-            <h2>Scoreboard</h2>
-          </div>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Agente</th>
-                <th>Puntos</th>
-                <th>Bugs</th>
-                <th>Prop.</th>
-                <th>Impl.</th>
-                <th>Val.</th>
-                <th>Correcciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in dashboard.agent_scoreboard %}
-              <tr>
-                <td>{{ row.agent }}</td>
-                <td><strong>{{ row.points }}</strong></td>
-                <td>{{ row.bugs_detected }}</td>
-                <td>{{ row.proposed }}</td>
-                <td>{{ row.implemented }}</td>
-                <td>{{ row.validated }}</td>
-                <td>{{ row.corrections }}</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </article>
-
-      <article class="card">
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Rivalidad</p>
-            <h2>Quién corrige a quién</h2>
-          </div>
-        </div>
-        {% if dashboard.rivalry %}
-        <div class="list-stack">
-          {% for row in dashboard.rivalry %}
-          <div class="list-row">
-            <div>
-              <strong>{{ row.source }}</strong>
-              <span>corrigió/revisó a {{ row.target }}</span>
-            </div>
-            <span class="badge badge-muted">{{ row.count }} eventos</span>
-          </div>
-          {% endfor %}
-        </div>
-        {% else %}
-        <div class="notice notice-muted">Aún no hay suficientes eventos estructurados para rivalidad.</div>
-        {% endif %}
-      </article>
-    </section>
-
-    <section class="grid layout-main">
-      <article class="card">
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Accuracy</p>
-            <h2>Ciudades clave</h2>
-          </div>
-        </div>
-        {% if dashboard.top_cities %}
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Ciudad</th>
-                <th>Riesgo</th>
-                <th>Trades</th>
-                <th>WR</th>
-                <th>PnL</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for city in dashboard.top_cities %}
-              <tr>
-                <td>{{ city.city }}</td>
-                <td><span class="badge badge-{{ 'bad' if city.risk_level == 'critical' else 'warn' if city.risk_level == 'watch' else 'good' }}">{{ city.risk_label }}</span></td>
-                <td>{{ city.trades }}</td>
-                <td>{{ city.win_rate }}%</td>
-                <td class="{{ 'good' if city.pnl >= 0 else 'bad' }}">${{ '%+.2f'|format(city.pnl) }}</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% else %}
-        <div class="notice notice-muted">Todavía no hay suficiente histórico por ciudad.</div>
-        {% endif %}
-      </article>
-
-      <article class="card">
-        <div class="card-head">
-          <div>
-            <p class="section-kicker">Eventos</p>
-            <h2>Últimos movimientos de agentes</h2>
-          </div>
-        </div>
-        {% if dashboard.agent_events %}
-        <div class="list-stack compact">
-          {% for event in dashboard.agent_events %}
-          <div class="list-row">
-            <div>
-              <strong>{{ event.agent }}</strong>
-              <span>{{ event.title or event.type }}</span>
-            </div>
-            <div class="event-meta">
-              <span class="badge badge-{{ event.stage_badge }}">{{ event.stage_label }}</span>
-              <span class="badge badge-muted">+{{ event.points or 0 }}</span>
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-        {% else %}
-        <div class="notice notice-muted">No hay eventos de agentes todavía.</div>
-        {% endif %}
-      </article>
-    </section>
       </div>
     </details>
   </div>

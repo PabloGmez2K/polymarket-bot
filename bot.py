@@ -4931,6 +4931,183 @@ def sync_city_policy_state(notify=True):
     return policy_state
 
 
+def build_dashboard_road_to_real(
+    shadow_tracking=None,
+    forecast_quality=None,
+    city_accuracy=None,
+    city_decisions=None,
+    alerts=None,
+):
+    """Build the Road to Real progress bar — checklist to reactivate live trading."""
+    if shadow_tracking is None:
+        shadow_tracking = load_shadow_city_tracking()
+    if forecast_quality is None:
+        forecast_quality = build_dashboard_forecast_quality()
+    if city_accuracy is None:
+        city_accuracy = get_city_accuracy()
+    if alerts is None:
+        alerts = get_dashboard_alert_summary()
+
+    shadow_summary = shadow_tracking.get("summary", {}) if isinstance(shadow_tracking, dict) else {}
+    recent_opps = shadow_tracking.get("recent_opportunities", []) if isinstance(shadow_tracking, dict) else []
+
+    # R1: >= 30 shadow directional signals (edge_hit=True means passed condition + edge)
+    directional_signals = shadow_summary.get("edge_hits", 0) or 0
+    r1_target = 30
+    r1_current = min(directional_signals, r1_target)
+    r1_done = r1_current >= r1_target
+
+    # R2: >= 10 NOAA observations
+    noaa_sample = int(forecast_quality.get("sample_size", 0) or 0)
+    r2_target = 10
+    r2_current = min(noaa_sample, r2_target)
+    r2_done = r2_current >= r2_target
+
+    # R3: Simulated WR from resolved trades >= 45%
+    # Use forecast_accuracy audit WR if available
+    audit = load_audit_data()
+    observed_records = []
+    if isinstance(audit, dict):
+        for entry in audit.get(OBSERVED_AUDIT_KEY, []):
+            if isinstance(entry, dict) and entry.get("observed_real") is not None:
+                observed_records.append(entry)
+    # Count directional wins: observed confirms the side we would have taken
+    directional_wins = 0
+    directional_resolved = 0
+    for rec in observed_records:
+        question = str(rec.get("question", "") or "")
+        if "at_or_above" not in question.lower() and "at_or_below" not in question.lower():
+            if "above" not in question.lower() and "below" not in question.lower():
+                continue
+        directional_resolved += 1
+        side = str(rec.get("side", "") or "").upper()
+        observed = rec.get("observed_real")
+        threshold = rec.get("threshold")
+        if observed is not None and threshold is not None:
+            try:
+                obs_val = float(observed)
+                thr_val = float(threshold)
+                if side == "YES" and obs_val >= thr_val:
+                    directional_wins += 1
+                elif side == "NO" and obs_val < thr_val:
+                    directional_wins += 1
+            except (ValueError, TypeError):
+                pass
+    sim_wr = round((directional_wins / directional_resolved * 100), 1) if directional_resolved > 0 else 0.0
+    r3_target = 45.0
+    r3_current = sim_wr
+    r3_done = sim_wr >= r3_target and directional_resolved >= 5
+
+    # R4: Sigma empirica calibrada con n >= 5 por ciudad activa
+    cities_with_sigma = 0
+    for city, data in (city_accuracy or {}).items():
+        if isinstance(data, dict) and int(data.get("trades", 0) or 0) >= 5:
+            cities_with_sigma += 1
+    r4_target = 2
+    r4_current = min(cities_with_sigma, r4_target)
+    r4_done = r4_current >= r4_target
+
+    # R5: >= 2 cities with readiness from city decisions ranking
+    ready_cities = 0
+    if isinstance(city_decisions, dict):
+        for row in city_decisions.get("ranking_rows", []):
+            score = int(row.get("readiness_score", 0) or 0)
+            if score >= 60:
+                ready_cities += 1
+    r5_target = 2
+    r5_current = min(ready_cities, r5_target)
+    r5_done = r5_current >= r5_target
+
+    # R6: No critical alerts active
+    critical_items = [
+        item for item in alerts.get("active_items", [])
+        if str(item.get("level", "")) in {"critical", "bad"}
+    ]
+    r6_done = len(critical_items) == 0
+    r6_current = 1 if r6_done else 0
+    r6_target = 1
+
+    checks = [
+        {
+            "id": "shadow_signals",
+            "label": f">= {r1_target} señales shadow direccionales",
+            "current": directional_signals,
+            "target": r1_target,
+            "display": f"{directional_signals} / {r1_target}",
+            "done": r1_done,
+            "badge": "good" if r1_done else "warn" if directional_signals >= r1_target // 2 else "bad",
+        },
+        {
+            "id": "noaa_resolved",
+            "label": f">= {r2_target} observaciones NOAA",
+            "current": noaa_sample,
+            "target": r2_target,
+            "display": f"{noaa_sample} / {r2_target}",
+            "done": r2_done,
+            "badge": "good" if r2_done else "warn" if noaa_sample >= r2_target // 2 else "bad",
+        },
+        {
+            "id": "sim_wr",
+            "label": f"WR observado direccional >= {r3_target:.0f}%",
+            "current": sim_wr,
+            "target": r3_target,
+            "display": f"{sim_wr:.1f}% (n={directional_resolved})" if directional_resolved > 0 else "sin muestra",
+            "done": r3_done,
+            "badge": "good" if r3_done else "warn" if directional_resolved >= 3 else "bad",
+        },
+        {
+            "id": "sigma_calibrated",
+            "label": f">= {r4_target} ciudades con sigma empírica (n>=5)",
+            "current": cities_with_sigma,
+            "target": r4_target,
+            "display": f"{cities_with_sigma} / {r4_target}",
+            "done": r4_done,
+            "badge": "good" if r4_done else "warn" if cities_with_sigma >= 1 else "bad",
+        },
+        {
+            "id": "cities_ready",
+            "label": f">= {r5_target} ciudades con readiness >= 60",
+            "current": ready_cities,
+            "target": r5_target,
+            "display": f"{ready_cities} / {r5_target}",
+            "done": r5_done,
+            "badge": "good" if r5_done else "warn" if ready_cities >= 1 else "bad",
+        },
+        {
+            "id": "no_critical",
+            "label": "Sin alertas críticas activas",
+            "current": r6_current,
+            "target": r6_target,
+            "display": "OK" if r6_done else f"{len(critical_items)} alertas críticas",
+            "done": r6_done,
+            "badge": "good" if r6_done else "bad",
+        },
+    ]
+
+    passed = sum(1 for c in checks if c["done"])
+    total = len(checks)
+    pct = int(round(passed / total * 100)) if total > 0 else 0
+
+    if pct >= 100:
+        status_label = "Listo para modo canary"
+        status_badge = "good"
+    elif pct >= 50:
+        status_label = "En progreso"
+        status_badge = "accent"
+    else:
+        status_label = "Fase temprana"
+        status_badge = "warn"
+
+    return {
+        "checks": checks,
+        "passed": passed,
+        "total": total,
+        "pct": pct,
+        "status_label": status_label,
+        "status_badge": status_badge,
+    }
+
+
 def build_dashboard_focus_center(
     alerts=None,
     forecast_quality=None,
@@ -7144,6 +7321,13 @@ def build_dashboard_snapshot():
         next_run_display=next_run_display,
         last_cycle_label=last_cycle_label,
     )
+    road_to_real = build_dashboard_road_to_real(
+        shadow_tracking=shadow_tracking,
+        forecast_quality=forecast_quality,
+        city_accuracy=city_accuracy,
+        city_decisions=city_decisions,
+        alerts=alerts,
+    )
 
     return {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
@@ -7159,6 +7343,7 @@ def build_dashboard_snapshot():
         "last_cycle_label": last_cycle_label,
         "cycle_summary": cycle_summary,
         "focus": focus,
+        "road_to_real": road_to_real,
         "cycle_history": cycle_history_display,
         "promotion": promotion,
         "progress": progress,
