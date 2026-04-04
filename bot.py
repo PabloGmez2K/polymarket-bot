@@ -535,15 +535,19 @@ def save_shadow_city_tracking(data):
     for city in sorted(payload["cities"]):
         ordered_cities[city] = payload["cities"][city]
     payload["cities"] = ordered_cities
-    payload["recent_opportunities"] = sorted(
-        payload["recent_opportunities"],
-        key=lambda item: (
-            str(item.get("seen_at", "")),
-            float(item.get("edge_pct", 0) or 0),
-            str(item.get("city", "")),
-        ),
+    # Keep directional (edge_hit=True) and filtered separately, prioritize directional
+    all_opps = payload["recent_opportunities"]
+    directional = sorted(
+        [o for o in all_opps if o.get("edge_hit")],
+        key=lambda item: (str(item.get("seen_at", "")), float(item.get("edge_pct", 0) or 0)),
         reverse=True,
     )[:30]
+    filtered = sorted(
+        [o for o in all_opps if not o.get("edge_hit")],
+        key=lambda item: (str(item.get("seen_at", "")), float(item.get("edge_pct", 0) or 0)),
+        reverse=True,
+    )[:10]
+    payload["recent_opportunities"] = directional + filtered
 
     with open(SHADOW_TRACKING_FILE, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
@@ -4161,6 +4165,8 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None):
         | set(city_accuracy.keys())
     )
     tracked_cities |= {city for city in RESOLUTION_ICAO if is_city_blocked(city)}
+    # Filter out sentinel values like "NONE"
+    tracked_cities = {c for c in tracked_cities if c.upper() not in {"NONE", ""}}
 
     rows = []
     active_count = 0
@@ -4194,7 +4200,23 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None):
         if interpretable:
             observed_ready_count += 1
 
-        if city_mode == "active":
+        if _is_shadow_only():
+            if city_mode in ("active", "canary"):
+                trading_label = "Shadow"
+                trading_badge = "warn"
+                trading_detail = "SHADOW-ONLY: sin BUY real (ACTIVE_TRADING_CITIES vacío)"
+            elif blocked:
+                trading_label = "Bloqueada"
+                trading_badge = "bad"
+                if auto_block_meta:
+                    trading_detail = f"auto-bloqueada: {auto_block_meta.get('reason', 'baja accuracy')}"
+                else:
+                    trading_detail = "solo referencia; no abrir nuevas entradas"
+            else:
+                trading_label = "Shadow"
+                trading_badge = "muted"
+                trading_detail = "sin BUY real; solo observación"
+        elif city_mode == "active":
             trading_label = "Activa"
             trading_badge = "good"
             trading_detail = "BUY habilitado en el scan"
@@ -4942,6 +4964,26 @@ def sync_city_policy_state(notify=True):
     return policy_state
 
 
+def _extract_threshold_from_question(question):
+    """Extract temperature threshold from Polymarket question text.
+
+    Examples:
+        'Will ... be at or above 50°F ...' → 10.0 (converted to Celsius)
+        'Will ... be at or below 13°C ...' → 13.0
+    """
+    import re
+    q = str(question or "")
+    # Match patterns like "above 50°F", "below 13°C", "above 285°F"
+    match = re.search(r'(?:above|below)\s+(-?\d+(?:\.\d+)?)\s*[°]?\s*([FCfc])', q)
+    if not match:
+        return None
+    value = float(match.group(1))
+    unit = match.group(2).upper()
+    if unit == "F":
+        value = round((value - 32) * 5 / 9, 1)
+    return value
+
+
 def build_dashboard_road_to_real(
     shadow_tracking=None,
     forecast_quality=None,
@@ -4974,40 +5016,51 @@ def build_dashboard_road_to_real(
     r2_current = min(noaa_sample, r2_target)
     r2_done = r2_current >= r2_target
 
-    # R3: Simulated WR from resolved trades >= 45%
-    # Use forecast_accuracy audit WR if available
+    # R3: Simulated WR >= 45% — join shadow directional signals with NOAA observed by city+date
     audit = load_audit_data()
-    observed_records = []
+    # Build lookup: (city, date) → observed_temp_c from NOAA
+    noaa_lookup = {}
     if isinstance(audit, dict):
         for entry in audit.get(OBSERVED_AUDIT_KEY, []):
-            if isinstance(entry, dict) and entry.get("observed_real") is not None:
-                observed_records.append(entry)
-    # Count directional wins: observed confirms the side we would have taken
+            if not isinstance(entry, dict) or entry.get("source") != "noaa_ncei":
+                continue
+            obs_temp = entry.get("observed_temp_c")
+            if obs_temp is None:
+                continue
+            key = (str(entry.get("city", "")).strip(), str(entry.get("date", "")).strip())
+            if key[0] and key[1]:
+                noaa_lookup[key] = float(obs_temp)
+    # Match shadow directional signals (edge_hit=True) with NOAA observed
     directional_wins = 0
     directional_resolved = 0
-    for rec in observed_records:
-        question = str(rec.get("question", "") or "")
-        if "at_or_above" not in question.lower() and "at_or_below" not in question.lower():
-            if "above" not in question.lower() and "below" not in question.lower():
-                continue
+    for opp in recent_opps:
+        if not opp.get("edge_hit"):
+            continue
+        city = str(opp.get("city", "")).strip()
+        date = str(opp.get("date", "")).strip()
+        if not city or not date:
+            continue
+        observed_temp = noaa_lookup.get((city, date))
+        if observed_temp is None:
+            continue
+        # Parse threshold from question text
+        question = str(opp.get("question", "") or "")
+        side = str(opp.get("side", "") or "").upper()
+        threshold = _extract_threshold_from_question(question)
+        if threshold is None or not side:
+            continue
         directional_resolved += 1
-        side = str(rec.get("side", "") or "").upper()
-        observed = rec.get("observed_real")
-        threshold = rec.get("threshold")
-        if observed is not None and threshold is not None:
-            try:
-                obs_val = float(observed)
-                thr_val = float(threshold)
-                if side == "YES" and obs_val >= thr_val:
-                    directional_wins += 1
-                elif side == "NO" and obs_val < thr_val:
-                    directional_wins += 1
-            except (ValueError, TypeError):
-                pass
+        if side == "YES" and observed_temp >= threshold:
+            directional_wins += 1
+        elif side == "NO" and observed_temp < threshold:
+            directional_wins += 1
     sim_wr = round((directional_wins / directional_resolved * 100), 1) if directional_resolved > 0 else 0.0
     r3_target = 45.0
     r3_current = sim_wr
     r3_done = sim_wr >= r3_target and directional_resolved >= 5
+    r3_no_join_reason = ""
+    if directional_resolved == 0 and directional_signals > 0:
+        r3_no_join_reason = f"0/{directional_signals} señales con NOAA enlazada por city+date"
 
     # R4: Sigma empirica calibrada con n >= 5 por ciudad activa
     cities_with_sigma = 0
@@ -5062,7 +5115,11 @@ def build_dashboard_road_to_real(
             "label": f"WR observado direccional >= {r3_target:.0f}%",
             "current": sim_wr,
             "target": r3_target,
-            "display": f"{sim_wr:.1f}% (n={directional_resolved})" if directional_resolved > 0 else "sin muestra",
+            "display": (
+                f"{sim_wr:.1f}% (n={directional_resolved})" if directional_resolved > 0
+                else r3_no_join_reason if r3_no_join_reason
+                else "sin señales shadow direccionales"
+            ),
             "done": r3_done,
             "badge": "good" if r3_done else "warn" if directional_resolved >= 3 else "bad",
         },

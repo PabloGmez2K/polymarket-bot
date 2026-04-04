@@ -1095,6 +1095,7 @@ def run_tests():
                 "New York City": {"icao": "KLGA"},
             },
             "is_city_blocked": lambda city: str(city or "").strip().lower() in {"london", "wellington"},
+            "_is_shadow_only": lambda: False,
             "load_city_policy_state": lambda: {"auto_canary_cities": {}, "auto_shadow_cities": {}, "transition_history": []},
             "get_effective_city_mode": lambda city, policy_state=None: (
                 "blocked" if str(city or "").strip().lower() in {"london", "wellington"}

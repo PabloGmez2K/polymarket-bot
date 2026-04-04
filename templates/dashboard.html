@@ -359,7 +359,7 @@
               <div><p class="section-kicker">Bloqueadas</p></div>
               <span class="badge badge-bad">{{ dashboard.city_observation.blocked_count }}</span>
             </div>
-            {% for row in dashboard.city_observation.blocked_rows %}
+            {% for row in dashboard.city_observation.blocked_rows[:5] %}
             <div class="check-item check-item-bad">
               <div class="check-status bad"></div>
               <div class="check-body">
@@ -368,6 +368,9 @@
               </div>
             </div>
             {% endfor %}
+            {% if dashboard.city_observation.blocked_rows|length > 5 %}
+            <div class="notice notice-muted">y {{ dashboard.city_observation.blocked_rows|length - 5 }} mas bloqueadas.</div>
+            {% endif %}
             {% endif %}
           </article>
         </section>
