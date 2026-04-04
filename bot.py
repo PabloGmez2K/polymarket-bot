@@ -756,6 +756,7 @@ def record_shadow_city_opportunities(opportunities, cycle_context=None):
             "expected_value": round(float(item.get("expected_value", 0) or 0), 2),
             "market_price": item.get("mkt_price"),
             "our_prob": item.get("our_prob"),
+            "forecast_max": item.get("forecast_max"),
         }
         city_state.setdefault("recent_edges", []).append(recent_edge)
         city_state["recent_edges"] = sorted(
@@ -4443,6 +4444,15 @@ def _build_recent_shadow_rows(shadow_tracking):
             edge_pct = float(edge.get("edge_pct", 0) or 0)
             if edge_pct <= 0:
                 continue
+            forecast_max = edge.get("forecast_max")
+            # Extract threshold from question as display fallback
+            threshold_c = _extract_threshold_from_question(edge.get("question"))
+            if forecast_max is not None:
+                forecast_display = f"{float(forecast_max):.1f}C"
+            elif threshold_c is not None:
+                forecast_display = f"umbral {threshold_c:.0f}C"
+            else:
+                forecast_display = "n/d"
             all_edges.append({
                 "city": city_name,
                 "date": edge.get("date", ""),
@@ -4452,7 +4462,8 @@ def _build_recent_shadow_rows(shadow_tracking):
                 "expected_value": float(edge.get("expected_value", 0) or 0),
                 "market_price": edge.get("market_price"),
                 "our_prob": edge.get("our_prob"),
-                "forecast_max": edge.get("forecast_max"),
+                "forecast_max": forecast_max,
+                "forecast_display": forecast_display,
                 "seen_at": edge.get("seen_at", ""),
                 "condition_label": condition,
             })
