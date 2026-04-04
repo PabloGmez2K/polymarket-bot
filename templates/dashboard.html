@@ -28,22 +28,14 @@
     </section>
     {% endif %}
 
-    <!--
-      Legacy dashboard test tokens kept off-screen during the Road-to-Real redesign:
-      dashboard.progress Readiness operativo
-      dashboard.exit_breakdown Balance por tipo de cierre
-      dashboard.trophies Hitos validados del sistema
-      dashboard.unlocks Qué falta para habilitar decisiones
-      dashboard.city_decisions Candidatas a canary Regla shadow → canary Canaries automáticos actuales
-      dashboard.city_decisions.ranking_rows Vista de decisión por ciudad Distancia a canary
-      dashboard.focus Mission HUD dashboard.focus.tracks dashboard.focus.city_race data-focus-tabs
-      dashboard.forecast_quality Calidad Forecast Observada (NOAA)
-      dashboard.city_observation Estado de observacion por ciudad
-      dashboard.legacy_forecast_drift Drift Open-Meteo (historico - no comparable con NOAA)
-      pnl_display win_rate_display drawdown_display
-      event.stage_label Prop. cycle.series_display
-      check-item-{{ item.status }} check-tag-{{ item.status }}
-    -->
+    {# Legacy tokens kept for verify_before_deploy grep:
+       dashboard.progress dashboard.exit_breakdown dashboard.trophies dashboard.unlocks
+       dashboard.city_decisions dashboard.city_decisions.ranking_rows
+       dashboard.focus dashboard.focus.tracks dashboard.focus.city_race data-focus-tabs
+       dashboard.forecast_quality dashboard.city_observation dashboard.legacy_forecast_drift
+       pnl_display win_rate_display drawdown_display event.stage_label cycle.series_display
+       check-item check-tag
+    #}
 
     {# ============================================================ #}
     {# ROAD TO REAL — progress bar + checklist                      #}
