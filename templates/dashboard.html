@@ -90,7 +90,7 @@
         <dl class="metric-list">
           <div>
             <dt>Modo</dt>
-            <dd><span class="badge badge-{{ 'warn' if dashboard.mode != 'REAL' else 'good' }}">{{ dashboard.mode }}</span> · SHADOW-ONLY</dd>
+            <dd><span class="badge badge-{{ 'good' if dashboard.mode == 'REAL' else 'warn' }}">{{ dashboard.mode }}</span></dd>
           </div>
           <div>
             <dt>Cash</dt>
@@ -179,7 +179,7 @@
           <h2>Senales shadow direccionales</h2>
         </div>
         <span class="badge badge-accent">
-          {{ dashboard.city_decisions.shadow_summary.opportunities_seen }} senales
+          {{ dashboard.city_decisions.shadow_summary.edge_hits }} direccionales
         </span>
       </div>
 

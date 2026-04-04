@@ -4841,7 +4841,18 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
             ],
             "transitions": list((policy_state.get("transition_history", []) if isinstance(policy_state, dict) else [])[:10]),
         },
-        "recent_shadow_rows": list((shadow_tracking.get("recent_opportunities", []) if isinstance(shadow_tracking, dict) else [])[:10]),
+        "recent_shadow_rows": [
+            {
+                **row,
+                "condition_label": (
+                    "at_or_above" if "above" in str(row.get("question", "")).lower()
+                    else "at_or_below" if "below" in str(row.get("question", "")).lower()
+                    else "direccional"
+                ),
+            }
+            for row in (shadow_tracking.get("recent_opportunities", []) if isinstance(shadow_tracking, dict) else [])
+            if row.get("edge_hit")
+        ][:10],
     }
 
 
@@ -7157,6 +7168,21 @@ def load_cycle_summary_data():
         return {}
 
 
+def _is_shadow_only():
+    """True when ACTIVE_TRADING_CITIES is effectively empty (e.g. 'NONE' or blank)."""
+    real_cities = {c for c in ACTIVE_TRADING_CITIES if c.upper() not in {"NONE", ""}}
+    return len(real_cities) == 0
+
+
+def _dashboard_mode_label():
+    """Human-readable mode for the dashboard badge."""
+    if DRY_RUN:
+        return "DRY RUN"
+    if _is_shadow_only():
+        return "SHADOW-ONLY"
+    return "REAL"
+
+
 def build_dashboard_snapshot():
     """Construye el snapshot completo que renderiza el dashboard web."""
     cycle_total, cycle_series = _load_cycle_counts()
@@ -7334,7 +7360,7 @@ def build_dashboard_snapshot():
         "title": DASHBOARD_TITLE,
         "version": BOT_VERSION,
         "logic_series": LOGIC_SERIES,
-        "mode": "REAL" if not DRY_RUN else "DRY RUN",
+        "mode": _dashboard_mode_label(),
         "auth_enabled": auth_enabled,
         "next_run": next_run_display,
         "last_run": bot_state["last_run"].strftime("%Y-%m-%d %H:%M UTC") if bot_state.get("last_run") else "",
