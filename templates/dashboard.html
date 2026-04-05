@@ -15,7 +15,7 @@
         <h1>{{ dashboard.title }}</h1>
       </div>
       <div class="hero-meta">
-        <span class="badge badge-{{ 'warn' if dashboard.mode != 'REAL' else 'good' }}">{{ dashboard.mode }}</span>
+        <span class="badge badge-{{ 'good' if dashboard.mode == 'REAL' else 'accent' }}">{{ dashboard.mode }}</span>
         <span class="badge badge-accent">{{ dashboard.version }}</span>
         <span class="badge badge-muted">{{ dashboard.generated_at }}</span>
       </div>
