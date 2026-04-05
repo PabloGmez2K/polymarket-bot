@@ -4227,10 +4227,18 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None):
             observed_ready_count += 1
 
         if _is_shadow_only():
-            if city_mode in ("active", "canary"):
-                trading_label = "Shadow"
+            if city_mode == "canary":
+                trading_label = "Canary (shadow)"
                 trading_badge = "warn"
-                trading_detail = "SHADOW-ONLY: sin BUY real (ACTIVE_TRADING_CITIES vacío)"
+                auto_canary_dict = policy_state.get("auto_canary_cities", {}) if isinstance(policy_state, dict) else {}
+                auto_canary_meta = auto_canary_dict.get(city, {}) if isinstance(auto_canary_dict, dict) else {}
+                promoted_at_raw = auto_canary_meta.get("promoted_at", "") if isinstance(auto_canary_meta, dict) else ""
+                promoted_at = promoted_at_raw[:10] if promoted_at_raw else "?"
+                trading_detail = f"canary autopromovida ({promoted_at}) pero shadow-only override activo: sin BUY real"
+            elif city_mode == "active":
+                trading_label = "Activa (shadow)"
+                trading_badge = "warn"
+                trading_detail = "active allowlist pero shadow-only override activo: sin BUY real"
             elif blocked:
                 trading_label = "Bloqueada"
                 trading_badge = "bad"
@@ -11163,10 +11171,20 @@ def main(client):
             blocked_seen.add(city)
             continue
         allowlisted = city_mode in {"active", "canary"}
+        shadow_override = False
+        if allowlisted and _is_shadow_only():
+            # Shadow-only global: canary/active se observan pero NO ejecutan BUY real.
+            # Se preserva auto_canary_cities (autopromoción sigue viva) para mantener la señal
+            # de Phase 1 — solo se corta la ejecución.
+            allowlisted = False
+            shadow_override = True
         if not allowlisted:
             allowlist_city_skip += 1
             if city not in allowlist_seen:
-                dl.append(f"SHADOW {city}: fuera de ACTIVE_TRADING_CITIES (se observa, no se compra)")
+                if shadow_override:
+                    dl.append(f"SHADOW {city}: shadow-only override (era {city_mode}, se observa sin comprar)")
+                else:
+                    dl.append(f"SHADOW {city}: fuera de ACTIVE_TRADING_CITIES (se observa, no se compra)")
                 allowlist_seen.add(city)
         min_days = get_min_days_for_city(city)
 
