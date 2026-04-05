@@ -506,8 +506,8 @@ def run_tests():
          "Duplicate event blocked" in append_agent_event_code and 'row.get("session") == event["session"]' in append_agent_event_code)
     test("template dashboard incluye Road to Real", "dashboard.road_to_real" in dashboard_template_code and "Road to Real" in dashboard_template_code and "requisitos cumplidos" in dashboard_template_code)
     test("template dashboard incluye Estado del bot", "Estado del bot" in dashboard_template_code and "Mercados escaneados" in dashboard_template_code and "markets_evaluated" in dashboard_template_code)
-    test("template dashboard incluye shadow direccional", "Senales shadow direccionales" in dashboard_template_code and "Condicion" in dashboard_template_code and "Resolucion" in dashboard_template_code)
-    test("template dashboard incluye contadores shadow consistentes", "direccionales visibles" in dashboard_template_code and "historicas totales" in dashboard_template_code)
+    test("template dashboard incluye shadow direccional", "Senales shadow direccionales" in dashboard_template_code and "Condicion" in dashboard_template_code and "Forecast" in dashboard_template_code)
+    test("template dashboard incluye contadores shadow consistentes", "recientes" in dashboard_template_code and "historicas" in dashboard_template_code)
     test("template dashboard incluye Salud del sistema", "Salud del sistema" in dashboard_template_code and "<details class=\"layer-toggle\">" in dashboard_template_code)
     test("template dashboard incluye NOAA observado", "dashboard.forecast_quality" in dashboard_template_code and "Calidad NOAA observada" in dashboard_template_code)
     test("template dashboard incluye NOAA observado", "dashboard.forecast_quality" in dashboard_template_code and "Calidad NOAA observada" in dashboard_template_code)
@@ -1858,6 +1858,7 @@ def run_tests():
             "CITY_MIN_TRADES_FOR_BLOCK": 3,
             "CITY_BLOCK_WIN_RATE": 25.0,
             "LOW_BANKROLL_THRESHOLD": 5.0,
+            "_dashboard_mode_label": lambda: "REAL",
             "inspect_signals_file_health": lambda: {"status": "ok", "actionable": 4},
             "load_audit_data": lambda: {"pending_sells": []},
             "get_city_accuracy": lambda: {},
@@ -1876,6 +1877,7 @@ def run_tests():
             "CITY_MIN_TRADES_FOR_BLOCK": 3,
             "CITY_BLOCK_WIN_RATE": 25.0,
             "LOW_BANKROLL_THRESHOLD": 5.0,
+            "_dashboard_mode_label": lambda: "REAL",
             "inspect_signals_file_health": lambda: {"status": "ok", "actionable": 4},
             "load_audit_data": lambda: {"pending_sells": []},
             "get_city_accuracy": lambda: {},
@@ -3968,7 +3970,10 @@ def run_tests():
 
     # Test 2: append_skip_log_entries([]) es no-op (no crea archivo)
     ns2 = _build_skip_ns()
-    tmp_dir_r3 = _tf_r3.mkdtemp(prefix="skip_log_test_")
+    tmp_dir_r3 = os.path.join(os.getcwd(), "_tmp_skip_log_test")
+    if os.path.exists(tmp_dir_r3):
+        _sh_r3.rmtree(tmp_dir_r3, ignore_errors=True)
+    os.makedirs(tmp_dir_r3, exist_ok=True)
     try:
         tmp_path = os.path.join(tmp_dir_r3, "skip_log.jsonl")
         ns2["append_skip_log_entries"]([], path=tmp_path)
@@ -4038,9 +4043,15 @@ def run_tests():
         rot_tmp = os.path.join(tmp_dir_r3, "skip_log_rot.jsonl")
         big_entry = ns2["_make_skip_entry"]("no_edge", cycle_id="2026-04-05T16:00",
                                              city="Tokyo", question="x" * 2000)
+        original_replace = ns2["os"].replace
+        def _test_replace(src, dst):
+            _sh_r3.copyfile(src, dst)
+            os.remove(src)
+        ns2["os"].replace = _test_replace
         ns2["append_skip_log_entries"]([big_entry] * 5, path=rot_tmp, max_size=1024)
         # Primer append crea el archivo. Segundo debería rotar antes de escribir.
         ns2["append_skip_log_entries"]([big_entry], path=rot_tmp, max_size=1024)
+        ns2["os"].replace = original_replace
         rotated_files = [
             n for n in os.listdir(tmp_dir_r3)
             if n.startswith("skip_log_rot.") and n.endswith(".jsonl") and n != "skip_log_rot.jsonl"
