@@ -3608,7 +3608,164 @@ def run_tests():
     test("/accuracy en MENU_KEYBOARD", '"callback_data": "accuracy"' in code)
     test("cmd_accuracy vuelve con menú", 'send_telegram("Sin datos de accuracy todavía.", with_menu=True)' in code and 'send_telegram_paged("\\n".join(lines), with_menu=True)' in code)
     test("Win rate en rendimiento", "WR:" in code)
-    test("Version v10.6.10", "v10.6.10" in code)
+
+    # ---- Test v10.6.11: M4 resumen diario + M5 alerta canary candidate ----
+    print("\n v10.6.11: M4 daily summary + M5 canary candidate alert")
+    test("maybe_send_daily_summary_telegram definida", "def maybe_send_daily_summary_telegram(" in code)
+    test("build_daily_summary_payload definida", "def build_daily_summary_payload(" in code)
+    test("format_daily_summary_text definida", "def format_daily_summary_text(" in code)
+    test("notify_canary_candidates definida", "def notify_canary_candidates(" in code)
+    test("daily_summary_last_sent en alerts default", '"daily_summary_last_sent"' in code)
+    test("canary_candidate_notified en alerts default", '"canary_candidate_notified"' in code)
+    test("run_observability_alerts invoca notify_canary_candidates", "notify_canary_candidates(state)" in code)
+    test("run_observability_alerts invoca maybe_send_daily_summary_telegram", "maybe_send_daily_summary_telegram(state)" in code)
+    test("resumen diario gated en SCHEDULE_HOURS_UTC[0]", "sorted(SCHEDULE_HOURS_UTC)[0]" in code)
+
+    # Functional: M4 daily summary gating (hora != target → no envía; hora target + sin flag → envía; idempotente).
+    daily_messages = []
+    daily_ns = {
+        "datetime": datetime,
+        "timezone": timezone,
+        "timedelta": timedelta,
+        "SCHEDULE_HOURS_UTC": [8, 16, 23],
+        "BOT_VERSION": "v10.6.11-test",
+        "LOGIC_SERIES": "10.6",
+        "ACTIVE_TRADING_CITIES": set(),
+        "OBSERVED_AUDIT_KEY": "observed_vs_forecast",
+        "load_cycle_history": lambda: [
+            {"timestamp_utc": "2026-04-05T00:00:00+00:00", "scan": {"markets_evaluated": 18, "with_edge": 2, "selected": 1, "shadow": 1}, "buys": [{"city": "Tokyo"}]},
+            {"timestamp_utc": "2026-04-05T07:00:00+00:00", "scan": {"markets_evaluated": 10, "with_edge": 0, "selected": 0, "shadow": 0}, "buys": []},
+        ],
+        "_get_recent_closed_trades": lambda: [
+            {"closed_at": "2026-04-05T03:00:00+00:00", "pnl_cash": 1.5},
+            {"closed_at": "2026-04-05T06:00:00+00:00", "pnl_cash": -0.6},
+            {"closed_at": "2026-04-03T09:00:00+00:00", "pnl_cash": 2.0},  # fuera de ventana
+        ],
+        "load_audit_data": lambda: {
+            "observed_vs_forecast": [
+                {"source": "noaa_ncei", "city": "Atlanta", "checked_at": "2026-04-05T01:00:00+00:00"},
+                {"source": "noaa_ncei", "city": "Dallas", "checked_at": "2026-04-05T02:00:00+00:00"},
+                {"source": "noaa_ncei", "city": "Chicago", "checked_at": "2026-04-01T10:00:00+00:00"},  # cumulativo pero no en 24h
+            ]
+        },
+        "get_next_run_time": lambda: datetime(2026, 4, 5, 16, 0, tzinfo=timezone.utc),
+        "send_telegram": lambda text, with_menu=False, custom_keyboard=None: daily_messages.append(text),
+    }
+    exec(get_function_source(module_ast, code_lines, "_daily_summary_cycles_last_24h"), daily_ns)
+    exec(get_function_source(module_ast, code_lines, "_daily_summary_closed_trades_last_24h"), daily_ns)
+    exec(get_function_source(module_ast, code_lines, "_daily_summary_noaa_last_24h"), daily_ns)
+    exec(get_function_source(module_ast, code_lines, "build_daily_summary_payload"), daily_ns)
+    exec(get_function_source(module_ast, code_lines, "format_daily_summary_text"), daily_ns)
+    exec(get_function_source(module_ast, code_lines, "maybe_send_daily_summary_telegram"), daily_ns)
+
+    probe_now = datetime(2026, 4, 5, 8, 5, tzinfo=timezone.utc)
+    probe_state = {"daily_summary_last_sent": None}
+    result_fire = daily_ns["maybe_send_daily_summary_telegram"](probe_state, now=probe_now)
+    test("M4 daily summary: se envía en la ventana 08 UTC la primera vez",
+         result_fire is True and len(daily_messages) == 1 and "Resumen diario" in daily_messages[0],
+         {"result": result_fire, "messages": daily_messages})
+    test("M4 daily summary: marca daily_summary_last_sent con la fecha UTC",
+         probe_state.get("daily_summary_last_sent") == "2026-04-05",
+         probe_state)
+
+    # Segunda llamada mismo día → idempotente.
+    result_idem = daily_ns["maybe_send_daily_summary_telegram"](probe_state, now=probe_now)
+    test("M4 daily summary: idempotente en el mismo día UTC",
+         result_idem is False and len(daily_messages) == 1,
+         {"result": result_idem, "messages_count": len(daily_messages)})
+
+    # Hora distinta → no envía.
+    off_state = {"daily_summary_last_sent": None}
+    off_now = datetime(2026, 4, 5, 12, 0, tzinfo=timezone.utc)
+    result_off = daily_ns["maybe_send_daily_summary_telegram"](off_state, now=off_now)
+    test("M4 daily summary: no envía fuera de la ventana target",
+         result_off is False and off_state.get("daily_summary_last_sent") is None,
+         {"result": result_off, "state": off_state})
+
+    # Contenido del payload.
+    payload = daily_ns["build_daily_summary_payload"](now=probe_now)
+    test("M4 daily payload: agrega ciclos 24h correctamente",
+         payload["cycles_24h"]["cycles"] == 2
+         and payload["cycles_24h"]["markets_evaluated"] == 28
+         and payload["cycles_24h"]["with_edge"] == 2
+         and payload["cycles_24h"]["buys_real"] == 1,
+         payload["cycles_24h"])
+    test("M4 daily payload: resoluciones 24h split wins/losses",
+         payload["resolutions_24h"]["closed"] == 2
+         and payload["resolutions_24h"]["wins"] == 1
+         and payload["resolutions_24h"]["losses"] == 1
+         and abs(payload["resolutions_24h"]["pnl"] - 0.9) < 1e-9,
+         payload["resolutions_24h"])
+    test("M4 daily payload: NOAA 24h cuenta solo recientes pero cumulativo incluye todo",
+         payload["noaa_24h"]["new_total"] == 2
+         and payload["noaa_24h"]["cumulative"] == 3
+         and payload["noaa_24h"]["new_by_city"].get("Atlanta") == 1,
+         payload["noaa_24h"])
+    test("M4 daily payload: marca shadow_only cuando ACTIVE_TRADING_CITIES está vacío",
+         payload["shadow_only"] is True,
+         payload)
+
+    # Functional: M5 canary candidate notifier.
+    candidate_messages = []
+    candidate_ns = {
+        "datetime": datetime,
+        "timezone": timezone,
+        "get_city_accuracy": lambda: {},
+        "load_shadow_city_tracking": lambda: {},
+        "build_dashboard_city_observation": lambda city_accuracy=None: {},
+        "build_dashboard_city_decisions": lambda city_observation=None, city_accuracy=None, shadow_tracking=None: {
+            "rows": [
+                {
+                    "city": "Buenos Aires",
+                    "decision": "promote",
+                    "reason": "regla canary disparada: 2 edges shadow, 2 ciclos y pico 12.4%",
+                    "shadow_edges": 2,
+                    "shadow_best_edge": 12.4,
+                    "support_count": 2,
+                    "observed_count": 3,
+                },
+                {
+                    "city": "Chicago",
+                    "decision": "keep",
+                    "reason": "ciudad ya operativa",
+                },
+            ]
+        },
+        "send_telegram": lambda text, with_menu=False, custom_keyboard=None: candidate_messages.append(text),
+    }
+    exec(get_function_source(module_ast, code_lines, "_compute_city_decisions_for_alerts"), candidate_ns)
+    exec(get_function_source(module_ast, code_lines, "notify_canary_candidates"), candidate_ns)
+
+    cand_state = {"canary_candidate_notified": {}}
+    fire1 = candidate_ns["notify_canary_candidates"](cand_state)
+    test("M5 canary candidate: dispara alerta para ciudad promote",
+         fire1 is True
+         and len(candidate_messages) == 1
+         and "Buenos Aires" in candidate_messages[0]
+         and "Ciudad candidata a canary" in candidate_messages[0],
+         {"fired": fire1, "messages": candidate_messages})
+    test("M5 canary candidate: registra la ciudad en canary_candidate_notified",
+         "Buenos Aires" in cand_state.get("canary_candidate_notified", {}),
+         cand_state)
+
+    # Re-invocación con el mismo estado → no re-dispara.
+    fire2 = candidate_ns["notify_canary_candidates"](cand_state)
+    test("M5 canary candidate: idempotente si la ciudad sigue candidata",
+         fire2 is False and len(candidate_messages) == 1,
+         {"fired": fire2, "messages_count": len(candidate_messages)})
+
+    # Si la ciudad ya no aparece como promote → limpia el flag para permitir re-disparo futuro.
+    candidate_ns["build_dashboard_city_decisions"] = lambda city_observation=None, city_accuracy=None, shadow_tracking=None: {
+        "rows": [{"city": "Chicago", "decision": "keep"}]
+    }
+    exec(get_function_source(module_ast, code_lines, "_compute_city_decisions_for_alerts"), candidate_ns)
+    exec(get_function_source(module_ast, code_lines, "notify_canary_candidates"), candidate_ns)
+    fire3 = candidate_ns["notify_canary_candidates"](cand_state)
+    test("M5 canary candidate: limpia flag cuando la ciudad deja de ser candidata",
+         fire3 is True and "Buenos Aires" not in cand_state.get("canary_candidate_notified", {}),
+         {"fired": fire3, "state": cand_state})
+
+    test("Version v10.6.11", 'BOT_VERSION = "v10.6.11"' in code)
 
     # ---- Resultado ----
     print(f"\n{'='*50}")

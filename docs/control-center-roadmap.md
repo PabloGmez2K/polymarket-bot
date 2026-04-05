@@ -16,182 +16,51 @@
 
 ---
 
-## Estado al 4 de abril de 2026
+## Estado al 4 de abril de 2026 (post-rediseño)
 
-- Completado en la capa HTML/CSS: `Road to Real`, `Bloque 1 Estado del bot`, `Bloque 2 Senales shadow direccionales` y `Bloque 3 Salud del sistema` en `<details>`.
-- Eliminado del flujo visible principal: Mission HUD gamificado, trofeos, desbloqueos, trade console larga, scoreboard/rivalry y tabla larga de ciclos.
-- Los tests de `verify_before_deploy.py` ya cubren la nueva estructura y el fallback de `build_dashboard_road_to_real()`.
-- Pendiente en otra sesion, sin implementar ahora: evaluar subir ciclos de `3x/dia` a `4-6x/dia` solo despues de validar que el dashboard nuevo deja leer bien la muestra shadow.
+### Completado (sesiones 71-77)
 
----
+| ID | Tarea | Sesión | Estado |
+|----|-------|--------|--------|
+| QW1 | Eliminar `legacy-focus-shell` | 77 | Obsoleto — template reescrito de 1716→460 líneas |
+| QW2 | Mover Legacy drift a capa 3 | 77 | Obsoleto — eliminado en rediseño |
+| QW3 | Reordenar capa 2 | 73 | Hecho |
+| QW4 | Alarma "sin ciclo en >12h" | 71 | Hecho |
+| QW5 | Timestamp NOAA | 73 | Hecho |
+| QW6 | Mini-cards "esperando muestra" | 73 | Hecho |
+| QW7 | Colapsar Readiness/Desbloqueos | 77 | Obsoleto — eliminados trofeos/unlocks |
+| M1 | Mega-card 3 tabs | 74 | Hecho (absorbido en Bloque 3) |
+| M2 | Verificar persistencia shadow/policy en Volume | 78 | Hecho (5 abr, SSH Railway) |
+| M3 | Cerrar filas Chicago legacy | 74 | Hecho (auditado) |
+| M4 | Resumen diario Telegram (08:00 UTC) | 78 | Hecho (v10.6.11) |
+| M5 | Alerta ciudad candidata a canary | 78 | Hecho (v10.6.11) |
 
-## Quick wins
-
-Cambios sin riesgo de regresión. No tocan la lógica de trading ni el deploy.
-
----
-
-### QW1 — Eliminar `legacy-focus-shell`
-
-| Campo | Valor |
-|---|---|
-| **Objetivo** | Limpiar código HTML muerto que contamina el template |
-| **Impacto** | Legibilidad del template; sin efecto visible en el dashboard |
-| **Dificultad** | Mínima |
-| **Riesgo** | Ninguno (ya está `hidden`) |
-| **Prioridad** | Alta |
-| **Archivos** | `templates/dashboard.html` |
-| **Dependencias** | Ninguna |
-| **Sesión aparte** | No |
+### Rediseño global (sesión 77)
+- Dashboard: Road to Real progress bar + Bloque 1 (Estado bot) + Bloque 2 (Señales shadow direccionales) + Bloque 3 (Salud del sistema en `<details>`)
+- Eliminado: Mission HUD, trofeos, desbloqueos, scoreboards, trade console larga, tabla ciclos
+- `build_dashboard_road_to_real()` con 6 checks (R1-R6) para reactivar trading real
+- `_is_shadow_only()`, `_dashboard_mode_label()`, `_build_recent_shadow_rows()` en bot.py
+- `verify_before_deploy.py` cubre nueva estructura: 516/516
 
 ---
 
-### QW2 — Mover Legacy drift a capa 3
+## Tareas pendientes post-rediseño
 
-| Campo | Valor |
-|---|---|
-| **Objetivo** | Sacar el bloque "Drift Open-Meteo" de la zona de Observabilidad activa |
-| **Impacto** | Reduce ruido en capa 2; Legacy drift no es comparable con NOAA activo |
-| **Dificultad** | Mínima |
-| **Riesgo** | Ninguno |
-| **Prioridad** | Alta |
-| **Archivos** | `templates/dashboard.html` |
-| **Dependencias** | Ninguna |
-| **Sesión aparte** | No |
+### Mejoras medianas
 
----
+### M2 — Verificar persistencia de shadow_city_tracking y city_policy_state en Volume ✅
 
-### QW3 — Reordenar capa 2: NOAA y Decision engine primero
+**Estado:** Hecho (5 abr 2026, sesión 78).
 
-| Campo | Valor |
-|---|---|
-| **Objetivo** | Reflejar la prioridad real de la fase actual: NOAA/coverage es el cuello de botella, pero aparece al final de capa 2 |
-| **Impacto** | Alto: la información más relevante pasa a estar visible sin bajar 7 secciones |
-| **Dificultad** | Baja |
-| **Riesgo** | Ninguno |
-| **Prioridad** | Alta |
-| **Archivos** | `templates/dashboard.html` |
-| **Dependencias** | Ninguna |
-| **Sesión aparte** | No |
-
-**Orden objetivo:**
+**Verificación (via `railway_safe.ps1 ssh`):**
 ```
-[Capa 2]
-  1. Estado operativo compacto
-  2. NOAA calidad + Decision engine / Ranking   ← subir aquí
-  3. Stats de trading
-  4. Checklist bankroll
-  5. Eficiencia de exits (colapsada si muted)
-  6. Trade console
+shadow_city_tracking.json   45650 B   Apr 4 23:00
+city_policy_state.json       5449 B   Apr 4 16:00
 ```
 
----
+Ambos archivos persisten en `/app/data/` entre deploys. Evidencia adicional: backups de `agent_events.jsonl` de Mar 29/30 y `postmortem.json.bak_session72_chicago` del 3 abr siguen presentes en el mismo Volume. El nombre real del archivo shadow es `shadow_city_tracking.json` (no `shadow_tracking.json` como figuraba originalmente en el roadmap). Tabla de `Datos persistentes` en `CONTEXTO.md` actualizada con la nueva fila.
 
-### QW4 — Alarma "sin ciclo en >12h" en Mission HUD
-
-| Campo | Valor |
-|---|---|
-| **Objetivo** | Detectar bot caído antes del próximo ciclo de 8h |
-| **Impacto** | Crítico operativamente — hoy no hay forma de saber desde el dashboard si el bot está corriendo |
-| **Dificultad** | Baja |
-| **Riesgo** | Bajo — solo añade lógica de lectura en `build_dashboard_focus_center()` |
-| **Prioridad** | Crítica |
-| **Archivos** | `bot.py` (función `build_dashboard_focus_center`), `templates/dashboard.html` |
-| **Dependencias** | Requiere leer `cycle_summary.json` para obtener el timestamp del último ciclo |
-| **Sesión aparte** | No, pero toca Python |
-
----
-
-### QW5 — Timestamp "último fetch NOAA exitoso"
-
-| Campo | Valor |
-|---|---|
-| **Objetivo** | Hacer visible cuándo fue el último caso NOAA guardado exitosamente |
-| **Impacto** | Detecta pipeline NOAA roto sin necesidad de revisar logs de Railway |
-| **Dificultad** | Baja |
-| **Riesgo** | Ninguno |
-| **Prioridad** | Alta |
-| **Archivos** | `bot.py` (`build_dashboard_forecast_quality`), `templates/dashboard.html` |
-| **Dependencias** | Ninguna |
-| **Sesión aparte** | No |
-
----
-
-### QW6 — Mini-cards: "esperando muestra" cuando n < 5
-
-| Campo | Valor |
-|---|---|
-| **Objetivo** | Evitar que PnL serie, Win rate y Drawdown se lean como señal cuando la muestra es insuficiente |
-| **Impacto** | Medio — elimina lectura ruidosa de métricas con n < 5 trades limpios |
-| **Dificultad** | Mínima |
-| **Riesgo** | Ninguno |
-| **Prioridad** | Media |
-| **Archivos** | `templates/dashboard.html` (condición Jinja existente, ampliar umbral) |
-| **Dependencias** | Ninguna |
-| **Sesión aparte** | No |
-
----
-
-### QW7 — Colapsar Readiness y Desbloqueos
-
-| Campo | Valor |
-|---|---|
-| **Objetivo** | Reducir redundancia con los tracks de Progress en capa 1 |
-| **Impacto** | Medio — elimina secciones que duplican información ya visible en capa 1 |
-| **Dificultad** | Mínima |
-| **Riesgo** | Ninguno |
-| **Prioridad** | Media |
-| **Archivos** | `templates/dashboard.html` |
-| **Dependencias** | Ninguna |
-| **Sesión aparte** | No |
-
----
-
-## Mejoras medianas
-
-Requieren más trabajo pero no cambian la arquitectura core.
-
----
-
-### M1 — Mega-card Observabilidad → 3 tabs
-
-| Campo | Valor |
-|---|---|
-| **Objetivo** | Dividir el mega-card de Observabilidad en 3 tabs: `NOAA \| Ciudades \| Decisiones` |
-| **Impacto** | Alto — es el bloque más denso del dashboard; imposible de leer de un vistazo |
-| **Dificultad** | Media |
-| **Riesgo** | Bajo — solo reorganización de HTML, mismos datos y variables Jinja |
-| **Prioridad** | Alta |
-| **Archivos** | `templates/dashboard.html`, `static/dashboard.js` (activar tabs nuevos) |
-| **Dependencias** | QW3 (para no confundir con el reordenamiento previo) |
-| **Sesión aparte** | Sí — dedicar una sesión específica |
-
-**Estructura objetivo:**
-```
-Tab NOAA:       calidad forecast + últimos 20 casos
-Tab Ciudades:   estado por ciudad + universo operativo + bloqueadas
-Tab Decisiones: decision engine + ranking + canary/shadow + transiciones
-```
-
----
-
-### M2 — Verificar persistencia de shadow_tracking y city_policy_state en Volume
-
-| Campo | Valor |
-|---|---|
-| **Objetivo** | Confirmar que los dos archivos críticos para el motor de ciudades persisten entre deploys |
-| **Impacto** | Crítico — si `shadow_tracking` no persiste, la autopromoción a canary nunca se dispara |
-| **Dificultad** | Baja (solo verificación + documentar) |
-| **Riesgo** | Ninguno |
-| **Prioridad** | Crítica — hacer antes de confiar en ninguna autopromoción |
-| **Archivos** | Railway Volume `/app/data/`, `CONTEXTO.md` (actualizar tabla de datos persistentes) |
-| **Dependencias** | Ninguna |
-| **Sesión aparte** | No — puede hacerse en 15 minutos desde Railway |
-
-**Verificación:**
-```bash
-rtk railway run -- ls /app/data/ | grep -E "shadow|city_policy"
-```
+**Desbloquea:** M5 (alerta canary en Telegram) y R1 (motor 3 gates).
 
 ---
 
@@ -210,39 +79,29 @@ rtk railway run -- ls /app/data/ | grep -E "shadow|city_policy"
 
 ---
 
-### M4 — Resumen diario Telegram (08:00 UTC)
+### M4 — Resumen diario Telegram (08:00 UTC) ✅
 
-| Campo | Valor |
-|---|---|
-| **Objetivo** | Reemplazar múltiples alertas de estado con un único resumen diario agrupado |
-| **Impacto** | Alto — reduce dependencia del dashboard para seguimiento operativo diario |
-| **Dificultad** | Media |
-| **Riesgo** | Bajo — no toca trading, solo observabilidad |
-| **Prioridad** | Alta |
-| **Archivos** | `bot.py` (nueva función `send_daily_summary_telegram()`), `alerts_state.json` (flag de envío) |
-| **Dependencias** | M3 (para que el WR de Chicago no distorsione el resumen) |
-| **Sesión aparte** | Sí |
+**Estado:** Hecho v10.6.11 (sesión 78).
 
-**Contenido del resumen:**
-1. Ciclos ejecutados en las últimas 24h + oportunidades detectadas/tomadas
-2. Resoluciones del día (ganadas/perdidas + importes)
-3. NOAA nuevos casos por ciudad + acumulado
-4. Estado del sistema: HP, versión, próximo ciclo estimado
+**Implementación:**
+- `build_daily_summary_payload(now)` + `format_daily_summary_text(payload)` + `maybe_send_daily_summary_telegram(state, now)` en `bot.py`.
+- Gate: `now.hour == sorted(SCHEDULE_HOURS_UTC)[0]` (08 UTC por defecto) y `state["daily_summary_last_sent"] != today_utc` → one-shot idempotente por fecha UTC.
+- Invocado desde `run_observability_alerts()` al final, envuelto en try/except.
+- Helpers internos de agregación 24h: `_daily_summary_cycles_last_24h` (cycles_history.jsonl), `_daily_summary_closed_trades_last_24h` (postmortem), `_daily_summary_noaa_last_24h` (audit.observed_vs_forecast por `checked_at`).
+
+**Contenido:** ciclos 24h (ejecutados, mercados, edges, selected/shadow/buys_real), resoluciones 24h (cerrados, wins/losses, PnL), NOAA nuevos por ciudad + acumulado, versión, modo (SHADOW-ONLY / N activas), próximo ciclo.
 
 ---
 
-### M5 — Alerta "ciudad candidata a canary" en Telegram
+### M5 — Alerta "ciudad candidata a canary" en Telegram ✅
 
-| Campo | Valor |
-|---|---|
-| **Objetivo** | Notificar cuando una ciudad shadow cumple la regla de promoción, antes de ejecutar automáticamente |
-| **Impacto** | Alto — añade gate de revisión humana antes de que el bot empiece a hacer BUYs en una ciudad nueva |
-| **Dificultad** | Baja |
-| **Riesgo** | Ninguno — es observabilidad, no acción |
-| **Prioridad** | Alta |
-| **Archivos** | `bot.py` (`sync_city_policy_state()`), `alerts_state.json` |
-| **Dependencias** | M2 (verificar que shadow_tracking persiste) |
-| **Sesión aparte** | No — puede hacerse junto con M4 |
+**Estado:** Hecho v10.6.11 (sesión 78).
+
+**Implementación:**
+- `notify_canary_candidates(state)` en `bot.py`, self-contained: reconstruye `city_decisions` vía `_compute_city_decisions_for_alerts()` con los mismos helpers que usa `sync_city_policy_state`.
+- Fires one-shot cuando `row.decision == "promote"`. Registra en `state["canary_candidate_notified"]` con evidencia (shadow_edges, best_edge).
+- Limpia la entrada cuando la ciudad deja de ser candidata → permite re-disparo futuro si la evidencia regresa tras una regresión.
+- Invocado desde `run_observability_alerts()` justo antes de `sync_city_policy_state`, envuelto en try/except. NO modifica la lógica de auto-promote: es observabilidad paralela con un mensaje rico en evidencia para review humano.
 
 ---
 
@@ -354,30 +213,21 @@ Datos que hoy no se recogen y que habilitarán aprendizaje estratégico.
 
 ---
 
-## Orden recomendado de ejecución
+## Orden recomendado de ejecución (post-rediseño)
 
-### Fase 1 — Corrección y quick wins (sin deploy de riesgo)
-
-```
-M2 → verificar shadow_tracking en Volume    (15 min, Railway)
-QW4 → alarma "sin ciclo en >12h"            (toca Python, riesgo bajo)
-M3 → cerrar 3 filas Chicago legacy open     (sesión 70 ya planificada)
-QW1 + QW2 + QW3 + QW6 + QW7 → HTML puro    (sesión rápida, cero riesgo)
-QW5 → timestamp NOAA                        (junto con QW4)
-```
-
-### Fase 2 — Mejoras de experiencia (después de Fase 1)
+### Fase 2 — Operativa (próximas sesiones)
 
 ```
-M1 → mega-card en 3 tabs                    (sesión propia, solo HTML)
-M4 + M5 → resumen diario + alerta canary    (sesión propia, Python)
+M2 ✅ shadow_city_tracking + city_policy_state persisten (sesión 78)
+M4 ✅ resumen diario Telegram 08 UTC (sesión 78, v10.6.11)
+M5 ✅ alerta ciudad candidata a canary (sesión 78, v10.6.11)
 ```
 
 ### Fase 3 — Refactors con impacto
 
 ```
-R1 → motor de ciudades con 3 gates          (después de M2 + M3)
-R3 → log de skips                           (sesión propia)
+R1 → motor de ciudades con 3 gates          (después de M2)
+R3 → log de skips por ciclo                 (sesión propia)
 ```
 
 ### Fase 4 — Instrumentación y aprendizaje
@@ -390,7 +240,8 @@ I2 + R2 → edge stability + capa 1 adaptativa   (largo plazo)
 
 ### Reglas de corte
 
-- No empezar R1 (refactor motor) sin tener M2 (persistencia confirmada) y M3 (WR Chicago corregido)
+- No empezar R1 sin tener M2 (persistencia confirmada)
 - No empezar R2 (capa adaptativa) sin >= 20 casos NOAA por ciudad
 - M5 (alerta canary) solo tiene valor si M2 confirma que shadow_tracking persiste
 - I3 solo tiene valor cuando hay >= 10 casos NOAA por ciudad
+- Evaluar subir ciclos de 3x/dia a 4-6x/dia solo después de validar que la muestra shadow crece bien

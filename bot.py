@@ -100,7 +100,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.10"
+BOT_VERSION = "v10.6.11"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -458,6 +458,10 @@ def load_alerts_state():
         "city_accuracy_flagged": {},
         # v10.6: alerta de bankroll bajo
         "low_bankroll_alerted": False,
+        # v10.6.11 (M4): resumen diario Telegram — fecha UTC del último envío (YYYY-MM-DD)
+        "daily_summary_last_sent": None,
+        # v10.6.11 (M5): ciudades ya notificadas como candidatas a canary (one-shot por ciudad)
+        "canary_candidate_notified": {},
     }
     if not os.path.exists(ALERTS_FILE):
         return default
@@ -481,6 +485,8 @@ def load_alerts_state():
         state.setdefault("win_rate_high_alerted", False)
         state.setdefault("city_accuracy_flagged", {})
         state.setdefault("low_bankroll_alerted", False)
+        state.setdefault("daily_summary_last_sent", None)
+        state.setdefault("canary_candidate_notified", {})
         return state
     except Exception:
         return default
@@ -3235,12 +3241,31 @@ def run_observability_alerts():
             state["low_bankroll_alerted"] = False
             changed = True
 
+    # v10.6.11 (M5): alerta one-shot cuando una ciudad shadow se vuelve candidata a canary.
+    # Se evalúa antes del sync para que la notificación humana preceda (o acompañe) al auto-promote.
+    try:
+        if notify_canary_candidates(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"Error evaluando canary candidates: {e}")
+
     try:
         sync_city_policy_state(notify=True)
     except Exception as e:
         logger = globals().get("log")
         if logger:
             logger.warning(f"Error sincronizando city policy state: {e}")
+
+    # v10.6.11 (M4): resumen diario Telegram 08:00 UTC, one-shot por día.
+    try:
+        if maybe_send_daily_summary_telegram(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"Error evaluando resumen diario: {e}")
 
     if changed:
         save_alerts_state(state)
@@ -5027,6 +5052,304 @@ def sync_city_policy_state(notify=True):
         policy_state["updated_at"] = now_iso
         save_city_policy_state(policy_state)
     return policy_state
+
+
+# =============================================================
+# v10.6.11 — M5: alerta ciudad candidata a canary (one-shot)
+# =============================================================
+
+def _compute_city_decisions_for_alerts():
+    """
+    Reconstruye city_decisions con los mismos helpers que usa sync_city_policy_state
+    pero aislado para poder consumirlo desde alertas sin duplicar lógica de transición.
+    """
+    city_accuracy = get_city_accuracy()
+    shadow_tracking = load_shadow_city_tracking()
+    city_observation = build_dashboard_city_observation(city_accuracy=city_accuracy)
+    return build_dashboard_city_decisions(
+        city_observation=city_observation,
+        city_accuracy=city_accuracy,
+        shadow_tracking=shadow_tracking,
+    )
+
+
+def notify_canary_candidates(state):
+    """
+    Fires a one-shot Telegram alert when a shadow city first reaches the canary
+    promotion rule (decision == "promote"). Does NOT mutate city_policy_state:
+    the auto-promote logic in sync_city_policy_state keeps its own transition flow.
+
+    Uses alerts_state["canary_candidate_notified"] as the idempotency map:
+      { city: {"notified_at": iso, "reason": str, "shadow_edges": int, "best_edge": float} }
+
+    An entry is cleared when the city no longer meets the promote rule, so the
+    alert can fire again if the evidence reappears after a regression.
+
+    Returns True if `state` was mutated (caller should persist it).
+    """
+    try:
+        city_decisions = _compute_city_decisions_for_alerts()
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"canary candidates: no pude computar city_decisions ({e})")
+        return False
+
+    rows = city_decisions.get("rows", []) if isinstance(city_decisions, dict) else []
+    notified = state.setdefault("canary_candidate_notified", {})
+    if not isinstance(notified, dict):
+        notified = {}
+        state["canary_candidate_notified"] = notified
+
+    current_candidates = {
+        row.get("city"): row
+        for row in rows
+        if isinstance(row, dict)
+        and row.get("city")
+        and row.get("decision") == "promote"
+    }
+
+    changed = False
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # Nuevas candidatas → enviar alerta y registrar one-shot.
+    for city, row in current_candidates.items():
+        if city in notified:
+            continue
+        reason = row.get("reason", "")
+        shadow_edges = row.get("shadow_edges", 0)
+        shadow_cycles = row.get("shadow_cycles") or row.get("support_count") or 0
+        shadow_best_edge = row.get("shadow_best_edge", 0.0)
+        observed_count = row.get("observed_count", 0)
+        try:
+            send_telegram(
+                f"🎯 <b>Ciudad candidata a canary</b>\n"
+                f"{city} cumple la regla shadow → canary.\n\n"
+                f"Evidencia:\n"
+                f"• Shadow edges: <b>{shadow_edges}</b>\n"
+                f"• Mejor edge shadow: <b>{float(shadow_best_edge or 0):.1f}%</b>\n"
+                f"• Ciclos shadow/soporte: <b>{shadow_cycles}</b>\n"
+                f"• NOAA observados: <b>{observed_count}</b>\n\n"
+                f"<i>{reason}</i>\n\n"
+                f"El auto-promote puede activarse en este mismo ciclo; "
+                f"revisar antes de confiar en BUYs en esta ciudad."
+            )
+        except Exception as e:
+            logger = globals().get("log")
+            if logger:
+                logger.warning(f"canary candidates: fallo al enviar Telegram ({e})")
+            continue
+        notified[city] = {
+            "notified_at": now_iso,
+            "reason": reason,
+            "shadow_edges": int(shadow_edges or 0),
+            "best_edge": float(shadow_best_edge or 0),
+        }
+        changed = True
+
+    # Ciudades que ya no son candidatas → limpiar flag para permitir re-disparo futuro.
+    for city in list(notified.keys()):
+        if city not in current_candidates:
+            notified.pop(city, None)
+            changed = True
+
+    return changed
+
+
+# =============================================================
+# v10.6.11 — M4: resumen diario Telegram (08:00 UTC)
+# =============================================================
+
+def _daily_summary_cycles_last_24h(now):
+    """
+    Agrega ciclos de cycles_history.jsonl dentro de las últimas 24h.
+    Retorna dict con cycles, markets_evaluated, with_edge, selected, shadow, buys_real.
+    """
+    stats = {
+        "cycles": 0,
+        "markets_evaluated": 0,
+        "with_edge": 0,
+        "selected": 0,
+        "shadow": 0,
+        "buys_real": 0,
+    }
+    cutoff = now - timedelta(hours=24)
+    try:
+        records = load_cycle_history()
+    except Exception:
+        records = []
+    for rec in records:
+        ts_raw = rec.get("timestamp_utc", "")
+        if not ts_raw:
+            continue
+        try:
+            ts = datetime.fromisoformat(ts_raw)
+        except Exception:
+            continue
+        if ts < cutoff:
+            continue
+        stats["cycles"] += 1
+        scan = rec.get("scan", {}) if isinstance(rec.get("scan"), dict) else {}
+        stats["markets_evaluated"] += int(scan.get("markets_evaluated", 0) or 0)
+        stats["with_edge"] += int(scan.get("with_edge", 0) or 0)
+        stats["selected"] += int(scan.get("selected", 0) or 0)
+        stats["shadow"] += int(scan.get("shadow", 0) or 0)
+        buys = rec.get("buys", []) if isinstance(rec.get("buys"), list) else []
+        stats["buys_real"] += len(buys)
+    return stats
+
+
+def _daily_summary_closed_trades_last_24h(now):
+    """Resoluciones del día: trades cerrados en las últimas 24h."""
+    stats = {"closed": 0, "wins": 0, "losses": 0, "pnl": 0.0}
+    cutoff = now - timedelta(hours=24)
+    try:
+        closed = _get_recent_closed_trades()
+    except Exception:
+        closed = []
+    for rec in closed:
+        closed_at_raw = rec.get("closed_at", "")
+        if not closed_at_raw:
+            continue
+        try:
+            closed_at = datetime.fromisoformat(closed_at_raw)
+        except Exception:
+            continue
+        if closed_at < cutoff:
+            continue
+        pnl = float(rec.get("pnl_cash", 0) or 0)
+        stats["closed"] += 1
+        stats["pnl"] += pnl
+        if pnl > 0:
+            stats["wins"] += 1
+        else:
+            stats["losses"] += 1
+    return stats
+
+
+def _daily_summary_noaa_last_24h(now):
+    """NOAA: filas observadas añadidas en últimas 24h + acumulado histórico."""
+    stats = {"new_total": 0, "new_by_city": {}, "cumulative": 0}
+    cutoff = now - timedelta(hours=24)
+    try:
+        audit = load_audit_data()
+    except Exception:
+        audit = {}
+    rows = audit.get(OBSERVED_AUDIT_KEY, []) if isinstance(audit, dict) else []
+    for row in rows:
+        if not isinstance(row, dict) or row.get("source") != "noaa_ncei":
+            continue
+        stats["cumulative"] += 1
+        checked_at_raw = row.get("checked_at", "")
+        if not checked_at_raw:
+            continue
+        try:
+            checked_at = datetime.fromisoformat(checked_at_raw)
+        except Exception:
+            continue
+        if checked_at < cutoff:
+            continue
+        stats["new_total"] += 1
+        city = row.get("city", "?")
+        stats["new_by_city"][city] = stats["new_by_city"].get(city, 0) + 1
+    return stats
+
+
+def build_daily_summary_payload(now=None):
+    """Construye payload del resumen diario (datos crudos sin formateo)."""
+    if now is None:
+        now = datetime.now(timezone.utc)
+    return {
+        "generated_at": now.isoformat(),
+        "cycles_24h": _daily_summary_cycles_last_24h(now),
+        "resolutions_24h": _daily_summary_closed_trades_last_24h(now),
+        "noaa_24h": _daily_summary_noaa_last_24h(now),
+        "version": BOT_VERSION,
+        "logic_series": LOGIC_SERIES,
+        "active_cities_count": len(ACTIVE_TRADING_CITIES),
+        "shadow_only": len(ACTIVE_TRADING_CITIES) == 0,
+    }
+
+
+def format_daily_summary_text(payload):
+    """Formatea payload del resumen diario como mensaje Telegram HTML."""
+    c = payload.get("cycles_24h", {})
+    r = payload.get("resolutions_24h", {})
+    n = payload.get("noaa_24h", {})
+
+    mode_label = "SHADOW-ONLY" if payload.get("shadow_only") else f"{payload.get('active_cities_count', 0)} ciudades activas"
+
+    lines = [
+        f"📊 <b>Resumen diario — {datetime.now(timezone.utc).strftime('%Y-%m-%d')}</b>",
+        f"<i>Bot {payload.get('version', '?')} · {mode_label}</i>",
+        "",
+        "<b>🔄 Ciclos 24h</b>",
+        f"• Ejecutados: <b>{c.get('cycles', 0)}</b>",
+        f"• Mercados escaneados: {c.get('markets_evaluated', 0)}",
+        f"• Con edge detectado: <b>{c.get('with_edge', 0)}</b>",
+        f"• Seleccionados: {c.get('selected', 0)} | Shadow: {c.get('shadow', 0)}",
+        f"• BUYs reales: {c.get('buys_real', 0)}",
+        "",
+        "<b>💰 Resoluciones 24h</b>",
+    ]
+
+    if r.get("closed", 0) > 0:
+        lines.append(
+            f"• Cerrados: <b>{r['closed']}</b> "
+            f"(✅ {r.get('wins', 0)} / ❌ {r.get('losses', 0)})"
+        )
+        lines.append(f"• PnL neto: <b>${r.get('pnl', 0.0):+.2f}</b>")
+    else:
+        lines.append("• Sin trades cerrados hoy")
+
+    lines.append("")
+    lines.append("<b>🛰 NOAA 24h</b>")
+    if n.get("new_total", 0) > 0:
+        lines.append(f"• Nuevos casos: <b>{n['new_total']}</b>")
+        for city, count in sorted(n.get("new_by_city", {}).items(), key=lambda x: -x[1]):
+            lines.append(f"  · {city}: {count}")
+    else:
+        lines.append("• Sin casos nuevos en 24h")
+    lines.append(f"• Acumulado histórico: {n.get('cumulative', 0)}")
+
+    # Próximo ciclo (usa scheduler si está disponible).
+    try:
+        next_run = get_next_run_time()
+        lines.append("")
+        lines.append(f"<b>⏭ Próximo ciclo:</b> {next_run.strftime('%H:%M UTC')}")
+    except Exception:
+        pass
+
+    return "\n".join(lines)
+
+
+def maybe_send_daily_summary_telegram(state, now=None):
+    """
+    Envía el resumen diario por Telegram si es la ventana de las 08 UTC y
+    no se envió ya hoy. Retorna True si state fue mutado.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    # Ventana: solo si el ciclo actual cae en la hora configurada (08 por defecto).
+    target_hour = sorted(SCHEDULE_HOURS_UTC)[0] if SCHEDULE_HOURS_UTC else 8
+    if now.hour != target_hour:
+        return False
+    today = now.date().isoformat()
+    if state.get("daily_summary_last_sent") == today:
+        return False
+
+    try:
+        payload = build_daily_summary_payload(now=now)
+        text = format_daily_summary_text(payload)
+        send_telegram(text)
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"daily summary: fallo generando/enviando ({e})")
+        return False
+
+    state["daily_summary_last_sent"] = today
+    return True
 
 
 def _extract_threshold_from_question(question):

@@ -1,6 +1,12 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 4 de abril de 2026 (Sesión 77 — Rediseño Control Center shadow-only direccional)
+**Última actualización:** 5 de abril de 2026 (Sesión 78 — M2/M4/M5 Control Center, v10.6.11)
+**Sesión 78 (5 abr 2026, Claude):** M2, M4 y M5 del control-center roadmap completados en una sesión.
+- M2: verificado por SSH Railway que `shadow_city_tracking.json` y `city_policy_state.json` persisten en el Volume `/app/data` entre deploys. Nombre real del archivo shadow corregido en roadmap y añadido a la tabla de "Datos persistentes".
+- M4: `build_daily_summary_payload()`, `format_daily_summary_text()`, `maybe_send_daily_summary_telegram(state)` en `bot.py`. Hook desde `run_observability_alerts()` (try/except). One-shot idempotente por fecha UTC, disparado en la ventana `sorted(SCHEDULE_HOURS_UTC)[0]` (08 UTC por defecto). Contenido: ciclos 24h, resoluciones 24h (wins/losses/PnL), NOAA 24h por ciudad + acumulado, versión, modo y próximo ciclo.
+- M5: `notify_canary_candidates(state)` en `bot.py`. Self-contained, se invoca desde `run_observability_alerts()` antes de `sync_city_policy_state` (try/except). Fires one-shot por ciudad cuando `row.decision == "promote"` usando `state["canary_candidate_notified"]`; limpia la entrada cuando la ciudad deja de ser candidata para permitir re-disparo tras regresión. NO toca la lógica de auto-promote — es observabilidad paralela con evidencia rica (shadow_edges, best_edge, soporte, NOAA count).
+- Versión bumpeada a **v10.6.11**. `verify_before_deploy.py` cierra en `534/534` (21 tests nuevos cubriendo M4 + M5: gating, idempotencia, agregaciones 24h y lifecycle del flag canary candidate).
+- Pendiente operativo: push + deploy Railway (el usuario decide cuándo); validar en live que el resumen diario cae el primer ciclo 08 UTC y que la alerta canary candidate no se dispara accidentalmente por la shadow tracking actual.
 **M3 COMPLETADA (sesión 72, auditada sesión 74):** Las 3 filas legacy Chicago `2026-03-26/27/28` ya están `closed/LOSS_TOTAL/legacy_unresolved` en producción. Chicago accuracy real: `trades=8, wins=1, WR=12.5%, PnL=-$7.85`. Hay una fila sin fecha (take_profit, la única win) — dato menor.
 **M1 COMPLETADA (sesión 74, Codex):** Mega-card Observabilidad dividida en 3 tabs: `NOAA | Ciudades | Decisiones` en `templates/dashboard.html`. Usa patrón existente `data-tab-shell`. DOM order: NOAA → Ciudades → Decisiones. 507/507 OK.
 **ALERTA ESTRATÉGICA — próxima sesión con Opus:** WR últimos 15 trades pasó de 53% (16:00 UTC 3 abr) a 27% (23:00 UTC 3 abr) en 7 horas. Revisar trades del ciclo 23:00 UTC, lógica de entrada y sigma. M4 y R1 quedan desbloqueados para Fase 2 CC.
@@ -224,6 +230,7 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 | `postmortem.json` | Postmortems estructurados de apertura/cierre por mercado |
 | `alerts_state.json` | Estado persistente de alertas para evitar avisos duplicados |
 | `city_policy_state.json` | Overlay persistente por ciudad: `auto_canary_cities`, `auto_shadow_cities`, `auto_blocked_cities` y `transition_history` |
+| `shadow_city_tracking.json` | Tracking shadow acumulativo por ciudad (señales detectadas, edges, hit-rate) — input de la autopromoción a canary |
 | `agent_events.jsonl` | Eventos persistentes del scoreboard de agentes (si existe en Volume) |
 | `signals.json` | Señales de traders activas usadas por el bot en producción |
 | `traders_db.json` | Base de datos persistente de traders descubiertos/calificados |
