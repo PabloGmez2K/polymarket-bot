@@ -4709,7 +4709,7 @@ def _extract_threshold_display_from_question(question):
     value = float(match.group(1))
     unit = match.group(2).upper()
     value_display = f"{int(value)}" if value.is_integer() else f"{value:.1f}"
-    return f"umbral {value_display}Â°{unit}"
+    return f"umbral {value_display}°{unit}"
 
 
 def _build_shadow_forecast_fields(row):
