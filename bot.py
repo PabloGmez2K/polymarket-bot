@@ -4678,8 +4678,8 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None):
     }
 
 
-def _shadow_condition_label(question):
-    """Extract directional condition label from question text."""
+def _shadow_condition_code(question):
+    """Extract directional condition code from question text."""
     q = str(question or "").lower()
     if "above" in q:
         return "at_or_above"
@@ -4688,6 +4688,18 @@ def _shadow_condition_label(question):
     if "between" in q or "exactly" in q:
         return "range/exact"
     return "otro"
+
+
+def _shadow_condition_label(question):
+    """Translate the shadow condition into a short user-facing label."""
+    condition = _shadow_condition_code(question)
+    if condition == "at_or_above":
+        return "≥ umbral"
+    if condition == "at_or_below":
+        return "≤ umbral"
+    if condition == "range/exact":
+        return "rango/exacta"
+    return "direccional"
 
 
 def _build_recent_shadow_rows(shadow_tracking):
@@ -4729,8 +4741,8 @@ def _build_recent_shadow_rows(shadow_tracking):
         for edge in city_data.get("recent_edges", []):
             if not isinstance(edge, dict):
                 continue
-            condition = _shadow_condition_label(edge.get("question"))
-            if condition not in ("at_or_above", "at_or_below"):
+            condition_code = _shadow_condition_code(edge.get("question"))
+            if condition_code not in ("at_or_above", "at_or_below"):
                 continue
             edge_pct = float(edge.get("edge_pct", 0) or 0)
             if edge_pct <= 0:
@@ -4756,7 +4768,7 @@ def _build_recent_shadow_rows(shadow_tracking):
                 "forecast_max": forecast_max,
                 "forecast_display": forecast_display,
                 "seen_at": edge.get("seen_at", ""),
-                "condition_label": condition,
+                "condition_label": _shadow_condition_label(edge.get("question")),
             })
     all_edges.sort(key=lambda r: str(r.get("seen_at", "")), reverse=True)
     return all_edges[:15]
