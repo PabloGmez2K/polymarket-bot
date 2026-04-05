@@ -1165,6 +1165,7 @@ def run_tests():
         }
         exec(get_function_source(module_ast, code_lines, "_shadow_condition_label"), city_decisions_ns)
         exec(get_function_source(module_ast, code_lines, "_build_recent_shadow_rows"), city_decisions_ns)
+        exec(get_function_source(module_ast, code_lines, "_city_decision_gates"), city_decisions_ns)
         exec(get_function_source(module_ast, code_lines, "build_dashboard_city_decisions"), city_decisions_ns)
         city_observation_for_decisions = {
             **city_observation,
@@ -1235,6 +1236,89 @@ def run_tests():
              and city_decisions["policy"]["remove"]["trades"] == 3
              and city_decisions["ranking_summary"]["expelled"] >= 1,
              city_decisions)
+
+        # ---- R1 gates (gate_a historial / gate_b shadow / gate_c NOAA) ----
+        # Integration: las filas del ranking exponen los 3 gates con la forma documentada en
+        # docs/control-center-r1-contract.md
+        test("R1 gates: NYC expone shadow ready (promotable)",
+             nyc_decision["gate_b"]["state"] == "ready"
+             and nyc_decision["gate_b"]["badge"] == "good"
+             and "edges" in nyc_decision["gate_b"]["detail"],
+             nyc_decision.get("gate_b"))
+        test("R1 gates: London bloqueada marca gate_a=bad",
+             london_decision["gate_a"]["state"] == "bad"
+             and london_decision["gate_a"]["badge"] == "bad",
+             london_decision.get("gate_a"))
+        test("R1 gates: Dallas degradada marca gate_a=bad",
+             dallas_decision["gate_a"]["state"] == "bad"
+             and dallas_decision["gate_a"]["badge"] == "bad",
+             dallas_decision.get("gate_a"))
+        test("R1 gates: gates_summary tiene el formato A x · B y · C z",
+             nyc_decision["gates_summary"].startswith("A ")
+             and " · B " in nyc_decision["gates_summary"]
+             and " · C " in nyc_decision["gates_summary"],
+             nyc_decision.get("gates_summary"))
+        test("R1 gates: toda fila tiene gate_a/gate_b/gate_c con state+label+badge+detail",
+             all(
+                all(
+                    isinstance(row.get(g), dict)
+                    and {"state", "label", "badge", "detail"}.issubset(row[g].keys())
+                    for g in ("gate_a", "gate_b", "gate_c")
+                )
+                for row in city_decisions["ranking_rows"]
+             ),
+             city_decisions["ranking_rows"][0] if city_decisions["ranking_rows"] else None)
+
+        # Unit: _city_decision_gates cubre las 9 transiciones del contrato
+        gates_unit_ns = {}
+        exec(get_function_source(module_ast, code_lines, "_city_decision_gates"), gates_unit_ns)
+        gates_fn = gates_unit_ns["_city_decision_gates"]
+
+        def _gates_call(**overrides):
+            defaults = dict(
+                trades=0, win_rate=0.0, pnl=0.0,
+                history_bad=False, degraded=False, blocked=False, removable_active=False,
+                degradation_reason="", block_reason="",
+                shadow_seen=0, shadow_edges=0, shadow_cycles=0, shadow_best_edge=0.0,
+                promotable_shadow=False,
+                interpretable=False, noaa_configured=False,
+                observed_count=0, observed_goal=3,
+            )
+            defaults.update(overrides)
+            return gates_fn(**defaults)
+
+        # Gate A
+        g = _gates_call(trades=5, win_rate=60.0, pnl=1.5)
+        test("R1 gate_a: clean con trades>0 sin flags",
+             g["gate_a"]["state"] == "clean" and g["gate_a"]["badge"] == "good", g["gate_a"])
+        g = _gates_call(trades=10, win_rate=10.0, pnl=-5.0, history_bad=True)
+        test("R1 gate_a: bad con history_bad",
+             g["gate_a"]["state"] == "bad" and g["gate_a"]["badge"] == "bad", g["gate_a"])
+        g = _gates_call()
+        test("R1 gate_a: no_data con trades=0",
+             g["gate_a"]["state"] == "no_data" and g["gate_a"]["badge"] == "muted", g["gate_a"])
+
+        # Gate B
+        g = _gates_call(promotable_shadow=True, shadow_edges=4, shadow_cycles=2, shadow_best_edge=28.3, shadow_seen=5)
+        test("R1 gate_b: ready con promotable_shadow",
+             g["gate_b"]["state"] == "ready" and g["gate_b"]["badge"] == "good", g["gate_b"])
+        g = _gates_call(shadow_edges=1, shadow_cycles=1, shadow_best_edge=8.0, shadow_seen=2)
+        test("R1 gate_b: building con actividad shadow pero sin promotable",
+             g["gate_b"]["state"] == "building" and g["gate_b"]["badge"] == "accent", g["gate_b"])
+        g = _gates_call()
+        test("R1 gate_b: empty sin actividad shadow",
+             g["gate_b"]["state"] == "empty" and g["gate_b"]["badge"] == "muted", g["gate_b"])
+
+        # Gate C
+        g = _gates_call(interpretable=True, noaa_configured=True, observed_count=10, observed_goal=5)
+        test("R1 gate_c: interpretable con observed_count>=goal",
+             g["gate_c"]["state"] == "interpretable" and g["gate_c"]["badge"] == "good", g["gate_c"])
+        g = _gates_call(noaa_configured=True, observed_count=2, observed_goal=5)
+        test("R1 gate_c: partial con NOAA configurado pero muestra corta",
+             g["gate_c"]["state"] == "partial" and g["gate_c"]["badge"] == "warn", g["gate_c"])
+        g = _gates_call()
+        test("R1 gate_c: none sin NOAA configurado",
+             g["gate_c"]["state"] == "none" and g["gate_c"]["badge"] == "muted", g["gate_c"])
 
         transition_messages = []
         sync_policy_ns = {

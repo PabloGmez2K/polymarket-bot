@@ -4504,6 +4504,115 @@ def _build_recent_shadow_rows(shadow_tracking):
     return all_edges[:15]
 
 
+def _city_decision_gates(
+    *,
+    trades,
+    win_rate,
+    pnl,
+    history_bad,
+    degraded,
+    blocked,
+    removable_active,
+    degradation_reason,
+    block_reason,
+    shadow_seen,
+    shadow_edges,
+    shadow_cycles,
+    shadow_best_edge,
+    promotable_shadow,
+    interpretable,
+    noaa_configured,
+    observed_count,
+    observed_goal,
+):
+    """
+    Computa los 3 gates (A historial, B shadow, C NOAA) para una ciudad en el ranking.
+    Contrato público documentado en docs/control-center-r1-contract.md.
+    Retorna {"gate_a": {...}, "gate_b": {...}, "gate_c": {...}, "gates_summary": "..."}.
+    """
+    # --- Gate A: historial real (trades cerrados) ---
+    is_bad_history = bool(history_bad or degraded or blocked or removable_active)
+    if is_bad_history:
+        gate_a_state = "bad"
+        gate_a_label = "Malo"
+        gate_a_badge = "bad"
+        if blocked and block_reason:
+            gate_a_detail = block_reason
+        elif degraded and degradation_reason:
+            gate_a_detail = degradation_reason
+        elif removable_active or history_bad:
+            gate_a_detail = f"regla de salida: {trades} trades, WR {win_rate:.1f}%, PnL ${pnl:+.2f}"
+        else:
+            gate_a_detail = f"{trades} trades, WR {win_rate:.1f}%, PnL ${pnl:+.2f}"
+    elif trades > 0:
+        gate_a_state = "clean"
+        gate_a_label = "Limpio"
+        gate_a_badge = "good"
+        gate_a_detail = f"{trades} trades, WR {win_rate:.1f}%, PnL ${pnl:+.2f}"
+    else:
+        gate_a_state = "no_data"
+        gate_a_label = "Sin datos"
+        gate_a_badge = "muted"
+        gate_a_detail = "sin trades reales"
+
+    # --- Gate B: shadow signal ---
+    has_shadow_activity = shadow_seen > 0 or shadow_edges > 0 or shadow_cycles > 0
+    if promotable_shadow:
+        gate_b_state = "ready"
+        gate_b_label = "Lista"
+        gate_b_badge = "good"
+        gate_b_detail = f"{shadow_edges} edges, {shadow_cycles} ciclos, pico {shadow_best_edge:.1f}%"
+    elif has_shadow_activity:
+        gate_b_state = "building"
+        gate_b_label = "Construyendo"
+        gate_b_badge = "accent"
+        gate_b_detail = f"{shadow_edges} edges, {shadow_cycles} ciclos, pico {shadow_best_edge:.1f}%"
+    else:
+        gate_b_state = "empty"
+        gate_b_label = "Vacío"
+        gate_b_badge = "muted"
+        gate_b_detail = "sin actividad shadow"
+
+    # --- Gate C: NOAA observed proxy ---
+    if interpretable:
+        gate_c_state = "interpretable"
+        gate_c_label = "Interpretable"
+        gate_c_badge = "good"
+        gate_c_detail = f"{observed_count} casos NOAA"
+    elif noaa_configured and observed_count > 0:
+        gate_c_state = "partial"
+        gate_c_label = "Parcial"
+        gate_c_badge = "warn"
+        gate_c_detail = f"{observed_count}/{observed_goal} casos NOAA"
+    else:
+        gate_c_state = "none"
+        gate_c_label = "Sin NOAA"
+        gate_c_badge = "muted"
+        gate_c_detail = "NOAA sin muestra" if noaa_configured else "sin NOAA configurado"
+
+    return {
+        "gate_a": {
+            "state": gate_a_state,
+            "label": gate_a_label,
+            "badge": gate_a_badge,
+            "detail": gate_a_detail,
+        },
+        "gate_b": {
+            "state": gate_b_state,
+            "label": gate_b_label,
+            "badge": gate_b_badge,
+            "detail": gate_b_detail,
+        },
+        "gate_c": {
+            "state": gate_c_state,
+            "label": gate_c_label,
+            "badge": gate_c_badge,
+            "detail": gate_c_detail,
+        },
+        "gates_summary": f"A {gate_a_state} · B {gate_b_state} · C {gate_c_state}",
+    }
+
+
 def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, shadow_tracking=None):
     """
     Convierte el seguimiento de ciudades en una lectura decisional:
@@ -4810,12 +4919,37 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
         else:
             main_reason = "solo referencia"
 
+        gates = _city_decision_gates(
+            trades=trades,
+            win_rate=win_rate,
+            pnl=pnl,
+            history_bad=history_bad,
+            degraded=degraded,
+            blocked=blocked,
+            removable_active=removable_active,
+            degradation_reason=auto_shadow_meta.get("reason") or latest_transition.get("reason") or "",
+            block_reason=auto_block_meta.get("reason") or "",
+            shadow_seen=shadow_seen,
+            shadow_edges=shadow_edges,
+            shadow_cycles=shadow_cycles,
+            shadow_best_edge=shadow_best_edge,
+            promotable_shadow=promotable_shadow,
+            interpretable=interpretable,
+            noaa_configured=noaa_configured,
+            observed_count=observed_count,
+            observed_goal=observed_goal,
+        )
+
         candidate = {
             "city": city,
             "decision": decision,
             "decision_label": decision_label,
             "badge": badge,
             "readiness_score": readiness_score,
+            "gate_a": gates["gate_a"],
+            "gate_b": gates["gate_b"],
+            "gate_c": gates["gate_c"],
+            "gates_summary": gates["gates_summary"],
             "score_badge": (
                 "good" if readiness_score >= 80
                 else "accent" if readiness_score >= 60
