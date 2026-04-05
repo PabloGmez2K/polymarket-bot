@@ -424,6 +424,8 @@ TRADE_LIFECYCLE_FILE = _data_path("trade_lifecycle.json")
 ALERTS_FILE = _data_path("alerts_state.json")
 SHADOW_TRACKING_FILE = _data_path("shadow_city_tracking.json")
 CITY_POLICY_FILE = _data_path("city_policy_state.json")
+SKIP_LOG_FILE = _data_path("skip_log.jsonl")
+SKIP_LOG_MAX_SIZE_BYTES = 20 * 1024 * 1024  # 20 MB — rotación del contrato R3
 AGENT_EVENTS_FILE = _sync_agent_events_seed()
 SIGNALS_FILE = _seed_data_file("signals.json")
 TRADERS_DB_FILE = _seed_data_file("traders_db.json")
@@ -439,6 +441,253 @@ def load_performance_history():
         return data if isinstance(data, list) else []
     except Exception:
         return []
+
+
+# =============================================================
+# SKIP LOG (R3) — log append-only de skips por ciudad por ciclo
+# Ver docs/control-center-r3-contract.md
+# =============================================================
+
+SKIP_LOG_REQUIRED_FIELDS = ("ts_utc", "cycle_id", "skip_reason", "extras")
+
+SKIP_REASONS_VALID = frozenset({
+    # Grupo A — datos ricos (edge calculado en Loop B)
+    "no_edge",
+    "below_min_edge",
+    "kelly_too_low",
+    "shadow_only_override",
+    "fuera_allowlist",
+    "existing_order",
+    "sold_this_cycle",
+    "existing_position",
+    # Grupo B — datos parciales (Loop A, pre-edge)
+    "blocked_city",
+    "timezone_filter",
+    "date_out_of_range_past",
+    "date_out_of_range_future",
+    "price_out_of_range",
+    "liquidity_low",
+    "forecast_missing",
+    "condition_filtered",
+    # Grupo C — parse fail
+    "parse_fail",
+})
+
+
+def _make_skip_entry(
+    reason,
+    *,
+    cycle_id,
+    ts_utc=None,
+    city=None,
+    date_iso=None,
+    side=None,
+    city_mode=None,
+    allowlisted=None,
+    days_ahead=None,
+    edge_pct=None,
+    our_prob=None,
+    mkt_prob=None,
+    min_edge=None,
+    forecast_max=None,
+    threshold=None,
+    threshold_high=None,
+    unit=None,
+    condition=None,
+    sigma_used=None,
+    question=None,
+    extras=None,
+):
+    """Construye un dict de skip_log entry según el contrato R3.
+
+    reason: valor del enum SKIP_REASONS_VALID.
+    cycle_id: string determinista "YYYY-MM-DDTHH:MM" UTC (compartido por todas las filas del ciclo).
+    ts_utc: ISO 8601 tz-aware UTC. Si None, usa datetime.now(timezone.utc).isoformat().
+    Los demás campos son opcionales según el grupo del skip (A/B/C).
+    """
+    return {
+        "ts_utc": ts_utc or datetime.now(timezone.utc).isoformat(),
+        "cycle_id": cycle_id,
+        "city": city,
+        "date_iso": date_iso,
+        "side": side,
+        "skip_reason": reason,
+        "city_mode": city_mode,
+        "allowlisted": allowlisted,
+        "days_ahead": days_ahead,
+        "edge_pct": edge_pct,
+        "our_prob": our_prob,
+        "mkt_prob": mkt_prob,
+        "min_edge": min_edge,
+        "forecast_max": forecast_max,
+        "threshold": threshold,
+        "threshold_high": threshold_high,
+        "unit": unit,
+        "condition": condition,
+        "sigma_used": sigma_used,
+        "question": question,
+        "extras": extras if extras is not None else {},
+    }
+
+
+def _skip_log_rotate_if_needed(path=None, max_size=None):
+    """Rota skip_log.jsonl → skip_log.YYYY-MM-DD.jsonl si supera max_size. No lanza."""
+    target = path if path is not None else SKIP_LOG_FILE
+    limit = max_size if max_size is not None else SKIP_LOG_MAX_SIZE_BYTES
+    try:
+        if not os.path.exists(target):
+            return
+        if os.path.getsize(target) < limit:
+            return
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if target.endswith(".jsonl"):
+            rotated = target[:-len(".jsonl")] + f".{stamp}.jsonl"
+        else:
+            rotated = target + f".{stamp}"
+        if os.path.exists(rotated):
+            i = 1
+            candidate = rotated[:-len(".jsonl")] + f".{i}.jsonl"
+            while os.path.exists(candidate):
+                i += 1
+                candidate = rotated[:-len(".jsonl")] + f".{i}.jsonl"
+            rotated = candidate
+        os.replace(target, rotated)
+    except Exception as e:
+        try:
+            log.warning(f"skip_log rotate fallo: {e}")
+        except Exception:
+            pass
+
+
+def append_skip_log_entries(entries, path=None, max_size=None):
+    """Append batch de skip entries a data/skip_log.jsonl.
+
+    - entries: lista de dicts ya construidos con _make_skip_entry.
+    - No-op si entries vacío.
+    - Fail-fast (ValueError) si un entry no tiene los campos obligatorios del contrato.
+    - NUNCA propaga excepciones de I/O al caller — solo warning.
+    - Rota el archivo ANTES de escribir si supera max_size.
+    """
+    if not entries:
+        return
+    for e in entries:
+        for field in SKIP_LOG_REQUIRED_FIELDS:
+            if field not in e:
+                raise ValueError(f"skip_log entry missing required field: {field}")
+
+    target = path if path is not None else SKIP_LOG_FILE
+    try:
+        _skip_log_rotate_if_needed(target, max_size)
+        parent = os.path.dirname(target)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        payload = "".join(
+            json.dumps(e, ensure_ascii=False, default=str) + "\n" for e in entries
+        )
+        with open(target, "a", encoding="utf-8") as f:
+            f.write(payload)
+    except Exception as e:
+        try:
+            log.warning(f"skip_log append fallo: {e}")
+        except Exception:
+            pass
+
+
+def _skip_log_rotated_files(base=None):
+    """Lista de archivos rotados skip_log.*.jsonl (excluye el activo), ordenados desc."""
+    target = base if base is not None else SKIP_LOG_FILE
+    directory = os.path.dirname(target) or "."
+    basename = os.path.basename(target)
+    if not basename.endswith(".jsonl"):
+        return []
+    prefix = basename[: -len(".jsonl")] + "."  # "skip_log."
+    try:
+        files = []
+        for name in os.listdir(directory):
+            if name == basename:
+                continue
+            if name.startswith(prefix) and name.endswith(".jsonl"):
+                files.append(os.path.join(directory, name))
+        files.sort(reverse=True)
+        return files
+    except Exception:
+        return []
+
+
+def read_skip_log_last_n_cycles(n, path=None):
+    """Devuelve todas las filas de los últimos N cycle_id distintos.
+
+    Lee el archivo activo y los rotados (del más reciente al más viejo), tolera
+    líneas malformadas con warning.
+    """
+    if n <= 0:
+        return []
+    target = path if path is not None else SKIP_LOG_FILE
+    files = [target] + _skip_log_rotated_files(target)
+    seen_cycles = []
+    collected = []
+    for fpath in files:
+        if not os.path.exists(fpath):
+            continue
+        try:
+            with open(fpath, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+        except Exception as e:
+            try:
+                log.warning(f"skip_log read fallo en {fpath}: {e}")
+            except Exception:
+                pass
+            continue
+        for raw in reversed(lines):
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                obj = json.loads(raw)
+            except Exception:
+                try:
+                    log.warning(f"skip_log linea malformada en {fpath}")
+                except Exception:
+                    pass
+                continue
+            cid = obj.get("cycle_id")
+            if cid is None:
+                continue
+            if cid not in seen_cycles:
+                if len(seen_cycles) >= n:
+                    return collected
+                seen_cycles.append(cid)
+            collected.append(obj)
+    return collected
+
+
+def read_skip_log_since(ts_utc_iso, path=None):
+    """Devuelve todas las filas con ts_utc >= ts_utc_iso (archivo activo + rotados)."""
+    target = path if path is not None else SKIP_LOG_FILE
+    files = [target] + _skip_log_rotated_files(target)
+    out = []
+    for fpath in files:
+        if not os.path.exists(fpath):
+            continue
+        try:
+            with open(fpath, "r", encoding="utf-8") as f:
+                for raw in f:
+                    raw = raw.strip()
+                    if not raw:
+                        continue
+                    try:
+                        obj = json.loads(raw)
+                    except Exception:
+                        continue
+                    ts = obj.get("ts_utc")
+                    if ts and ts >= ts_utc_iso:
+                        out.append(obj)
+        except Exception as e:
+            try:
+                log.warning(f"skip_log read_since fallo en {fpath}: {e}")
+            except Exception:
+                pass
+    return out
 
 
 def load_alerts_state():
@@ -11144,6 +11393,10 @@ def main(client):
     dl.append(f"BANKROLL: ${effective_bankroll:.2f} (tope ${BANKROLL:.2f}) | MIN_EDGE={MIN_EDGE}%")
     dl.append(f"{'='*50}")
 
+    # R3: skip_log por ciclo — cycle_id determinista + bucket local para batch append al final
+    cycle_id = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M")
+    skip_log_entries = []
+
     if client is None:
         log.error("No autenticado.")
         dl.append("ERROR: Cliente no autenticado. Ciclo abortado.")
@@ -11285,16 +11538,31 @@ def main(client):
         parsed = parse_temperature_question(question)
         if not parsed or not parsed["date_str"]:
             parse_fail += 1
+            skip_log_entries.append(_make_skip_entry(
+                "parse_fail", cycle_id=cycle_id,
+                question=question,
+                extras={"stage": "no_parsed_or_date_str"},
+            ))
             continue
 
         date_iso = date_text_to_iso(parsed["date_str"])
         if not date_iso:
             parse_fail += 1
+            skip_log_entries.append(_make_skip_entry(
+                "parse_fail", cycle_id=cycle_id,
+                city=parsed.get("city"), question=question,
+                extras={"stage": "date_text_to_iso", "date_str": parsed.get("date_str")},
+            ))
             continue
 
         try:
             days_ahead = (date.fromisoformat(date_iso) - date.today()).days
         except ValueError:
+            skip_log_entries.append(_make_skip_entry(
+                "parse_fail", cycle_id=cycle_id,
+                city=parsed.get("city"), date_iso=date_iso, question=question,
+                extras={"stage": "date_fromisoformat"},
+            ))
             continue
 
         # v10.3: min_days PER-CITY según zona horaria (Bug #5 fix)
@@ -11303,6 +11571,11 @@ def main(client):
         if city_mode == "blocked":
             blocked_city_skip += 1
             blocked_seen.add(city)
+            skip_log_entries.append(_make_skip_entry(
+                "blocked_city", cycle_id=cycle_id,
+                city=city, date_iso=date_iso, days_ahead=days_ahead,
+                city_mode=city_mode, allowlisted=False, question=question,
+            ))
             continue
         allowlisted = city_mode in {"active", "canary"}
         shadow_override = False
@@ -11320,26 +11593,59 @@ def main(client):
                 else:
                     dl.append(f"SHADOW {city}: fuera de ACTIVE_TRADING_CITIES (se observa, no se compra)")
                 allowlist_seen.add(city)
+        # NOTA R3: ni fuera_allowlist ni shadow_only_override generan skip_log entry aquí.
+        # El candidato continúa procesándose con allowlisted=False y llega a Loop B,
+        # donde se loguea con datos ricos (edge_pct, our_prob, forecast_max).
         min_days = get_min_days_for_city(city)
 
         if days_ahead < min_days:
             # Distinguir si fue por zona horaria o por filtro global
             if min_days > min_days_global:
                 timezone_skip += 1
+                skip_log_entries.append(_make_skip_entry(
+                    "timezone_filter", cycle_id=cycle_id,
+                    city=city, date_iso=date_iso, days_ahead=days_ahead,
+                    city_mode=city_mode, allowlisted=allowlisted, question=question,
+                    extras={"min_days_city": min_days, "min_days_global": min_days_global},
+                ))
             else:
                 date_fail += 1
+                skip_log_entries.append(_make_skip_entry(
+                    "date_out_of_range_past", cycle_id=cycle_id,
+                    city=city, date_iso=date_iso, days_ahead=days_ahead,
+                    city_mode=city_mode, allowlisted=allowlisted, question=question,
+                    extras={"min_days": min_days},
+                ))
             continue
 
         if days_ahead > MAX_DAYS_AHEAD:
             date_fail += 1
+            skip_log_entries.append(_make_skip_entry(
+                "date_out_of_range_future", cycle_id=cycle_id,
+                city=city, date_iso=date_iso, days_ahead=days_ahead,
+                city_mode=city_mode, allowlisted=allowlisted, question=question,
+                extras={"max_days_ahead": MAX_DAYS_AHEAD},
+            ))
             continue
 
         prices_raw = market.get("outcomePrices", "[]")
         try:
             prices = json.loads(prices_raw) if isinstance(prices_raw, str) else prices_raw
         except (json.JSONDecodeError, TypeError):
+            skip_log_entries.append(_make_skip_entry(
+                "parse_fail", cycle_id=cycle_id,
+                city=city, date_iso=date_iso, days_ahead=days_ahead,
+                city_mode=city_mode, allowlisted=allowlisted, question=question,
+                extras={"stage": "prices_decode"},
+            ))
             continue
         if not prices:
+            skip_log_entries.append(_make_skip_entry(
+                "parse_fail", cycle_id=cycle_id,
+                city=city, date_iso=date_iso, days_ahead=days_ahead,
+                city_mode=city_mode, allowlisted=allowlisted, question=question,
+                extras={"stage": "prices_empty"},
+            ))
             continue
 
         clob_ids_raw = market.get("clobTokenIds", "[]")
@@ -11348,6 +11654,12 @@ def main(client):
         except (json.JSONDecodeError, TypeError):
             clob_ids = []
         if not clob_ids or len(clob_ids) < 2:
+            skip_log_entries.append(_make_skip_entry(
+                "parse_fail", cycle_id=cycle_id,
+                city=city, date_iso=date_iso, days_ahead=days_ahead,
+                city_mode=city_mode, allowlisted=allowlisted, question=question,
+                extras={"stage": "clob_ids_insufficient", "count": len(clob_ids) if clob_ids else 0},
+            ))
             continue
 
         mkt_prob_yes = float(prices[0])
@@ -11355,11 +11667,24 @@ def main(client):
             mkt_prob_no = 1.0 - mkt_prob_yes
             if mkt_prob_no < MIN_PRICE or mkt_prob_no > MAX_PRICE:
                 price_fail += 1
+                skip_log_entries.append(_make_skip_entry(
+                    "price_out_of_range", cycle_id=cycle_id,
+                    city=city, date_iso=date_iso, days_ahead=days_ahead,
+                    city_mode=city_mode, allowlisted=allowlisted, question=question,
+                    mkt_prob=round(mkt_prob_yes * 100, 2),
+                    extras={"min_price": MIN_PRICE, "max_price": MAX_PRICE},
+                ))
                 continue
 
         liquidity = float(market.get("liquidity", 0))
         if liquidity < MIN_LIQUIDITY:
             liq_fail += 1
+            skip_log_entries.append(_make_skip_entry(
+                "liquidity_low", cycle_id=cycle_id,
+                city=city, date_iso=date_iso, days_ahead=days_ahead,
+                city_mode=city_mode, allowlisted=allowlisted, question=question,
+                extras={"liquidity": liquidity, "min_liquidity": MIN_LIQUIDITY},
+            ))
             continue
 
         parsed.update({
@@ -11369,6 +11694,7 @@ def main(client):
             "token_id_yes": clob_ids[0], "token_id_no": clob_ids[1],
             "allowlisted": allowlisted,
             "city_mode": city_mode,
+            "shadow_override_flag": shadow_override,  # R3: distingue fuera_allowlist vs shadow_only_override en Loop B
         })
         candidates.append(parsed)
 
@@ -11408,6 +11734,13 @@ def main(client):
     for c in candidates:
         city = c["city"]
         if city not in forecast_cache or c["date_iso"] not in forecast_cache[city]:
+            skip_log_entries.append(_make_skip_entry(
+                "forecast_missing", cycle_id=cycle_id,
+                city=city, date_iso=c.get("date_iso"), days_ahead=c.get("days_ahead"),
+                city_mode=c.get("city_mode"), allowlisted=c.get("allowlisted"),
+                question=c.get("question"),
+                extras={"forecast_cached": city in forecast_cache},
+            ))
             continue
 
         forecast_max = forecast_cache[city][c["date_iso"]]["temp_max"]
@@ -11422,6 +11755,12 @@ def main(client):
 
         # Label para logs (muestra rango si aplica)
         temp_label = f"{threshold}-{threshold_high}°{c['unit']}" if threshold_high else f"{threshold}°{c['unit']}"
+
+        # R3: sigma efectivo para esta ciudad+días (para skip_log enrichment)
+        try:
+            sigma_used_val = get_uncertainty(c["days_ahead"], city=city)
+        except Exception:
+            sigma_used_val = None
 
         condition_name = str(c.get("condition", "") or "").strip().lower()
         if condition_name not in ALLOWED_CONDITIONS:
@@ -11448,6 +11787,15 @@ def main(client):
                 f"  SHADOW-FILTER {city} {temp_label} {c['date_iso']} | "
                 f"condicion={condition_name} fuera de ALLOWED_CONDITIONS"
             )
+            skip_log_entries.append(_make_skip_entry(
+                "condition_filtered", cycle_id=cycle_id,
+                city=city, date_iso=c["date_iso"], days_ahead=c["days_ahead"],
+                city_mode=c.get("city_mode"), allowlisted=c.get("allowlisted"),
+                forecast_max=forecast_max, threshold=threshold, threshold_high=threshold_high,
+                unit=c["unit"], condition=condition_name, sigma_used=sigma_used_val,
+                question=c["question"],
+                extras={"allowed_conditions": sorted(ALLOWED_CONDITIONS)},
+            ))
             continue
 
         our_prob_yes = estimate_prob_with_city(
@@ -11469,17 +11817,51 @@ def main(client):
             side, our_prob, mkt_price, edge, token_id = "NO", our_prob_no, c["mkt_prob_no"], edge_no, c["token_id_no"]
         else:
             edge_analysis.append(f"  ✗ {city} {temp_label} {c['date_iso']} | forecast={forecast_max:.1f}°C | edge_yes={edge_yes*100:.1f}% edge_no={edge_no*100:.1f}% → SIN EDGE")
+            skip_log_entries.append(_make_skip_entry(
+                "no_edge", cycle_id=cycle_id,
+                city=city, date_iso=c["date_iso"], days_ahead=c["days_ahead"],
+                city_mode=c.get("city_mode"), allowlisted=c.get("allowlisted"),
+                our_prob=round(our_prob_yes * 100, 2),
+                mkt_prob=round(c["mkt_prob_yes"] * 100, 2),
+                forecast_max=forecast_max, threshold=threshold, threshold_high=threshold_high,
+                unit=c["unit"], condition=condition_name, sigma_used=sigma_used_val,
+                question=c["question"],
+                extras={"edge_yes_pct": round(edge_yes * 100, 2), "edge_no_pct": round(edge_no * 100, 2)},
+            ))
             continue
 
         edge_pct = edge * 100
 
         if edge_pct < MIN_EDGE:
             edge_analysis.append(f"  ✗ {city} {side} {temp_label} {c['date_iso']} | forecast={forecast_max:.1f}°C | nuestro={our_prob*100:.1f}% mercado={mkt_price*100:.1f}% | edge={edge_pct:.1f}% → BAJO (min {MIN_EDGE}%)")
+            skip_log_entries.append(_make_skip_entry(
+                "below_min_edge", cycle_id=cycle_id,
+                city=city, date_iso=c["date_iso"], side=side, days_ahead=c["days_ahead"],
+                city_mode=c.get("city_mode"), allowlisted=c.get("allowlisted"),
+                edge_pct=round(edge_pct, 2),
+                our_prob=round(our_prob * 100, 2), mkt_prob=round(mkt_price * 100, 2),
+                min_edge=MIN_EDGE,
+                forecast_max=forecast_max, threshold=threshold, threshold_high=threshold_high,
+                unit=c["unit"], condition=condition_name, sigma_used=sigma_used_val,
+                question=c["question"],
+            ))
             continue
 
         position = calculate_position(effective_bankroll, our_prob, mkt_price)
         if not position:
             edge_analysis.append(f"  ✗ {city} {side} | edge={edge_pct:.1f}% → KELLY MUY BAJO (no alcanza $1 mín)")
+            skip_log_entries.append(_make_skip_entry(
+                "kelly_too_low", cycle_id=cycle_id,
+                city=city, date_iso=c["date_iso"], side=side, days_ahead=c["days_ahead"],
+                city_mode=c.get("city_mode"), allowlisted=c.get("allowlisted"),
+                edge_pct=round(edge_pct, 2),
+                our_prob=round(our_prob * 100, 2), mkt_prob=round(mkt_price * 100, 2),
+                min_edge=MIN_EDGE,
+                forecast_max=forecast_max, threshold=threshold, threshold_high=threshold_high,
+                unit=c["unit"], condition=condition_name, sigma_used=sigma_used_val,
+                question=c["question"],
+                extras={"min_bet": MIN_BET, "effective_bankroll": round(effective_bankroll, 2)},
+            ))
             continue
         position = _scaled_position(position, our_prob, c.get("city_mode"))
 
@@ -11495,23 +11877,73 @@ def main(client):
                 "liquidity": c["liquidity"], "token_id": token_id,
             })
             edge_analysis.append(f"  SHADOW {city} {side} {temp_label} {c['date_iso']} | forecast={forecast_max:.1f}°C | nuestro={our_prob*100:.1f}% mercado={mkt_price*100:.1f}% | edge={edge_pct:.1f}% | ${position['amount']:.2f} virtual")
+            # R3: distinguir fuera_allowlist puro vs shadow_only_override (ambos con datos ricos)
+            _skip_reason_allow = "shadow_only_override" if c.get("shadow_override_flag") else "fuera_allowlist"
+            skip_log_entries.append(_make_skip_entry(
+                _skip_reason_allow, cycle_id=cycle_id,
+                city=city, date_iso=c["date_iso"], side=side, days_ahead=c["days_ahead"],
+                city_mode=c.get("city_mode"), allowlisted=False,
+                edge_pct=round(edge_pct, 2),
+                our_prob=round(our_prob * 100, 2), mkt_prob=round(mkt_price * 100, 2),
+                min_edge=MIN_EDGE,
+                forecast_max=forecast_max, threshold=threshold, threshold_high=threshold_high,
+                unit=c["unit"], condition=condition_name, sigma_used=sigma_used_val,
+                question=c["question"],
+                extras={"virtual_amount": position.get("amount"), "virtual_ev": position.get("expected_value")},
+            ))
             continue
 
         if token_id in open_token_ids:
             skipped_dup += 1
             edge_analysis.append(f"   {city} {side} | edge={edge_pct:.1f}% → YA HAY ORDEN")
+            skip_log_entries.append(_make_skip_entry(
+                "existing_order", cycle_id=cycle_id,
+                city=city, date_iso=c["date_iso"], side=side, days_ahead=c["days_ahead"],
+                city_mode=c.get("city_mode"), allowlisted=c.get("allowlisted"),
+                edge_pct=round(edge_pct, 2),
+                our_prob=round(our_prob * 100, 2), mkt_prob=round(mkt_price * 100, 2),
+                min_edge=MIN_EDGE,
+                forecast_max=forecast_max, threshold=threshold, threshold_high=threshold_high,
+                unit=c["unit"], condition=condition_name, sigma_used=sigma_used_val,
+                question=c["question"],
+                extras={"token_id": token_id},
+            ))
             continue
 
         # v10.4 Fix Bug #9: no re-comprar lo que vendimos este ciclo
         if token_id in sold_this_cycle:
             skipped_dup += 1
             edge_analysis.append(f"   {city} {side} | edge={edge_pct:.1f}% → VENDIDO ESTE CICLO (no re-entrada)")
+            skip_log_entries.append(_make_skip_entry(
+                "sold_this_cycle", cycle_id=cycle_id,
+                city=city, date_iso=c["date_iso"], side=side, days_ahead=c["days_ahead"],
+                city_mode=c.get("city_mode"), allowlisted=c.get("allowlisted"),
+                edge_pct=round(edge_pct, 2),
+                our_prob=round(our_prob * 100, 2), mkt_prob=round(mkt_price * 100, 2),
+                min_edge=MIN_EDGE,
+                forecast_max=forecast_max, threshold=threshold, threshold_high=threshold_high,
+                unit=c["unit"], condition=condition_name, sigma_used=sigma_used_val,
+                question=c["question"],
+                extras={"token_id": token_id},
+            ))
             continue
 
         # v10.4 Fix Bug #3: no comprar si ya tenemos posición abierta
         if token_id in existing_position_tokens:
             skipped_dup += 1
             edge_analysis.append(f"   {city} {side} | edge={edge_pct:.1f}% → YA HAY POSICIÓN ABIERTA")
+            skip_log_entries.append(_make_skip_entry(
+                "existing_position", cycle_id=cycle_id,
+                city=city, date_iso=c["date_iso"], side=side, days_ahead=c["days_ahead"],
+                city_mode=c.get("city_mode"), allowlisted=c.get("allowlisted"),
+                edge_pct=round(edge_pct, 2),
+                our_prob=round(our_prob * 100, 2), mkt_prob=round(mkt_price * 100, 2),
+                min_edge=MIN_EDGE,
+                forecast_max=forecast_max, threshold=threshold, threshold_high=threshold_high,
+                unit=c["unit"], condition=condition_name, sigma_used=sigma_used_val,
+                question=c["question"],
+                extras={"token_id": token_id},
+            ))
             continue
 
         # v9: Cruzar con señales de traders
@@ -11703,6 +12135,13 @@ def main(client):
                 "timestamp_utc": shadow_timestamp,
             },
         )
+
+    # ---- R3: flush batch de skip_log entries al final del ciclo ----
+    # El writer nunca lanza: errores se loggean y se descartan. Un log roto no frena trading.
+    try:
+        append_skip_log_entries(skip_log_entries)
+    except Exception as _e_skip_log:
+        log.warning(f"skip_log flush fallo: {_e_skip_log}")
 
     # ---- v10.2: RESUMEN COMPLETO DEL CICLO ----
     if not DRY_RUN:

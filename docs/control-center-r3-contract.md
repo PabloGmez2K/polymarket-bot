@@ -71,17 +71,18 @@ Cada valor corresponde a un `continue` o desvío-a-shadow del scan loop. Agrupad
 
 ### Grupo A — datos ricos (edge ya calculado)
 
-Estos son los que más valor tienen para recalibración. `our_prob`, `mkt_prob`, `edge_pct`, `forecast_max`, `sigma_used`, `threshold`, `city`, `date_iso`, `side`, `days_ahead` **siempre presentes y no-null**.
+Estos son los que más valor tienen para recalibración. `our_prob`, `mkt_prob`, `edge_pct`, `forecast_max`, `sigma_used`, `threshold`, `city`, `date_iso`, `side`, `days_ahead` **siempre presentes y no-null** (salvo `side` en `no_edge`, que no tiene lado ganador).
 
 | `skip_reason` | Línea bot.py | Cuándo dispara |
 |---|---|---|
-| `no_edge` | ~11472 | `edge_yes<=0` y `edge_no<=0` simultáneamente |
-| `below_min_edge` | ~11478 | `edge_pct < MIN_EDGE` (hoy 3.0) |
-| `kelly_too_low` | ~11483 | `calculate_position()` devuelve `None` (bet < $1 mínimo) |
-| `shadow_only_override` | ~11498 | `_is_shadow_only()` apagó ejecución para city originalmente `active`/`canary`. Edge **sí** calculado, ejecución **no**. Este es el caso crítico del fix `c8c8e73`. |
-| `existing_order` | ~11503 | `token_id in open_token_ids` |
-| `sold_this_cycle` | ~11509 | `token_id in sold_this_cycle` (v10.4 Fix Bug #9) |
-| `existing_position` | ~11515 | `token_id in existing_position_tokens` (v10.4 Fix Bug #3) |
+| `no_edge` | Loop B | `edge_yes<=0` y `edge_no<=0` simultáneamente |
+| `below_min_edge` | Loop B | `edge_pct < MIN_EDGE` (hoy 3.0) |
+| `kelly_too_low` | Loop B | `calculate_position()` devuelve `None` (bet < $1 mínimo) |
+| `shadow_only_override` | Loop B | `_is_shadow_only()` apagó ejecución para city originalmente `active`/`canary`. Edge **sí** calculado, ejecución **no**. Caso crítico del fix `c8c8e73`. Distinguido de `fuera_allowlist` por el flag `shadow_override_flag` propagado desde Loop A. |
+| `fuera_allowlist` | Loop B | `city_mode` ∉ {`active`, `canary`} y **no** es shadow-override (city realmente fuera de allowlist). El scan loop actual NO hace `continue` temprano en Loop A para estas ciudades — las sigue procesando hasta Loop B, donde se materializa el skip con edge calculado. Por eso está en Grupo A y no en Grupo B. |
+| `existing_order` | Loop B | `token_id in open_token_ids` |
+| `sold_this_cycle` | Loop B | `token_id in sold_this_cycle` (v10.4 Fix Bug #9) |
+| `existing_position` | Loop B | `token_id in existing_position_tokens` (v10.4 Fix Bug #3) |
 
 ### Grupo B — datos parciales (antes de edge eval)
 
@@ -89,15 +90,14 @@ Estos skips ocurren en Loop A (filtrado de candidatos). `city`, `date_iso`, `day
 
 | `skip_reason` | Línea bot.py | Cuándo dispara |
 |---|---|---|
-| `blocked_city` | ~11303 | `city_mode == "blocked"` |
-| `fuera_allowlist` | ~11315 | `city_mode` ∉ {`active`, `canary`} y **NO** es shadow-override (city realmente fuera de allowlist). Excluye el caso shadow-override que va al Grupo A. |
-| `timezone_filter` | ~11327 | `min_days > min_days_global` y `days_ahead < min_days` (v10.3 Bug #5 fix) |
-| `date_out_of_range_past` | ~11330 | `days_ahead < min_days_global` |
-| `date_out_of_range_future` | ~11334 | `days_ahead > MAX_DAYS_AHEAD` |
-| `price_out_of_range` | ~11357 | `mkt_prob` fuera de `[MIN_PRICE, MAX_PRICE]` en ambos lados |
-| `liquidity_low` | ~11362 | `liquidity < MIN_LIQUIDITY` |
-| `condition_filtered` | ~11427 | `condition_name not in ALLOWED_CONDITIONS` (va también a shadow tracking) |
-| `forecast_missing` | ~11411 | `city not in forecast_cache` o fecha faltante en el cache |
+| `blocked_city` | Loop A | `city_mode == "blocked"` (único camino que hace `continue` temprano al inicio de Loop A) |
+| `timezone_filter` | Loop A | `min_days > min_days_global` y `days_ahead < min_days` (v10.3 Bug #5 fix) |
+| `date_out_of_range_past` | Loop A | `days_ahead < min_days_global` |
+| `date_out_of_range_future` | Loop A | `days_ahead > MAX_DAYS_AHEAD` |
+| `price_out_of_range` | Loop A | `mkt_prob` fuera de `[MIN_PRICE, MAX_PRICE]` en ambos lados |
+| `liquidity_low` | Loop A | `liquidity < MIN_LIQUIDITY` |
+| `forecast_missing` | Loop B | `city not in forecast_cache` o fecha faltante en el cache (ocurre al inicio de Loop B antes de edge, por eso queda en Grupo B) |
+| `condition_filtered` | Loop B | `condition_name not in ALLOWED_CONDITIONS` (también va a shadow tracking). Tiene `forecast_max`/`threshold` pero no `our_prob`/`edge_pct`. |
 
 ### Grupo C — datos mínimos (parse fail)
 
@@ -105,9 +105,14 @@ Estos skips ocurren en Loop A (filtrado de candidatos). `city`, `date_iso`, `day
 |---|---|---|
 | `parse_fail` | ~11286, 11292, 11298, 11341, 11343, 11348, 11350 | Mercado mal parseado: pregunta ilegible, fecha no convertible, JSON malformado, clob_ids insuficientes. `city`, `date_iso`, `days_ahead`, etc. = `null`. `question` presente (string raw) si se logró leer. |
 
-### Importante: `shadow_only_override` NO se loguea en Loop A
+### Importante: `shadow_only_override` y `fuera_allowlist` se loguean en Loop B
 
-Cuando una ciudad `active`/`canary` es apagada por shadow-only, el scan loop NO la filtra en Loop A — la sigue procesando con `allowlisted=False` y llega a Loop B:11486 donde tiene edge calculado. Ahí es donde se emite el `skip_log` entry con **datos ricos**. Loop A solo emite `fuera_allowlist` para ciudades realmente fuera de allowlist (no shadow-override). Distinguir estos dos caminos es clave para el analyzer.
+El scan loop actual NO hace `continue` temprano en Loop A cuando `allowlisted=False` — ni por shadow-override ni por fuera de allowlist. El candidato sigue procesándose hasta Loop B, donde en el gate de `not c.get("allowlisted", True)` se emite el skip con **datos ricos** (edge, our_prob, forecast_max, sigma_used). La distinción entre las dos razones se hace con el flag `shadow_override_flag` que Loop A adjunta al dict del candidato:
+
+- `shadow_override_flag=True` → `skip_reason="shadow_only_override"` (caso del fix `c8c8e73`: city era canary/active pero shadow-only global cortó ejecución)
+- `shadow_override_flag=False` → `skip_reason="fuera_allowlist"` (city_mode ∉ {active, canary}, realmente fuera)
+
+Distinguir estos dos caminos es clave para el analyzer: las ciudades en `shadow_only_override` son candidatas inmediatas de promoción cuando se reactive trading, las de `fuera_allowlist` requieren evaluación estratégica previa.
 
 ---
 
@@ -186,8 +191,8 @@ Reglas obligatorias para la instrumentación:
   2. `append_skip_log_entries([entry])` crea archivo con exactamente 1 línea JSON parseable.
   3. Entry con campos faltantes obligatorios hace fail-fast (no silencia).
   4. Cada uno de los 17 `skip_reason` dispara en un fixture de ciclo (fake markets + fake forecasts), aparece en `data/skip_log.jsonl` con el valor correcto y con los campos obligatorios del grupo correspondiente (A/B/C).
-  5. `shadow_only_override` aparece con `edge_pct != null` y `our_prob != null` (confirma que va por Loop B, no Loop A).
-  6. `fuera_allowlist` aparece con `edge_pct == null` (confirma que va por Loop A).
+  5. `shadow_only_override` aparece con `edge_pct != null` y `our_prob != null` (confirma que va por Loop B con datos ricos).
+  6. `fuera_allowlist` aparece con `edge_pct != null` y `our_prob != null` (confirma que también va por Loop B, distinguido de shadow_only_override solo por el flag `shadow_override_flag`).
   7. `read_skip_log_last_n_cycles(2)` devuelve exactamente las filas de los 2 últimos `cycle_id` distintos.
   8. `read_skip_log_since(ts)` filtra correctamente.
   9. Writer tolera archivo inexistente (primer run) — lo crea.

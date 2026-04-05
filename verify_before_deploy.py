@@ -3849,6 +3849,246 @@ def run_tests():
          fire3 is True and "Buenos Aires" not in cand_state.get("canary_candidate_notified", {}),
          {"fired": fire3, "state": cand_state})
 
+    # ============================================================
+    # R3 — Skip log por ciclo (docs/control-center-r3-contract.md)
+    # ============================================================
+    print("\n R3: skip_log")
+
+    # --- Static checks: constantes, enum, helpers definidos ---
+    test("R3: SKIP_LOG_FILE definido en bot.py",
+         'SKIP_LOG_FILE = _data_path("skip_log.jsonl")' in code)
+    test("R3: SKIP_LOG_MAX_SIZE_BYTES = 20 MB",
+         "SKIP_LOG_MAX_SIZE_BYTES = 20 * 1024 * 1024" in code)
+    test("R3: SKIP_LOG_REQUIRED_FIELDS incluye ts_utc, cycle_id, skip_reason, extras",
+         all(f in code for f in ['"ts_utc"', '"cycle_id"', '"skip_reason"', '"extras"'])
+         and "SKIP_LOG_REQUIRED_FIELDS" in code)
+
+    # Enum: las 17 razones deben estar todas presentes
+    R3_REASONS = [
+        "parse_fail", "blocked_city", "fuera_allowlist", "timezone_filter",
+        "date_out_of_range_past", "date_out_of_range_future", "price_out_of_range",
+        "liquidity_low", "forecast_missing", "condition_filtered", "no_edge",
+        "below_min_edge", "kelly_too_low", "shadow_only_override", "existing_order",
+        "sold_this_cycle", "existing_position",
+    ]
+    for reason in R3_REASONS:
+        test(f"R3: SKIP_REASONS_VALID incluye '{reason}'",
+             f'"{reason}"' in code)
+
+    # Helpers definidos
+    for fn in ("_make_skip_entry", "_skip_log_rotate_if_needed", "append_skip_log_entries",
+               "_skip_log_rotated_files", "read_skip_log_last_n_cycles", "read_skip_log_since"):
+        test(f"R3: función '{fn}' definida",
+             f"def {fn}(" in code)
+
+    # --- Static checks: scan loop instrumentado ---
+    test("R3: cycle_id inicializado al inicio de main()",
+         'cycle_id = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M")' in code)
+    test("R3: skip_log_entries bucket local inicializado",
+         "skip_log_entries = []" in code)
+    test("R3: flush append_skip_log_entries al final del ciclo",
+         "append_skip_log_entries(skip_log_entries)" in code)
+    test("R3: shadow_override_flag propagado en parsed.update",
+         '"shadow_override_flag": shadow_override' in code)
+    test("R3: Loop B distingue fuera_allowlist vs shadow_only_override por flag",
+         '"shadow_only_override" if c.get("shadow_override_flag") else "fuera_allowlist"' in code)
+
+    # Cada razón debe aparecer al menos una vez en una llamada a _make_skip_entry
+    for reason in R3_REASONS:
+        # Buscamos el patrón "_make_skip_entry(\n        \"reason\"," o variantes con comillas
+        patterns = [
+            f'_make_skip_entry(\n                "{reason}"',
+            f'_make_skip_entry(\n            "{reason}"',
+            f'_make_skip_entry("{reason}"',
+        ]
+        found = any(p in code for p in patterns)
+        # Fallback tolerante: al menos aparece con comillas tras _make_skip_entry en el source del scan loop
+        if not found:
+            # regex liviano: _make_skip_entry\([^)]*"reason"
+            import re as _re_r3
+            pattern = _re_r3.compile(
+                r'_make_skip_entry\s*\(\s*(?:\n\s*)?"' + _re_r3.escape(reason) + r'"',
+                _re_r3.DOTALL,
+            )
+            found = bool(pattern.search(code))
+        # Fallback final: fuera_allowlist / shadow_only_override se emiten vía variable _skip_reason_allow
+        # (el contrato distingue los dos caminos por el ternario validado más arriba). Basta con que
+        # la cadena aparezca como literal en el scan loop.
+        if not found and reason in ("fuera_allowlist", "shadow_only_override"):
+            found = f'"{reason}"' in code
+        test(f"R3: scan loop emite skip_reason='{reason}'", found)
+
+    # --- Functional tests: exec helpers en namespace limpio ---
+    import tempfile as _tf_r3
+    import shutil as _sh_r3
+
+    class _FakeLog:
+        warnings = []
+        def warning(self, msg, *args, **kwargs):
+            self.warnings.append(str(msg))
+        def info(self, *a, **k):
+            pass
+        def error(self, *a, **k):
+            pass
+
+    def _build_skip_ns():
+        ns = {
+            "os": os,
+            "json": json,
+            "datetime": datetime,
+            "timezone": timezone,
+            "log": _FakeLog(),
+            "SKIP_LOG_REQUIRED_FIELDS": ("ts_utc", "cycle_id", "skip_reason", "extras"),
+            "SKIP_LOG_FILE": "unused_in_tests.jsonl",
+            "SKIP_LOG_MAX_SIZE_BYTES": 20 * 1024 * 1024,
+        }
+        for fn_name in (
+            "_make_skip_entry", "_skip_log_rotate_if_needed",
+            "append_skip_log_entries", "_skip_log_rotated_files",
+            "read_skip_log_last_n_cycles", "read_skip_log_since",
+        ):
+            exec(get_function_source(module_ast, code_lines, fn_name), ns)
+        return ns
+
+    # Test 1: _make_skip_entry con campos mínimos → dict con defaults null y extras={}
+    ns1 = _build_skip_ns()
+    entry1 = ns1["_make_skip_entry"](
+        "below_min_edge", cycle_id="2026-04-05T16:00",
+        city="Tokyo", edge_pct=2.5, our_prob=61.0, mkt_prob=58.5,
+    )
+    test("R3: _make_skip_entry construye dict con cycle_id y reason",
+         entry1.get("cycle_id") == "2026-04-05T16:00"
+         and entry1.get("skip_reason") == "below_min_edge")
+    test("R3: _make_skip_entry defaults null para campos no provistos",
+         entry1.get("sigma_used") is None and entry1.get("threshold") is None)
+    test("R3: _make_skip_entry extras default es dict vacío",
+         entry1.get("extras") == {})
+    test("R3: _make_skip_entry genera ts_utc tz-aware si no se provee",
+         "T" in entry1.get("ts_utc", "") and ("+" in entry1["ts_utc"] or "Z" in entry1["ts_utc"]))
+
+    # Test 2: append_skip_log_entries([]) es no-op (no crea archivo)
+    ns2 = _build_skip_ns()
+    tmp_dir_r3 = _tf_r3.mkdtemp(prefix="skip_log_test_")
+    try:
+        tmp_path = os.path.join(tmp_dir_r3, "skip_log.jsonl")
+        ns2["append_skip_log_entries"]([], path=tmp_path)
+        test("R3: append_skip_log_entries([]) no crea archivo",
+             not os.path.exists(tmp_path))
+
+        # Test 3: append con 1 entry → archivo con 1 línea parseable
+        entry = ns2["_make_skip_entry"](
+            "below_min_edge", cycle_id="2026-04-05T16:00",
+            city="Tokyo", edge_pct=2.5, our_prob=61.0, mkt_prob=58.5,
+        )
+        ns2["append_skip_log_entries"]([entry], path=tmp_path)
+        test("R3: append_skip_log_entries crea archivo",
+             os.path.exists(tmp_path))
+        with open(tmp_path, "r", encoding="utf-8") as fh:
+            lines = [l for l in fh.read().splitlines() if l.strip()]
+        test("R3: append escribe exactamente 1 línea",
+             len(lines) == 1)
+        parsed_back = json.loads(lines[0])
+        test("R3: línea escrita parsea y matchea cycle_id",
+             parsed_back.get("cycle_id") == "2026-04-05T16:00"
+             and parsed_back.get("skip_reason") == "below_min_edge")
+
+        # Test 4: entry sin ts_utc → ValueError (fail-fast)
+        broken_entry = {"cycle_id": "x", "skip_reason": "no_edge", "extras": {}}  # falta ts_utc
+        raised = False
+        try:
+            ns2["append_skip_log_entries"]([broken_entry], path=tmp_path)
+        except ValueError:
+            raised = True
+        test("R3: append fail-fast si entry carece de campos obligatorios",
+             raised)
+
+        # Test 5: read_skip_log_last_n_cycles(2) devuelve filas de 2 cycle_id distintos
+        extra_entries = [
+            ns2["_make_skip_entry"]("kelly_too_low", cycle_id="2026-04-05T16:00", city="Seoul"),
+            ns2["_make_skip_entry"]("below_min_edge", cycle_id="2026-04-05T23:00", city="Munich"),
+            ns2["_make_skip_entry"]("no_edge", cycle_id="2026-04-05T23:00", city="Chicago"),
+            ns2["_make_skip_entry"]("liquidity_low", cycle_id="2026-04-06T08:00", city="Paris"),
+        ]
+        ns2["append_skip_log_entries"](extra_entries, path=tmp_path)
+        last2 = ns2["read_skip_log_last_n_cycles"](2, path=tmp_path)
+        cycle_ids_seen = set(e.get("cycle_id") for e in last2)
+        test("R3: read_skip_log_last_n_cycles(2) devuelve solo los 2 ciclos más recientes",
+             cycle_ids_seen == {"2026-04-06T08:00", "2026-04-05T23:00"})
+
+        # Test 6: read_skip_log_since filtra por timestamp
+        all_entries = ns2["read_skip_log_since"]("1970-01-01T00:00:00+00:00", path=tmp_path)
+        test("R3: read_skip_log_since con ts antiguo devuelve todo",
+             len(all_entries) == 5)
+        future_entries = ns2["read_skip_log_since"]("2099-12-31T00:00:00+00:00", path=tmp_path)
+        test("R3: read_skip_log_since con ts futuro devuelve vacío",
+             future_entries == [])
+
+        # Test 7: reader tolera línea malformada (skip silencioso)
+        with open(tmp_path, "a", encoding="utf-8") as fh:
+            fh.write("{this is not valid json}\n")
+        try:
+            result_tol = ns2["read_skip_log_last_n_cycles"](10, path=tmp_path)
+            tolerated = True
+        except Exception:
+            tolerated = False
+        test("R3: reader tolera líneas malformadas sin lanzar",
+             tolerated and len(result_tol) == 5)
+
+        # Test 8: rotación dispara cuando size >= max_size
+        rot_tmp = os.path.join(tmp_dir_r3, "skip_log_rot.jsonl")
+        big_entry = ns2["_make_skip_entry"]("no_edge", cycle_id="2026-04-05T16:00",
+                                             city="Tokyo", question="x" * 2000)
+        ns2["append_skip_log_entries"]([big_entry] * 5, path=rot_tmp, max_size=1024)
+        # Primer append crea el archivo. Segundo debería rotar antes de escribir.
+        ns2["append_skip_log_entries"]([big_entry], path=rot_tmp, max_size=1024)
+        rotated_files = [
+            n for n in os.listdir(tmp_dir_r3)
+            if n.startswith("skip_log_rot.") and n.endswith(".jsonl") and n != "skip_log_rot.jsonl"
+        ]
+        test("R3: rotación crea archivo rotado cuando supera max_size",
+             len(rotated_files) >= 1)
+
+        # Test 9: reader lee desde archivos rotados
+        # rotated_files[0] tiene las primeras 5 filas; el actual tiene la última.
+        combined = ns2["read_skip_log_last_n_cycles"](10, path=rot_tmp)
+        test("R3: reader combina archivo activo + rotados",
+             len(combined) >= 5)
+
+        # Test 10: writer NO lanza si disco falla (path inválido en Windows / directorio inexistente sin permiso)
+        invalid_path = os.path.join(tmp_dir_r3, "nonexistent_dir", "skip.jsonl")
+        # Crear el parent dir está permitido, así que esto crea y escribe → no falla.
+        # Mejor: simular write a path con caracter inválido en Windows.
+        fake_log = _FakeLog()
+        ns_fail = _build_skip_ns()
+        ns_fail["log"] = fake_log
+        # Override open() dentro del namespace para simular IOError
+        original_open = ns_fail.get("open", open)
+        def _failing_open(*args, **kwargs):
+            raise OSError("simulated disk failure")
+        ns_fail["open"] = _failing_open
+        # Re-exec append con el open fallado
+        exec(get_function_source(module_ast, code_lines, "append_skip_log_entries"), ns_fail)
+        fail_path = os.path.join(tmp_dir_r3, "skip_fail.jsonl")
+        raised_fail = False
+        try:
+            ns_fail["append_skip_log_entries"](
+                [ns_fail["_make_skip_entry"]("no_edge", cycle_id="x")]
+                if False else
+                [{"ts_utc": "2026-04-05T00:00:00+00:00", "cycle_id": "x",
+                  "skip_reason": "no_edge", "extras": {}}],
+                path=fail_path,
+            )
+        except Exception:
+            raised_fail = True
+        test("R3: writer NO propaga excepciones de I/O al caller",
+             not raised_fail)
+
+    finally:
+        try:
+            _sh_r3.rmtree(tmp_dir_r3, ignore_errors=True)
+        except Exception:
+            pass
+
     test("Version v10.6.11", 'BOT_VERSION = "v10.6.11"' in code)
 
     # ---- Resultado ----
