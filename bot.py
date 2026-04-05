@@ -4701,10 +4701,19 @@ def _build_recent_shadow_rows(shadow_tracking):
     if not isinstance(shadow_tracking, dict):
         return []
 
+    def _strip_resolution_fields(row):
+        clean_row = dict(row)
+        clean_row.pop("resolution_label", None)
+        clean_row.pop("resolution_badge", None)
+        return clean_row
+
     # Primary: directional signals from recent_opportunities
     recent = shadow_tracking.get("recent_opportunities", [])
     directional = [
-        {**row, "condition_label": _shadow_condition_label(row.get("question"))}
+        {
+            **_strip_resolution_fields(row),
+            "condition_label": _shadow_condition_label(row.get("question")),
+        }
         for row in recent
         if row.get("edge_hit")
     ]
