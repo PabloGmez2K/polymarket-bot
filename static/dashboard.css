@@ -1403,3 +1403,22 @@ th {
     align-items: flex-start;
   }
 }
+
+.city-gates th:first-child,
+.city-gates td:first-child {
+  min-width: 120px;
+}
+
+.city-gates th:not(:first-child),
+.city-gates td:not(:first-child) {
+  white-space: nowrap;
+}
+
+.city-gates .badge {
+  vertical-align: middle;
+}
+
+.city-gates-glossary {
+  margin-top: 14px;
+  line-height: 1.55;
+}

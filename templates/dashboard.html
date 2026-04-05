@@ -340,18 +340,51 @@
                 <p class="section-kicker">Ciudades</p>
                 <h2>Estado por ciudad</h2>
               </div>
-              <span class="badge badge-accent">{{ dashboard.city_observation.tracked_count }} seguidas</span>
+              <span class="badge badge-accent">{{ dashboard.city_decisions.ranking_rows|length }} seguidas</span>
             </div>
 
-            {% for row in dashboard.city_observation.active_rows %}
-            <div class="check-item check-item-{{ row.state_badge }}">
-              <div class="check-status {{ row.state_badge }}"></div>
-              <div class="check-body">
-                <strong>{{ row.city }}</strong>
-                <span>{{ row.state_label }} · NOAA {{ row.observed_count }}/{{ row.observed_goal }} · {{ row.trading_detail }}</span>
-              </div>
+            <div class="table-wrap city-ranking-table-wrap">
+              <table class="city-ranking-table city-gates">
+                <thead>
+                  <tr>
+                    <th>Ciudad</th>
+                    <th>Historial</th>
+                    <th>Shadow</th>
+                    <th>NOAA</th>
+                    <th>Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in dashboard.city_decisions.ranking_rows %}
+                  <tr class="city-ranking-row-{{ row.badge|default('muted') }}">
+                    <td><strong>{{ row.city }}</strong></td>
+                    <td>
+                      <span class="badge badge-{{ row.gate_a.badge }}" title="{{ row.gate_a.detail }}">
+                        {{ row.gate_a.label }}
+                      </span>
+                    </td>
+                    <td>
+                      <span class="badge badge-{{ row.gate_b.badge }}" title="{{ row.gate_b.detail }}">
+                        {{ row.gate_b.label }}
+                      </span>
+                    </td>
+                    <td>
+                      <span class="badge badge-{{ row.gate_c.badge }}" title="{{ row.gate_c.detail }}">
+                        {{ row.gate_c.label }}
+                      </span>
+                    </td>
+                    <td><span class="badge badge-{{ row.state_badge }}">{{ row.state_label }}</span></td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
             </div>
-            {% endfor %}
+
+            <div class="notice notice-muted city-gates-glossary">
+              Historial: Limpio (trades sanos) · Malo (WR/PnL bajos) · Sin datos (sin cierres).
+              Shadow: Lista (cumple regla canary) · Construyendo (acumulando señales) · Vacío (sin actividad).
+              NOAA: Interpretable (muestra suficiente) · Parcial (en acumulación) · Sin NOAA (no configurado o vacío).
+            </div>
 
             {% if dashboard.city_observation.blocked_rows %}
             <div class="card-head">
