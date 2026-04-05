@@ -2238,3 +2238,111 @@ Regla recomendada:
 **Validación:**
 
 - `python verify_before_deploy.py` -> `516/516`
+
+## Sesión 80 — R3 skip_log backend + analyzer offline + validación producción (5 abr 2026)
+
+**Disparador:** cerrar R3 del roadmap Fase 3 (log de skips por ciclo). El bot evalúa ~150 candidatos por ciclo y solo ejecuta 0-3 trades reales; los 147+ skips eran información estratégica tirada a la basura. R3 materializa esa información en `data/skip_log.jsonl` para poder decidir en el futuro (con datos) si bajar `MIN_EDGE`, expandir allowlist, o recalibrar sigma.
+
+**Split Claude ↔ Codex sobre contrato `docs/control-center-r3-contract.md` (commit 096a680):**
+
+- **Claude (Opus) — backend + tests:**
+  - `bot.py`: helpers a nivel de módulo `_make_skip_entry`, `_skip_log_rotate_if_needed`, `append_skip_log_entries` (batch + rotación 20 MB + tolerancia a I/O roto), `_skip_log_rotated_files`, `read_skip_log_last_n_cycles`, `read_skip_log_since`.
+  - `run_cycle` instrumentado: `cycle_id = now.strftime("%Y-%m-%dT%H:%M")` capturado una sola vez al inicio, `skip_log_entries = []` bucket local, un único `append_skip_log_entries(...)` al final del ciclo envuelto en try/except.
+  - 17 `skip_reason` instrumentados en los `continue` existentes del scan loop. Flag `shadow_override_flag` propagado en `parsed.update(...)` desde Loop A para que Loop B distinga `fuera_allowlist` vs `shadow_only_override` (fix `c8c8e73`).
+  - `verify_before_deploy.py`: 64 tests nuevos, estáticos y funcionales (exec del source en namespace limpio contra tempdir).
+
+- **Codex — analyzer offline + docs:**
+  - `tools/analyze_skip_log.py`: CLI con flags `--last-n-cycles`, `--since`, `--city`, `--csv`, `--min-edge`. Lee `data/skip_log.jsonl` + rotados directamente con `json.loads(line)`, sin importar `bot.py`. 3 secciones: distribución, trend, near-misses.
+  - `docs/skip-log-analyzer.md` con ejemplos.
+
+**Validación:**
+
+- `python verify_before_deploy.py` → `612/612`
+- commits en `main`: `096a680` (contrato R3), `4b37cfe` (analyzer Codex), backend R3 (Claude)
+- Pablo forzó ciclo vía `/forzar` en Telegram → `data/skip_log.jsonl` generó 660 filas en `cycle_id 2026-04-05T20:09`. Analyzer via SSH funciona.
+
+**Hallazgo estratégico del primer ciclo real:** cero filas llegan a Loop B con edge calculado — todos los skips caen en Loop A (filtros tempranos). `below_min_edge`/`kelly_too_low`/`shadow_only_override` solo aparecerán cuando haya mercados futuros válidos en ciudades activas. R3 listo para análisis longitudinal cuando acumule 10-30 ciclos.
+
+## Sesión 79 — R1 frontend Control Center: 3 gates por ciudad (5 abr 2026)
+
+**Disparador:** cerrar la parte frontend de R1 mientras Claude trabajaba el backend en paralelo, consumiendo el contrato estable de `docs/control-center-r1-contract.md` sin tocar `bot.py`.
+
+**Cambios implementados por Codex (solo frontend):**
+
+- `templates/dashboard.html` reemplaza el bloque `{# -- City states compact -- #}` que iteraba `dashboard.city_observation.active_rows` por una tabla compacta sobre `dashboard.city_decisions.ranking_rows`.
+- La nueva tabla muestra `Historial`, `Shadow` y `NOAA` con `gate_a`, `gate_b` y `gate_c` como autoridad del JSON, manteniendo la columna de `state_label`/`state_badge`.
+- Cada gate expone `detail` vía `title` HTML y se añade debajo un glosario corto con los significados de `Limpio/Malo/Sin datos`, `Lista/Construyendo/Vacío` e `Interpretable/Parcial/Sin NOAA`.
+- `static/dashboard.css` añade un ajuste mínimo `.city-gates` para anchos y badges, reutilizando `badge-good/accent/warn/bad/muted`.
+- El bloque posterior de `dashboard.city_observation.blocked_rows` queda intacto.
+
+**Límites de alcance respetados:**
+
+- no se tocó `bot.py` bajo ninguna circunstancia;
+- no se modificó `verify_before_deploy.py`;
+- no hubo bump de versión;
+- no se añadió microajuste UX extra para el caso Dallas (`gate_a=bad` + `gate_b=ready`), porque los gates independientes son parte explícita del diseño y la columna de estado ya sintetiza el veredicto.
+
+**Validación y trazabilidad:**
+
+- `python verify_before_deploy.py` -> `548/548`
+- commit/push a `main`: `c382000`
+- mensaje: `feat(dashboard): R1 frontend — 3 gates visuales por ciudad`
+
+## Sesión 80 — R3 skip_log: analyzer offline Codex + validación end-to-end (5 abr 2026)
+
+**Disparador:** cerrar la parte Codex del contrato `docs/control-center-r3-contract.md` mientras el backend R3 se implementaba en paralelo, y luego validar el analyzer contra el primer `skip_log.jsonl` real generado en producción.
+
+**Cambios implementados por Codex:**
+
+- `tools/analyze_skip_log.py` añade un CLI stdlib-only para leer `data/skip_log.jsonl` y archivos rotados `data/skip_log.YYYY-MM-DD.jsonl` directamente con `json.loads(line)`, sin importar `bot.py`.
+- El analyzer tolera líneas malformadas con warning a `stderr`, respeta campos `null` del schema R3 y soporta `--last-n-cycles`, `--since`, `--city`, `--csv` y `--min-edge`.
+- La salida queda organizada en tres secciones: distribución de `skip_reason` por ciudad, trend temporal por razón comparando ventanas de ciclos y near-misses para `below_min_edge`.
+- `docs/skip-log-analyzer.md` documenta instalación, flags, interpretación de cada sección y casos de uso operativos.
+
+**Límites de alcance respetados:**
+
+- no se tocó `bot.py`;
+- no se modificó `verify_before_deploy.py`;
+- no se importó el bot desde el analyzer;
+- no se dejaron archivos temporales persistentes en `data/` tras la verificación local.
+
+**Validación y trazabilidad:**
+
+- `python -c "import ast; ast.parse(open('tools/analyze_skip_log.py').read())"` -> OK
+- `python tools/analyze_skip_log.py --last-n-cycles 5` -> OK con fixture local mínimo de 3 filas
+- validación posterior sobre Railway: el primer ciclo real produjo `660` filas en `data/skip_log.jsonl` (`cycle_id 2026-04-05T20:09`) y el analyzer respondió correctamente por SSH
+- commit local Codex: `4b37cfe`
+- mensaje: `feat(r3): analyzer offline de skip_log.jsonl`
+
+## Sesión 81 — Control Center simplificado + verify saneado sobre main (6 abr 2026)
+
+**Disparador:** ejecutar los ítems delegables de `docs/control-center-simplify-plan.md` sin agrupar cambios, integrar la cadena completa en `main` y dejar `verify_before_deploy.py` verde antes de cualquier deploy.
+
+**Cambios integrados por Codex:**
+
+- Se mergearon en orden local y luego a `origin/main` siete PRs aisladas del plan:
+  - `#5` limpieza de duplicados visuales del dashboard;
+  - `#1` badge de modo sin falsa alarma en shadow/dry;
+  - `#2` eliminación de la columna `Resolucion` del bloque de señales shadow;
+  - `#6` lenguaje llano para scan y etiquetas de condición;
+  - `#3` normalización de `forecast_display`/`forecast_badge`, incluyendo corrección del mojibake `°`;
+  - `#4` supresión de `city_low_accuracy` como alerta operativa en `SHADOW_ONLY/DRY_RUN`, moviéndola a anotación fija en rendimiento;
+  - `#7` gateo NOAA cuando la muestra todavía es insuficiente.
+- El conflicto textual de `bot.py` entre `#3` y `#6` se resolvió manteniendo todos los helpers nuevos y combinando correctamente `_strip_resolution_fields(row)`, `_build_shadow_forecast_fields(row)` y `condition_label` en la comprehension de `build_dashboard_city_decisions`.
+- `verify_before_deploy.py` se endureció para reflejar el dashboard simplificado y el entorno real de sandbox:
+  - actualiza asserts HTML que seguían esperando `Resolucion` y textos viejos del bloque shadow;
+  - inyecta `_dashboard_mode_label` en el harness funcional de `get_dashboard_alert_summary`;
+  - usa un tempdir local del repo para R3 y monkeypatch de `os.replace` en la prueba de rotación, evitando falsos rojos por restricciones del sandbox Windows.
+
+**Validación y trazabilidad:**
+
+- `python verify_before_deploy.py` -> `612/612`
+- commit final de saneamiento del verify en `main`: `df4ff60`
+- mensaje: `test(verify): harden merged dashboard checks`
+- `git push origin main` publicado con toda la cadena ya integrada
+
+**Notas de alcance:**
+
+- no hubo bump de versión;
+- no se tocaron los 3 gates de R1 ni la lógica funcional de `skip_log`;
+- no se desplegó a Railway en esta sesión.
