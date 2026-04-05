@@ -89,10 +89,6 @@
         </div>
         <dl class="metric-list">
           <div>
-            <dt>Modo</dt>
-            <dd><span class="badge badge-{{ 'good' if dashboard.mode == 'REAL' else 'warn' }}">{{ dashboard.mode }}</span></dd>
-          </div>
-          <div>
             <dt>Cash</dt>
             <dd>
               {% if dashboard.portfolio %}
@@ -111,6 +107,10 @@
             <dd>{{ dashboard.next_run }}</dd>
           </div>
           <div>
+            <dt>Intra-SL</dt>
+            <dd>{{ dashboard.intra_label }}</dd>
+          </div>
+          <div>
             <dt>Mercados escaneados</dt>
             <dd>
               {% set total_scanned = dashboard.cycle_summary.scan.markets_evaluated|default(dashboard.cycle_summary.scan.total_scanned|default(0)) %}
@@ -119,10 +119,6 @@
               {{ total_scanned - filtered_scanned if total_scanned >= filtered_scanned else 0 }} direccionales,
               {{ filtered_scanned }} filtrados (range/exact)
             </dd>
-          </div>
-          <div>
-            <dt>Version</dt>
-            <dd>{{ dashboard.version }} · serie v{{ dashboard.logic_series }}</dd>
           </div>
         </dl>
 
@@ -222,11 +218,6 @@
             {% endfor %}
           </tbody>
         </table>
-      </div>
-      <div class="notice notice-accent">
-        {{ dashboard.city_decisions.recent_shadow_rows|length }} direccionales visibles |
-        {{ dashboard.city_decisions.shadow_summary.edge_hits }} historicas totales |
-        {{ dashboard.city_decisions.shadow_summary.cycles_with_shadow }} ciclos con shadow
       </div>
       {% else %}
       <div class="notice notice-muted">
@@ -428,27 +419,6 @@
           </article>
         </section>
         {% endif %}
-
-        {# -- System status compact only -- #}
-        <section class="grid">
-          <article class="card">
-            <div class="card-head">
-              <div>
-                <p class="section-kicker">Sistema</p>
-                <h2>Estado operativo</h2>
-              </div>
-            </div>
-            <dl class="metric-list">
-              <div><dt>Version</dt><dd>{{ dashboard.version }}</dd></div>
-              <div><dt>Serie logica</dt><dd>v{{ dashboard.logic_series }}</dd></div>
-              <div><dt>Proximo ciclo</dt><dd>{{ dashboard.next_run }}</dd></div>
-              <div><dt>Ultimo ciclo</dt><dd>{{ dashboard.last_cycle_label }}</dd></div>
-              <div><dt>Intra-SL</dt><dd>{{ dashboard.intra_label }}</dd></div>
-              <div><dt>Signals</dt><dd>{{ dashboard.alerts.signals.status }}</dd></div>
-            </dl>
-          </article>
-
-        </section>
 
         {# Open positions se lee en Bloque 1; el detalle largo sale del HTML principal. #}
         {% if false and dashboard.open_positions %}
