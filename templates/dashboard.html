@@ -115,9 +115,10 @@
             <dd>
               {% set total_scanned = dashboard.cycle_summary.scan.markets_evaluated|default(dashboard.cycle_summary.scan.total_scanned|default(0)) %}
               {% set filtered_scanned = dashboard.cycle_summary.scan.condition_filtered|default(0) %}
-              {{ total_scanned }} total,
-              {{ total_scanned - filtered_scanned if total_scanned >= filtered_scanned else 0 }} direccionales,
-              {{ filtered_scanned }} filtrados (range/exact)
+              {% set directional_scanned = total_scanned - filtered_scanned if total_scanned >= filtered_scanned else 0 %}
+              <span title="{{ filtered_scanned }} filtrados por range/exact de {{ total_scanned }} escaneados">
+                {{ directional_scanned }} direccionales de {{ total_scanned }} mercados escaneados
+              </span>
             </dd>
           </div>
           <div>
