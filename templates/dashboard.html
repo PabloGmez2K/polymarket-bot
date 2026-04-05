@@ -204,12 +204,14 @@
               <td>{{ row.side }}</td>
               <td><span class="badge badge-accent">{{ '%.1f'|format(row.edge_pct) }}%</span></td>
               <td>
-                {% if row.forecast_display is defined %}
+                {% if row.forecast_badge %}
+                  <span class="badge badge-{{ row.forecast_badge }}">{{ row.forecast_display }}</span>
+                {% elif row.forecast_display is defined %}
                   {{ row.forecast_display }}
                 {% elif row.forecast_max is not none %}
                   {{ '%.1fC'|format(row.forecast_max) }}
                 {% else %}
-                  n/d
+                  <span class="badge badge-muted">dato faltante en origen</span>
                 {% endif %}
               </td>
               <td><span class="table-note">{{ row.question|default('n/d') }}</span></td>
