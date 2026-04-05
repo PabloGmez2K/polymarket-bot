@@ -4690,6 +4690,63 @@ def _shadow_condition_label(question):
     return "otro"
 
 
+def _extract_threshold_display_from_question(question):
+    """Build a human-readable threshold fallback from the market question."""
+    q = str(question or "")
+    unit_gap = r'\s*(?:[^0-9A-Za-z\s])?\s*'
+    patterns = [
+        rf'(?:above|below)\s+(-?\d+(?:\.\d+)?){unit_gap}([FCfc])',
+        rf'(-?\d+(?:\.\d+)?){unit_gap}([FCfc])\s+or\s+(?:above|below)',
+        rf'(?:at\s+most|at\s+least)\s+(-?\d+(?:\.\d+)?){unit_gap}([FCfc])',
+    ]
+    match = None
+    for pattern in patterns:
+        match = re.search(pattern, q, re.IGNORECASE)
+        if match:
+            break
+    if not match:
+        return None
+    value = float(match.group(1))
+    unit = match.group(2).upper()
+    value_display = f"{int(value)}" if value.is_integer() else f"{value:.1f}"
+    return f"umbral {value_display}Â°{unit}"
+
+
+def _build_shadow_forecast_fields(row):
+    """Normalize forecast fields for shadow rows across both builder branches."""
+    question = row.get("question", "")
+    forecast_display = row.get("forecast_display")
+    forecast_max = row.get("forecast_max")
+
+    if isinstance(forecast_display, str) and forecast_display.strip():
+        return {
+            "forecast_display": forecast_display.strip(),
+            "forecast_badge": None,
+        }
+
+    try:
+        if forecast_max is not None:
+            forecast_value = float(forecast_max)
+            return {
+                "forecast_display": f"{forecast_value:.1f}C",
+                "forecast_badge": None,
+            }
+    except (TypeError, ValueError):
+        pass
+
+    threshold_display = _extract_threshold_display_from_question(question)
+    if threshold_display:
+        return {
+            "forecast_display": threshold_display,
+            "forecast_badge": None,
+        }
+
+    return {
+        "forecast_display": "dato faltante en origen",
+        "forecast_badge": "muted",
+    }
+
+
 def _build_recent_shadow_rows(shadow_tracking):
     """Build shadow signal rows for the dashboard — only directional signals.
 
@@ -4704,7 +4761,11 @@ def _build_recent_shadow_rows(shadow_tracking):
     # Primary: directional signals from recent_opportunities
     recent = shadow_tracking.get("recent_opportunities", [])
     directional = [
-        {**row, "condition_label": _shadow_condition_label(row.get("question"))}
+        {
+            **row,
+            **_build_shadow_forecast_fields(row),
+            "condition_label": _shadow_condition_label(row.get("question")),
+        }
         for row in recent
         if row.get("edge_hit")
     ]
@@ -4726,15 +4787,6 @@ def _build_recent_shadow_rows(shadow_tracking):
             edge_pct = float(edge.get("edge_pct", 0) or 0)
             if edge_pct <= 0:
                 continue
-            forecast_max = edge.get("forecast_max")
-            # Extract threshold from question as display fallback
-            threshold_c = _extract_threshold_from_question(edge.get("question"))
-            if forecast_max is not None:
-                forecast_display = f"{float(forecast_max):.1f}C"
-            elif threshold_c is not None:
-                forecast_display = f"umbral {threshold_c:.0f}C"
-            else:
-                forecast_display = "n/d"
             all_edges.append({
                 "city": city_name,
                 "date": edge.get("date", ""),
@@ -4744,8 +4796,8 @@ def _build_recent_shadow_rows(shadow_tracking):
                 "expected_value": float(edge.get("expected_value", 0) or 0),
                 "market_price": edge.get("market_price"),
                 "our_prob": edge.get("our_prob"),
-                "forecast_max": forecast_max,
-                "forecast_display": forecast_display,
+                "forecast_max": edge.get("forecast_max"),
+                **_build_shadow_forecast_fields(edge),
                 "seen_at": edge.get("seen_at", ""),
                 "condition_label": condition,
             })
