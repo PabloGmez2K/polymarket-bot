@@ -192,7 +192,6 @@
               <th>Edge%</th>
               <th>Forecast</th>
               <th>Mercado</th>
-              <th>Resolucion</th>
             </tr>
           </thead>
           <tbody>
@@ -213,7 +212,6 @@
                 {% endif %}
               </td>
               <td><span class="table-note">{{ row.question|default('n/d') }}</span></td>
-              <td><span class="badge badge-{{ row.resolution_badge|default('muted') }}">{{ row.resolution_label|default('pendiente') }}</span></td>
             </tr>
             {% endfor %}
           </tbody>
