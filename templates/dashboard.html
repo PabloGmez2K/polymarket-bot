@@ -334,6 +334,12 @@
             <div class="notice notice-muted">Sin historico suficiente por ciudad.</div>
             {% endif %}
 
+            {% if dashboard.alerts.flagged_cities_suppressed and dashboard.alerts.flagged_history_note %}
+            <div class="notice notice-muted">
+              {{ dashboard.alerts.flagged_history_note.detail }}
+            </div>
+            {% endif %}
+
             {# -- City states compact -- #}
             <div class="card-head">
               <div>
