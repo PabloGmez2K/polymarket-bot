@@ -4365,6 +4365,7 @@ def build_dashboard_forecast_quality(audit=None):
             "source": item.get("source", "?"),
         })
 
+    kpis_gated = sample_size < OBSERVED_FORECAST_GLOBAL_TARGET
     if sample_size < OBSERVED_FORECAST_MIN_SAMPLE:
         note_level = "muted"
         note = (
@@ -4390,6 +4391,11 @@ def build_dashboard_forecast_quality(audit=None):
         "mae_display": _fmt_temp(mae_c) if mae_c is not None else "acumulando muestra...",
         "bias_display": _fmt_temp(bias_c, signed=True) if bias_c is not None else "acumulando muestra...",
         "coverage_display": f"{coverage_with_sample} / {len(city_order)} ciudades con muestra",
+        "kpis_gated": kpis_gated,
+        "kpis_gate_message": (
+            f"Muestra insuficiente — {sample_size}/{OBSERVED_FORECAST_GLOBAL_TARGET}. "
+            "MAE/Bias se habilitan al alcanzar el umbral."
+        ),
         "coverage_detail": (
             f"{coverage_ready} / {len(city_order)} con >= {OBSERVED_FORECAST_MIN_SAMPLE} casos"
             if city_order else

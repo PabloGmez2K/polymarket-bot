@@ -252,9 +252,13 @@
             </div>
             <dl class="metric-list">
               <div><dt>Muestra NOAA</dt><dd>{{ dashboard.forecast_quality.sample_display }}</dd></div>
+              {% if dashboard.forecast_quality.kpis_gated %}
+              <div><dt>Estado KPIs</dt><dd>{{ dashboard.forecast_quality.kpis_gate_message }}</dd></div>
+              {% else %}
               <div><dt>MAE NOAA</dt><dd>{{ dashboard.forecast_quality.mae_display }}</dd></div>
               <div><dt>Bias NOAA</dt><dd>{{ dashboard.forecast_quality.bias_display }}</dd></div>
               <div><dt>Cobertura</dt><dd>{{ dashboard.forecast_quality.coverage_display }}</dd></div>
+              {% endif %}
               <div><dt>Ultimo fetch NOAA</dt><dd>{{ dashboard.forecast_quality.last_record_display }}</dd></div>
             </dl>
 
