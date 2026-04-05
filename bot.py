@@ -6079,7 +6079,7 @@ def build_dashboard_focus_center(
     signal_status = str(alerts.get("signals", {}).get("status", "unknown") or "unknown")
     signal_actionable = int(alerts.get("signals", {}).get("actionable", 0) or 0)
     pending_count = len(alerts.get("pending_stuck", []))
-    flagged_cities = alerts.get("flagged_cities", [])
+    flagged_cities = alerts.get("flagged_cities_operational", alerts.get("flagged_cities", []))
     flagged_count = len(flagged_cities)
     low_bankroll = bool(alerts.get("low_bankroll"))
     portfolio_total = alerts.get("portfolio_total")
@@ -7836,6 +7836,45 @@ def build_agent_rivalry(events):
     return rows
 
 
+def _build_flagged_city_history_note(flagged_cities):
+    """Build a static note for frozen low-accuracy history in shadow/dry contexts."""
+    if not flagged_cities:
+        return None
+
+    flagged_names = {item.get("city", "") for item in flagged_cities if item.get("city")}
+    frozen_since = ""
+    if flagged_names:
+        records = load_postmortem_data()
+        latest_closed_at = ""
+        for record in records:
+            if record.get("status") != "closed":
+                continue
+            if record.get("city") not in flagged_names:
+                continue
+            closed_at = str(record.get("closed_at") or "").strip()
+            if closed_at > latest_closed_at:
+                latest_closed_at = closed_at
+        if latest_closed_at:
+            try:
+                frozen_since = datetime.fromisoformat(
+                    latest_closed_at.replace("Z", "+00:00")
+                ).strftime("%Y-%m-%d")
+            except Exception:
+                frozen_since = latest_closed_at[:10]
+
+    city_list = ", ".join(
+        f"{item['city']} ({item['win_rate']}%)" for item in flagged_cities
+    )
+    since_label = frozen_since or "fecha no disponible"
+    return {
+        "frozen_since": frozen_since,
+        "detail": (
+            f"Histórico congelado desde {since_label}. "
+            f"No se promoverán sin evidencia nueva: {city_list}."
+        ),
+    }
+
+
 def get_dashboard_alert_summary():
     """Resume alertas y riesgos operativos visibles para el panel."""
     signals = inspect_signals_file_health()
@@ -7871,6 +7910,9 @@ def get_dashboard_alert_summary():
         if data["trades"] >= CITY_MIN_TRADES_FOR_BLOCK and data["win_rate"] <= CITY_BLOCK_WIN_RATE
     ]
     flagged_cities.sort(key=lambda item: (item["win_rate"], -item["trades"], item["city"]))
+    shadow_or_dry = _dashboard_mode_label() in {"SHADOW-ONLY", "DRY RUN"}
+    flagged_cities_operational = [] if shadow_or_dry else flagged_cities
+    flagged_history_note = _build_flagged_city_history_note(flagged_cities) if shadow_or_dry else None
 
     active_items = []
     if issue != "ok":
@@ -7885,11 +7927,13 @@ def get_dashboard_alert_summary():
             "title": "Pending exits atascadas",
             "detail": f"{len(pending_stuck)} órdenes > {PENDING_EXIT_ALERT_HOURS:.0f}h",
         })
-    if flagged_cities:
+    if flagged_cities_operational:
         active_items.append({
             "level": "warn",
             "title": "Ciudades con accuracy baja",
-            "detail": ", ".join(f"{item['city']} ({item['win_rate']}%)" for item in flagged_cities[:4]),
+            "detail": ", ".join(
+                f"{item['city']} ({item['win_rate']}%)" for item in flagged_cities_operational
+            ),
         })
 
     # v10.6: alerta de bankroll bajo en dashboard
@@ -7911,6 +7955,9 @@ def get_dashboard_alert_summary():
         "signals": signals,
         "pending_stuck": pending_stuck,
         "flagged_cities": flagged_cities,
+        "flagged_cities_operational": flagged_cities_operational,
+        "flagged_cities_suppressed": shadow_or_dry and bool(flagged_cities),
+        "flagged_history_note": flagged_history_note,
         "active_items": active_items,
         "low_bankroll": low_bankroll,
         "portfolio_total": portfolio_total,
