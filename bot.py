@@ -4996,6 +4996,30 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
 
     for row in city_observation.get("rows", []):
         city = row.get("city", "?")
+        observed_audit_cities = globals().get("OBSERVED_AUDIT_CITIES")
+        if not isinstance(observed_audit_cities, (set, list, tuple)):
+            observed_audit_cities = (
+                set(globals().get("FORECAST_BIAS_C", {}).keys())
+                if isinstance(globals().get("FORECAST_BIAS_C"), dict)
+                else set()
+            )
+        forecast_bias_value = (
+            float(FORECAST_BIAS_C.get(city, 0.0))
+            if city in observed_audit_cities
+            else None
+        )
+        forecast_bias_applied = forecast_bias_value is not None
+        forecast_bias_display = (
+            f"{forecast_bias_value:+.2f}C"
+            if forecast_bias_applied
+            else "n/d"
+        )
+        forecast_bias_badge = "accent" if forecast_bias_applied else "muted"
+        forecast_bias_detail = (
+            f"FORECAST_BIAS_C aplicado en estimate_prob_with_city: {forecast_bias_value:+.2f}C"
+            if forecast_bias_applied
+            else "esta ciudad no usa correccion declarativa en FORECAST_BIAS_C"
+        )
         shadow = shadow_cities.get(city, {}) if isinstance(shadow_cities, dict) else {}
         shadow_seen = int(shadow.get("markets_seen", 0) or 0)
         shadow_edges = int(shadow.get("edge_hits", 0) or 0)
@@ -5298,6 +5322,11 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
             "pnl": pnl,
             "pnl_display": f"${pnl:+.2f}",
             "observed_display": f"{observed_count}/{observed_goal}",
+            "forecast_bias_value": forecast_bias_value,
+            "forecast_bias_applied": forecast_bias_applied,
+            "forecast_bias_display": forecast_bias_display,
+            "forecast_bias_badge": forecast_bias_badge,
+            "forecast_bias_detail": forecast_bias_detail,
             "shadow_seen": shadow_seen,
             "shadow_edges": shadow_edges,
             "shadow_cycles": shadow_cycles,

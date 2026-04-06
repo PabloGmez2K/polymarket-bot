@@ -353,6 +353,7 @@
                     <th>Historial</th>
                     <th>Shadow</th>
                     <th>NOAA</th>
+                    <th>Bias</th>
                     <th>Estado</th>
                   </tr>
                 </thead>
@@ -373,6 +374,11 @@
                     <td>
                       <span class="badge badge-{{ row.gate_c.badge }}" title="{{ row.gate_c.detail }}">
                         {{ row.gate_c.label }}
+                      </span>
+                    </td>
+                    <td>
+                      <span class="badge badge-{{ row.forecast_bias_badge }}" title="{{ row.forecast_bias_detail }}">
+                        {{ row.forecast_bias_display }}
                       </span>
                     </td>
                     <td><span class="badge badge-{{ row.state_badge }}">{{ row.state_label }}</span></td>
