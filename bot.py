@@ -258,8 +258,8 @@ TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", "40.0"))  # vender si PnL% 
 SELL_AGGRESSION = 0.02  # cuánto bajar el precio para asegurar venta rápida
 INTRA_SL_INTERVAL = int(os.getenv("INTRA_SL_INTERVAL", "0"))  # v10.6: desactivado — cada 8h es suficiente para mercados diarios
 
-MIN_PRICE = 0.08
-MAX_PRICE = 0.92
+MIN_PRICE = 0.20
+MAX_PRICE = 0.80
 PRICE_AGGRESSION = 0.02
 ORDER_MAX_AGE_HOURS = 8
 
