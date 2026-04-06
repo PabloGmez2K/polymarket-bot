@@ -2348,6 +2348,30 @@ Regla recomendada:
 - no se tocaron los 3 gates de R1 ni la lógica funcional de `skip_log`;
 - no se desplegó a Railway en esta sesión.
 
+## Sesión 83 — Dallas desbloqueado + arquitectura modos ciudad + contrato NOAA (6 abr 2026)
+
+**Disparador:** revisar el primer ciclo Dallas con modelo corregido (bias + sigma 0.57°C), diagnosticar por qué no operaba, y diseñar la hoja de ruta NOAA para todas las ciudades.
+
+**Hallazgos:**
+
+- Dallas bloqueada en producción por `sync_city_policy_state` — re-añadida a `auto_blocked_cities` en cada arranque porque WR=11.8% (<25%) dispara `removable_active=True`. El label "(WU vs Open-Meteo)" en el log es hardcodeado, no refleja una comprobación WU activa.
+- El loop era: cleanup manual → bot arranca → `run_observability_alerts()` → `sync_city_policy_state()` → Dallas re-bloqueada antes del primer ciclo.
+- Atlanta y Chicago estaban en `BLOCKED_CITIES` por error de diseño: `BLOCKED_CITIES` corta TODO incluyendo recolección NOAA. Esas ciudades habían dejado de acumular datos NOAA sin que nadie lo notara.
+- 26 ciudades en `RESOLUTION_ICAO` sin `noaa_station_id` → no acumulan NOAA aunque estén en shadow.
+
+**Resultado:**
+
+- `CITY_STATS_CUTOFF` env var + `get_city_accuracy()` filtrado por fecha: reset de métricas Dallas sin borrar `postmortem.json`. `verify_before_deploy.py` 626/626 (6 tests nuevos).
+- `ALLOWLIST_REMOVE_MIN_TRADES=25` en Railway: barrera de seguridad anti-re-bloqueo hasta n≥25 trades nuevos.
+- `CITY_STATS_CUTOFF=Dallas=2026-04-06` en Railway: Dallas arranca con 0 trades en métricas.
+- Atlanta y Chicago removidas de `BLOCKED_CITIES` en Railway → vuelven a shadow, siguen acumulando NOAA.
+- Norma canónica de modos documentada en `AGENTS.md`, `bot.py` (comentario junto a `BLOCKED_CITIES`) y `CONTEXTO.md`: blocked=datos rotos, shadow=no opera pero observa.
+- Contrato Codex `docs/noaa-station-verification-contract.md`: proceso autónomo para verificar estaciones NOAA de las 26 ciudades pendientes via isd-history.csv + GHCND API.
+
+**Commits:** `f7abd5b`, `55b6dee`, `0a220ed`
+**Railway:** `ALLOWLIST_REMOVE_MIN_TRADES=25`, `CITY_STATS_CUTOFF=Dallas=2026-04-06`, Atlanta/Chicago fuera de `BLOCKED_CITIES`.
+**Próximo paso:** Codex ejecuta `docs/noaa-station-verification-contract.md`.
+
 ## Sesión 82 — Cierre NOAA decouple en rama de revisión (6 abr 2026)
 
 **Disparador:** cerrar ordenadamente una exploración local sobre NOAA después de detectar que el diff se había trabajado sobre una base de tests antigua respecto a `main`.
