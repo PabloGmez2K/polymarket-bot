@@ -2346,3 +2346,20 @@ Regla recomendada:
 - no hubo bump de versión;
 - no se tocaron los 3 gates de R1 ni la lógica funcional de `skip_log`;
 - no se desplegó a Railway en esta sesión.
+
+## Sesión 82 — Cierre NOAA decouple en rama de revisión (6 abr 2026)
+
+**Disparador:** cerrar ordenadamente una exploración local sobre NOAA después de detectar que el diff se había trabajado sobre una base de tests antigua respecto a `main`.
+
+**Resultado real al cierre:**
+
+- se creó y publicó la rama `codex/noaa-decouple` para revisión aislada;
+- la rama quedó sin delta efectivo de código frente a `main`/`origin/main` al terminar la sesión;
+- no se integraron cambios funcionales nuevos en `bot.py` ni `verify_before_deploy.py`;
+- se sincronizaron `CONTEXTO.md`, `HISTORIAL_SESIONES.md` y `agent_events.jsonl` para dejar trazabilidad explícita de que esta sesión cerró workflow, no producto.
+
+**Validación y trazabilidad:**
+
+- `python verify_before_deploy.py` relanzado antes del push de cierre;
+- commit de cierre documental realizado sobre `codex/noaa-decouple`;
+- push de la rama de revisión actualizado para dejar la sesión cerrada.

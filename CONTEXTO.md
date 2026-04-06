@@ -1,6 +1,11 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 6 de abril de 2026 (Sesión 81 — Control Center simplificado + verify saneado sobre main, v10.6.11)
+**Última actualización:** 6 de abril de 2026 (Sesión 82 — cierre NOAA decouple en rama de revisión, v10.6.11)
+**Sesión 82 (6 abr 2026, Codex):** cierre administrativo de una exploración NOAA en rama separada, sin delta funcional publicado sobre `main`.
+- Se abrió la rama de revisión `codex/noaa-decouple` para aislar un posible cambio de desacople de recolección NOAA respecto a eventos `BUY` y poder compararlo sin pisar el trabajo ya integrado en `main`.
+- Al cierre de la sesión, la rama quedó limpia y sin diferencia efectiva de código frente a `main`/`origin/main`; no se publicó ningún cambio funcional nuevo en `bot.py` ni en `verify_before_deploy.py`.
+- La aportación real de la sesión queda en la trazabilidad del workflow: branch de revisión creado, cierre documentado y fuentes de verdad del repo sincronizadas (`CONTEXTO.md`, `HISTORIAL_SESIONES.md`, `agent_events.jsonl`).
+
 **Sesión 81 (6 abr 2026, Codex):** simplificación operativa del Control Center integrada y publicada en `main`, sin bump de versión.
 - Se mergearon en cadena 7 PRs aisladas del plan `docs/control-center-simplify-plan.md`: badge de modo sin falsa alarma en shadow/dry, eliminación de la columna `Resolucion` en señales shadow, normalización de `forecast_display` con fallback semántico, supresión de la alerta operativa `city_low_accuracy` en `SHADOW_ONLY/DRY_RUN` moviéndola a nota fija de rendimiento, limpieza de duplicados en dashboard, lenguaje llano en scan/condición y gateo NOAA con mensaje de muestra insuficiente.
 - `bot.py` resolvió el conflicto textual entre PRs manteniendo ambos helpers (`_shadow_condition_label`, `_extract_threshold_display_from_question`) y combinando correctamente `_strip_resolution_fields(...)`, `_build_shadow_forecast_fields(...)` y `condition_label` en `build_dashboard_city_decisions`.
