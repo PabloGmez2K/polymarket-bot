@@ -2388,3 +2388,26 @@ Regla recomendada:
 - `python verify_before_deploy.py` relanzado antes del push de cierre;
 - commit de cierre documental realizado sobre `codex/noaa-decouple`;
 - push de la rama de revisión actualizado para dejar la sesión cerrada.
+
+## Sesión 84 — Revalidación NOAA London/Milan sin delta funcional (6 abr 2026)
+
+**Disparador:** revisar dos `noaa_daily_station_id` del commit `9efd8bc` con posible sesgo geográfico antes de seguir confiando en la nueva capa NOAA ampliada.
+
+**Verificación ejecutada:**
+
+- `London -> UKE00107650` se reconsultó en `daily-summaries/TMAX` para `2025-10-01..2026-03-31`: devuelve `149` registros válidos, rango plausible `2.5°C..21.3°C`. En `ghcnd-stations.txt` figura como `HEATHROW` (`51.4789, 0.4489`), a ~`27.8 km` de `EGLC`.
+- `Milan -> SZ000009480` también devuelve `151` registros `TMAX`, pero las coordenadas son `46.0, 8.9667` (`LUGANO`, Suiza), a ~`45.0 km` de `LIMC`.
+- Se hizo búsqueda dirigida de candidatos italianos cerca de Malpensa en `ghcnd-stations.txt` y luego una ampliación de radio hasta `300 km`. Los candidatos italianos obvios (`ITM00016064 CAMERI`, `ITE00100554 MILAN`, etc.) devolvieron `0` registros `TMAX` para el periodo contractual.
+
+**Resultado:**
+
+- no se modifica `bot.py` en esta sesión;
+- London queda validada como `daily` útil;
+- Milan se mantiene temporalmente con `SZ000009480` por falta de alternativa italiana con cobertura real en GHCND;
+- se documenta explícitamente que el siguiente cuello de botella ya no es el lookup de IDs sino acumular muestra real en `observed_vs_forecast`.
+
+**Validación y cierre:**
+
+- `python verify_before_deploy.py` -> `626/626`
+- se sincronizan `CONTEXTO.md`, `HISTORIAL_SESIONES.md` y `agent_events.jsonl`
+- no hay commit funcional nuevo de producto en esta sesión; el commit/push de cierre es solo documental

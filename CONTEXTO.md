@@ -1200,3 +1200,11 @@ git push
 
 - El endpoint `global-hourly` devolvió datos reales para `2025-01-01..2025-03-31` en las estaciones ISD verificadas, pero devolvió vacío para `2026-01-01..2026-03-31` incluso en estaciones ya buenas como `KORD` y `KLGA`, así que la promoción en esta sesión se apoyó en `isd-history.csv` + `daily-summaries`.
 - Para mantener compatibilidad con la suite actual, `bot.py` conserva una ancla literal legacy de `OBSERVED_AUDIT_CITIES` aunque el set real ya incluye las 19 ciudades con NOAA observado activo.
+
+### Seguimiento London/Milan (sesión 84, 6 abr 2026)
+
+- `London -> UKE00107650` revalidada contra `daily-summaries`: `149` registros `TMAX` entre `2025-10-01` y `2026-03-31`, rango `2.5°C..21.3°C`, coordenadas `51.4789, 0.4489` (`HEATHROW`), a ~`27.8 km` de `EGLC`.
+- `Milan -> SZ000009480` revalidada: `151` registros `TMAX`, rango `3.8°C..21.9°C`, pero corresponde a `LUGANO` (`46.0, 8.9667`), Suiza, a ~`45.0 km` de `LIMC`.
+- Se buscaron candidatos italianos en `ghcnd-stations.txt` cerca de `LIMC` (`ITM00016064 CAMERI`, `ITE00100554 MILAN` y radio ampliado hasta `300 km`), pero ninguno devolvió `TMAX` útil en ese periodo.
+- Decisión: no cambiar `bot.py` en esta sesión; London queda confirmada y Milan se mantiene como mejor daily disponible hasta encontrar una estación italiana con cobertura real.
+- Siguiente paso lógico: observar en dashboard/API que las 19 ciudades configuradas empiecen a poblar `observed_vs_forecast`; el valor operativo ahora viene de acumular muestra, no de seguir resolviendo IDs.
