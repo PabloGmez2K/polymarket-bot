@@ -391,12 +391,12 @@
             <div class="notice notice-muted city-gates-glossary">
               Historial: Limpio (trades sanos) · Malo (WR/PnL bajos) · Sin datos (sin cierres).
               Shadow: Lista (cumple regla canary) · Construyendo (acumulando señales) · Vacío (sin actividad).
-              NOAA: Interpretable (muestra suficiente) · Parcial (en acumulación) · Sin NOAA (no configurado o vacío).
+              NOAA: Interpretable (muestra suficiente) · Parcial (acumulando) · Sin muestra (configurado sin casos) · Sin NOAA (no configurado).
             </div>
 
             {% if dashboard.city_observation.blocked_rows %}
             <div class="card-head">
-              <div><p class="section-kicker">Bloqueadas</p></div>
+              <div><p class="section-kicker">Descartes reales</p></div>
               <span class="badge badge-bad">{{ dashboard.city_observation.blocked_count }}</span>
             </div>
             {% for row in dashboard.city_observation.blocked_rows[:5] %}

@@ -86,6 +86,7 @@ Comandos útiles:
 | 2026-04-03 | Explícita | Sesión 72 | `—` | Cobertura funcional de la alarma `sin ciclo en >12h` en `build_dashboard_focus_center()`: el test fuerza ausencia de `cycle_summary.json`, valida `incidents` + `badge="warn"` y sincroniza `agent_events.jsonl` con la sesión documentada más reciente. Suite local `507/507`, sin tocar trading/NOAA/scheduler. |
 | 2026-04-04 | Explícita | Sesión 76 | `—` | Implementación local de Camino A shadow-only: filtro `ALLOWED_CONDITIONS` para dejar solo `at_or_above/at_or_below`, `range/exact` enviados a shadow tracking con `edge_hit=False`, sigma empírica por ciudad con fallback global, `MIN_EDGE=15.0`, `condition_filtered` en dashboard/Telegram/cycle_summary y suite `515/515`; sin tocar scheduler/NOAA/trade_lifecycle/deploy ni env vars Railway. |
 | 2026-04-06 | Explícita | Sesión 82 | `93c8b2e` `1daec87` | Diagnóstico estratégico completo + corrección de modelo + reactivación Dallas. (1) Verificación empírica: NOAA `daily-summaries/TMAX` = WU daily high exactamente para KORD — no se necesita scraping WU. (2) Sesgo Open-Meteo medido con 13 casos NOAA en producción: Atlanta `Bias=+1.38°C`, Chicago `Bias=+1.40°C`, Dallas `Bias≈0`. (3) `FORECAST_BIAS_C` implementado en `estimate_prob_with_city` (`mu = forecast_max + bias`). (4) Dallas sigma D0 `0.21→0.57°C`, samples D0 `2→3`. (5) `MIN_PRICE 0.08→0.20`, `MAX_PRICE 0.92→0.80`. (6) `ACTIVE_TRADING_CITIES=Dallas` en Railway (estaba `NONE`), `auto_blocked_cities` limpio. (7) NOAA decoupling (Codex): `_iter_recent_noaa_cycle_markets` + `_get_noaa_candidate_dates` + `scanned_markets` en cycle_summary — recoge observaciones sin BUY. Suite `620/620` (+8 tests). |
+| 2026-04-06 | Explícita | Sesión 85 | `—` | Política local de ciudades `shadow-first`: `sync_city_policy_state()` vuelve a degradar `active/canary -> shadow`, `blocked` queda reservado a descartes reales, y el overlay legado `auto_blocked_cities[action=auto_block]` se migra al vuelo a `auto_shadow_cities` para evitar casos tipo Dallas. Dashboard/copy distinguen `Sin muestra` vs `Sin NOAA` y `Descartes reales` vs `Shadow degradada`. `verify_before_deploy.py` cierra en `628/628`; falta push/deploy. |
 
 ---
 
@@ -2411,3 +2412,28 @@ Regla recomendada:
 - `python verify_before_deploy.py` -> `626/626`
 - se sincronizan `CONTEXTO.md`, `HISTORIAL_SESIONES.md` y `agent_events.jsonl`
 - no hay commit funcional nuevo de producto en esta sesión; el commit/push de cierre es solo documental
+
+## Sesión 85 — Política de ciudades shadow-first y migración Dallas legacy (6 abr 2026)
+
+**Disparador:** auditar la contradicción entre la semántica deseada (`blocked` solo para descartes reales, `shadow` para observación activa) y el comportamiento real donde `sync_city_policy_state()` mandaba `active/canary -> blocked`, dejando casos como Dallas atrapados por `auto_blocked_cities`.
+
+**Hallazgos de auditoría:**
+
+- `get_effective_city_mode()` daba prioridad total a `auto_blocked_cities` sobre `ACTIVE_TRADING_CITIES`, así que una entrada legacy `action="auto_block"` podía dejar una ciudad `blocked` aunque en la práctica solo se quisiera pausarla y seguir observando.
+- `sync_city_policy_state()` seguía escribiendo `auto_blocked_cities` cuando `decision == "remove"`, con transición `active/canary -> blocked`.
+- El scan trataba `blocked` como descarte duro (`continue` temprano), por lo que esas ciudades salían también del circuito útil de observación.
+- El dashboard mezclaba `Sin muestra` y `Sin NOAA` en el gate C y todavía verbalizaba `blocked` y `shadow degradada` demasiado cerca semánticamente.
+
+**Implementación local:**
+
+- se añade normalización del overlay persistido con `_normalize_city_policy_state()`, `_is_real_block_policy()` y `_coerce_shadow_policy_entry()`;
+- el legado `auto_blocked_cities[action=auto_block]` migra automáticamente a `auto_shadow_cities` al cargar/guardar, preservando `reason`, `metrics`, `from_mode` y fecha;
+- `sync_city_policy_state()` vuelve a degradar `active/canary -> shadow` con `_build_auto_city_shadow_policy()` y transición `action="auto_shadow"`;
+- `blocked` queda reservado a descartes reales explícitos (`BLOCKED_CITIES` o `auto_blocked_cities` con acción de bloqueo real);
+- el dashboard distingue `Interpretable`, `Parcial`, `Sin muestra` y `Sin NOAA`, renombra el bloque de `blocked_rows` a `Descartes reales`, y presenta `Shadow degradada` como observación activa, no como expulsión dura.
+
+**Validación y estado:**
+
+- `python verify_before_deploy.py` -> `628/628`
+- no se tocó trading core, NOAA fetch core, scheduler ni exits, fuera del overlay de política y la presentación
+- no hubo mutación live en Railway durante esta sesión; el siguiente paso operativo es push/deploy para que el código nuevo migre overlays legacy en producción

@@ -532,13 +532,15 @@ def run_tests():
     test("load_city_policy_state definida", "def load_city_policy_state(" in code)
     test("save_city_policy_state definida", "def save_city_policy_state(" in code)
     test("get_effective_city_mode definida", "def get_effective_city_mode(" in code)
+    test("_normalize_city_policy_state definida", "def _normalize_city_policy_state(" in code)
     test("_build_auto_city_block_policy definida", "def _build_auto_city_block_policy(" in code)
+    test("_build_auto_city_shadow_policy definida", "def _build_auto_city_shadow_policy(" in code)
     test("sync_city_policy_state definida", "def sync_city_policy_state(" in code)
     test("city policy persiste auto_blocked_cities", '"auto_blocked_cities": {}' in code and 'payload.setdefault("auto_blocked_cities", {})' in code)
-    test("get_effective_city_mode respeta auto_blocked_cities",
+    test("get_effective_city_mode migra auto_block legacy a shadow",
          'auto_blocked = policy_state.get("auto_blocked_cities", {})' in code
-         and 'if city in auto_blocked:' in code
-         and 'return "blocked"' in code)
+         and '_normalize_city_policy_state' in code
+         and 'return "shadow"' in code)
     test("build_dashboard_focus_center definida", "def build_dashboard_focus_center(" in code)
     test("build_dashboard_legacy_forecast_drift definida", "def build_dashboard_legacy_forecast_drift(" in code)
     test("build_dashboard_trade_analytics definida", "def build_dashboard_trade_analytics(" in code)
@@ -1204,7 +1206,7 @@ def run_tests():
              and london_watch_row["state_label"] == "Bloqueada",
              london_watch_row)
         test("city observation: NYC queda como referencia historica fuera del allowlist",
-             nyc_watch_row["trading_label"] == "Fuera allowlist"
+             nyc_watch_row["trading_label"] == "Shadow"
              and nyc_watch_row["noaa_label"] == "Sin NOAA"
              and nyc_watch_row["state_label"] == "Referencia historica",
              nyc_watch_row)
@@ -1238,8 +1240,8 @@ def run_tests():
             if item["city"] == "Dallas":
                 item["city_mode"] = "shadow"
                 item["active"] = False
-                item["trading_label"] = "Fuera allowlist"
-                item["state_label"] = "Observacion"
+                item["trading_label"] = "Shadow degradada"
+                item["state_label"] = "Shadow degradada"
                 item["state_badge"] = "accent"
         city_decisions_ns["load_city_policy_state"] = lambda: {
             "auto_canary_cities": {},
@@ -1285,10 +1287,10 @@ def run_tests():
         test("city decisions: respeta bloqueadas",
              london_decision["decision"] == "blocked"
              and london_decision["badge"] == "bad"
-             and london_decision["priority_group"] == "no_touch",
+             and london_decision["priority_group"] == "expelled",
              london_decision)
         test("city decisions: Dallas aparece como shadow degradada",
-             dallas_decision["priority_group"] == "expelled"
+             dallas_decision["priority_group"] == "watch"
              and dallas_decision["state_label"] == "Shadow degradada"
              and dallas_decision["trend_label"] == "Enfriándose"
              and dallas_decision["main_reason"] == "shadow degradada por histórico real",
@@ -1422,7 +1424,7 @@ def run_tests():
             "get_effective_city_mode": lambda city, policy_state=None: "shadow" if city == "New York City" else "active",
             "send_telegram": lambda text, with_menu=False, custom_keyboard=None: transition_messages.append(("msg", text)),
         }
-        exec(get_function_source(module_ast, code_lines, "_build_auto_city_block_policy"), sync_policy_ns)
+        exec(get_function_source(module_ast, code_lines, "_build_auto_city_shadow_policy"), sync_policy_ns)
         exec(get_function_source(module_ast, code_lines, "sync_city_policy_state"), sync_policy_ns)
         sync_policy_ns["sync_city_policy_state"](notify=True)
         sent_texts = [item[1] for item in transition_messages if item[0] == "msg"]
@@ -1431,28 +1433,29 @@ def run_tests():
              any("promovida a canary" in text and "New York City" in text for text in sent_texts),
              sent_texts)
         test("city policy sync: alerta degradación a shadow",
-             any("blocked" in text and "Chicago" in text for text in sent_texts),
+             any("shadow" in text and "Chicago" in text for text in sent_texts),
              sent_texts)
 
-        test("city policy sync: persiste auto_blocked_cities con evidencia",
-             saved_policy.get("auto_blocked_cities", {}).get("Chicago", {}).get("action") == "auto_block"
-             and saved_policy.get("auto_blocked_cities", {}).get("Chicago", {}).get("reason") == "regla de salida disparada"
-             and saved_policy.get("auto_blocked_cities", {}).get("Chicago", {}).get("metrics", {}).get("trades") == 4
-             and saved_policy.get("auto_blocked_cities", {}).get("Chicago", {}).get("metrics", {}).get("wins") == 1
-             and saved_policy.get("auto_blocked_cities", {}).get("Chicago", {}).get("from_mode") == "active"
-             and bool(saved_policy.get("auto_blocked_cities", {}).get("Chicago", {}).get("triggered_at")),
+        test("city policy sync: persiste auto_shadow_cities con evidencia",
+             saved_policy.get("auto_shadow_cities", {}).get("Chicago", {}).get("action") == "auto_shadow"
+             and saved_policy.get("auto_shadow_cities", {}).get("Chicago", {}).get("reason") == "regla de salida disparada"
+             and saved_policy.get("auto_shadow_cities", {}).get("Chicago", {}).get("metrics", {}).get("trades") == 4
+             and saved_policy.get("auto_shadow_cities", {}).get("Chicago", {}).get("metrics", {}).get("wins") == 1
+             and saved_policy.get("auto_shadow_cities", {}).get("Chicago", {}).get("from_mode") == "active"
+             and bool(saved_policy.get("auto_shadow_cities", {}).get("Chicago", {}).get("shadowed_at")),
              saved_policy)
-        test("city policy sync: transicion de salida apunta a blocked",
+        test("city policy sync: transicion de salida apunta a shadow",
              any(
                  item.get("city") == "Chicago"
-                 and item.get("to") == "blocked"
-                 and item.get("action") == "auto_block"
+                 and item.get("to") == "shadow"
+                 and item.get("action") == "auto_shadow"
                  and item.get("metrics", {}).get("win_rate") == 25.0
                  for item in saved_policy.get("transition_history", [])
              ),
              saved_policy.get("transition_history"))
 
         effective_mode_ns = {
+            "LOGIC_SERIES": "10.6",
             "ACTIVE_TRADING_CITIES": {"Atlanta", "Chicago"},
             "CANARY_TRADING_CITIES": set(),
             "is_city_blocked": lambda city: False,
@@ -1462,9 +1465,12 @@ def run_tests():
                 "auto_canary_cities": {},
             },
         }
+        exec(get_function_source(module_ast, code_lines, "_is_real_block_policy"), effective_mode_ns)
+        exec(get_function_source(module_ast, code_lines, "_coerce_shadow_policy_entry"), effective_mode_ns)
+        exec(get_function_source(module_ast, code_lines, "_normalize_city_policy_state"), effective_mode_ns)
         exec(get_function_source(module_ast, code_lines, "get_effective_city_mode"), effective_mode_ns)
-        test("get_effective_city_mode: auto_blocked domina sobre allowlist activa",
-             effective_mode_ns["get_effective_city_mode"]("Atlanta") == "blocked"
+        test("get_effective_city_mode: auto_block legacy migra a shadow sobre allowlist activa",
+             effective_mode_ns["get_effective_city_mode"]("Atlanta") == "shadow"
              and effective_mode_ns["get_effective_city_mode"]("Chicago") == "active",
              {
                  "Atlanta": effective_mode_ns["get_effective_city_mode"]("Atlanta"),

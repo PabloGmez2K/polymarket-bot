@@ -1,6 +1,13 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 6 de abril de 2026 (Sesión 82 — diagnóstico estratégico + corrección de modelo + reactivación Dallas, v10.6.11)
+**Última actualización:** 6 de abril de 2026 (Sesión 85 — política de ciudades shadow-first, local, verify 628/628)
+**Sesión 85 (6 abr 2026, Codex):** limpieza semántica de la política `blocked/shadow/canary/active`, sin tocar trading core, NOAA fetch core ni scheduler.
+- **Cambio canónico local:** `sync_city_policy_state()` ya no degrada `active/canary -> blocked`; ahora degrada `active/canary -> shadow` con evidencia persistida en `auto_shadow_cities`. `blocked` queda reservado a descartes reales.
+- **Migración de legado:** `load_city_policy_state()/save_city_policy_state()/get_effective_city_mode()` normalizan overlays viejos `auto_blocked_cities[action=auto_block]` a `auto_shadow_cities`. Caso principal cubierto: Dallas deja de quedar atrapada como `blocked` por overlay legacy aunque siga en `ACTIVE_TRADING_CITIES`.
+- **Dashboard/copy alineado:** Gate NOAA distingue `Interpretable`, `Parcial`, `Sin muestra` y `Sin NOAA`; `blocked` se verbaliza como descarte real; `shadow` y `shadow degradada` quedan como observación activa.
+- **Validación local:** `python verify_before_deploy.py` cierra en **628/628**.
+- **Importante:** esta sesión no muta Railway por sí sola; si en live sigue existiendo `city_policy_state.json` viejo, el código nuevo lo migrará a shadow al cargar/guardar la política.
+
 **Sesión 82 (6 abr 2026, Claude + Codex en paralelo):** diagnóstico estratégico completo, validación empírica WU≈NOAA, corrección de sesgo del modelo y reactivación del bot.
 - **Hallazgo clave — WU = NOAA:** verificación manual de 3 fechas en Chicago (KORD): NOAA `daily-summaries/TMAX` es idéntico al daily high de Weather Underground (diferencia ≤1°F por redondeo). No se necesita scraping de WU. La capa NOAA ya existente es la fuente correcta de validación.
 - **Sesgo Open-Meteo confirmado con NOAA:** `observed_vs_forecast` (13 casos en producción): Atlanta `MAE=1.38°C, Bias=+1.38°C`; Chicago `MAE=2.48°C, Bias=+1.40°C`; Dallas `MAE=0.57°C, Bias≈0°C`. Open-Meteo subestima sistemáticamente en Atlanta/Chicago; Dallas está bien calibrado.
@@ -281,6 +288,8 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 | `active` | `ACTIVE_TRADING_CITIES` | ✅ | ✅ |
 
 **Regla de oro:** `BLOCKED_CITIES` = fuente de datos rota. Para "no operar pero sí acumular NOAA" → dejar en shadow (no añadir a `ACTIVE_TRADING_CITIES`, no añadir a `BLOCKED_CITIES`).
+
+**Nota sesión 85:** el overlay persistido solo debe usar `auto_blocked_cities` para descartes reales. Los legados `action="auto_block"` de mala performance se migran a `auto_shadow_cities`.
 
 ### Configuración en Railway (variables de entorno):
 ```
