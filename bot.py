@@ -127,12 +127,16 @@ ALLOWLIST_REMOVE_MAX_WIN_RATE = float(os.getenv("ALLOWLIST_REMOVE_MAX_WIN_RATE",
 ALLOWLIST_REMOVE_MAX_PNL = float(os.getenv("ALLOWLIST_REMOVE_MAX_PNL", "0.0"))
 # Cutoff de stats por ciudad: "Dallas=2026-04-06,Chicago=2026-03-01"
 # Trades cerrados ANTES de la fecha indicada se ignoran en get_city_accuracy().
-CITY_STATS_CUTOFF: dict[str, str] = {
-    c.strip(): d.strip()
-    for part in os.getenv("CITY_STATS_CUTOFF", "").split(",")
-    if "=" in (part := part.strip())
-    for c, d in [part.split("=", 1)]
-}
+CITY_STATS_CUTOFF: dict[str, str] = {}
+for _city_stats_part in os.getenv("CITY_STATS_CUTOFF", "").split(","):
+    _city_stats_part = _city_stats_part.strip()
+    if "=" not in _city_stats_part:
+        continue
+    _city_stats_city, _city_stats_date = _city_stats_part.split("=", 1)
+    _city_stats_city = _city_stats_city.strip()
+    _city_stats_date = _city_stats_date.strip()
+    if _city_stats_city and _city_stats_date:
+        CITY_STATS_CUTOFF[_city_stats_city] = _city_stats_date
 
 # v10.5.5: Dashboard web
 DASHBOARD_ENABLED = os.getenv("DASHBOARD_ENABLED", "true").lower() == "true"
