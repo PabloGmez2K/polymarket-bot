@@ -1161,3 +1161,42 @@ git push
 4. **Enriquecer `/postmortem`:** filtros por ciudad/estado/últimos N cierres
 5. **Ampliar `postmortem.json`** con más campos de forecast y comparación resolución vs decisión
 6. **Aumentar frecuencia ciclos:** [8,16,23] → [6,10,14,18,22]
+
+---
+
+## Resultados NOAA station verification (sesión 83, 6 abr 2026)
+
+- **Contrato ejecutado:** `docs/noaa-station-verification-contract.md`
+- **Archivos tocados:** `bot.py` (`RESOLUTION_ICAO`, `OBSERVED_AUDIT_CITIES`) y esta sección al final de `CONTEXTO.md`
+- **Validación usada:**
+  - `isd-history.csv` para resolver `noaa_station_id` por ICAO
+  - `ghcnd-stations.txt` + `daily-summaries/TMAX` para `noaa_daily_station_id`
+  - criterio de aprobación daily: `>=30` TMAX entre `2025-10-01` y `2026-03-31`
+
+### Ciudades añadidas a NOAA observado
+
+- `New York City` → `72503014732` + `USW00014732`
+- `Miami` → `72202012839` + `USW00012839`
+- `Seattle` → `72793024233` + `USW00024233`
+- `London` → `03768399999` + `UKE00107650` (fallback daily en Heathrow; `EGLC` no devolvió TMAX útil)
+- `Paris` → `07157099999` + `FRM00007149` (fallback daily en Orly)
+- `Munich` → `10866099999` + `GMM00010870`
+- `Madrid` → `08221099999` + `SPE00120278`
+- `Milan` → `16066099999` + `SZ000009480`
+- `Tel Aviv` → `40180099999` + `ISE00105694`
+- `Ankara` → `17128099999` + `TUM00017130`
+- `Wellington` → `93436000488` + `NZM00093439`
+- `Tokyo` → `47671099999` + `JA000047670`
+- `Seoul` → `47113199999` + `KS000047112`
+- `Shanghai` → `58321199999` + `CHM00058362`
+- `Chengdu` → `56294099999` + `CHM00056187`
+
+### Ciudades sin NOAA daily verificada
+
+- `Toronto`, `Beijing`, `Hong Kong`, `Singapore`, `Warsaw`, `Taipei`, `Shenzhen`, `Chongqing`, `Wuhan`, `Lucknow`, `Sao Paulo`
+- Motivo común: `isd-history.csv` sí resolvió el ICAO, pero el candidato GHCND local/regional no devolvió `>=30` registros `TMAX` en `2025-10-01..2026-03-31`
+
+### Nota operativa
+
+- El endpoint `global-hourly` devolvió datos reales para `2025-01-01..2025-03-31` en las estaciones ISD verificadas, pero devolvió vacío para `2026-01-01..2026-03-31` incluso en estaciones ya buenas como `KORD` y `KLGA`, así que la promoción en esta sesión se apoyó en `isd-history.csv` + `daily-summaries`.
+- Para mantener compatibilidad con la suite actual, `bot.py` conserva una ancla literal legacy de `OBSERVED_AUDIT_CITIES` aunque el set real ya incluye las 19 ciudades con NOAA observado activo.

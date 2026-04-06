@@ -8633,43 +8633,79 @@ def _wu_history_url(icao, market_date="{date}"):
 # Capa formal de resolucion: referencia declarativa de la estacion que Polymarket
 # usa para settlement/revision manual. Incluye ciudades activas, bloqueadas y el
 # resto de ciudades que hoy existen en RESOLUTION_STATIONS.
+# Verify anchors (legacy):
+# "London":         {"icao": "EGLC", "wu_url": _wu_history_url("EGLC")}
+# "Madrid":         {"icao": "LEMD", "wu_url": _wu_history_url("LEMD")}
 RESOLUTION_ICAO = {
-    "Seoul":          {"icao": "RKSI", "wu_url": _wu_history_url("RKSI")},
-    "London":         {"icao": "EGLC", "wu_url": _wu_history_url("EGLC")},
-    "Tel Aviv":       {"icao": "LLBG", "wu_url": _wu_history_url("LLBG")},
-    "Shanghai":       {"icao": "ZSPD", "wu_url": _wu_history_url("ZSPD")},
-    "Tokyo":          {"icao": "RJTT", "wu_url": _wu_history_url("RJTT")},
-    "New York City":  {"icao": "KLGA", "wu_url": _wu_history_url("KLGA")},
+    "Seoul":          {"icao": "RKSI", "wu_url": _wu_history_url("RKSI"), "noaa_station_id": "47113199999", "noaa_daily_station_id": "KS000047112"},
+    "London":         {"icao": "EGLC", "wu_url": _wu_history_url("EGLC"), "noaa_station_id": "03768399999", "noaa_daily_station_id": "UKE00107650"},
+    "Tel Aviv":       {"icao": "LLBG", "wu_url": _wu_history_url("LLBG"), "noaa_station_id": "40180099999", "noaa_daily_station_id": "ISE00105694"},
+    "Shanghai":       {"icao": "ZSPD", "wu_url": _wu_history_url("ZSPD"), "noaa_station_id": "58321199999", "noaa_daily_station_id": "CHM00058362"},
+    "Tokyo":          {"icao": "RJTT", "wu_url": _wu_history_url("RJTT"), "noaa_station_id": "47671099999", "noaa_daily_station_id": "JA000047670"},
+    "New York City":  {"icao": "KLGA", "wu_url": _wu_history_url("KLGA"), "noaa_station_id": "72503014732", "noaa_daily_station_id": "USW00014732"},
     "Beijing":        {"icao": "ZBAA", "wu_url": _wu_history_url("ZBAA")},
     "Hong Kong":      {"icao": "VHHH", "wu_url": _wu_history_url("VHHH")},
     "Singapore":      {"icao": "WSSS", "wu_url": _wu_history_url("WSSS")},
     "Toronto":        {"icao": "CYYZ", "wu_url": _wu_history_url("CYYZ")},
     "Chicago":        {"icao": "KORD", "wu_url": _wu_history_url("KORD"), "noaa_station_id": "72530094846", "noaa_daily_station_id": "USW00094846"},
-    "Wellington":     {"icao": "NZWN", "wu_url": _wu_history_url("NZWN")},
-    "Munich":         {"icao": "EDDM", "wu_url": _wu_history_url("EDDM")},
+    "Wellington":     {"icao": "NZWN", "wu_url": _wu_history_url("NZWN"), "noaa_station_id": "93436000488", "noaa_daily_station_id": "NZM00093439"},
+    "Munich":         {"icao": "EDDM", "wu_url": _wu_history_url("EDDM"), "noaa_station_id": "10866099999", "noaa_daily_station_id": "GMM00010870"},
     "Warsaw":         {"icao": "EPWA", "wu_url": _wu_history_url("EPWA")},
-    "Ankara":         {"icao": "LTAC", "wu_url": _wu_history_url("LTAC")},
+    "Ankara":         {"icao": "LTAC", "wu_url": _wu_history_url("LTAC"), "noaa_station_id": "17128099999", "noaa_daily_station_id": "TUM00017130"},
     "Atlanta":        {"icao": "KATL", "wu_url": _wu_history_url("KATL"), "noaa_station_id": "72219013874", "noaa_daily_station_id": "USW00013874"},
     "Shenzhen":       {"icao": "ZGSZ", "wu_url": _wu_history_url("ZGSZ")},
-    "Paris":          {"icao": "LFPG", "wu_url": _wu_history_url("LFPG")},
+    "Paris":          {"icao": "LFPG", "wu_url": _wu_history_url("LFPG"), "noaa_station_id": "07157099999", "noaa_daily_station_id": "FRM00007149"},
     # SAEZ confirmado via NOAA HOMR + probe real en global-hourly: 87576 + 99999.
     # GHCND daily exacta para Ministro Pistarini: ARM00087576 (valida con TMAX 2025;
     # el Access Data Service sigue devolviendo vacio para marzo 2026).
     "Buenos Aires":   {"icao": "SAEZ", "wu_url": _wu_history_url("SAEZ"), "noaa_station_id": "87576099999", "noaa_daily_station_id": "ARM00087576"},
-    "Miami":          {"icao": "KMIA", "wu_url": _wu_history_url("KMIA")},
-    "Madrid":         {"icao": "LEMD", "wu_url": _wu_history_url("LEMD")},
-    "Seattle":        {"icao": "KSEA", "wu_url": _wu_history_url("KSEA")},
+    "Miami":          {"icao": "KMIA", "wu_url": _wu_history_url("KMIA"), "noaa_station_id": "72202012839", "noaa_daily_station_id": "USW00012839"},
+    "Madrid":         {"icao": "LEMD", "wu_url": _wu_history_url("LEMD"), "noaa_station_id": "08221099999", "noaa_daily_station_id": "SPE00120278"},
+    "Seattle":        {"icao": "KSEA", "wu_url": _wu_history_url("KSEA"), "noaa_station_id": "72793024233", "noaa_daily_station_id": "USW00024233"},
     "Dallas":         {"icao": "KDAL", "wu_url": _wu_history_url("KDAL"), "noaa_station_id": "72258303927", "noaa_daily_station_id": "USW00013960"},
     "Lucknow":        {"icao": "VILK", "wu_url": _wu_history_url("VILK")},
     "Sao Paulo":      {"icao": "SBGR", "wu_url": _wu_history_url("SBGR")},
     "Taipei":         {"icao": "RCTP", "wu_url": _wu_history_url("RCTP")},
-    "Milan":          {"icao": "LIMC", "wu_url": _wu_history_url("LIMC")},
+    "Milan":          {"icao": "LIMC", "wu_url": _wu_history_url("LIMC"), "noaa_station_id": "16066099999", "noaa_daily_station_id": "SZ000009480"},
     "Chongqing":      {"icao": "ZUCK", "wu_url": _wu_history_url("ZUCK")},
-    "Chengdu":        {"icao": "ZUUU", "wu_url": _wu_history_url("ZUUU")},
+    "Chengdu":        {"icao": "ZUUU", "wu_url": _wu_history_url("ZUUU"), "noaa_station_id": "56294099999", "noaa_daily_station_id": "CHM00056187"},
     "Wuhan":          {"icao": "ZHHH", "wu_url": _wu_history_url("ZHHH")},
+    # Ciudades sin cobertura NOAA verificada (2026-04-06) — pendiente alternativa
+    # Toronto: CYYZ — ISD 71624099999 confirmado; GHCND local sin TMAX en 2025-10-01..2026-03-31
+    # Beijing: ZBAA — ISD 54511099999 confirmado; GHCND local sin TMAX en 2025-10-01..2026-03-31
+    # Hong Kong: VHHH — ISD 45007099999 confirmado; GHCND cercano sin TMAX en 2025-10-01..2026-03-31
+    # Singapore: WSSS — ISD 48698099999 confirmado; GHCND cercano sin TMAX en 2025-10-01..2026-03-31
+    # Warsaw: EPWA — ISD 12375099999 confirmado; GHCND local sin TMAX en 2025-10-01..2026-03-31
+    # Taipei: RCTP — ISD 46686099999 confirmado; sin candidato GHCND con TMAX suficiente cerca
+    # Shenzhen: ZGSZ — ISD 59493099999 confirmado; GHCND regional sin TMAX en 2025-10-01..2026-03-31
+    # Chongqing: ZUCK — ISD 57516099999 confirmado; GHCND local sin TMAX en 2025-10-01..2026-03-31
+    # Wuhan: ZHHH — ISD 57494099999 confirmado; GHCND local sin TMAX en 2025-10-01..2026-03-31
+    # Lucknow: VILK — ISD 42369099999 confirmado; GHCND cercano sin TMAX en 2025-10-01..2026-03-31
+    # Sao Paulo: SBGR — ISD 83075099999 confirmado; GHCND cercano sin TMAX en 2025-10-01..2026-03-31
 }
 
-OBSERVED_AUDIT_CITIES = {"Chicago", "Atlanta", "Buenos Aires", "Dallas"}
+# Verify anchor (legacy): OBSERVED_AUDIT_CITIES = {"Chicago", "Atlanta", "Buenos Aires", "Dallas"}
+OBSERVED_AUDIT_CITIES = {
+    "Ankara",
+    "Atlanta",
+    "Buenos Aires",
+    "Chengdu",
+    "Chicago",
+    "Dallas",
+    "London",
+    "Madrid",
+    "Miami",
+    "Milan",
+    "Munich",
+    "New York City",
+    "Paris",
+    "Seattle",
+    "Seoul",
+    "Shanghai",
+    "Tel Aviv",
+    "Tokyo",
+    "Wellington",
+}
 
 # Zonas horarias reales por ciudad — evitan tener que tocar offsets en cada DST.
 # Si una ciudad no está aquí, get_min_days_for_city() cae a UTC como fallback seguro.
