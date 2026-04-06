@@ -293,6 +293,32 @@ def run_tests():
     test("Dallas bias=0 no altera probabilidad",
          abs(p_dallas_bias - p_dallas_raw) < 1e-9)
 
+    # ---- Test CITY_STATS_CUTOFF — reset de stats por ciudad ----
+    print("\n CITY_STATS_CUTOFF — reset de métricas por ciudad")
+    test("CITY_STATS_CUTOFF definido en código",
+         "CITY_STATS_CUTOFF" in code)
+    test("get_city_accuracy respeta CITY_STATS_CUTOFF",
+         "CITY_STATS_CUTOFF.get(city" in code)
+    test("get_city_accuracy filtra por closed_at",
+         'r.get("closed_at")' in code and "< cutoff" in code)
+
+    # Test funcional: trade anterior al cutoff queda excluido
+    cutoff_ns = {
+        "CITY_STATS_CUTOFF": {"Dallas": "2026-04-06"},
+        "os": __import__("os"),
+        "json": __import__("json"),
+    }
+    # Simular load_postmortem_data con un trade Dallas cerrado antes y uno después del cutoff
+    _pre  = {"status": "closed", "close_action": "LOSS_TOTAL", "city": "Dallas", "closed_at": "2026-04-05T10:00:00+00:00", "pnl_cash": -1.0}
+    _post = {"status": "closed", "close_action": "RESOLVED_WIN", "city": "Dallas", "closed_at": "2026-04-07T10:00:00+00:00", "pnl_cash": 1.5}
+    cutoff_ns["load_postmortem_data"] = lambda: [_pre, _post]
+    exec(get_function_source(module_ast, code_lines, "get_city_accuracy"), cutoff_ns)
+    _acc = cutoff_ns["get_city_accuracy"]()
+    test("cutoff excluye trade anterior (solo 1 trade Dallas post-cutoff)",
+         _acc.get("Dallas", {}).get("trades") == 1)
+    test("cutoff: trade post-cutoff es ganador (WR=100%)",
+         _acc.get("Dallas", {}).get("win_rate") == 100.0)
+
     # ---- Test 3: Bug #12 — Resueltas no en keeping ----
     print("\n Bug #12: Resueltas excluidas de keeping")
     # Buscar el bloque de curPrice >= 0.98 en manage_positions

@@ -125,6 +125,14 @@ SHADOW_CANARY_MIN_SUPPORT = int(os.getenv("SHADOW_CANARY_MIN_SUPPORT", "2"))
 ALLOWLIST_REMOVE_MIN_TRADES = int(os.getenv("ALLOWLIST_REMOVE_MIN_TRADES", str(CITY_MIN_TRADES_FOR_BLOCK)))
 ALLOWLIST_REMOVE_MAX_WIN_RATE = float(os.getenv("ALLOWLIST_REMOVE_MAX_WIN_RATE", str(CITY_BLOCK_WIN_RATE)))
 ALLOWLIST_REMOVE_MAX_PNL = float(os.getenv("ALLOWLIST_REMOVE_MAX_PNL", "0.0"))
+# Cutoff de stats por ciudad: "Dallas=2026-04-06,Chicago=2026-03-01"
+# Trades cerrados ANTES de la fecha indicada se ignoran en get_city_accuracy().
+CITY_STATS_CUTOFF: dict[str, str] = {
+    c.strip(): d.strip()
+    for part in os.getenv("CITY_STATS_CUTOFF", "").split(",")
+    if "=" in (part := part.strip())
+    for c, d in [part.split("=", 1)]
+}
 
 # v10.5.5: Dashboard web
 DASHBOARD_ENABLED = os.getenv("DASHBOARD_ENABLED", "true").lower() == "true"
@@ -3132,7 +3140,12 @@ def _get_recent_closed_trades(n=None):
 
 
 def get_city_accuracy():
-    """Calcula win rate y PnL por ciudad desde postmortem.json cerrados."""
+    """Calcula win rate y PnL por ciudad desde postmortem.json cerrados.
+
+    Respeta CITY_STATS_CUTOFF: trades cerrados antes de la fecha de corte
+    por ciudad se excluyen del cálculo (el historial en postmortem.json
+    no se modifica; solo cambia qué trades cuentan para métricas de auto-block).
+    """
     records = load_postmortem_data()
     closed = [r for r in records if r.get("status") == "closed"
               and r.get("close_action") in {"SELL", "LOSS_TOTAL", "RESOLVED_WIN"}
@@ -3141,6 +3154,9 @@ def get_city_accuracy():
     cities = {}
     for r in closed:
         city = r["city"]
+        cutoff = CITY_STATS_CUTOFF.get(city)
+        if cutoff and (r.get("closed_at") or "")[:10] < cutoff:
+            continue  # trade anterior al reset — excluido de métricas
         if city not in cities:
             cities[city] = {"trades": 0, "wins": 0, "pnl": 0.0}
         cities[city]["trades"] += 1
