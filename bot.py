@@ -156,9 +156,20 @@ BLOCKED_CITIES = {
     city.strip().lower()
     for city in os.getenv(
         "BLOCKED_CITIES",
-        # Ciudades bloqueadas por default (WU vs Open-Meteo discrepancia confirmada con datos reales).
-        # Chicago, Atlanta, Buenos Aires, Dallas: siguen activas (accuracy positiva o neutra con muestra pequeña).
-        # El resto: 0% WR con 1-2+ trades reales → no entrar hasta resolver fuente de datos.
+        # ⚠ BLOCKED_CITIES = fuente de datos rota o irrecuperable.
+        # Estas ciudades se IGNORAN COMPLETAMENTE: sin trading, sin forecast, sin NOAA.
+        # Usar SOLO cuando el pipeline de datos (WU/Open-Meteo/resolución) es estructuralmente
+        # infiable para esa ciudad. No usar para "no quiero operar por ahora".
+        #
+        # Para "no operar pero sí observar/acumular NOAA":
+        #   → No incluir en ACTIVE_TRADING_CITIES (quedan en shadow automáticamente).
+        #   → Shadow = observa mercados, acumula observed_vs_forecast, no abre posiciones.
+        #
+        # Resumen de modos (ver AGENTS.md § Modos de ciudad):
+        #   active  → opera + observa  (en ACTIVE_TRADING_CITIES)
+        #   canary  → opera pequeño + observa  (en CANARY_TRADING_CITIES o auto_canary)
+        #   shadow  → solo observa, no opera  (default si no está en ninguna lista)
+        #   blocked → ignorada por completo  (en BLOCKED_CITIES o auto_blocked)
         "London,Miami,Seattle,Paris,Tel Aviv,Wellington,Toronto,Madrid,Singapore,Ankara"
     ).split(",")
     if city.strip()

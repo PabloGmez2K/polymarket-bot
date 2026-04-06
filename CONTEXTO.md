@@ -271,6 +271,17 @@ Cada 8 horas (08:00, 16:00, 23:00 UTC) ejecuta un ciclo completo:
 | `decisions.log` | Log detallado por ciclo |
 | `trades.log` | Log compacto de órdenes |
 
+### Modos de ciudad — regla canónica (sesión 83)
+
+| Modo | Cómo se activa | Tradea | Observa NOAA |
+|------|---------------|:------:|:------------:|
+| `blocked` | `BLOCKED_CITIES` o `auto_blocked_cities` | ❌ | ❌ |
+| `shadow` | **default** (no está en ninguna lista) | ❌ | ✅ |
+| `canary` | `CANARY_TRADING_CITIES` o `auto_canary_cities` | ✅ pequeño | ✅ |
+| `active` | `ACTIVE_TRADING_CITIES` | ✅ | ✅ |
+
+**Regla de oro:** `BLOCKED_CITIES` = fuente de datos rota. Para "no operar pero sí acumular NOAA" → dejar en shadow (no añadir a `ACTIVE_TRADING_CITIES`, no añadir a `BLOCKED_CITIES`).
+
 ### Configuración en Railway (variables de entorno):
 ```
 DRY_RUN="false"
@@ -278,10 +289,14 @@ BANKROLL="25.00"
 MIN_DAYS_AHEAD="-1"
 MIN_BET="1.00"
 DATA_DIR="/app/data"
-BLOCKED_CITIES="London,Miami,Seattle,Paris,Tel Aviv,Wellington,Toronto,Madrid,Singapore,Ankara,Atlanta"
+ACTIVE_TRADING_CITIES="Dallas"
+BLOCKED_CITIES="London,Miami,Seattle,Paris,Tel Aviv,Wellington,Toronto,Madrid,Singapore,Ankara"
+ALLOWLIST_REMOVE_MIN_TRADES="25"
+CITY_STATS_CUTOFF="Dallas=2026-04-06"
 ```
+Atlanta y Chicago: shadow (fuera de BLOCKED_CITIES, fuera de ACTIVE_TRADING_CITIES) — acumulan NOAA sin operar.
 
-### Configuración en código (defaults bot.py v10.6.11, sesión 82):
+### Configuración en código (defaults bot.py v10.6.11, sesión 82-83):
 ```python
 MIN_EDGE = 15.0%
 MIN_PRICE = 0.20      # sesión 82: subido desde 0.08 — evita mercados extremos
