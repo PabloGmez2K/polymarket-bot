@@ -11036,6 +11036,106 @@ def fetch_noaa_observed_max(noaa_station_id, date_iso, daily_station_id="", retr
     return None, None
 
 
+def _iter_recent_noaa_cycle_markets(limit_cycles=12):
+    """Itera snapshots ligeros de mercados escaneados para auditoria NOAA."""
+    records = []
+
+    summary_loader = globals().get("load_cycle_summary_data")
+    if callable(summary_loader):
+        try:
+            cycle_summary = summary_loader()
+        except Exception:
+            cycle_summary = {}
+        if isinstance(cycle_summary, dict):
+            records.append(cycle_summary)
+
+    history_loader = globals().get("load_cycle_history")
+    if callable(history_loader):
+        try:
+            history = history_loader(limit=limit_cycles)
+        except Exception:
+            history = []
+        if isinstance(history, list):
+            records.extend(reversed(history))
+
+    seen_cycles = set()
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        cycle_key = (
+            record.get("cycle_number"),
+            record.get("logic_cycle_number"),
+            record.get("timestamp_utc"),
+        )
+        if cycle_key in seen_cycles:
+            continue
+        seen_cycles.add(cycle_key)
+
+        scanned_markets = record.get("scanned_markets", [])
+        if not isinstance(scanned_markets, list):
+            continue
+        for item in scanned_markets:
+            if isinstance(item, dict):
+                yield item
+
+
+def _get_noaa_candidate_dates(city, already_checked=None, limit=3):
+    """
+    Devuelve fechas NOAA pendientes usando mercados escaneados sin BUY asociado.
+    """
+    city = str(city or "").strip()
+    already_checked = already_checked or set()
+    if not city or city not in OBSERVED_AUDIT_CITIES:
+        return []
+
+    resolution_meta = RESOLUTION_ICAO.get(city, {})
+    if not resolution_meta.get("noaa_station_id"):
+        return []
+
+    today_utc = datetime.now(timezone.utc).date()
+    candidates = []
+    seen_dates = set()
+
+    for item in _iter_recent_noaa_cycle_markets():
+        if str(item.get("city", "") or "").strip() != city:
+            continue
+
+        market_date = str(item.get("date", "") or item.get("date_iso", "") or "").strip()
+        if not market_date:
+            continue
+
+        key = f"{city}|{market_date}"
+        if key in already_checked or market_date in seen_dates:
+            continue
+
+        try:
+            days_ago = (today_utc - date.fromisoformat(market_date)).days
+        except ValueError:
+            continue
+
+        if days_ago < NOAA_OBSERVED_LAG_DAYS:
+            continue
+
+        try:
+            forecast_temp = round(float(item.get("forecast_max")), 1)
+        except (TypeError, ValueError):
+            continue
+
+        candidates.append({
+            "city": city,
+            "date": market_date,
+            "forecast_max": forecast_temp,
+            "side": None,
+            "edge_pct": None,
+        })
+        seen_dates.add(market_date)
+        already_checked.add(key)
+        if len(candidates) >= limit:
+            break
+
+    return candidates
+
+
 def audit_check_resolution_truth(dl):
     """
     Observed proxy audit: forecast original vs observado NOAA NCEI.
@@ -11085,6 +11185,9 @@ def audit_check_resolution_truth(dl):
             to_check.append(entry)
             already_checked.add(key)
 
+    for city in sorted(OBSERVED_AUDIT_CITIES):
+        to_check.extend(_get_noaa_candidate_dates(city, already_checked=already_checked))
+
     if not to_check:
         return
 
@@ -11115,8 +11218,8 @@ def audit_check_resolution_truth(dl):
             "forecast_temp_c": forecast_temp_c,
             "error_c": error,
             "abs_error_c": abs(error),
-            "side": entry.get("side", "?"),
-            "edge_pct": entry.get("edge_pct", 0),
+            "side": entry.get("side"),
+            "edge_pct": entry.get("edge_pct"),
             "source": "noaa_ncei",
             "observed_dataset": observed_dataset or "unknown",
             "checked_at": datetime.now(timezone.utc).isoformat(),
@@ -11362,16 +11465,25 @@ EMPIRICAL_SIGMA = {
     "Atlanta": {0: 0.78, 1: 3.50, 2: 2.5},
     "Buenos Aires": {0: 1.10, 1: 1.5, 2: 2.0},
     "New York City": {0: 0.28, 1: 1.5, 2: 2.15},
-    "Dallas": {0: 0.21, 1: 1.30, 2: 2.0},
+    "Dallas": {0: 0.57, 1: 1.30, 2: 2.0},  # D0 actualizado NOAA n=3: MAE=0.57°C
 }
 EMPIRICAL_SIGMA_SAMPLES = {
     "Chicago": {0: 4, 1: 3, 2: 0},
     "Atlanta": {0: 5, 1: 1, 2: 0},
     "Buenos Aires": {0: 3, 1: 0, 2: 0},
     "New York City": {0: 2, 1: 0, 2: 1},
-    "Dallas": {0: 2, 1: 1, 2: 0},
+    "Dallas": {0: 3, 1: 1, 2: 0},  # D0: n=3 (NOAA sesión 82) — desbloquea sigma empírica
 }
 EMPIRICAL_SIGMA_GLOBAL = {0: 2.0, 1: 1.9, 2: 2.5, 3: 3.0}
+
+# Corrección de sesgo sistemático Open-Meteo vs NOAA/WU, medida en sesión 82.
+# Positivo = Open-Meteo subestima la temperatura real; se suma al forecast antes del cálculo de prob.
+# Fuente: observed_vs_forecast NOAA daily-summaries (Chicago n=5, Atlanta n=5, Dallas n=3).
+FORECAST_BIAS_C = {
+    "Atlanta": 1.38,
+    "Chicago": 1.40,
+    "Dallas": 0.0,
+}
 _UNCERTAINTY_CITY_CONTEXT = None
 
 
@@ -11419,7 +11531,8 @@ def estimate_prob_with_city(forecast_max, threshold_c, condition, days_ahead, th
     previous_city = _UNCERTAINTY_CITY_CONTEXT
     _UNCERTAINTY_CITY_CONTEXT = city
     try:
-        return estimate_prob(forecast_max, threshold_c, condition, days_ahead, threshold_high_c)
+        bias = FORECAST_BIAS_C.get(city, 0.0) if city else 0.0
+        return estimate_prob(forecast_max + bias, threshold_c, condition, days_ahead, threshold_high_c)
     finally:
         _UNCERTAINTY_CITY_CONTEXT = previous_city
 
@@ -11849,6 +11962,8 @@ def main(client):
     condition_filtered_shadow = []
     condition_filtered_skip = 0
     condition_filtered_seen = set()
+    observed_cycle_markets = []
+    observed_cycle_market_keys = set()
     skipped_dup = 0
     edge_analysis = []  # Para el log detallado
     # v10.4 Fix Bug #9: token_ids vendidos en manage_positions → no re-comprar
@@ -11867,6 +11982,17 @@ def main(client):
             continue
 
         forecast_max = forecast_cache[city][c["date_iso"]]["temp_max"]
+        if city in OBSERVED_AUDIT_CITIES:
+            observed_key = f"{city}|{c['date_iso']}"
+            if observed_key not in observed_cycle_market_keys:
+                observed_cycle_markets.append({
+                    "city": city,
+                    "date": c["date_iso"],
+                    "forecast_max": round(float(forecast_max), 1),
+                    "question": c.get("question", ""),
+                    "seen_at": datetime.now(timezone.utc).isoformat(),
+                })
+                observed_cycle_market_keys.add(observed_key)
         threshold = c["temp_threshold"]
         threshold_c = (threshold - 32) * 5 / 9 if c["unit"] == "F" else float(threshold)
 
@@ -12335,6 +12461,7 @@ def main(client):
                 }
                 for b in (buy_summaries if 'buy_summaries' in locals() else [])
             ],
+            "scanned_markets": observed_cycle_markets if 'observed_cycle_markets' in locals() else [],
             "exposure_after": round(current_exposure, 2) if 'current_exposure' in locals() else None,
             "budget_left": round(budget_left, 2) if 'budget_left' in locals() else None,
         }

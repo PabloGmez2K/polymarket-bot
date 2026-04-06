@@ -242,11 +242,11 @@ def run_tests():
     sigma_ns = {
         "EMPIRICAL_SIGMA": {
             "Chicago": {0: 2.57, 1: 2.59, 2: 3.0},
-            "Dallas": {0: 0.21, 1: 1.30, 2: 2.0},
+            "Dallas": {0: 0.57, 1: 1.30, 2: 2.0},
         },
         "EMPIRICAL_SIGMA_SAMPLES": {
             "Chicago": {0: 4, 1: 3, 2: 0},
-            "Dallas": {0: 2, 1: 1, 2: 0},
+            "Dallas": {0: 3, 1: 1, 2: 0},
         },
         "EMPIRICAL_SIGMA_GLOBAL": {0: 2.0, 1: 1.9, 2: 2.5, 3: 3.0},
         "MODEL_SIGMA_REFERENCE": {0: 1.2, 1: 1.5, 2: 2.0, 3: 2.5},
@@ -255,8 +255,43 @@ def run_tests():
     exec(get_uncertainty_src, sigma_ns)
     test("get_uncertainty(city=Chicago, days=1) usa sigma empírica con n>=3",
          abs(sigma_ns["get_uncertainty"](1, city="Chicago") - 2.59) < 1e-9)
-    test("get_uncertainty(city=Dallas, days=0) cae a sigma global si n<3",
-         abs(sigma_ns["get_uncertainty"](0, city="Dallas") - 2.0) < 1e-9)
+    test("get_uncertainty(city=Dallas, days=0) usa sigma empírica NOAA n=3",
+         abs(sigma_ns["get_uncertainty"](0, city="Dallas") - 0.57) < 1e-9)
+
+    # ---- Test FORECAST_BIAS_C + estimate_prob_with_city ----
+    print("\n Corrección de sesgo NOAA (FORECAST_BIAS_C)")
+    test("FORECAST_BIAS_C definido en código",
+         "FORECAST_BIAS_C" in code)
+    test("FORECAST_BIAS_C Atlanta >= 1.0",
+         bool(re.search(r'"Atlanta":\s*1\.[0-9]', code)))
+    test("FORECAST_BIAS_C Chicago >= 1.0",
+         bool(re.search(r'"Chicago":\s*1\.[0-9]', code)))
+    test("FORECAST_BIAS_C Dallas = 0.0",
+         bool(re.search(r'"Dallas":\s*0\.0', code)))
+    test("estimate_prob_with_city aplica FORECAST_BIAS_C",
+         "FORECAST_BIAS_C.get(city" in code)
+
+    # Test funcional: bias aumenta p(YES) cuando Open-Meteo subestima
+    import math as _math
+    bias_ns = {
+        "EMPIRICAL_SIGMA": {"Atlanta": {0: 0.78}},
+        "EMPIRICAL_SIGMA_SAMPLES": {"Atlanta": {0: 5}},
+        "EMPIRICAL_SIGMA_GLOBAL": {0: 2.0, 1: 1.9, 2: 2.5, 3: 3.0},
+        "MODEL_SIGMA_REFERENCE": {0: 1.2, 1: 1.5},
+        "FORECAST_BIAS_C": {"Atlanta": 1.38, "Chicago": 1.40, "Dallas": 0.0},
+        "_UNCERTAINTY_CITY_CONTEXT": None,
+        "math": _math,
+    }
+    for fn in ("normal_cdf", "get_uncertainty", "estimate_prob", "estimate_prob_with_city"):
+        exec(get_function_source(module_ast, code_lines, fn), bias_ns)
+    p_sin_bias = bias_ns["estimate_prob"](20.0, 21.0, "at_or_above", 0)
+    p_con_bias = bias_ns["estimate_prob_with_city"](20.0, 21.0, "at_or_above", 0, city="Atlanta")
+    test("bias Atlanta sube p(YES at_or_above) vs sin bias",
+         p_con_bias > p_sin_bias)
+    p_dallas_bias = bias_ns["estimate_prob_with_city"](20.0, 21.0, "at_or_above", 0, city="Dallas")
+    p_dallas_raw  = bias_ns["estimate_prob"](20.0, 21.0, "at_or_above", 0)
+    test("Dallas bias=0 no altera probabilidad",
+         abs(p_dallas_bias - p_dallas_raw) < 1e-9)
 
     # ---- Test 3: Bug #12 — Resueltas no en keeping ----
     print("\n Bug #12: Resueltas excluidas de keeping")
@@ -2263,6 +2298,7 @@ def run_tests():
         observed_saved = {}
         observed_calls = []
         lagged_date = (date.today() - timedelta(days=1)).isoformat()
+        noaa_shadow_date = (date.today() - timedelta(days=4)).isoformat()
         with open(tmp_perf_noaa, "w", encoding="utf-8") as f:
             json.dump([
                 {"action": "BUY", "city": "Dallas", "date": noaa_date, "forecast_max": 18.0, "side": "YES", "edge_pct": 12.5},
@@ -2281,24 +2317,41 @@ def run_tests():
             "OBSERVED_AUDIT_CITIES": {"Chicago", "Atlanta", "Buenos Aires", "Dallas"},
             "NOAA_OBSERVED_LAG_DAYS": 2,
             "RESOLUTION_ICAO": {
+                "Chicago": {"icao": "KORD", "noaa_station_id": "72530094846", "noaa_daily_station_id": "USW00094846"},
                 "Dallas": {"icao": "KDAL", "noaa_station_id": "72258303927", "noaa_daily_station_id": "USW00013960"},
                 "Atlanta": {"icao": "KATL", "noaa_station_id": "72219013874", "noaa_daily_station_id": "USW00013874"},
                 "London": {"icao": "EGLC", "noaa_station_id": "00000000000"},
             },
             "load_audit_data": lambda: {"pending_sells": [], "forecast_vs_real": [], "observed_vs_forecast": [], "errors": []},
+            "load_cycle_summary_data": lambda: {
+                "cycle_number": 21,
+                "logic_cycle_number": 7,
+                "timestamp_utc": "2026-04-01T16:00:00+00:00",
+                "scanned_markets": [
+                    {"city": "Chicago", "date": noaa_shadow_date, "forecast_max": 16.2},
+                    {"city": "Dallas", "date": noaa_date, "forecast_max": 18.0},
+                ],
+            },
+            "load_cycle_history": lambda limit=None: [],
             "save_audit_data": lambda data: observed_saved.update(data),
             "fetch_noaa_observed_max": lambda station_id, date_iso, daily_station_id="", retries=3, delay=5: observed_calls.append((station_id, date_iso, daily_station_id)) or (19.4, "daily-summaries_tmax"),
         }
+        exec(get_function_source(module_ast, code_lines, "_iter_recent_noaa_cycle_markets"), observed_ns)
+        exec(get_function_source(module_ast, code_lines, "_get_noaa_candidate_dates"), observed_ns)
         exec(get_function_source(module_ast, code_lines, "audit_check_resolution_truth"), observed_ns)
         observed_dl = []
         observed_ns["audit_check_resolution_truth"](observed_dl)
         observed_records = observed_saved.get("observed_vs_forecast", [])
+        chicago_record = next((rec for rec in observed_records if rec.get("city") == "Chicago"), None)
         test("audit NOAA: guarda observed_vs_forecast separado del legacy",
-             len(observed_records) == 1 and observed_records[0]["city"] == "Dallas", observed_records)
+             len(observed_records) == 2 and any(rec["city"] == "Dallas" for rec in observed_records), observed_records)
         test("audit NOAA: source=noaa_ncei en registros nuevos",
              bool(observed_records) and observed_records[0]["source"] == "noaa_ncei", observed_records[:1])
         test("audit NOAA: deja trazabilidad del dataset observado",
              bool(observed_records) and observed_records[0]["observed_dataset"] == "daily-summaries_tmax", observed_records[:1])
+        test("audit NOAA: colecta fecha sin BUY context",
+             chicago_record is not None and chicago_record.get("date") == noaa_shadow_date and chicago_record.get("side") is None and chicago_record.get("edge_pct") is None,
+             chicago_record)
         test("audit NOAA: no toca ciudades bloqueadas",
              all(rec["city"] != "London" for rec in observed_records) and all(call[0] != "00000000000" for call in observed_calls),
              {"records": observed_records, "calls": observed_calls})
