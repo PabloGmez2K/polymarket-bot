@@ -8597,7 +8597,9 @@ RESOLUTION_ICAO = {
     "Shenzhen":       {"icao": "ZGSZ", "wu_url": _wu_history_url("ZGSZ")},
     "Paris":          {"icao": "LFPG", "wu_url": _wu_history_url("LFPG")},
     # SAEZ confirmado via NOAA HOMR + probe real en global-hourly: 87576 + 99999.
-    "Buenos Aires":   {"icao": "SAEZ", "wu_url": _wu_history_url("SAEZ"), "noaa_station_id": "87576099999"},
+    # GHCND daily exacta para Ministro Pistarini: ARM00087576 (valida con TMAX 2025;
+    # el Access Data Service sigue devolviendo vacio para marzo 2026).
+    "Buenos Aires":   {"icao": "SAEZ", "wu_url": _wu_history_url("SAEZ"), "noaa_station_id": "87576099999", "noaa_daily_station_id": "ARM00087576"},
     "Miami":          {"icao": "KMIA", "wu_url": _wu_history_url("KMIA")},
     "Madrid":         {"icao": "LEMD", "wu_url": _wu_history_url("LEMD")},
     "Seattle":        {"icao": "KSEA", "wu_url": _wu_history_url("KSEA")},

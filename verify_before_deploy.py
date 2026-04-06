@@ -438,8 +438,10 @@ def run_tests():
          '"Chicago":        {"icao": "KORD", "wu_url": _wu_history_url("KORD"), "noaa_station_id": "72530094846", "noaa_daily_station_id": "USW00094846"}' in code)
     test("RESOLUTION_ICAO Atlanta -> KATL + NOAA daily",
          '"Atlanta":        {"icao": "KATL", "wu_url": _wu_history_url("KATL"), "noaa_station_id": "72219013874", "noaa_daily_station_id": "USW00013874"}' in code)
-    test("RESOLUTION_ICAO Buenos Aires -> SAEZ / 87576099999",
-         '"Buenos Aires":   {"icao": "SAEZ", "wu_url": _wu_history_url("SAEZ"), "noaa_station_id": "87576099999"}' in code)
+    test("RESOLUTION_ICAO Buenos Aires -> SAEZ + NOAA daily",
+         '"Buenos Aires":   {"icao": "SAEZ", "wu_url": _wu_history_url("SAEZ"), "noaa_station_id": "87576099999", "noaa_daily_station_id": "ARM00087576"}' in code)
+    test("RESOLUTION_ICAO Buenos Aires tiene noaa_daily_station_id no vacio",
+         re.search(r'"Buenos Aires":\s+\{"icao": "SAEZ".*"noaa_daily_station_id": "[^"]+"', code) is not None)
     test("RESOLUTION_ICAO Dallas -> KDAL + NOAA daily",
          '"Dallas":         {"icao": "KDAL", "wu_url": _wu_history_url("KDAL"), "noaa_station_id": "72258303927", "noaa_daily_station_id": "USW00013960"}' in code)
     test("RESOLUTION_ICAO incluye ciudades bloqueadas",
@@ -1125,7 +1127,7 @@ def run_tests():
                 "Chicago": {"icao": "KORD", "noaa_station_id": "72530094846"},
                 "Atlanta": {"icao": "KATL", "noaa_station_id": "72219013874"},
                 "Dallas": {"icao": "KDAL", "noaa_station_id": "72258303927"},
-                "Buenos Aires": {"icao": "SAEZ", "noaa_station_id": "87576099999"},
+                "Buenos Aires": {"icao": "SAEZ", "noaa_station_id": "87576099999", "noaa_daily_station_id": "ARM00087576"},
                 "London": {"icao": "EGLC"},
                 "New York City": {"icao": "KLGA"},
             },
