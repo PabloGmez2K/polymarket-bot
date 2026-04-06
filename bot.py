@@ -1056,6 +1056,14 @@ def _build_auto_city_shadow_policy(row, current_mode, shadowed_at):
             "wins": int(row.get("wins", 0) or 0),
             "win_rate": win_rate,
             "pnl": pnl,
+            "policy_source": str(row.get("policy_source") or "legacy"),
+            "policy_is_provisional": bool(row.get("policy_is_provisional")),
+            "policy_trades": int(row.get("policy_trades", trades) or 0),
+            "policy_wins": int(row.get("policy_wins", row.get("wins", 0)) or 0),
+            "policy_win_rate": round(float(row.get("policy_win_rate", win_rate) or 0.0), 1),
+            "policy_pnl": round(float(row.get("policy_pnl", pnl) or 0.0), 2),
+            "verified_trades": int(row.get("verified_trades", 0) or 0),
+            "legacy_trades": int(row.get("legacy_trades", trades) or 0),
             "observed_count": int(row.get("observed_count", 0) or 0),
             "shadow_seen": int(row.get("shadow_seen", 0) or 0),
             "shadow_edges": int(row.get("shadow_edges", 0) or 0),
@@ -3304,6 +3312,91 @@ def get_city_accuracy():
     return cities
 
 
+def get_city_policy_metrics(audit=None):
+    """
+    Separa el historico por ciudad entre:
+    - total cerrado
+    - NOAA-verificado (join city+date contra observed_vs_forecast)
+    - legacy/no verificado
+
+    La policy debe evitar decisiones fuertes basadas solo en eras pre-NOAA-verificado.
+    """
+    if audit is None:
+        audit = load_audit_data()
+
+    verified_keys = set()
+    for raw in audit.get(OBSERVED_AUDIT_KEY, []):
+        if not isinstance(raw, dict) or raw.get("source") != "noaa_ncei":
+            continue
+        city = str(raw.get("city") or "").strip()
+        market_date = str(raw.get("date") or "").strip()[:10]
+        if city and market_date:
+            verified_keys.add((city, market_date))
+
+    records = load_postmortem_data()
+    closed = [
+        r for r in records
+        if r.get("status") == "closed"
+        and r.get("close_action") in {"SELL", "LOSS_TOTAL", "RESOLVED_WIN"}
+        and r.get("city")
+    ]
+
+    cities = {}
+
+    def _bucket_stats():
+        return {"trades": 0, "wins": 0, "pnl": 0.0}
+
+    def _append_trade(stats, record):
+        stats["trades"] += 1
+        if (record.get("pnl_cash") or 0) > 0:
+            stats["wins"] += 1
+        stats["pnl"] += record.get("pnl_cash", 0) or 0
+
+    for r in closed:
+        city = r["city"]
+        cutoff = CITY_STATS_CUTOFF.get(city)
+        if cutoff and (r.get("closed_at") or "")[:10] < cutoff:
+            continue
+
+        city_stats = cities.setdefault(city, {
+            "total": _bucket_stats(),
+            "verified": _bucket_stats(),
+            "legacy": _bucket_stats(),
+        })
+        _append_trade(city_stats["total"], r)
+
+        market_date = str(r.get("date") or "").strip()[:10]
+        target_bucket = "verified" if (city, market_date) in verified_keys else "legacy"
+        _append_trade(city_stats[target_bucket], r)
+
+    for city, buckets in cities.items():
+        total = buckets["total"]
+        verified = buckets["verified"]
+        legacy = buckets["legacy"]
+        for stats in (total, verified, legacy):
+            stats["win_rate"] = round(stats["wins"] / stats["trades"] * 100, 1) if stats["trades"] > 0 else 0.0
+            stats["pnl"] = round(float(stats["pnl"] or 0.0), 2)
+
+        policy_source = "noaa_verified" if verified["trades"] > 0 else "legacy"
+        policy_stats = verified if policy_source == "noaa_verified" else legacy
+        buckets.update({
+            "policy_source": policy_source,
+            "policy_is_provisional": policy_source != "noaa_verified",
+            "policy": {
+                "trades": int(policy_stats["trades"] or 0),
+                "wins": int(policy_stats["wins"] or 0),
+                "win_rate": round(float(policy_stats["win_rate"] or 0.0), 1),
+                "pnl": round(float(policy_stats["pnl"] or 0.0), 2),
+            },
+            "verified_dates": sorted(
+                date_key for row_city, date_key in verified_keys
+                if row_city == city and date_key
+            ),
+        })
+
+    return cities
+
+
 def run_observability_alerts():
     """
     Alertas one-shot de observabilidad y review readiness.
@@ -4561,12 +4654,14 @@ def build_dashboard_forecast_quality(audit=None):
     }
 
 
-def build_dashboard_city_observation(audit=None, city_accuracy=None):
+def build_dashboard_city_observation(audit=None, city_accuracy=None, city_policy_metrics=None):
     """Resume el estado operativo/observacional por ciudad sin promocionar nada automaticamente."""
     if audit is None:
         audit = load_audit_data()
     if city_accuracy is None:
         city_accuracy = get_city_accuracy()
+    if city_policy_metrics is None:
+        city_policy_metrics = get_city_policy_metrics(audit=audit)
 
     observed_counts = {}
     observed_last_date = {}
@@ -4623,6 +4718,18 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None):
         wins = int(stats.get("wins", 0) or 0)
         win_rate = float(stats.get("win_rate", 0.0) or 0.0)
         pnl = round(float(stats.get("pnl", 0.0) or 0.0), 2)
+        policy_stats = city_policy_metrics.get(city, {}) if isinstance(city_policy_metrics, dict) else {}
+        verified_stats = policy_stats.get("verified", {}) if isinstance(policy_stats, dict) else {}
+        legacy_stats = policy_stats.get("legacy", {}) if isinstance(policy_stats, dict) else {}
+        policy_bucket = policy_stats.get("policy", {}) if isinstance(policy_stats, dict) else {}
+        policy_source = str(policy_stats.get("policy_source") or ("legacy" if trades > 0 else "none"))
+        policy_is_provisional = bool(policy_stats.get("policy_is_provisional")) if isinstance(policy_stats, dict) else False
+        policy_trades = int(policy_bucket.get("trades", 0) or 0)
+        policy_wins = int(policy_bucket.get("wins", 0) or 0)
+        policy_win_rate = float(policy_bucket.get("win_rate", 0.0) or 0.0)
+        policy_pnl = round(float(policy_bucket.get("pnl", 0.0) or 0.0), 2)
+        verified_trades = int(verified_stats.get("trades", 0) or 0)
+        legacy_trades = int(legacy_stats.get("trades", 0) or 0)
 
         if active:
             active_count += 1
@@ -4707,10 +4814,18 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None):
             history_label = "Sin cierres"
             history_badge = "muted"
             history_detail = "sin muestra real validada todavia"
-        elif trades >= CITY_MIN_TRADES_FOR_BLOCK and win_rate <= CITY_BLOCK_WIN_RATE:
+        elif policy_is_provisional and legacy_trades > 0:
+            history_label = f"{wins}/{trades} | WR {win_rate:.1f}%"
+            history_badge = "warn"
+            history_detail = (
+                f"${pnl:+.2f} | historico legacy; policy provisional hasta sumar casos NOAA-verificados"
+            )
+        elif policy_trades >= CITY_MIN_TRADES_FOR_BLOCK and policy_win_rate <= CITY_BLOCK_WIN_RATE:
             history_label = f"{wins}/{trades} | WR {win_rate:.1f}%"
             history_badge = "bad"
-            history_detail = f"${pnl:+.2f} | bajo review / riesgo alto"
+            history_detail = (
+                f"${pnl:+.2f} | historico NOAA-verificado malo ({policy_wins}/{policy_trades})"
+            )
         elif pnl > 0 or win_rate >= 50.0:
             history_label = f"{wins}/{trades} | WR {win_rate:.1f}%"
             history_badge = "good"
@@ -4781,6 +4896,14 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None):
             "wins": wins,
             "win_rate": round(win_rate, 1),
             "pnl": pnl,
+            "policy_source": policy_source,
+            "policy_is_provisional": policy_is_provisional,
+            "policy_trades": policy_trades,
+            "policy_wins": policy_wins,
+            "policy_win_rate": round(policy_win_rate, 1),
+            "policy_pnl": policy_pnl,
+            "verified_trades": verified_trades,
+            "legacy_trades": legacy_trades,
             "trading_label": trading_label,
             "trading_badge": trading_badge,
             "trading_detail": trading_detail,
@@ -4999,6 +5122,7 @@ def _city_decision_gates(
     win_rate,
     pnl,
     history_bad,
+    provisional_review,
     degraded,
     blocked,
     removable_active,
@@ -5033,6 +5157,11 @@ def _city_decision_gates(
             gate_a_detail = f"regla de salida: {trades} trades, WR {win_rate:.1f}%, PnL ${pnl:+.2f}"
         else:
             gate_a_detail = f"{trades} trades, WR {win_rate:.1f}%, PnL ${pnl:+.2f}"
+    elif provisional_review and trades > 0:
+        gate_a_state = "provisional"
+        gate_a_label = "Provisional"
+        gate_a_badge = "warn"
+        gate_a_detail = f"legacy bajo review: {trades} trades, WR {win_rate:.1f}%, PnL ${pnl:+.2f}"
     elif trades > 0:
         gate_a_state = "clean"
         gate_a_label = "Limpio"
@@ -5107,7 +5236,7 @@ def _city_decision_gates(
     }
 
 
-def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, shadow_tracking=None):
+def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, shadow_tracking=None, city_policy_metrics=None):
     """
     Convierte el seguimiento de ciudades en una lectura decisional:
     mantener, promover a canary, observar, revisar salida o bloquear.
@@ -5118,6 +5247,8 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
         city_accuracy = get_city_accuracy()
     if shadow_tracking is None:
         shadow_tracking = load_shadow_city_tracking()
+    if city_policy_metrics is None:
+        city_policy_metrics = get_city_policy_metrics()
     policy_state = load_city_policy_state()
 
     shadow_cities = shadow_tracking.get("cities", {}) if isinstance(shadow_tracking, dict) else {}
@@ -5141,7 +5272,7 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
             "win_rate": round(ALLOWLIST_REMOVE_MAX_WIN_RATE, 1),
             "pnl": round(ALLOWLIST_REMOVE_MAX_PNL, 2),
             "label": (
-                f"degradar a shadow si active/canary tiene >= {ALLOWLIST_REMOVE_MIN_TRADES} trades, "
+                f"degradar a shadow si active/canary tiene >= {ALLOWLIST_REMOVE_MIN_TRADES} trades NOAA-verificados, "
                 f"WR <= {ALLOWLIST_REMOVE_MAX_WIN_RATE:.1f}% y PnL <= ${ALLOWLIST_REMOVE_MAX_PNL:.2f}"
             ),
         },
@@ -5198,6 +5329,30 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
         wins = int(row.get("wins", 0) or 0)
         pnl = round(float(row.get("pnl", 0) or 0), 2)
         win_rate = round(float(row.get("win_rate", 0) or 0), 1)
+        policy_meta = city_policy_metrics.get(city, {}) if isinstance(city_policy_metrics, dict) else {}
+        row_policy_source = str(
+            row.get("policy_source")
+            or policy_meta.get("policy_source")
+            or ("legacy" if trades > 0 else "none")
+        )
+        row_policy_bucket = policy_meta.get("policy", {}) if isinstance(policy_meta, dict) else {}
+        policy_is_provisional = bool(row.get("policy_is_provisional")) or bool(policy_meta.get("policy_is_provisional"))
+        policy_trades = int(row.get("policy_trades", row_policy_bucket.get("trades", trades)) or 0)
+        policy_wins = int(row.get("policy_wins", row_policy_bucket.get("wins", wins)) or 0)
+        policy_win_rate = round(float(row.get("policy_win_rate", row_policy_bucket.get("win_rate", win_rate)) or 0), 1)
+        policy_pnl = round(float(row.get("policy_pnl", row_policy_bucket.get("pnl", pnl)) or 0), 2)
+        verified_trades = int(
+            row.get(
+                "verified_trades",
+                (policy_meta.get("verified", {}) if isinstance(policy_meta, dict) else {}).get("trades", 0),
+            ) or 0
+        )
+        legacy_trades = int(
+            row.get(
+                "legacy_trades",
+                (policy_meta.get("legacy", {}) if isinstance(policy_meta, dict) else {}).get("trades", 0),
+            ) or 0
+        )
         active = bool(row.get("active"))
         blocked = bool(row.get("blocked"))
         city_mode = row.get("city_mode", "shadow")
@@ -5212,14 +5367,18 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
             and shadow_best_edge >= SHADOW_CANARY_MIN_BEST_EDGE
             and support_count >= SHADOW_CANARY_MIN_SUPPORT
         )
-        removable_active = (
-            active
-            and trades >= ALLOWLIST_REMOVE_MIN_TRADES
-            and win_rate <= ALLOWLIST_REMOVE_MAX_WIN_RATE
-            and pnl <= ALLOWLIST_REMOVE_MAX_PNL
+        verified_history_bad = (
+            row_policy_source == "noaa_verified"
+            and policy_trades >= ALLOWLIST_REMOVE_MIN_TRADES
+            and policy_win_rate <= ALLOWLIST_REMOVE_MAX_WIN_RATE
+            and policy_pnl <= ALLOWLIST_REMOVE_MAX_PNL
         )
-        history_bad = (
-            trades >= ALLOWLIST_REMOVE_MIN_TRADES
+        removable_active = active and verified_history_bad
+        history_bad = verified_history_bad
+        provisional_review = (
+            active
+            and policy_is_provisional
+            and legacy_trades >= ALLOWLIST_REMOVE_MIN_TRADES
             and win_rate <= ALLOWLIST_REMOVE_MAX_WIN_RATE
             and pnl <= ALLOWLIST_REMOVE_MAX_PNL
         )
@@ -5269,16 +5428,33 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
             decision = "remove"
             decision_label = "Pasar a shadow"
             badge = "bad"
-            reason = f"regla de salida disparada: {trades} trades, WR {win_rate:.1f}% y PnL ${pnl:+.2f}; queda shadow para seguir observando"
+            reason = (
+                f"regla de salida disparada con historico NOAA-verificado: "
+                f"{policy_wins}/{policy_trades} trades, WR {policy_win_rate:.1f}% y PnL ${policy_pnl:+.2f}; "
+                "queda shadow para seguir observando"
+            )
         elif active:
             decision = "keep"
             decision_label = "Mantener"
-            badge = "good" if interpretable or pnl >= 0 else "accent"
-            reason = (
-                "ciudad ya operativa; mantener mientras siga aportando evidencia"
-                if interpretable or pnl >= 0
-                else "sigue activa, pero aun sin evidencia suficiente para ampliar riesgo"
-            )
+            if provisional_review:
+                badge = "warn"
+                reason = (
+                    f"histórico legacy muy flojo ({wins}/{trades}, WR {win_rate:.1f}%, PnL ${pnl:+.2f}) "
+                    "pero sin base NOAA-verificada suficiente; mantener sin autodegradar y revisar manualmente"
+                )
+            elif policy_is_provisional and legacy_trades > 0:
+                badge = "accent"
+                reason = (
+                    f"historico legacy {wins}/{trades} (WR {win_rate:.1f}%) pero sin base NOAA-verificada suficiente; "
+                    "mantener y observar antes de degradar"
+                )
+            else:
+                badge = "good" if interpretable or pnl >= 0 else "accent"
+                reason = (
+                    "ciudad ya operativa; mantener mientras siga aportando evidencia"
+                    if interpretable or pnl >= 0
+                    else "sigue activa, pero aun sin evidencia suficiente para ampliar riesgo"
+                )
         elif promotable_shadow:
             decision = "promote"
             decision_label = "Candidata a canary"
@@ -5292,6 +5468,11 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
                 reason = (
                     f"shadow ya vio {shadow_seen} mercados y {shadow_edges} edges; "
                     "falta decidir si merece canary"
+                )
+            elif policy_is_provisional and legacy_trades > 0:
+                reason = (
+                    f"historico legacy {wins}/{trades} separado del NOAA-verificado; "
+                    "no conviene degradar ni promocionar solo por esa era"
                 )
             elif noaa_configured and observed_count > 0:
                 reason = "proxy NOAA activo, pero todavia sin muestra para promocionar"
@@ -5360,6 +5541,8 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
         if trades > 0:
             if history_bad:
                 score -= 28.0
+            elif provisional_review:
+                score -= 12.0
             elif pnl > 0 or win_rate >= 50.0:
                 score += 10.0
             else:
@@ -5376,6 +5559,8 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
             score = min(score, 18.0)
         if removable_active:
             score = min(score, 15.0)
+        if provisional_review:
+            score = min(score, 42.0)
         readiness_score = int(max(0.0, min(99.0, round(score))))
 
         if blocked:
@@ -5394,6 +5579,10 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
             priority_group = "ready"
             priority_label = "Lista para canary"
             priority_badge = "good"
+        elif provisional_review:
+            priority_group = "watch"
+            priority_label = "Revisar legado"
+            priority_badge = "warn"
         elif not active and shadow_seen > 0 and not history_bad:
             priority_group = "near"
             priority_label = "Cerca de canary"
@@ -5414,6 +5603,9 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
         if degraded or removable_active or history_bad:
             trend_label = "Enfriándose"
             trend_badge = "bad"
+        elif provisional_review:
+            trend_label = "Bajo review"
+            trend_badge = "warn"
         elif promotable_shadow or (shadow_seen > 0 and shadow_edges > 0) or (observed_count > 0 and not active):
             trend_label = "Subiendo"
             trend_badge = "good" if promotable_shadow else "accent"
@@ -5442,11 +5634,17 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
         else:
             main_reason = "solo referencia"
 
+        if provisional_review and not degraded and not removable_active:
+            main_reason = "historico legacy bajo review"
+        if removable_active:
+            main_reason = "historico NOAA-verificado malo"
+
         gates = _city_decision_gates(
             trades=trades,
             win_rate=win_rate,
             pnl=pnl,
             history_bad=history_bad,
+            provisional_review=provisional_review,
             degraded=degraded,
             blocked=blocked,
             removable_active=removable_active,
@@ -5489,11 +5687,20 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
             "active": active,
             "blocked": blocked,
             "degraded": degraded,
+            "provisional_review": provisional_review,
             "interpretable": interpretable,
             "trades": trades,
             "wins": wins,
             "win_rate": win_rate,
             "pnl": pnl,
+            "policy_source": row_policy_source,
+            "policy_is_provisional": policy_is_provisional,
+            "policy_trades": policy_trades,
+            "policy_wins": policy_wins,
+            "policy_win_rate": policy_win_rate,
+            "policy_pnl": policy_pnl,
+            "verified_trades": verified_trades,
+            "legacy_trades": legacy_trades,
             "pnl_display": f"${pnl:+.2f}",
             "observed_display": f"{observed_count}/{observed_goal}",
             "forecast_bias_value": forecast_bias_value,
@@ -5644,13 +5851,20 @@ def sync_city_policy_state(notify=True):
     No toca las env vars; aplica un overlay persistente en volumen.
     """
     policy_state = load_city_policy_state()
+    audit = load_audit_data()
     city_accuracy = get_city_accuracy()
+    city_policy_metrics = get_city_policy_metrics(audit=audit)
     shadow_tracking = load_shadow_city_tracking()
-    city_observation = build_dashboard_city_observation(city_accuracy=city_accuracy)
+    city_observation = build_dashboard_city_observation(
+        audit=audit,
+        city_accuracy=city_accuracy,
+        city_policy_metrics=city_policy_metrics,
+    )
     city_decisions = build_dashboard_city_decisions(
         city_observation=city_observation,
         city_accuracy=city_accuracy,
         shadow_tracking=shadow_tracking,
+        city_policy_metrics=city_policy_metrics,
     )
 
     auto_canary = policy_state.setdefault("auto_canary_cities", {})
@@ -5733,13 +5947,20 @@ def _compute_city_decisions_for_alerts():
     Reconstruye city_decisions con los mismos helpers que usa sync_city_policy_state
     pero aislado para poder consumirlo desde alertas sin duplicar lógica de transición.
     """
+    audit = load_audit_data()
     city_accuracy = get_city_accuracy()
+    city_policy_metrics = get_city_policy_metrics(audit=audit)
     shadow_tracking = load_shadow_city_tracking()
-    city_observation = build_dashboard_city_observation(city_accuracy=city_accuracy)
+    city_observation = build_dashboard_city_observation(
+        audit=audit,
+        city_accuracy=city_accuracy,
+        city_policy_metrics=city_policy_metrics,
+    )
     return build_dashboard_city_decisions(
         city_observation=city_observation,
         city_accuracy=city_accuracy,
         shadow_tracking=shadow_tracking,
+        city_policy_metrics=city_policy_metrics,
     )
 
 
@@ -8385,11 +8606,17 @@ def build_dashboard_snapshot():
         logic_series=LOGIC_SERIES,
     )
     forecast_quality = build_dashboard_forecast_quality(audit=audit)
-    city_observation = build_dashboard_city_observation(audit=audit, city_accuracy=city_accuracy)
+    city_policy_metrics = get_city_policy_metrics(audit=audit)
+    city_observation = build_dashboard_city_observation(
+        audit=audit,
+        city_accuracy=city_accuracy,
+        city_policy_metrics=city_policy_metrics,
+    )
     city_decisions = build_dashboard_city_decisions(
         city_observation=city_observation,
         city_accuracy=city_accuracy,
         shadow_tracking=shadow_tracking,
+        city_policy_metrics=city_policy_metrics,
     )
     legacy_forecast_drift = build_dashboard_legacy_forecast_drift(audit=audit)
     trade_analytics = build_dashboard_trade_analytics(trade_lifecycle=trade_lifecycle, portfolio=portfolio)
@@ -9050,10 +9277,15 @@ def cmd_focus():
         else:
             last_cycle_label = f"Total #{cycle_summary.get('cycle_number', '?')} | legacy"
 
+    city_policy_metrics = get_city_policy_metrics(audit=audit)
     focus = build_dashboard_focus_center(
         alerts=get_dashboard_alert_summary(),
         forecast_quality=build_dashboard_forecast_quality(audit=audit),
-        city_observation=build_dashboard_city_observation(audit=audit, city_accuracy=city_accuracy),
+        city_observation=build_dashboard_city_observation(
+            audit=audit,
+            city_accuracy=city_accuracy,
+            city_policy_metrics=city_policy_metrics,
+        ),
         series_stats=get_logic_series_stats(),
         series_clean_stats=get_logic_series_clean_closed_trade_stats(),
         next_run_display=next_run_display,

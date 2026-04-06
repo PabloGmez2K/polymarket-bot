@@ -1,6 +1,15 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 6 de abril de 2026 (Sesión 85 — política de ciudades shadow-first, local, verify 628/628)
+**Última actualización:** 6 de abril de 2026 (Sesión 86 — policy NOAA-verificada vs legacy, local, verify 632/632)
+**Sesión 86 (6 abr 2026, Codex):** reinterpretación del histórico para la policy de ciudades, sin tocar trading core, NOAA fetch core ni scheduler.
+- **Nueva capa de policy:** `get_city_policy_metrics()` separa cierres por ciudad en `verified` (join `city+date` contra `observed_vs_forecast` con `source=noaa_ncei`) y `legacy` (sin NOAA-verificado).
+- **Degradación más robusta:** `build_dashboard_city_decisions()` ya no degrada `active/canary -> shadow` usando histórico agregado bruto. La regla `remove` ahora exige trades **NOAA-verificados**; si solo hay histórico legacy malo, la policy queda `provisional` y la ciudad se mantiene/observa en vez de oscilar por una era observacional antigua.
+- **Promoción/lectura alineadas:** `build_dashboard_city_observation()` expone `policy_source`, `policy_is_provisional`, `verified_trades` y `legacy_trades`; el soporte para `shadow -> canary` vuelve a usar `trades` totales como soporte para no penalizar ciudades con trayectoria previa, pero la degradación sigue exigiendo evidencia NOAA-verificada.
+- **Review manual visible:** las ciudades activas con histórico legacy muy malo pero aún sin base NOAA suficiente ya no quedan “operando limpias”; pasan a `Revisar legado / Bajo review`, con score más conservador y sin autodegradación.
+- **Hardening técnico:** el join `city+date` normaliza fechas a `YYYY-MM-DD` y `sync_city_policy_state()`, alertas canary, snapshot y focus reutilizan `city_policy_metrics` para evitar recálculo triple.
+- **Persistencia de evidencia:** `_build_auto_city_shadow_policy()` guarda también el basis de policy (`policy_source`, `policy_trades`, `verified_trades`, `legacy_trades`) cuando una ciudad sí se degrada a shadow.
+- **Validación local:** `python verify_before_deploy.py` cierra en **632/632** con tests nuevos para separar NOAA-verificado vs legacy, normalizar fechas y evitar degradación automática por histórico legacy malo.
+
 **Sesión 85 (6 abr 2026, Codex):** limpieza semántica de la política `blocked/shadow/canary/active`, sin tocar trading core, NOAA fetch core ni scheduler.
 - **Cambio canónico local:** `sync_city_policy_state()` ya no degrada `active/canary -> blocked`; ahora degrada `active/canary -> shadow` con evidencia persistida en `auto_shadow_cities`. `blocked` queda reservado a descartes reales.
 - **Migración de legado:** `load_city_policy_state()/save_city_policy_state()/get_effective_city_mode()` normalizan overlays viejos `auto_blocked_cities[action=auto_block]` a `auto_shadow_cities`. Caso principal cubierto: Dallas deja de quedar atrapada como `blocked` por overlay legacy aunque siga en `ACTIVE_TRADING_CITIES`.

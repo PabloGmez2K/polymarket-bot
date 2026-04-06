@@ -2413,6 +2413,27 @@ Regla recomendada:
 - se sincronizan `CONTEXTO.md`, `HISTORIAL_SESIONES.md` y `agent_events.jsonl`
 - no hay commit funcional nuevo de producto en esta sesión; el commit/push de cierre es solo documental
 
+## Sesión 86 — Policy NOAA-verificada vs histórico legacy en ciudades (6 abr 2026)
+
+**Disparador:** convertir en implementación el pendiente explícito de la sesión 85: evitar que la policy de ciudades degrade/promueva usando como evidencia fuerte un histórico malo de una era pre-NOAA-verificada.
+
+**Implementación local:**
+
+- se añade `get_city_policy_metrics()` en `bot.py` para separar cierres por ciudad en `total`, `verified` y `legacy`, usando join `city + date` contra `audit.json -> observed_vs_forecast` con `source=noaa_ncei`;
+- `build_dashboard_city_observation()` pasa a exponer `policy_source`, `policy_is_provisional`, `policy_trades`, `verified_trades` y `legacy_trades`, y deja explícito cuando el histórico visible sigue siendo solo legacy/provisional;
+- `build_dashboard_city_decisions()` cambia la regla de salida: `active/canary -> shadow` ya no usa el agregado bruto de `get_city_accuracy()`, sino solo histórico **NOAA-verificado** para disparar `remove`;
+- si una ciudad activa solo tiene histórico legacy malo, la decision se mantiene en `keep` pero pasa a `Revisar legado / Bajo review` con score más conservador, de modo que no se autodegrada ni queda visualmente “limpia”;
+- el soporte de `shadow -> canary` conserva `trades` totales como soporte para no introducir una regresión silenciosa al split `verified/legacy`, pero la degradación sigue exigiendo evidencia NOAA-verificada;
+- se endurece el join `city + date` normalizando ambas fechas a `YYYY-MM-DD`;
+- `sync_city_policy_state()`, `_compute_city_decisions_for_alerts()`, snapshot y focus dejan de recalcular tres veces la misma capa `city_policy_metrics`.
+- `_build_auto_city_shadow_policy()` persiste también el basis de policy (`policy_source`, `policy_trades`, `verified_trades`, `legacy_trades`) para que la degradación guardada conserve contexto de calidad de evidencia.
+
+**Validación y estado:**
+
+- `python verify_before_deploy.py` -> `632/632`
+- se añaden tests funcionales que prueban la separación `NOAA-verificado vs legacy` y que una ciudad activa con histórico legacy malo no se degrada automáticamente por esa sola razón
+- no se tocó trading core, NOAA fetch core, scheduler ni exits; el cambio queda acotado a la policy, su lectura y su persistencia
+
 ## Sesión 85 — Política de ciudades shadow-first y migración Dallas legacy (6 abr 2026)
 
 **Disparador:** auditar la contradicción entre la semántica deseada (`blocked` solo para descartes reales, `shadow` para observación activa) y el comportamiento real donde `sync_city_policy_state()` mandaba `active/canary -> blocked`, dejando casos como Dallas atrapados por `auto_blocked_cities`.

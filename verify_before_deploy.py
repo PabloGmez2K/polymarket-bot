@@ -320,6 +320,53 @@ def run_tests():
          _acc.get("Dallas", {}).get("win_rate") == 100.0)
 
     # ---- Test 3: Bug #12 — Resueltas no en keeping ----
+    policy_ns = {
+        "CITY_STATS_CUTOFF": {"Dallas": "2026-04-06"},
+        "OBSERVED_AUDIT_KEY": "observed_vs_forecast",
+    }
+    policy_ns["load_postmortem_data"] = lambda: [
+        {"status": "closed", "close_action": "LOSS_TOTAL", "city": "Dallas", "date": "2026-04-05", "closed_at": "2026-04-05T10:00:00+00:00", "pnl_cash": -1.0},
+        {"status": "closed", "close_action": "RESOLVED_WIN", "city": "Dallas", "date": "2026-04-07", "closed_at": "2026-04-07T10:00:00+00:00", "pnl_cash": 1.5},
+        {"status": "closed", "close_action": "LOSS_TOTAL", "city": "Chicago", "date": "2026-04-02", "closed_at": "2026-04-02T10:00:00+00:00", "pnl_cash": -1.2},
+        {"status": "closed", "close_action": "LOSS_TOTAL", "city": "Chicago", "date": "2026-04-03", "closed_at": "2026-04-03T10:00:00+00:00", "pnl_cash": -1.0},
+        {"status": "closed", "close_action": "LOSS_TOTAL", "city": "Chicago", "date": "2026-04-04", "closed_at": "2026-04-04T10:00:00+00:00", "pnl_cash": -0.8},
+        {"status": "closed", "close_action": "LOSS_TOTAL", "city": "Atlanta", "date": "2026-03-20", "closed_at": "2026-03-20T10:00:00+00:00", "pnl_cash": -1.0},
+        {"status": "closed", "close_action": "LOSS_TOTAL", "city": "Atlanta", "date": "2026-03-21", "closed_at": "2026-03-21T10:00:00+00:00", "pnl_cash": -1.1},
+        {"status": "closed", "close_action": "LOSS_TOTAL", "city": "Atlanta", "date": "2026-03-22", "closed_at": "2026-03-22T10:00:00+00:00", "pnl_cash": -1.2},
+    ]
+    exec(get_function_source(module_ast, code_lines, "get_city_policy_metrics"), policy_ns)
+    _policy = policy_ns["get_city_policy_metrics"](audit={
+        "observed_vs_forecast": [
+            {"city": "Chicago", "date": "2026-04-02", "source": "noaa_ncei"},
+            {"city": "Chicago", "date": "2026-04-03", "source": "noaa_ncei"},
+            {"city": "Chicago", "date": "2026-04-04", "source": "noaa_ncei"},
+            {"city": "Atlanta", "date": "2026-03-20", "source": "legacy_proxy"},
+        ]
+    })
+    test("city policy metrics: separa NOAA-verificado de legacy",
+         _policy.get("Chicago", {}).get("policy_source") == "noaa_verified"
+         and _policy.get("Chicago", {}).get("verified", {}).get("trades") == 3
+         and _policy.get("Chicago", {}).get("legacy", {}).get("trades") == 0,
+         _policy.get("Chicago"))
+    test("city policy metrics: legacy sin NOAA queda provisional",
+         _policy.get("Atlanta", {}).get("policy_source") == "legacy"
+         and _policy.get("Atlanta", {}).get("policy_is_provisional") is True
+         and _policy.get("Atlanta", {}).get("legacy", {}).get("trades") == 3,
+         _policy.get("Atlanta"))
+    test("city policy metrics: Dallas respeta cutoff tambien en split de policy",
+         _policy.get("Dallas", {}).get("policy_source") == "legacy"
+         and _policy.get("Dallas", {}).get("legacy", {}).get("trades") == 1
+         and _policy.get("Dallas", {}).get("verified", {}).get("trades") == 0,
+         _policy.get("Dallas"))
+    _policy_dates = policy_ns["get_city_policy_metrics"](audit={
+        "observed_vs_forecast": [
+            {"city": "Chicago", "date": "2026-04-02T00:00:00", "source": "noaa_ncei"},
+        ]
+    })
+    test("city policy metrics: normaliza fechas datetime a YYYY-MM-DD",
+         _policy_dates.get("Chicago", {}).get("verified", {}).get("trades") == 1,
+         _policy_dates.get("Chicago"))
+
     print("\n Bug #12: Resueltas excluidas de keeping")
     # Buscar el bloque de curPrice >= 0.98 en manage_positions
     # Buscamos entre cur_price >= 0.98 y el continue que le sigue
@@ -1161,6 +1208,29 @@ def run_tests():
             },
             "is_city_blocked": lambda city: str(city or "").strip().lower() in {"london", "wellington"},
             "_is_shadow_only": lambda: False,
+            "get_city_policy_metrics": lambda audit=None: {
+                "Chicago": {
+                    "policy_source": "noaa_verified",
+                    "policy_is_provisional": False,
+                    "policy": {"trades": 3, "wins": 2, "win_rate": 66.7, "pnl": 3.0},
+                    "verified": {"trades": 3, "wins": 2, "win_rate": 66.7, "pnl": 3.0},
+                    "legacy": {"trades": 1, "wins": 1, "win_rate": 100.0, "pnl": 2.2},
+                },
+                "London": {
+                    "policy_source": "legacy",
+                    "policy_is_provisional": True,
+                    "policy": {"trades": 3, "wins": 0, "win_rate": 0.0, "pnl": -4.0},
+                    "verified": {"trades": 0, "wins": 0, "win_rate": 0.0, "pnl": 0.0},
+                    "legacy": {"trades": 3, "wins": 0, "win_rate": 0.0, "pnl": -4.0},
+                },
+                "New York City": {
+                    "policy_source": "legacy",
+                    "policy_is_provisional": True,
+                    "policy": {"trades": 2, "wins": 1, "win_rate": 50.0, "pnl": 0.85},
+                    "verified": {"trades": 0, "wins": 0, "win_rate": 0.0, "pnl": 0.0},
+                    "legacy": {"trades": 2, "wins": 1, "win_rate": 50.0, "pnl": 0.85},
+                },
+            },
             "load_city_policy_state": lambda: {"auto_canary_cities": {}, "auto_shadow_cities": {}, "transition_history": []},
             "get_effective_city_mode": lambda city, policy_state=None: (
                 "blocked" if str(city or "").strip().lower() in {"london", "wellington"}
@@ -1200,9 +1270,9 @@ def run_tests():
              and chicago_watch_row["noaa_label"] == "Interpretable"
              and chicago_watch_row["state_label"] == "Operando con observabilidad",
              chicago_watch_row)
-        test("city observation: London queda bloqueada con historico malo",
+        test("city observation: London queda bloqueada con historico legacy provisional",
              london_watch_row["trading_label"] == "Bloqueada"
-             and london_watch_row["history_badge"] == "bad"
+             and london_watch_row["history_badge"] == "warn"
              and london_watch_row["state_label"] == "Bloqueada",
              london_watch_row)
         test("city observation: NYC queda como referencia historica fuera del allowlist",
@@ -1225,6 +1295,7 @@ def run_tests():
             "ALLOWLIST_REMOVE_MAX_PNL": 0.0,
             "build_dashboard_city_observation": lambda: {},
             "get_city_accuracy": lambda: {},
+            "get_city_policy_metrics": lambda audit=None: {},
             "load_shadow_city_tracking": lambda: {},
             "load_city_policy_state": lambda: {"auto_canary_cities": {}, "auto_shadow_cities": {}, "transition_history": []},
         }
@@ -1243,6 +1314,37 @@ def run_tests():
                 item["trading_label"] = "Shadow degradada"
                 item["state_label"] = "Shadow degradada"
                 item["state_badge"] = "accent"
+        city_observation_for_decisions["rows"].append({
+            "city": "Atlanta Legacy",
+            "city_mode": "active",
+            "active": True,
+            "blocked": False,
+            "trades": 4,
+            "wins": 0,
+            "win_rate": 0.0,
+            "pnl": -3.5,
+            "policy_source": "legacy",
+            "policy_is_provisional": True,
+            "policy_trades": 4,
+            "policy_wins": 0,
+            "policy_win_rate": 0.0,
+            "policy_pnl": -3.5,
+            "verified_trades": 0,
+            "legacy_trades": 4,
+            "trading_label": "Activa",
+            "state_label": "Activa con muestra incipiente",
+            "state_badge": "warn",
+            "interpretable": False,
+            "noaa_configured": True,
+            "observed_count": 1,
+            "observed_goal": 3,
+            "history_label": "0/4 | WR 0.0%",
+            "history_badge": "warn",
+            "history_detail": "historico legacy; policy provisional",
+            "policy_reason": "",
+            "policy_metrics": {},
+            "policy_changed_at": "",
+        })
         city_decisions_ns["load_city_policy_state"] = lambda: {
             "auto_canary_cities": {},
             "auto_shadow_cities": {"Dallas": {"shadowed_at": "2026-03-31T12:00:00+00:00", "reason": "historico real malo", "from_mode": "active"}},
@@ -1269,6 +1371,7 @@ def run_tests():
         chicago_decision = next(item for item in city_decisions["rows"] if item["city"] == "Chicago")
         london_decision = next(item for item in city_decisions["rows"] if item["city"] == "London")
         dallas_decision = next(item for item in city_decisions["rows"] if item["city"] == "Dallas")
+        atl_legacy_decision = next(item for item in city_decisions["rows"] if item["city"] == "Atlanta Legacy")
         test("city decisions: promueve canary cuando shadow acumula edge",
              nyc_decision["decision"] == "promote"
              and city_decisions["promote_rows"][0]["city"] == "New York City",
@@ -1295,6 +1398,18 @@ def run_tests():
              and dallas_decision["trend_label"] == "Enfriándose"
              and dallas_decision["main_reason"] == "shadow degradada por histórico real",
              dallas_decision)
+        test("city decisions: no degrada activa solo por historico legacy malo",
+             atl_legacy_decision["decision"] == "keep"
+             and atl_legacy_decision["badge"] == "warn"
+             and atl_legacy_decision["policy_is_provisional"] is True
+             and atl_legacy_decision["priority_group"] == "watch"
+             and atl_legacy_decision["provisional_review"] is True
+             and atl_legacy_decision["trend_label"] == "Bajo review",
+             atl_legacy_decision)
+        test("city decisions: gate_a provisional para legado bajo review",
+             atl_legacy_decision["gate_a"]["state"] == "provisional"
+             and atl_legacy_decision["gate_a"]["badge"] == "warn",
+             atl_legacy_decision.get("gate_a"))
         test("city decisions: expone politica explicita",
              "policy" in city_decisions
              and city_decisions["policy"]["promote"]["edge_hits"] == 2
@@ -1342,7 +1457,7 @@ def run_tests():
         def _gates_call(**overrides):
             defaults = dict(
                 trades=0, win_rate=0.0, pnl=0.0,
-                history_bad=False, degraded=False, blocked=False, removable_active=False,
+                history_bad=False, provisional_review=False, degraded=False, blocked=False, removable_active=False,
                 degradation_reason="", block_reason="",
                 shadow_seen=0, shadow_edges=0, shadow_cycles=0, shadow_best_edge=0.0,
                 promotable_shadow=False,
@@ -1359,6 +1474,9 @@ def run_tests():
         g = _gates_call(trades=10, win_rate=10.0, pnl=-5.0, history_bad=True)
         test("R1 gate_a: bad con history_bad",
              g["gate_a"]["state"] == "bad" and g["gate_a"]["badge"] == "bad", g["gate_a"])
+        g = _gates_call(trades=4, win_rate=0.0, pnl=-3.5, provisional_review=True)
+        test("R1 gate_a: provisional con legacy bajo review",
+             g["gate_a"]["state"] == "provisional" and g["gate_a"]["badge"] == "warn", g["gate_a"])
         g = _gates_call()
         test("R1 gate_a: no_data con trades=0",
              g["gate_a"]["state"] == "no_data" and g["gate_a"]["badge"] == "muted", g["gate_a"])
@@ -1391,10 +1509,12 @@ def run_tests():
             "timezone": timezone,
             "LOGIC_SERIES": "10.6",
             "ACTIVE_TRADING_CITIES": {"Chicago"},
+            "load_audit_data": lambda: {"observed_vs_forecast": []},
             "get_city_accuracy": lambda: {},
+            "get_city_policy_metrics": lambda audit=None: {},
             "load_shadow_city_tracking": lambda: {},
-            "build_dashboard_city_observation": lambda city_accuracy=None: {},
-            "build_dashboard_city_decisions": lambda city_observation=None, city_accuracy=None, shadow_tracking=None: {
+            "build_dashboard_city_observation": lambda audit=None, city_accuracy=None, city_policy_metrics=None: {},
+            "build_dashboard_city_decisions": lambda city_observation=None, city_accuracy=None, shadow_tracking=None, city_policy_metrics=None: {
                 "rows": [
                     {"city": "New York City", "decision": "promote", "reason": "regla canary disparada", "shadow_best_edge": 10.2, "shadow_edges": 2},
                     {
@@ -1453,6 +1573,68 @@ def run_tests():
                  for item in saved_policy.get("transition_history", [])
              ),
              saved_policy.get("transition_history"))
+
+        canary_remove_messages = []
+        canary_remove_ns = {
+            "datetime": datetime,
+            "timezone": timezone,
+            "LOGIC_SERIES": "10.6",
+            "ACTIVE_TRADING_CITIES": set(),
+            "load_audit_data": lambda: {"observed_vs_forecast": []},
+            "get_city_accuracy": lambda: {},
+            "get_city_policy_metrics": lambda audit=None: {},
+            "load_shadow_city_tracking": lambda: {},
+            "build_dashboard_city_observation": lambda audit=None, city_accuracy=None, city_policy_metrics=None: {},
+            "build_dashboard_city_decisions": lambda city_observation=None, city_accuracy=None, shadow_tracking=None, city_policy_metrics=None: {
+                "rows": [
+                    {
+                        "city": "Boston",
+                        "decision": "remove",
+                        "reason": "regla de salida NOAA-verificada",
+                        "trades": 4,
+                        "wins": 1,
+                        "win_rate": 25.0,
+                        "pnl": -1.25,
+                        "policy_source": "noaa_verified",
+                        "policy_is_provisional": False,
+                        "policy_trades": 4,
+                        "policy_wins": 1,
+                        "policy_win_rate": 25.0,
+                        "policy_pnl": -1.25,
+                        "verified_trades": 4,
+                        "legacy_trades": 0,
+                        "observed_count": 4,
+                        "shadow_seen": 0,
+                        "shadow_edges": 0,
+                        "shadow_best_edge": 0.0,
+                        "support_count": 4,
+                    },
+                ]
+            },
+            "load_city_policy_state": lambda: {
+                "logic_series": "10.6",
+                "auto_canary_cities": {},
+                "auto_shadow_cities": {},
+                "auto_blocked_cities": {},
+                "transition_history": [],
+            },
+            "save_city_policy_state": lambda data: canary_remove_messages.append(("save", data)),
+            "get_effective_city_mode": lambda city, policy_state=None: "canary",
+            "send_telegram": lambda text, with_menu=False, custom_keyboard=None: canary_remove_messages.append(("msg", text)),
+        }
+        exec(get_function_source(module_ast, code_lines, "_build_auto_city_shadow_policy"), canary_remove_ns)
+        exec(get_function_source(module_ast, code_lines, "sync_city_policy_state"), canary_remove_ns)
+        canary_remove_ns["sync_city_policy_state"](notify=True)
+        canary_saved_policy = next((item[1] for item in canary_remove_messages if item[0] == "save"), {})
+        test("city policy sync: canary tambien puede degradarse a shadow",
+             canary_saved_policy.get("auto_shadow_cities", {}).get("Boston", {}).get("from_mode") == "canary"
+             and any(
+                 item.get("city") == "Boston"
+                 and item.get("from") == "canary"
+                 and item.get("to") == "shadow"
+                 for item in canary_saved_policy.get("transition_history", [])
+             ),
+             canary_saved_policy)
 
         effective_mode_ns = {
             "LOGIC_SERIES": "10.6",
@@ -1876,6 +2058,7 @@ def run_tests():
             "get_dashboard_alert_summary": lambda: {"signals": {"status": "ok"}, "pending_stuck": [], "flagged_cities": [], "active_items": [], "low_bankroll": False, "portfolio_total": 14.75},
             "build_promotion_checklist": lambda: {"levels": {"next_target": 35.0, "is_max_level": False}, "passed": 3, "total": 9, "blocking_failed": 3, "decision": "HOLD", "decision_label": "Aún no listo", "trade_target": 30, "checks": []},
             "get_city_accuracy": lambda: {},
+            "get_city_policy_metrics": lambda audit=None: {},
             "build_dashboard_progress": lambda **kwargs: [{"label": "Muestra", "status": "bad"}],
             "build_dashboard_exit_breakdown": lambda **kwargs: {"validated_rows": [{"label": "Take-profit", "balance_display": "$+1.00"}], "series_rows": [{"label": "Pending exit serie v10.6", "balance_display": "$-0.50"}]},
             "build_dashboard_forecast_quality": lambda **kwargs: {"sample_size": 0, "sample_display": "0 mercados", "mae_display": "acumulando muestra...", "bias_display": "acumulando muestra...", "coverage_display": "0 / 4 ciudades con muestra", "coverage_detail": "0 / 4 con >= 3 casos", "city_rows": [], "latest_rows": [], "note": "acumulando muestra...", "note_level": "muted", "last_record_display": "n/d", "kpis_ready": False, "global_ready": False},
@@ -2163,12 +2346,13 @@ def run_tests():
             "datetime": datetime,
             "load_audit_data": lambda: {},
             "get_city_accuracy": lambda: {},
+            "get_city_policy_metrics": lambda audit=None: {},
             "load_cycle_summary_data": lambda: {"cycle_number": 7, "logic_cycle_number": 3, "logic_series": "10.6", "version": "v10.6.10"},
             "_extract_logic_series": lambda value: "10.6" if "10.6" in str(value) else None,
             "bot_state": {"next_run": datetime(2026, 3, 30, 16, 0, tzinfo=timezone.utc)},
             "get_dashboard_alert_summary": lambda: {},
             "build_dashboard_forecast_quality": lambda audit=None: {},
-            "build_dashboard_city_observation": lambda audit=None, city_accuracy=None: {},
+            "build_dashboard_city_observation": lambda audit=None, city_accuracy=None, city_policy_metrics=None: {},
             "get_logic_series_stats": lambda: {},
             "get_logic_series_clean_closed_trade_stats": lambda: {},
             "build_dashboard_focus_center": lambda **kwargs: {
@@ -3883,10 +4067,12 @@ def run_tests():
     candidate_ns = {
         "datetime": datetime,
         "timezone": timezone,
+        "load_audit_data": lambda: {"observed_vs_forecast": []},
         "get_city_accuracy": lambda: {},
+        "get_city_policy_metrics": lambda audit=None: {},
         "load_shadow_city_tracking": lambda: {},
-        "build_dashboard_city_observation": lambda city_accuracy=None: {},
-        "build_dashboard_city_decisions": lambda city_observation=None, city_accuracy=None, shadow_tracking=None: {
+        "build_dashboard_city_observation": lambda audit=None, city_accuracy=None, city_policy_metrics=None: {},
+        "build_dashboard_city_decisions": lambda city_observation=None, city_accuracy=None, shadow_tracking=None, city_policy_metrics=None: {
             "rows": [
                 {
                     "city": "Buenos Aires",
@@ -3928,7 +4114,7 @@ def run_tests():
          {"fired": fire2, "messages_count": len(candidate_messages)})
 
     # Si la ciudad ya no aparece como promote → limpia el flag para permitir re-disparo futuro.
-    candidate_ns["build_dashboard_city_decisions"] = lambda city_observation=None, city_accuracy=None, shadow_tracking=None: {
+    candidate_ns["build_dashboard_city_decisions"] = lambda city_observation=None, city_accuracy=None, shadow_tracking=None, city_policy_metrics=None: {
         "rows": [{"city": "Chicago", "decision": "keep"}]
     }
     exec(get_function_source(module_ast, code_lines, "_compute_city_decisions_for_alerts"), candidate_ns)
