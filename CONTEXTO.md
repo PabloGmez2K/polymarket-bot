@@ -1,10 +1,14 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 6 de abril de 2026 (Sesión 82 — cierre NOAA decouple en rama de revisión, v10.6.11)
-**Sesión 82 (6 abr 2026, Codex):** cierre administrativo de una exploración NOAA en rama separada, sin delta funcional publicado sobre `main`.
-- Se abrió la rama de revisión `codex/noaa-decouple` para aislar un posible cambio de desacople de recolección NOAA respecto a eventos `BUY` y poder compararlo sin pisar el trabajo ya integrado en `main`.
-- Al cierre de la sesión, la rama quedó limpia y sin diferencia efectiva de código frente a `main`/`origin/main`; no se publicó ningún cambio funcional nuevo en `bot.py` ni en `verify_before_deploy.py`.
-- La aportación real de la sesión queda en la trazabilidad del workflow: branch de revisión creado, cierre documentado y fuentes de verdad del repo sincronizadas (`CONTEXTO.md`, `HISTORIAL_SESIONES.md`, `agent_events.jsonl`).
+**Última actualización:** 6 de abril de 2026 (Sesión 82 — diagnóstico estratégico + corrección de modelo + reactivación Dallas, v10.6.11)
+**Sesión 82 (6 abr 2026, Claude + Codex en paralelo):** diagnóstico estratégico completo, validación empírica WU≈NOAA, corrección de sesgo del modelo y reactivación del bot.
+- **Hallazgo clave — WU = NOAA:** verificación manual de 3 fechas en Chicago (KORD): NOAA `daily-summaries/TMAX` es idéntico al daily high de Weather Underground (diferencia ≤1°F por redondeo). No se necesita scraping de WU. La capa NOAA ya existente es la fuente correcta de validación.
+- **Sesgo Open-Meteo confirmado con NOAA:** `observed_vs_forecast` (13 casos en producción): Atlanta `MAE=1.38°C, Bias=+1.38°C`; Chicago `MAE=2.48°C, Bias=+1.40°C`; Dallas `MAE=0.57°C, Bias≈0°C`. Open-Meteo subestima sistemáticamente en Atlanta/Chicago; Dallas está bien calibrado.
+- **Corrección de modelo implementada (`FORECAST_BIAS_C`):** nuevo dict en `bot.py` con `Atlanta: +1.38, Chicago: +1.40, Dallas: 0.0`. Aplicado en `estimate_prob_with_city` como `mu = forecast_max + bias` antes del cálculo de probabilidad. Dallas `EMPIRICAL_SIGMA D0` actualizado `0.21→0.57°C`, `samples D0` `2→3` (desbloquea sigma empírica NOAA). Commits `93c8b2e` + `1daec87`. `verify_before_deploy.py` cierra en **620/620** (8 tests nuevos de bias + sigma).
+- **Filtros de precio endurecidos:** `MIN_PRICE 0.08→0.20`, `MAX_PRICE 0.92→0.80`. Evita entradas en mercados de probabilidad extrema donde el modelo tiene baja resolución y el sesgo relativo es mayor.
+- **Bot reactivado en Railway:** `ACTIVE_TRADING_CITIES=Dallas` (estaba en `NONE` desde shadow mode). `auto_blocked_cities` limpio (Chicago/Dallas/NYC estaban bloqueadas). Bankroll disponible: `$9.21`.
+- **NOAA decoupling (Codex):** `_iter_recent_noaa_cycle_markets()` + `_get_noaa_candidate_dates()` añadidos. El audit NOAA ahora recoge observaciones para mercados escaneados aunque no haya `BUY` asociado, usando `scanned_markets` guardado en `cycle_summary`/`cycles_history`. Acelera la acumulación de muestra ~3-4x sin depender de trades. Los cambios de Codex viajaron junto al commit `1daec87` al estar en el worktree compartido.
+- **Próximo hito:** con `n≥10` Dallas en `observed_vs_forecast`, recalcular bias/sigma y evaluar si Buenos Aires puede ser la segunda ciudad activa.
 
 **Sesión 81 (6 abr 2026, Codex):** simplificación operativa del Control Center integrada y publicada en `main`, sin bump de versión.
 - Se mergearon en cadena 7 PRs aisladas del plan `docs/control-center-simplify-plan.md`: badge de modo sin falsa alarma en shadow/dry, eliminación de la columna `Resolucion` en señales shadow, normalización de `forecast_display` con fallback semántico, supresión de la alerta operativa `city_low_accuracy` en `SHADOW_ONLY/DRY_RUN` moviéndola a nota fija de rendimiento, limpieza de duplicados en dashboard, lenguaje llano en scan/condición y gateo NOAA con mensaje de muestra insuficiente.
@@ -277,9 +281,11 @@ DATA_DIR="/app/data"
 BLOCKED_CITIES="London,Miami,Seattle,Paris,Tel Aviv,Wellington,Toronto,Madrid,Singapore,Ankara,Atlanta"
 ```
 
-### Configuración en código (defaults bot.py v10.6.10):
+### Configuración en código (defaults bot.py v10.6.11, sesión 82):
 ```python
 MIN_EDGE = 15.0%
+MIN_PRICE = 0.20      # sesión 82: subido desde 0.08 — evita mercados extremos
+MAX_PRICE = 0.80      # sesión 82: bajado desde 0.92 — simétrico con MIN_PRICE
 ALLOWED_CONDITIONS = at_or_above,at_or_below
 STOP_LOSS_PCT = -25.0%
 TAKE_PROFIT_PCT = +40.0%
@@ -296,6 +302,8 @@ CITY_BLOCK_WIN_RATE = 25.0%
 LOW_BANKROLL_THRESHOLD = $5.00
 LOW_BANKROLL_RESET_MARGIN = $1.00
 Sigma: empírica por ciudad si n>=3; fallback global D0=2.0 D1=1.9 D2=2.5 D3=3.0; fallback final v10.3 D0=1.2 D1=1.5 D2=2.0 D3=2.5 D4-5=3.0
+FORECAST_BIAS_C: Atlanta=+1.38°C, Chicago=+1.40°C, Dallas=0.0 (sesión 82, NOAA n=5/5/3)
+EMPIRICAL_SIGMA Dallas D0: 0.57°C (n=3, NOAA sesión 82)
 Schedule: 08:00, 16:00, 23:00 UTC
 ```
 
