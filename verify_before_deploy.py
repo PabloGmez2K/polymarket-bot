@@ -23,6 +23,7 @@ import types
 import json
 import base64
 import tempfile
+import urllib.error
 from datetime import date, datetime, timezone, timedelta
 
 passed = 0
@@ -2170,6 +2171,69 @@ def run_tests():
                 os.remove(tmp_agent_events)
             except PermissionError:
                 pass
+
+        forecast_calls = {"count": 0}
+        forecast_payload = {
+            "daily": {
+                "time": ["2026-04-07"],
+                "temperature_2m_max": [24.0],
+                "temperature_2m_min": [18.0],
+                "precipitation_probability_max": [15],
+                "precipitation_sum": [0.3],
+            }
+        }
+        def _forecast_urlopen_cached(url, timeout=30):
+            forecast_calls["count"] += 1
+            return types.SimpleNamespace(read=lambda: json.dumps(forecast_payload).encode("utf-8"))
+
+        forecast_ns = {
+            "json": json,
+            "time": types.SimpleNamespace(time=lambda: 1000.0, sleep=lambda seconds: None),
+            "urllib": types.SimpleNamespace(
+                request=types.SimpleNamespace(urlopen=_forecast_urlopen_cached),
+                error=types.SimpleNamespace(HTTPError=urllib.error.HTTPError),
+            ),
+            "log": types.SimpleNamespace(warning=lambda *args, **kwargs: None),
+            "FORECAST_CACHE_TTL_SECONDS": 900,
+            "FORECAST_STALE_IF_ERROR_SECONDS": 21600,
+            "FORECAST_RATE_LIMIT_COOLDOWN_SECONDS": 120,
+        }
+        exec(get_function_source(module_ast, code_lines, "get_forecast"), forecast_ns)
+        cached_first = forecast_ns["get_forecast"](41.9, -87.6)
+        cached_second = forecast_ns["get_forecast"](41.9, -87.6)
+        test("get_forecast: cachea la segunda llamada",
+             forecast_calls["count"] == 1 and cached_first["2026-04-07"]["temp_max"] == cached_second["2026-04-07"]["temp_max"],
+             {"calls": forecast_calls["count"], "first": cached_first, "second": cached_second})
+
+        forecast_time = {"now": 2000.0}
+        forecast_rate_calls = {"count": 0}
+        def _forecast_urlopen_rate_limited(url, timeout=30):
+            forecast_rate_calls["count"] += 1
+            if forecast_rate_calls["count"] == 1:
+                return types.SimpleNamespace(read=lambda: json.dumps(forecast_payload).encode("utf-8"))
+            raise urllib.error.HTTPError(url, 429, "Too Many Requests", {"Retry-After": "120"}, None)
+
+        forecast_rate_ns = {
+            "json": json,
+            "time": types.SimpleNamespace(time=lambda: forecast_time["now"], sleep=lambda seconds: None),
+            "urllib": types.SimpleNamespace(
+                request=types.SimpleNamespace(urlopen=_forecast_urlopen_rate_limited),
+                error=types.SimpleNamespace(HTTPError=urllib.error.HTTPError),
+            ),
+            "log": types.SimpleNamespace(warning=lambda *args, **kwargs: None),
+            "FORECAST_CACHE_TTL_SECONDS": 10,
+            "FORECAST_STALE_IF_ERROR_SECONDS": 300,
+            "FORECAST_RATE_LIMIT_COOLDOWN_SECONDS": 120,
+        }
+        exec(get_function_source(module_ast, code_lines, "get_forecast"), forecast_rate_ns)
+        fresh_rate = forecast_rate_ns["get_forecast"](33.6, -84.4)
+        forecast_time["now"] = 2015.0
+        stale_rate = forecast_rate_ns["get_forecast"](33.6, -84.4)
+        test("get_forecast: usa cache stale si llega HTTP 429",
+             forecast_rate_calls["count"] == 2
+             and stale_rate["2026-04-07"]["temp_max"] == fresh_rate["2026-04-07"]["temp_max"]
+             and forecast_rate_ns.get("_forecast_rate_limited_until", 0) >= 2120.0,
+             {"calls": forecast_rate_calls["count"], "cooldown": forecast_rate_ns.get("_forecast_rate_limited_until", 0), "stale": stale_rate})
 
         pager_calls = []
         pager_ns = {

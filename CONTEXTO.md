@@ -1,6 +1,12 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 7 de abril de 2026 (Sesión 87 — hardening de `agent_events`, local, verify 637/637)
+**Última actualización:** 7 de abril de 2026 (Sesión 88 — hardening de forecast HTTP, local, verify 639/639)
+**Sesión 88 (7 abr 2026, Codex):** mitigación operativa del proveedor forecast, sin tocar trading core, NOAA fetch core ni scheduler.
+- **Hallazgo live:** los ciclos estaban sufriendo `timeout`, `429 Too Many Requests` y `502` al consultar Open-Meteo; además el mismo ciclo reutilizaba `get_forecast()` desde auditoría legacy y luego desde el escaneo principal, amplificando los hits al proveedor.
+- **Hardening HTTP:** `get_forecast()` ahora comparte caché en proceso por `lat/lon`, reutiliza respuestas frescas con TTL, respeta un cooldown explícito al detectar `HTTP 429` y puede caer a cache `stale` acotada cuando el proveedor rate-limita o falla.
+- **Impacto esperado:** menos fan-out duplicado dentro del ciclo, menos martilleo tras un `429`, y más probabilidad de que audit + scan sigan operando con una única respuesta reciente en vez de reconsultar la misma ciudad varias veces.
+- **Validación local:** `python verify_before_deploy.py` cierra en **639/639** con tests nuevos para cachear la segunda llamada y reutilizar `stale cache` cuando aparece `HTTP 429`.
+
 **Sesión 87 (7 abr 2026, Codex):** hardening puntual del scoreboard live, sin tocar trading core, NOAA fetch core ni scheduler.
 - **Fix de compatibilidad live:** `load_agent_events()` ya no falla al leer sesiones serializadas como texto tipo `session_72`; ahora extrae el sufijo numérico, lo normaliza a entero y mantiene la deduplicación por clave estable.
 - **Impacto operativo:** desaparece el warning repetido `invalid literal for int() with base 10: 'session_72'` que estaba ensuciando logs y podía dejar cojo el bloque de eventos/agentes del dashboard.

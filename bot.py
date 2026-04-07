@@ -1,5 +1,6 @@
 import urllib.request
 import urllib.parse
+import urllib.error
 import json
 import base64
 import re
@@ -115,6 +116,9 @@ WIN_RATE_LOW = float(os.getenv("WIN_RATE_LOW", "30.0"))
 WIN_RATE_HIGH = float(os.getenv("WIN_RATE_HIGH", "50.0"))
 LOW_BANKROLL_THRESHOLD = float(os.getenv("LOW_BANKROLL_THRESHOLD", "5.0"))  # v10.6: alerta para recargar
 LOW_BANKROLL_RESET_MARGIN = float(os.getenv("LOW_BANKROLL_RESET_MARGIN", "1.0"))  # v10.6: salir de zona roja con margen
+FORECAST_CACHE_TTL_SECONDS = int(os.getenv("FORECAST_CACHE_TTL_SECONDS", "900"))
+FORECAST_STALE_IF_ERROR_SECONDS = int(os.getenv("FORECAST_STALE_IF_ERROR_SECONDS", "21600"))
+FORECAST_RATE_LIMIT_COOLDOWN_SECONDS = int(os.getenv("FORECAST_RATE_LIMIT_COOLDOWN_SECONDS", "120"))
 # v10.5.2: City accuracy tracker
 CITY_MIN_TRADES_FOR_BLOCK = int(os.getenv("CITY_MIN_TRADES_FOR_BLOCK", "3"))
 CITY_BLOCK_WIN_RATE = float(os.getenv("CITY_BLOCK_WIN_RATE", "25.0"))
@@ -10369,7 +10373,35 @@ def get_coordinates_fallback(city_name):
 
 
 def get_forecast(lat, lon, retries=3, delay=5):
-    """GET a Open-Meteo con reintentos automáticos."""
+    """GET a Open-Meteo con reintentos automaticos."""
+    cache_ttl = max(0, int(globals().get("FORECAST_CACHE_TTL_SECONDS", 900) or 0))
+    stale_grace = max(cache_ttl, int(globals().get("FORECAST_STALE_IF_ERROR_SECONDS", 21600) or 0))
+    cooldown_floor = max(delay, int(globals().get("FORECAST_RATE_LIMIT_COOLDOWN_SECONDS", 120) or 0))
+    cache_store = globals().setdefault("_forecast_http_cache", {})
+    cache_key = f"{float(lat):.4f},{float(lon):.4f}"
+    now_ts = time.time()
+    cached_entry = cache_store.get(cache_key)
+    stale_data = None
+    if isinstance(cached_entry, dict):
+        cached_at = float(cached_entry.get("fetched_at", 0) or 0)
+        cached_data = cached_entry.get("data")
+        cache_age = max(0.0, now_ts - cached_at)
+        if cached_data:
+            if cache_ttl and cache_age <= cache_ttl:
+                return cached_data
+            if stale_grace and cache_age <= stale_grace:
+                stale_data = cached_data
+
+    cooldown_until = float(globals().get("_forecast_rate_limited_until", 0.0) or 0.0)
+    if now_ts < cooldown_until:
+        cooldown_left = max(1, int(round(cooldown_until - now_ts)))
+        if stale_data is not None:
+            log.warning(
+                f"Forecast rate limited: usando cache stale ({cooldown_left}s de cooldown activo)"
+            )
+            return stale_data
+        raise RuntimeError(f"Forecast rate limited: cooldown activo {cooldown_left}s")
+
     url = (
         f"https://api.open-meteo.com/v1/forecast"
         f"?latitude={lat}&longitude={lon}"
@@ -10391,14 +10423,47 @@ def get_forecast(lat, lon, retries=3, delay=5):
                     "rain_prob": daily["precipitation_probability_max"][i],
                     "rain_mm": daily["precipitation_sum"][i],
                 }
+            cache_store[cache_key] = {"fetched_at": time.time(), "data": result}
             return result
+        except urllib.error.HTTPError as e:
+            last_error = e
+            if getattr(e, "code", None) == 429:
+                retry_after = ""
+                try:
+                    retry_after = str(e.headers.get("Retry-After", "") or "").strip()
+                except Exception:
+                    retry_after = ""
+                wait_seconds = cooldown_floor
+                if retry_after.isdigit():
+                    wait_seconds = max(wait_seconds, int(retry_after))
+                globals()["_forecast_rate_limited_until"] = max(
+                    float(globals().get("_forecast_rate_limited_until", 0.0) or 0.0),
+                    time.time() + wait_seconds,
+                )
+                if stale_data is not None:
+                    log.warning(
+                        f"Forecast rate limited (HTTP 429): usando cache stale y enfriando {wait_seconds}s"
+                    )
+                    return stale_data
+                raise RuntimeError(f"Forecast rate limited (HTTP 429): cooldown {wait_seconds}s")
+            if attempt < retries - 1:
+                wait_seconds = delay * (2 ** attempt)
+                log.warning(
+                    f"Forecast error (intento {attempt+1}/{retries}): {e} - reintentando en {wait_seconds}s"
+                )
+                time.sleep(wait_seconds)
         except Exception as e:
             last_error = e
             if attempt < retries - 1:
-                log.warning(f"Forecast error (intento {attempt+1}/{retries}): {e} — reintentando en {delay}s")
-                time.sleep(delay)
+                wait_seconds = delay * (2 ** attempt)
+                log.warning(
+                    f"Forecast error (intento {attempt+1}/{retries}): {e} - reintentando en {wait_seconds}s"
+                )
+                time.sleep(wait_seconds)
+    if stale_data is not None:
+        log.warning("Forecast error persistente: usando cache stale")
+        return stale_data
     raise last_error
-
 
 # =============================================================
 # FUNCIONES: ÓRDENES

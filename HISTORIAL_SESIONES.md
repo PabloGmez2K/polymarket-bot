@@ -88,6 +88,7 @@ Comandos útiles:
 | 2026-04-06 | Explícita | Sesión 82 | `93c8b2e` `1daec87` | Diagnóstico estratégico completo + corrección de modelo + reactivación Dallas. (1) Verificación empírica: NOAA `daily-summaries/TMAX` = WU daily high exactamente para KORD — no se necesita scraping WU. (2) Sesgo Open-Meteo medido con 13 casos NOAA en producción: Atlanta `Bias=+1.38°C`, Chicago `Bias=+1.40°C`, Dallas `Bias≈0`. (3) `FORECAST_BIAS_C` implementado en `estimate_prob_with_city` (`mu = forecast_max + bias`). (4) Dallas sigma D0 `0.21→0.57°C`, samples D0 `2→3`. (5) `MIN_PRICE 0.08→0.20`, `MAX_PRICE 0.92→0.80`. (6) `ACTIVE_TRADING_CITIES=Dallas` en Railway (estaba `NONE`), `auto_blocked_cities` limpio. (7) NOAA decoupling (Codex): `_iter_recent_noaa_cycle_markets` + `_get_noaa_candidate_dates` + `scanned_markets` en cycle_summary — recoge observaciones sin BUY. Suite `620/620` (+8 tests). |
 | 2026-04-06 | Explícita | Sesión 85 | `—` | Política local de ciudades `shadow-first`: `sync_city_policy_state()` vuelve a degradar `active/canary -> shadow`, `blocked` queda reservado a descartes reales, y el overlay legado `auto_blocked_cities[action=auto_block]` se migra al vuelo a `auto_shadow_cities` para evitar casos tipo Dallas. Dashboard/copy distinguen `Sin muestra` vs `Sin NOAA` y `Descartes reales` vs `Shadow degradada`. `verify_before_deploy.py` cierra en `628/628`; falta push/deploy. |
 | 2026-04-07 | Explícita | Sesión 87 | `—` | Hardening local de `agent_events`: `load_agent_events()` acepta sesiones serializadas como `session_72`, extrae el sufijo numérico, mantiene la deduplicación y evita el warning live `invalid literal for int()`. `verify_before_deploy.py` amplía cobertura funcional y cierra en `637/637`. |
+| 2026-04-07 | Explícita | Sesión 88 | `—` | Mitigación local de Open-Meteo rate limit: `get_forecast()` añade caché por `lat/lon`, fallback `stale` acotado y cooldown explícito al detectar `HTTP 429`, recortando el fan-out duplicado entre auditoría legacy y escaneo principal. `verify_before_deploy.py` amplía cobertura y cierra en `639/639`. |
 
 ---
 
@@ -2450,6 +2451,29 @@ Regla recomendada:
 - `python verify_before_deploy.py` -> `637/637`
 - se añade un test funcional con `session="session_72"` para fijar la compatibilidad y asegurar que la carga sigue ordenando y deduplicando correctamente
 - impacto esperado: desaparece el warning repetido de `agent_events` en logs y el scoreboard/dashboard vuelve a poder leer esos eventos sin ruido
+
+## Sesión 88 — Hardening HTTP del forecast provider (7 abr 2026)
+
+**Disparador:** tras desaparecer el warning de `agent_events`, los logs live muestran el siguiente cuello de botella real: `Forecast error` con `timeout`, `429 Too Many Requests` y algún `502` durante el ciclo de las `08:43 UTC`.
+
+**Hallazgo operativo:**
+
+- el mismo ciclo reutiliza `get_forecast()` desde `audit_check_open_meteo_forecast_drift()` y luego otra vez desde el escaneo principal;
+- eso duplica hits al mismo endpoint/city cuando el proveedor ya está inestable o rate-limited;
+- el wrapper anterior reintentaba siempre con espera fija y no distinguía `HTTP 429`.
+
+**Implementación local:**
+
+- `get_forecast()` añade caché en proceso por `lat/lon`;
+- si la respuesta sigue fresca, la reutiliza directamente;
+- si aparece `HTTP 429`, registra un cooldown explícito y evita seguir martilleando el proveedor;
+- si existe una respuesta reciente pero ya no fresca, puede reutilizarla como `stale cache` controlada cuando el fallo es del proveedor.
+
+**Validación y estado:**
+
+- `python verify_before_deploy.py` -> `639/639`
+- se añaden tests funcionales para asegurar que la segunda llamada usa caché y que un `HTTP 429` cae a `stale cache` en vez de romper todo el flujo
+- no se toca trading, NOAA, scheduler ni sizing; el cambio queda acotado al wrapper HTTP de forecast
 
 ## Sesión 85 — Política de ciudades shadow-first y migración Dallas legacy (6 abr 2026)
 
