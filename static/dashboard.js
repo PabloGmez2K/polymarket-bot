@@ -1,4 +1,25 @@
 document.addEventListener("DOMContentLoaded", () => {
+  const detailsBlocks = Array.from(document.querySelectorAll(".layer-toggle"));
+  detailsBlocks.forEach((block, index) => {
+    const key = `dashboard:details:${index}`;
+    try {
+      const saved = window.localStorage.getItem(key);
+      if (saved === "open") {
+        block.open = true;
+      }
+    } catch (error) {
+      // Ignore storage errors; the dashboard should still work without persistence.
+    }
+
+    block.addEventListener("toggle", () => {
+      try {
+        window.localStorage.setItem(key, block.open ? "open" : "closed");
+      } catch (error) {
+        // Ignore storage errors; the dashboard should still work without persistence.
+      }
+    });
+  });
+
   const shells = Array.from(document.querySelectorAll("[data-tab-shell]"));
   if (!shells.length) {
     return;

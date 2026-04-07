@@ -1165,6 +1165,29 @@ th {
   margin-top: 18px;
 }
 
+.city-groups {
+  display: grid;
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.city-group-card {
+  padding: 18px;
+  border-radius: 20px;
+  background: rgba(247, 250, 252, 0.82);
+  border: 1px solid rgba(33, 52, 71, 0.08);
+}
+
+.city-group-head {
+  margin-bottom: 10px;
+}
+
+.city-group-note {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
 .city-ranking-table tbody tr {
   transition: background 140ms ease, transform 140ms ease;
 }

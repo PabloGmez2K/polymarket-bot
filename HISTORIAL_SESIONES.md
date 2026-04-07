@@ -31,6 +31,10 @@ Comandos útiles:
 
 | Fecha | Tipo | Referencia | Commits clave | Resumen |
 |------|------|------------|---------------|---------|
+| 2026-04-07 | Explícita | Sesión 92 | local | Se afinan y externalizan los umbrales de `Alertas activas` para la era NOAA-verificada: ciudades malas exigen `n>=5`, activas sin NOAA útil solo alertan por debajo de 3 casos, el join shadow→NOAA pide 20 señales y 10 observaciones NOAA, y el WR shadow no avisa hasta 8 resueltas. |
+| 2026-04-07 | Explícita | Sesión 91 | local | El bloque `Alertas activas` deja de priorizar `accuracy baja` histórica y pasa a usar señales de la era NOAA-verificada: ciudades con NOAA-verificado malo, ciudades activas sin NOAA interpretable y problemas del join shadow→NOAA, manteniendo el legacy solo como nota contextual. |
+| 2026-04-07 | Explícita | Sesión 90 | local | El bloque `Estado por ciudad` del dashboard se reorganiza en grupos semánticos (`Operativas y candidatas`, `Shadow observadas`, `Sin NOAA util`, `Fuera de observacion`) con una tabla por grupo y `main_reason` visible bajo cada ciudad para mejorar lectura humana y consumo por LLM. |
+| 2026-04-07 | Explícita | Sesión 89 | local | `blocked` vuelve a reservarse para ciudades sin NOAA observable; las ciudades con NOAA configurable dejan de quedar fuera del scan por listas/overlays viejos y el dashboard separa rendimiento NOAA-verificado vs legado, además de recordar el estado abierto de `Salud del sistema`. |
 | 2026-03-21 | Explícita | Sesión 2 | `bddcab8` | Bot base con edge detection, backtest y bankroll management. |
 | 2026-03-21 | Explícita | Sesión 3 | `f97702e` | Instalación `pip`, CLOB API, autenticación y primera orden de prueba. |
 | 2026-03-21 | Inferida | Iteración v3-v7 | `e8d11c0` `047f7e4` `5ac83b9` `c32c34f` `9e51025` `6973b74` `d5bf5d8` | Filtros de precio, scheduler, alertas Telegram, dashboard, cartera, órdenes enriquecidas y decision log. |

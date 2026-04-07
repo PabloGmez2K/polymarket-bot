@@ -301,7 +301,16 @@
                 <h2>Rendimiento por ciudad</h2>
               </div>
             </div>
-            {% if dashboard.top_cities %}
+
+            <div class="card-head">
+              <div>
+                <p class="section-kicker">Actual</p>
+                <h3>Rendimiento NOAA-verificado</h3>
+              </div>
+              <span class="badge badge-good">{{ dashboard.city_accuracy_views.verified_count }}</span>
+            </div>
+            <div class="notice notice-muted">{{ dashboard.city_accuracy_views.verified_note }}</div>
+            {% if dashboard.city_accuracy_views.verified_rows %}
             <div class="table-wrap">
               <table>
                 <thead>
@@ -314,7 +323,7 @@
                   </tr>
                 </thead>
                 <tbody>
-                  {% for city in dashboard.top_cities %}
+                  {% for city in dashboard.city_accuracy_views.verified_rows %}
                   <tr>
                     <td>{{ city.city }}</td>
                     <td>{{ city.trades }}</td>
@@ -327,7 +336,44 @@
               </table>
             </div>
             {% else %}
-            <div class="notice notice-muted">Sin historico suficiente por ciudad.</div>
+            <div class="notice notice-muted">Todavia no hay cierres NOAA-verificados por ciudad para leer rendimiento nuevo.</div>
+            {% endif %}
+
+            <div class="card-head">
+              <div>
+                <p class="section-kicker">Historico</p>
+                <h3>Legado pre-NOAA</h3>
+              </div>
+              <span class="badge badge-muted">{{ dashboard.city_accuracy_views.legacy_count }}</span>
+            </div>
+            <div class="notice notice-muted">{{ dashboard.city_accuracy_views.legacy_note }}</div>
+            {% if dashboard.city_accuracy_views.legacy_rows %}
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Ciudad</th>
+                    <th>Trades</th>
+                    <th>WR</th>
+                    <th>PnL</th>
+                    <th>Base</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for city in dashboard.city_accuracy_views.legacy_rows %}
+                  <tr>
+                    <td>{{ city.city }}</td>
+                    <td>{{ city.trades }}</td>
+                    <td>{{ city.win_rate }}%</td>
+                    <td class="{{ 'good' if city.pnl >= 0 else 'bad' }}">${{ '%+.2f'|format(city.pnl) }}</td>
+                    <td><span class="badge badge-muted">{{ city.basis_label }}</span></td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            {% else %}
+            <div class="notice notice-muted">No hay historico legacy visible por ciudad.</div>
             {% endif %}
 
             {% if dashboard.alerts.flagged_cities_suppressed and dashboard.alerts.flagged_history_note %}
@@ -345,53 +391,75 @@
               <span class="badge badge-accent">{{ dashboard.city_decisions.ranking_rows|length }} seguidas</span>
             </div>
 
-            <div class="table-wrap city-ranking-table-wrap">
-              <table class="city-ranking-table city-gates">
-                <thead>
-                  <tr>
-                    <th>Ciudad</th>
-                    <th>Historial</th>
-                    <th>Shadow</th>
-                    <th>NOAA</th>
-                    <th>Bias</th>
-                    <th>Estado</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {% for row in dashboard.city_decisions.ranking_rows %}
-                  <tr class="city-ranking-row-{{ row.badge|default('muted') }}">
-                    <td><strong>{{ row.city }}</strong></td>
-                    <td>
-                      <span class="badge badge-{{ row.gate_a.badge }}" title="{{ row.gate_a.detail }}">
-                        {{ row.gate_a.label }}
-                      </span>
-                    </td>
-                    <td>
-                      <span class="badge badge-{{ row.gate_b.badge }}" title="{{ row.gate_b.detail }}">
-                        {{ row.gate_b.label }}
-                      </span>
-                    </td>
-                    <td>
-                      <span class="badge badge-{{ row.gate_c.badge }}" title="{{ row.gate_c.detail }}">
-                        {{ row.gate_c.label }}
-                      </span>
-                    </td>
-                    <td>
-                      <span class="badge badge-{{ row.forecast_bias_badge }}" title="{{ row.forecast_bias_detail }}">
-                        {{ row.forecast_bias_display }}
-                      </span>
-                    </td>
-                    <td><span class="badge badge-{{ row.state_badge }}">{{ row.state_label }}</span></td>
-                  </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
+            <div class="city-groups">
+              {% for section in dashboard.city_decisions.grouped_sections %}
+              {% if section.rows %}
+              <section class="city-group-card">
+                <div class="card-head city-group-head">
+                  <div>
+                    <p class="section-kicker">{{ section.id|replace('_', ' ') }}</p>
+                    <h3>{{ section.label }}</h3>
+                  </div>
+                  <span class="badge badge-{{ section.badge }}">{{ section.count }}</span>
+                </div>
+                <p class="city-group-note">{{ section.note }}</p>
+                <div class="table-wrap city-ranking-table-wrap">
+                  <table class="city-ranking-table city-gates">
+                    <thead>
+                      <tr>
+                        <th>Ciudad</th>
+                        <th>Historial</th>
+                        <th>Shadow</th>
+                        <th>NOAA</th>
+                        <th>Bias</th>
+                        <th>Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for row in section.rows %}
+                      <tr class="city-ranking-row-{{ row.badge|default('muted') }}">
+                        <td>
+                          <strong>{{ row.city }}</strong>
+                          <span class="table-note">{{ row.main_reason }}</span>
+                        </td>
+                        <td>
+                          <span class="badge badge-{{ row.gate_a.badge }}" title="{{ row.gate_a.detail }}">
+                            {{ row.gate_a.label }}
+                          </span>
+                        </td>
+                        <td>
+                          <span class="badge badge-{{ row.gate_b.badge }}" title="{{ row.gate_b.detail }}">
+                            {{ row.gate_b.label }}
+                          </span>
+                        </td>
+                        <td>
+                          <span class="badge badge-{{ row.gate_c.badge }}" title="{{ row.gate_c.detail }}">
+                            {{ row.gate_c.label }}
+                          </span>
+                        </td>
+                        <td>
+                          <span class="badge badge-{{ row.forecast_bias_badge }}" title="{{ row.forecast_bias_detail }}">
+                            {{ row.forecast_bias_display }}
+                          </span>
+                        </td>
+                        <td>
+                          <span class="badge badge-{{ row.state_badge }}">{{ row.state_label }}</span>
+                        </td>
+                      </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+              {% endif %}
+              {% endfor %}
             </div>
 
             <div class="notice notice-muted city-gates-glossary">
               Historial: Limpio (trades sanos) · Malo (WR/PnL bajos) · Sin datos (sin cierres).
               Shadow: Lista (cumple regla canary) · Construyendo (acumulando señales) · Vacío (sin actividad).
               NOAA: Interpretable (muestra suficiente) · Parcial (acumulando) · Sin muestra (configurado sin casos) · Sin NOAA (no configurado).
+              Bloqueada: fuera de observación porque no hay NOAA configurado utilizable.
             </div>
 
             {% if dashboard.city_observation.blocked_rows %}

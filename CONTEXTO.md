@@ -1,6 +1,34 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 7 de abril de 2026 (Sesión 88 — hardening de forecast HTTP, local, verify 639/639)
+**Última actualización:** 7 de abril de 2026 (Sesión 92 — umbrales de alertas NOAA afinados para deploy, local, verify 639/639)
+**Sesión 92 (7 abr 2026, Codex):** afinado final de umbrales del dashboard para reducir ruido en la fase NOAA-verificada temprana, sin tocar trading core, NOAA fetch core ni scheduler.
+- **Umbrales explícitos de alertas:** `bot.py` añade `ALERT_VERIFIED_BAD_MIN_TRADES`, `ALERT_VERIFIED_BAD_MAX_WIN_RATE`, `ALERT_ACTIVE_NOAA_MIN_CASES`, `ALERT_SHADOW_JOIN_MIN_SIGNALS`, `ALERT_SHADOW_JOIN_MIN_NOAA_SAMPLE`, `ALERT_SHADOW_WR_MIN_RESOLVED` y `ALERT_SHADOW_WR_TARGET` para que `Alertas activas` ya no dependa de números mágicos enterrados en `get_dashboard_alert_summary()`.
+- **Defaults más prudentes para esta fase:** por defecto una ciudad `NOAA-verificado malo` exige `n>=5`; la alerta de activas sin NOAA interpretable solo aparece si la ciudad sigue por debajo de `3` casos observados; `Shadow sin join NOAA útil` exige `>=20` señales shadow y `>=10` observaciones NOAA globales; y el `WR shadow observado` no se alerta hasta `n>=8` resueltas.
+- **Objetivo operativo:** mantener visibilidad sobre cuellos de botella reales de la era NOAA-verificada sin sobrerreaccionar a muestras todavía pequeñas o transitorias.
+- **Validación local:** `python verify_before_deploy.py` cierra en **639/639**.
+
+**Sesión 91 (7 abr 2026, Codex):** actualización de alertas del dashboard hacia métricas NOAA-verificadas y cuellos de botella reales, sin tocar trading core, NOAA fetch core ni scheduler.
+- **Alertas activas reinterpretadas:** `get_dashboard_alert_summary()` deja de usar `Ciudades con accuracy baja` como señal operativa principal y pasa a priorizar `Ciudades con NOAA-verificado malo`, `Ciudades activas sin NOAA interpretable`, `Shadow sin join NOAA util` o `WR shadow observado por debajo de objetivo`, además de las alertas ya existentes de `signals`, `pending exits` y `bankroll`.
+- **Legacy separado del presente:** la antigua capa de ciudades con WR histórico malo sigue disponible como `legacy_flagged_cities` y `flagged_history_note`, pero ya no manda sobre `active_items`. El histórico legacy queda como contexto congelado, no como alarma operativa de primer nivel.
+- **Focus center alineado:** `build_dashboard_focus_center()` cambia el lenguaje de `accuracy baja` a `NOAA-verificado` cuando usa `flagged_cities` para explicar el limitador dominante o la acción del día.
+- **Compatibilidad con el harness:** `get_dashboard_alert_summary()` añade fallbacks cuando los tests funcionales ejecutan el builder en un namespace parcial sin ciertos helpers/constantes cargados.
+- **Validación local:** `python verify_before_deploy.py` cierra en **639/639**.
+
+**Sesión 90 (7 abr 2026, Codex):** pasada de legibilidad del dashboard para lectura humana + LLM, sin tocar trading core, NOAA fetch core ni scheduler.
+- **Estado por ciudad agrupado:** `build_dashboard_city_decisions()` expone ahora `grouped_sections` con cuatro zonas explícitas: `Operativas y candidatas`, `Shadow observadas`, `Sin NOAA util` y `Fuera de observacion`.
+- **HTML más escaneable:** `templates/dashboard.html` deja de mostrar una tabla monolítica única para `Estado por ciudad` y renderiza una tabla por grupo, cada una con conteo y nota corta. Cada fila añade además `main_reason` visible bajo el nombre de la ciudad para que un operador o un LLM pueda leer la causa principal sin inferirla.
+- **CSS de soporte:** `static/dashboard.css` añade `city-groups`, `city-group-card`, `city-group-head` y `city-group-note` para que el bloque siga siendo legible sin romper el look actual.
+- **Objetivo cumplido:** el dashboard ya separa mejor contexto operativo, observación activa, ciudades sin NOAA útil y bloqueos reales, reduciendo mezcla semántica en una sola tabla.
+- **Validación local:** `python verify_before_deploy.py` cierra en **639/639**.
+
+**Sesión 89 (7 abr 2026, Codex):** limpieza final de semántica `blocked` + separación actual/histórico en dashboard, sin tocar trading core, NOAA fetch core ni scheduler.
+- **Blocked vuelve a significar “no observar”:** `is_city_blocked()` solo bloquea operativamente si la ciudad está en `BLOCKED_CITIES` **y** no tiene NOAA utilizable (`noaa_station_id`/`noaa_daily_station_id` o entrada explícita en `OBSERVED_AUDIT_CITIES`). Ciudades con NOAA configurable pero descartadas en listas viejas dejan de quedar fuera del scan/observación y vuelven a `shadow`.
+- **Overlays legacy neutralizados:** `get_effective_city_mode()` ya no trata `auto_blocked_cities` como bloqueo duro cuando la ciudad sí puede observarse con NOAA; en esos casos la resuelve como `shadow`. El bloqueo efectivo queda reservado a casos sin observabilidad NOAA.
+- **Dashboard alineado con la nueva semántica:** `build_dashboard_city_observation()` deja de presentar como “bloqueadas” ciudades con NOAA configurado, actualiza el detalle textual de bloqueo a “sin NOAA configurado”, y `build_dashboard_city_decisions()` filtra `auto_state.blocked_rows` por bloqueo efectivo real.
+- **Lectura actual vs legado visible:** el bloque `Rendimiento por ciudad` ya separa `Rendimiento NOAA-verificado` de `Legado pre-NOAA`, para que la operativa nueva no quede mezclada con la era previa.
+- **UX:** el Bloque 3 (`Salud del sistema`) recuerda su estado abierto/cerrado entre auto-refreshes del dashboard.
+- **Validación local:** `python verify_before_deploy.py` cierra en **639/639**.
+
 **Sesión 88 (7 abr 2026, Codex):** mitigación operativa del proveedor forecast, sin tocar trading core, NOAA fetch core ni scheduler.
 - **Hallazgo live:** los ciclos estaban sufriendo `timeout`, `429 Too Many Requests` y `502` al consultar Open-Meteo; además el mismo ciclo reutilizaba `get_forecast()` desde auditoría legacy y luego desde el escaneo principal, amplificando los hits al proveedor.
 - **Hardening HTTP:** `get_forecast()` ahora comparte caché en proceso por `lat/lon`, reutiliza respuestas frescas con TTL, respeta un cooldown explícito al detectar `HTTP 429` y puede caer a cache `stale` acotada cuando el proveedor rate-limita o falla.

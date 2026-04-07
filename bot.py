@@ -129,6 +129,13 @@ SHADOW_CANARY_MIN_SUPPORT = int(os.getenv("SHADOW_CANARY_MIN_SUPPORT", "2"))
 ALLOWLIST_REMOVE_MIN_TRADES = int(os.getenv("ALLOWLIST_REMOVE_MIN_TRADES", str(CITY_MIN_TRADES_FOR_BLOCK)))
 ALLOWLIST_REMOVE_MAX_WIN_RATE = float(os.getenv("ALLOWLIST_REMOVE_MAX_WIN_RATE", str(CITY_BLOCK_WIN_RATE)))
 ALLOWLIST_REMOVE_MAX_PNL = float(os.getenv("ALLOWLIST_REMOVE_MAX_PNL", "0.0"))
+ALERT_VERIFIED_BAD_MIN_TRADES = int(os.getenv("ALERT_VERIFIED_BAD_MIN_TRADES", "5"))
+ALERT_VERIFIED_BAD_MAX_WIN_RATE = float(os.getenv("ALERT_VERIFIED_BAD_MAX_WIN_RATE", str(CITY_BLOCK_WIN_RATE)))
+ALERT_ACTIVE_NOAA_MIN_CASES = int(os.getenv("ALERT_ACTIVE_NOAA_MIN_CASES", "3"))
+ALERT_SHADOW_JOIN_MIN_SIGNALS = int(os.getenv("ALERT_SHADOW_JOIN_MIN_SIGNALS", "20"))
+ALERT_SHADOW_JOIN_MIN_NOAA_SAMPLE = int(os.getenv("ALERT_SHADOW_JOIN_MIN_NOAA_SAMPLE", "10"))
+ALERT_SHADOW_WR_MIN_RESOLVED = int(os.getenv("ALERT_SHADOW_WR_MIN_RESOLVED", "8"))
+ALERT_SHADOW_WR_TARGET = float(os.getenv("ALERT_SHADOW_WR_TARGET", "45.0"))
 # Cutoff de stats por ciudad: "Dallas=2026-04-06,Chicago=2026-03-01"
 # Trades cerrados ANTES de la fecha indicada se ignoran en get_city_accuracy().
 CITY_STATS_CUTOFF: dict[str, str] = {}
@@ -231,7 +238,26 @@ def get_min_days_ahead():
 
 def is_city_blocked(city):
     """Devuelve True si la ciudad está bloqueada operativamente."""
-    return city.strip().lower() in BLOCKED_CITIES if city else False
+    city = str(city or "").strip()
+    if not city:
+        return False
+    observed_proxy_helper = globals().get("_city_has_observed_proxy")
+    has_observed_proxy = observed_proxy_helper(city) if callable(observed_proxy_helper) else False
+    return city.lower() in BLOCKED_CITIES and not has_observed_proxy
+
+
+def _city_has_observed_proxy(city):
+    """True si la ciudad tiene NOAA configurado y por tanto conviene seguir observándola."""
+    city = str(city or "").strip()
+    if not city:
+        return False
+    resolution_meta = RESOLUTION_ICAO.get(city, {}) if isinstance(globals().get("RESOLUTION_ICAO"), dict) else {}
+    if city in OBSERVED_AUDIT_CITIES:
+        return True
+    return bool(
+        resolution_meta.get("noaa_station_id")
+        or resolution_meta.get("noaa_daily_station_id")
+    )
 
 
 def get_min_days_for_city(city):
@@ -992,6 +1018,8 @@ def get_effective_city_mode(city, policy_state=None):
     city = str(city or "").strip()
     if not city:
         return "shadow"
+    observed_proxy_helper = globals().get("_city_has_observed_proxy")
+    has_observed_proxy = observed_proxy_helper(city) if callable(observed_proxy_helper) else False
     if is_city_blocked(city):
         return "blocked"
     policy_state = _normalize_city_policy_state(policy_state or load_city_policy_state())
@@ -999,7 +1027,7 @@ def get_effective_city_mode(city, policy_state=None):
     auto_shadow = policy_state.get("auto_shadow_cities", {}) if isinstance(policy_state, dict) else {}
     auto_canary = policy_state.get("auto_canary_cities", {}) if isinstance(policy_state, dict) else {}
     if city in auto_blocked:
-        return "blocked"
+        return "blocked" if not has_observed_proxy else "shadow"
     if city in auto_shadow:
         return "shadow"
     if city in ACTIVE_TRADING_CITIES:
@@ -4658,6 +4686,92 @@ def build_dashboard_forecast_quality(audit=None):
     }
 
 
+def build_dashboard_city_accuracy_views(city_accuracy=None, city_policy_metrics=None):
+    """Separa rendimiento NOAA-verificado vs legado para no mezclar eras operativas."""
+    if city_accuracy is None:
+        city_accuracy = get_city_accuracy()
+    if city_policy_metrics is None:
+        city_policy_metrics = get_city_policy_metrics()
+
+    def _risk_meta(trades, win_rate, pnl):
+        if trades >= CITY_MIN_TRADES_FOR_BLOCK and win_rate <= CITY_BLOCK_WIN_RATE:
+            return "critical", "Crítica"
+        if pnl < 0 or win_rate < 50.0:
+            return "watch", "Observación"
+        return "good", "OK"
+
+    verified_rows = []
+    legacy_rows = []
+
+    all_cities = sorted(set(city_accuracy.keys()) | set(city_policy_metrics.keys()))
+    for city in all_cities:
+        total_stats = city_accuracy.get(city, {}) if isinstance(city_accuracy, dict) else {}
+        policy_stats = city_policy_metrics.get(city, {}) if isinstance(city_policy_metrics, dict) else {}
+        verified = policy_stats.get("verified", {}) if isinstance(policy_stats, dict) else {}
+        legacy = policy_stats.get("legacy", {}) if isinstance(policy_stats, dict) else {}
+
+        verified_trades = int(verified.get("trades", 0) or 0)
+        verified_win_rate = float(verified.get("win_rate", 0.0) or 0.0)
+        verified_pnl = round(float(verified.get("pnl", 0.0) or 0.0), 2)
+        if verified_trades > 0:
+            risk_level, risk_label = _risk_meta(verified_trades, verified_win_rate, verified_pnl)
+            verified_rows.append({
+                "city": city,
+                "trades": verified_trades,
+                "win_rate": round(verified_win_rate, 1),
+                "pnl": verified_pnl,
+                "risk_level": risk_level,
+                "risk_label": risk_label,
+                "basis_label": "NOAA verificado",
+            })
+
+        legacy_trades = int(legacy.get("trades", 0) or 0)
+        legacy_win_rate = float(legacy.get("win_rate", 0.0) or 0.0)
+        legacy_pnl = round(float(legacy.get("pnl", 0.0) or 0.0), 2)
+        if legacy_trades > 0:
+            total_trades = int(total_stats.get("trades", 0) or 0)
+            legacy_rows.append({
+                "city": city,
+                "trades": legacy_trades,
+                "win_rate": round(legacy_win_rate, 1),
+                "pnl": legacy_pnl,
+                "risk_level": "muted",
+                "risk_label": "Legacy",
+                "basis_label": (
+                    "Solo legado"
+                    if verified_trades == 0 and total_trades == legacy_trades
+                    else "Legado remanente"
+                ),
+            })
+
+    verified_rows.sort(key=lambda item: (
+        0 if item["risk_level"] == "critical" else 1 if item["risk_level"] == "watch" else 2,
+        item["win_rate"],
+        item["pnl"],
+        -item["trades"],
+        item["city"],
+    ))
+    legacy_rows.sort(key=lambda item: (
+        item["win_rate"],
+        item["pnl"],
+        -item["trades"],
+        item["city"],
+    ))
+
+    return {
+        "verified_rows": verified_rows[:8],
+        "legacy_rows": legacy_rows[:8],
+        "verified_count": len(verified_rows),
+        "legacy_count": len(legacy_rows),
+        "verified_note": (
+            "Mide solo cierres enlazados con NOAA por city+date. Esta es la capa util para juzgar la operativa nueva."
+        ),
+        "legacy_note": (
+            "Mantiene el historico previo o no enlazado con NOAA. Sirve como contexto, pero no debe mandar sobre la policy nueva."
+        ),
+    }
+
+
 def build_dashboard_city_observation(audit=None, city_accuracy=None, city_policy_metrics=None):
     """Resume el estado operativo/observacional por ciudad sin promocionar nada automaticamente."""
     if audit is None:
@@ -4712,7 +4826,10 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None, city_policy
         auto_shadow_meta = auto_shadow_dict.get(city, {}) if isinstance(auto_shadow_dict, dict) else {}
         auto_block_meta = auto_blocked.get(city, {}) if isinstance(auto_blocked, dict) else {}
         resolution_meta = RESOLUTION_ICAO.get(city, {})
-        noaa_configured = city in OBSERVED_AUDIT_CITIES or bool(resolution_meta.get("noaa_station_id"))
+        observed_proxy_helper = globals().get("_city_has_observed_proxy")
+        noaa_configured = observed_proxy_helper(city) if callable(observed_proxy_helper) else (
+            city in OBSERVED_AUDIT_CITIES or bool(resolution_meta.get("noaa_station_id"))
+        )
         observed_count = int(observed_counts.get(city, 0) or 0)
         observed_last = observed_last_date.get(city, "n/d")
         interpretable = noaa_configured and observed_count >= OBSERVED_FORECAST_MIN_SAMPLE
@@ -4763,7 +4880,7 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None, city_policy
                 if auto_block_meta:
                     trading_detail = f"descarte real persistido: {auto_block_meta.get('reason', 'fuera de juego')}"
                 else:
-                    trading_detail = "descartada de scan y NOAA hasta nueva revision manual"
+                    trading_detail = "sin NOAA configurado: fuera de observacion hasta nueva revision manual"
             elif auto_shadow_meta:
                 trading_label = "Shadow degradada"
                 trading_badge = "warn"
@@ -4786,7 +4903,7 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None, city_policy
             if auto_block_meta:
                 trading_detail = f"descarte real persistido: {auto_block_meta.get('reason', 'fuera de juego')}"
             else:
-                trading_detail = "descartada de scan y NOAA hasta nueva revision manual"
+                trading_detail = "sin NOAA configurado: fuera de observacion hasta nueva revision manual"
         elif auto_shadow_meta:
             trading_label = "Shadow degradada"
             trading_badge = "warn"
@@ -4853,7 +4970,7 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None, city_policy
             if auto_block_meta:
                 state_detail = f"descarte real persistido {auto_block_meta.get('triggered_at', 'n/d')}"
             else:
-                state_detail = "solo volver si se repara la fuente o cambia la estrategia"
+                state_detail = "sin NOAA configurado; no conviene observarla todavia"
         elif noaa_configured and interpretable:
             state_label = "Lista para revisar"
             state_badge = "accent"
@@ -5797,6 +5914,57 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
         f"{len(cooling_rows)} enfriándose"
     )
 
+    grouped_sections = [
+        {
+            "id": "operating",
+            "label": "Operativas y candidatas",
+            "badge": "good",
+            "note": "Ciudades activas, canary o shadow con evidencia suficiente para seguimiento prioritario.",
+            "rows": [
+                item for item in rows
+                if item.get("priority_group") in {"ready", "near", "operating"}
+            ],
+        },
+        {
+            "id": "observed_shadow",
+            "label": "Shadow observadas",
+            "badge": "accent",
+            "note": "Ciudades con NOAA o evidencia shadow que conviene seguir mirando, pero sin promocion inmediata.",
+            "rows": [
+                item for item in rows
+                if item.get("priority_group") == "watch" and not item.get("blocked")
+            ],
+        },
+        {
+            "id": "no_noaa",
+            "label": "Sin NOAA util",
+            "badge": "muted",
+            "note": "Ciudades sin NOAA interpretable o sin pipeline observado util; sirven como contexto, no como prioridad operativa.",
+            "rows": [
+                item for item in rows
+                if item.get("priority_group") == "no_touch" and not item.get("blocked")
+            ],
+        },
+        {
+            "id": "blocked",
+            "label": "Fuera de observacion",
+            "badge": "bad",
+            "note": "Ciudades efectivamente bloqueadas porque no tienen NOAA utilizable o quedaron fuera por descarte real.",
+            "rows": [
+                item for item in rows
+                if item.get("blocked")
+            ],
+        },
+    ]
+    for section in grouped_sections:
+        section["count"] = len(section["rows"])
+
+    effective_blocked_rows = [
+        {"city": city, **(auto_blocked.get(city) or {})}
+        for city in sorted(auto_blocked)
+        if get_effective_city_mode(city, policy_state=policy_state) == "blocked"
+    ]
+
     return {
         "summary": summary,
         "note": note,
@@ -5804,6 +5972,7 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
         "policy": policy,
         "rows": rows,
         "ranking_rows": rows,
+        "grouped_sections": grouped_sections,
         "keep_rows": buckets["keep"],
         "promote_rows": buckets["promote"],
         "observe_rows": buckets["observe"],
@@ -5830,7 +5999,7 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
         "auto_state": {
             "canary_count": len(auto_canary),
             "shadow_count": len(auto_shadow),
-            "blocked_count": len(auto_blocked),
+            "blocked_count": len(effective_blocked_rows),
             "canary_rows": [
                 {"city": city, **(auto_canary.get(city) or {})}
                 for city in sorted(auto_canary)
@@ -5839,10 +6008,7 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
                 {"city": city, **(auto_shadow.get(city) or {})}
                 for city in sorted(auto_shadow)
             ],
-            "blocked_rows": [
-                {"city": city, **(auto_blocked.get(city) or {})}
-                for city in sorted(auto_blocked)
-            ],
+            "blocked_rows": effective_blocked_rows,
             "transitions": list((policy_state.get("transition_history", []) if isinstance(policy_state, dict) else [])[:10]),
         },
         "recent_shadow_rows": _build_recent_shadow_rows(shadow_tracking),
@@ -6551,7 +6717,7 @@ def build_dashboard_focus_center(
     if flagged_count > 0:
         flagged_names = ", ".join(item.get("city", "?") for item in flagged_cities[:3])
         warn_ops.append(
-            f"{flagged_count} ciudades bajo review por accuracy ({flagged_names})"
+            f"{flagged_count} ciudades bajo review NOAA-verificado ({flagged_names})"
         )
 
     if critical_ops:
@@ -6651,9 +6817,9 @@ def build_dashboard_focus_center(
         limiter_badge = "warn"
         limiter_detail = f"signals.json estÃ¡ en {signal_status} y limita el scan accionable"
     elif flagged_count > 0:
-        limiter_answer = "Histórico desigual por ciudad"
+        limiter_answer = "NOAA-verificado desigual"
         limiter_badge = "warn"
-        limiter_detail = f"{flagged_count} ciudades siguen bajo review por accuracy"
+        limiter_detail = f"{flagged_count} ciudades siguen bajo review NOAA-verificado"
     elif series_clean_count < REVIEW_READY_CLEAN_TRADES:
         limiter_answer = "Muestra de la serie actual"
         limiter_badge = "accent"
@@ -6751,10 +6917,10 @@ def build_dashboard_focus_center(
         if signal_status in {"stale", "empty"}:
             action_detail += f" Secundario: signals.json {signal_status}."
     elif flagged_count > 0:
-        action_title = "Mantener allowlist y revisar ciudades con accuracy baja"
+        action_title = "Mantener allowlist y revisar ciudades con NOAA-verificado flojo"
         action_badge = "warn"
         action_detail = (
-            f"{flagged_count} ciudades siguen bajo review; no ampliar universo hasta tener evidencia mejor."
+            f"{flagged_count} ciudades siguen bajo review NOAA-verificado; no ampliar universo hasta tener evidencia mejor."
         )
     else:
         action_title = "Sin intervención hoy; seguir monitorizando"
@@ -8316,9 +8482,40 @@ def _build_flagged_city_history_note(flagged_cities):
 
 def get_dashboard_alert_summary():
     """Resume alertas y riesgos operativos visibles para el panel."""
+    verified_bad_min_trades = int(globals().get("ALERT_VERIFIED_BAD_MIN_TRADES", 5) or 5)
+    verified_bad_max_win_rate = float(
+        globals().get(
+            "ALERT_VERIFIED_BAD_MAX_WIN_RATE",
+            globals().get("CITY_BLOCK_WIN_RATE", 25.0),
+        )
+        or globals().get("CITY_BLOCK_WIN_RATE", 25.0)
+    )
+    active_noaa_min_cases = int(globals().get("ALERT_ACTIVE_NOAA_MIN_CASES", 3) or 3)
+    shadow_join_min_signals = int(globals().get("ALERT_SHADOW_JOIN_MIN_SIGNALS", 20) or 20)
+    shadow_join_min_noaa_sample = int(globals().get("ALERT_SHADOW_JOIN_MIN_NOAA_SAMPLE", 10) or 10)
+    shadow_wr_min_resolved = int(globals().get("ALERT_SHADOW_WR_MIN_RESOLVED", 8) or 8)
+    shadow_wr_target = float(globals().get("ALERT_SHADOW_WR_TARGET", 45.0) or 45.0)
     signals = inspect_signals_file_health()
     issue = signals.get("status", "unknown")
     audit = load_audit_data()
+    city_accuracy = get_city_accuracy()
+    if "get_city_policy_metrics" in globals():
+        city_policy_metrics = get_city_policy_metrics(audit=audit)
+    else:
+        city_policy_metrics = {}
+    if "build_dashboard_forecast_quality" in globals():
+        forecast_quality = build_dashboard_forecast_quality(audit=audit)
+    else:
+        forecast_quality = {"sample_size": 0}
+    if "build_dashboard_city_observation" in globals():
+        city_observation = build_dashboard_city_observation(
+            audit=audit,
+            city_accuracy=city_accuracy,
+            city_policy_metrics=city_policy_metrics,
+        )
+    else:
+        city_observation = {"active_rows": []}
+    shadow_tracking = load_shadow_city_tracking() if "load_shadow_city_tracking" in globals() else {}
     pending = audit.get("pending_sells", [])
     now = datetime.now(timezone.utc)
 
@@ -8337,8 +8534,7 @@ def get_dashboard_alert_summary():
                 "price": float(sell.get("price", 0) or 0),
             })
 
-    city_accuracy = get_city_accuracy()
-    flagged_cities = [
+    legacy_flagged_cities = [
         {
             "city": city,
             "win_rate": data["win_rate"],
@@ -8346,12 +8542,74 @@ def get_dashboard_alert_summary():
             "pnl": round(data["pnl"], 2),
         }
         for city, data in city_accuracy.items()
-        if data["trades"] >= CITY_MIN_TRADES_FOR_BLOCK and data["win_rate"] <= CITY_BLOCK_WIN_RATE
+        if data["trades"] >= verified_bad_min_trades and data["win_rate"] <= verified_bad_max_win_rate
     ]
+    legacy_flagged_cities.sort(key=lambda item: (item["win_rate"], -item["trades"], item["city"]))
+
+    flagged_cities = []
+    for city, buckets in city_policy_metrics.items():
+        verified = buckets.get("verified", {}) if isinstance(buckets, dict) else {}
+        trades = int(verified.get("trades", 0) or 0)
+        win_rate = float(verified.get("win_rate", 0.0) or 0.0)
+        pnl = round(float(verified.get("pnl", 0.0) or 0.0), 2)
+        if trades >= verified_bad_min_trades and win_rate <= verified_bad_max_win_rate:
+            flagged_cities.append({
+                "city": city,
+                "win_rate": round(win_rate, 1),
+                "trades": trades,
+                "pnl": pnl,
+            })
     flagged_cities.sort(key=lambda item: (item["win_rate"], -item["trades"], item["city"]))
-    shadow_or_dry = _dashboard_mode_label() in {"SHADOW-ONLY", "DRY RUN"}
-    flagged_cities_operational = [] if shadow_or_dry else flagged_cities
-    flagged_history_note = _build_flagged_city_history_note(flagged_cities) if shadow_or_dry else None
+    flagged_cities_operational = list(flagged_cities)
+    flagged_history_note = _build_flagged_city_history_note(legacy_flagged_cities) if legacy_flagged_cities else None
+
+    active_rows = city_observation.get("active_rows", []) if isinstance(city_observation, dict) else []
+    active_without_interpretable = [
+        {
+            "city": row.get("city", "?"),
+            "observed_count": int(row.get("observed_count", 0) or 0),
+            "observed_goal": int(row.get("observed_goal", OBSERVED_FORECAST_MIN_SAMPLE) or OBSERVED_FORECAST_MIN_SAMPLE),
+        }
+        for row in active_rows
+        if not bool(row.get("interpretable")) and int(row.get("observed_count", 0) or 0) < active_noaa_min_cases
+    ]
+
+    shadow_summary = shadow_tracking.get("summary", {}) if isinstance(shadow_tracking, dict) else {}
+    directional_signals = int(shadow_summary.get("edge_hits", 0) or 0)
+    recent_opps = shadow_tracking.get("recent_opportunities", []) if isinstance(shadow_tracking, dict) else []
+    noaa_lookup = {}
+    observed_audit_key = globals().get("OBSERVED_AUDIT_KEY", "observed_vs_forecast")
+    for entry in audit.get(observed_audit_key, []):
+        if not isinstance(entry, dict) or entry.get("source") != "noaa_ncei":
+            continue
+        obs_temp = entry.get("observed_temp_c")
+        if obs_temp is None:
+            continue
+        key = (str(entry.get("city", "")).strip(), str(entry.get("date", "")).strip())
+        if key[0] and key[1]:
+            noaa_lookup[key] = float(obs_temp)
+
+    directional_resolved = 0
+    directional_wins = 0
+    for opp in recent_opps:
+        if not opp.get("edge_hit"):
+            continue
+        city = str(opp.get("city", "")).strip()
+        market_date = str(opp.get("date", "")).strip()
+        observed_temp = noaa_lookup.get((city, market_date))
+        if observed_temp is None:
+            continue
+        threshold_helper = globals().get("_extract_threshold_from_question")
+        threshold = threshold_helper(str(opp.get("question", "") or "")) if callable(threshold_helper) else None
+        side = str(opp.get("side", "") or "").upper()
+        if threshold is None or not side:
+            continue
+        directional_resolved += 1
+        if side == "YES" and observed_temp >= threshold:
+            directional_wins += 1
+        elif side == "NO" and observed_temp < threshold:
+            directional_wins += 1
+    directional_wr = round((directional_wins / directional_resolved * 100), 1) if directional_resolved > 0 else 0.0
 
     active_items = []
     if issue != "ok":
@@ -8369,13 +8627,38 @@ def get_dashboard_alert_summary():
     if flagged_cities_operational:
         active_items.append({
             "level": "warn",
-            "title": "Ciudades con accuracy baja",
+            "title": "Ciudades con NOAA-verificado malo",
             "detail": ", ".join(
-                f"{item['city']} ({item['win_rate']}%)" for item in flagged_cities_operational
+                f"{item['city']} ({item['win_rate']}%, n={item['trades']})"
+                for item in flagged_cities_operational
             ),
         })
+    if active_without_interpretable:
+        active_items.append({
+            "level": "warn",
+            "title": "Ciudades activas sin NOAA interpretable",
+            "detail": ", ".join(
+                f"{item['city']} ({item['observed_count']}/{item['observed_goal']})"
+                for item in active_without_interpretable[:5]
+            ),
+        })
+    if (
+        directional_signals >= shadow_join_min_signals
+        and directional_resolved == 0
+        and int(forecast_quality.get("sample_size", 0) or 0) >= shadow_join_min_noaa_sample
+    ):
+        active_items.append({
+            "level": "warn",
+            "title": "Shadow sin join NOAA util",
+            "detail": f"0/{directional_signals} señales shadow enlazadas por city+date con NOAA",
+        })
+    elif directional_resolved >= shadow_wr_min_resolved and directional_wr < shadow_wr_target:
+        active_items.append({
+            "level": "warn",
+            "title": "WR shadow observado por debajo de objetivo",
+            "detail": f"{directional_wr:.1f}% con n={directional_resolved} señales resueltas",
+        })
 
-    # v10.6: alerta de bankroll bajo en dashboard
     portfolio = _get_portfolio_and_positions()
     low_bankroll = False
     portfolio_total = None
@@ -8395,8 +8678,12 @@ def get_dashboard_alert_summary():
         "pending_stuck": pending_stuck,
         "flagged_cities": flagged_cities,
         "flagged_cities_operational": flagged_cities_operational,
-        "flagged_cities_suppressed": shadow_or_dry and bool(flagged_cities),
+        "legacy_flagged_cities": legacy_flagged_cities,
+        "flagged_cities_suppressed": bool(legacy_flagged_cities),
         "flagged_history_note": flagged_history_note,
+        "active_without_interpretable": active_without_interpretable,
+        "shadow_join_resolved": directional_resolved,
+        "shadow_join_win_rate": directional_wr,
         "active_items": active_items,
         "low_bankroll": low_bankroll,
         "portfolio_total": portfolio_total,
@@ -8616,6 +8903,24 @@ def build_dashboard_snapshot():
     )
     forecast_quality = build_dashboard_forecast_quality(audit=audit)
     city_policy_metrics = get_city_policy_metrics(audit=audit)
+    if "build_dashboard_city_accuracy_views" in globals():
+        city_accuracy_views = build_dashboard_city_accuracy_views(
+            city_accuracy=city_accuracy,
+            city_policy_metrics=city_policy_metrics,
+        )
+    else:
+        city_accuracy_views = {
+            "verified_rows": [],
+            "legacy_rows": [],
+            "verified_count": 0,
+            "legacy_count": 0,
+            "verified_note": (
+                "Mide solo cierres enlazados con NOAA por city+date. Esta es la capa util para juzgar la operativa nueva."
+            ),
+            "legacy_note": (
+                "Mantiene el historico previo o no enlazado con NOAA. Sirve como contexto, pero no debe mandar sobre la policy nueva."
+            ),
+        }
     city_observation = build_dashboard_city_observation(
         audit=audit,
         city_accuracy=city_accuracy,
@@ -8773,6 +9078,7 @@ def build_dashboard_snapshot():
         "progress": progress,
         "exit_breakdown": exit_breakdown,
         "forecast_quality": forecast_quality,
+        "city_accuracy_views": city_accuracy_views,
         "city_observation": city_observation,
         "city_decisions": city_decisions,
         "legacy_forecast_drift": legacy_forecast_drift,
@@ -12479,7 +12785,7 @@ def main(client):
 
     dl.append(f"FILTROS: {len(candidates)} pasan | {parse_fail} no parseables | {date_fail} fuera de fecha | {timezone_skip} bloqueados por zona horaria | {blocked_city_skip} bloqueados por ciudad | {allowlist_city_skip} fuera de ACTIVE_TRADING_CITIES | {price_fail} fuera de precio | {liq_fail} sin liquidez")
     if blocked_seen:
-        dl.append(f"  🚫 Ciudades bloqueadas operativamente: {', '.join(sorted(blocked_seen))} (WU vs Open-Meteo)")
+        dl.append(f"  🚫 Ciudades bloqueadas operativamente: {', '.join(sorted(blocked_seen))} (sin NOAA utilizable para observacion)")
     if allowlist_seen:
         dl.append(f"  ✅ Allowlist activa: {', '.join(sorted(ACTIVE_TRADING_CITIES))}")
 
