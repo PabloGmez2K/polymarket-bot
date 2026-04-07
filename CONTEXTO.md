@@ -1,6 +1,13 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 7 de abril de 2026 (Sesión 93 — Railway auth recurrente documentada + alerta legacy corregida, local/live, verify 639/639)
+**Última actualización:** 7 de abril de 2026 (Sesión 94 — WR shadow observado persistente y estable, local, verify 642/642)
+**Sesión 94 (7 abr 2026, Codex):** auditoría y rediseño del `WR observado direccional` para dejar de depender de una ventana shadow volátil.
+- **Causa raíz confirmada con evidencia de código:** el check `WR observado direccional >= 45%` y la alerta asociada leían `shadow_tracking.recent_opportunities`, una lista recortada/perecedera pensada para UI reciente, no para resolución tardía con NOAA. Además `record_shadow_city_opportunities()` persistía esas filas sin `edge_hit`, de modo que `save_shadow_city_tracking()` las re-clasificaba como no direccionales al guardar y el join quedaba sesgado hacia `0/N`.
+- **Base persistente nueva para shadow observado:** `shadow_city_tracking.json` gana `directional_history`, un registro estable de señales shadow direccionales deduplicadas por firma (`city|date|side|condition|threshold`). Esta capa conserva `first_seen_at/last_seen_at/times_seen`, mantiene `recent_opportunities` solo como ventana de UI, y permite resolver señales cuando NOAA llegue con lag sin tocar trading core.
+- **Join endurecido:** el cálculo del dashboard y de alertas ya no depende de la lista reciente volátil; usa `directional_history` y normaliza `date` a `YYYY-MM-DD` tanto del lado shadow como del lado `observed_vs_forecast`, tolerando datetimes ISO del audit.
+- **Legibilidad operativa mantenida:** la métrica sigue leyendo `WR observado direccional`, pero ahora representa señales shadow persistidas y resolubles, no solo las todavía visibles en la cola reciente. `verify_before_deploy.py` añade regresiones para `edge_hit` persistido, `directional_history` y join NOAA con fecha datetime.
+- **Validación local:** `python verify_before_deploy.py` cierra en **642/642**.
+
 **Sesión 93 (7 abr 2026, Codex):** cierre operativo de deploy con Railway relogin, restart live y limpieza de alertas legacy en observabilidad.
 - **Incidente Railway confirmado como recurrente:** `tools/railway_auth_repair.ps1 doctor` volvió a mostrar el patrón de siempre: `accessToken` y `refreshToken` presentes, `Writable from this process=True`, `secondsToExpiry>0`, sin proxies persistentes ni de proceso, pero `Auth check via clean env` devolviendo `Unauthorized`. El recovery `reset + launch-login -Browserless` restauró `whoami/status`.
 - **Estado live validado:** tras `git push origin main` del commit `bb208fb`, la comprobación live inicial no mostraba arranque nuevo. Se forzó `restart --yes`, el CLI quedó colgado con mutex ocupado, se detectaron procesos `railway/node` atascados y se limpiaron. La evidencia final en logs muestra un nuevo arranque del servicio `polymarket-bot` a `2026-04-07 10:10:07 UTC`.

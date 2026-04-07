@@ -1497,6 +1497,77 @@ def run_tests():
         g = _gates_call(interpretable=True, noaa_configured=True, observed_count=10, observed_goal=5)
         test("R1 gate_c: interpretable con observed_count>=goal",
              g["gate_c"]["state"] == "interpretable" and g["gate_c"]["badge"] == "good", g["gate_c"])
+
+        print("\n Shadow observado persistente")
+        shadow_ns = {
+            "os": os,
+            "json": json,
+            "datetime": datetime,
+            "timezone": timezone,
+            "LOGIC_SERIES": "10.6",
+            "MIN_EDGE": 15.0,
+            "SHADOW_DIRECTIONAL_HISTORY_LIMIT": 500,
+        }
+        for fn in (
+            "_shadow_condition_code",
+            "_extract_threshold_from_question",
+            "_normalize_shadow_market_date",
+            "_shadow_signal_signature",
+            "_build_shadow_signal_record",
+            "_merge_shadow_signal_history",
+            "load_shadow_city_tracking",
+            "save_shadow_city_tracking",
+            "record_shadow_city_opportunities",
+            "_build_shadow_noaa_resolution_stats",
+        ):
+            exec(get_function_source(module_ast, code_lines, fn), shadow_ns)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            shadow_ns["SHADOW_TRACKING_FILE"] = os.path.join(tmpdir, "shadow_city_tracking.json")
+            shadow_ns["load_audit_data"] = lambda: {
+                "observed_vs_forecast": [
+                    {
+                        "city": "Tokyo",
+                        "date": "2026-04-05T00:00:00+00:00",
+                        "observed_temp_c": 21.0,
+                        "source": "noaa_ncei",
+                    }
+                ]
+            }
+            shadow_ns["OBSERVED_AUDIT_KEY"] = "observed_vs_forecast"
+            shadow_ns["build_dashboard_forecast_quality"] = lambda: {"sample_size": 12}
+            shadow_ns["get_city_accuracy"] = lambda: {}
+            shadow_ns["get_dashboard_alert_summary"] = lambda: {"active_items": []}
+
+            shadow_ns["record_shadow_city_opportunities"]([
+                {
+                    "city": "Tokyo",
+                    "date": "2026-04-05",
+                    "question": "Will the highest temperature in Tokyo be above 68°F on April 5?",
+                    "side": "YES",
+                    "edge_pct": 18.4,
+                    "expected_value": 0.72,
+                    "mkt_price": 41.0,
+                    "our_prob": 59.4,
+                    "forecast_max": 20.0,
+                    "seen_at": "2026-04-03T08:00:00+00:00",
+                    "edge_hit": True,
+                    "first_for_cycle": True,
+                }
+            ])
+            tracked = shadow_ns["load_shadow_city_tracking"]()
+            persisted_recent = tracked.get("recent_opportunities", [])
+            persisted_history = tracked.get("directional_history", [])
+            resolution_stats = shadow_ns["_build_shadow_noaa_resolution_stats"](tracked, audit=shadow_ns["load_audit_data"]())
+            test("shadow tracking: recent_opportunities persiste edge_hit",
+                 bool(persisted_recent) and persisted_recent[0].get("edge_hit") is True,
+                 persisted_recent)
+            test("shadow tracking: directional_history crea base persistente",
+                 len(persisted_history) == 1 and persisted_history[0].get("signal_key"),
+                 persisted_history)
+            test("shadow tracking: join NOAA normaliza datetime en date",
+                 resolution_stats["resolved"] == 1 and resolution_stats["wins"] == 1 and resolution_stats["win_rate"] == 100.0,
+                 resolution_stats)
         g = _gates_call(noaa_configured=True, observed_count=2, observed_goal=5)
         test("R1 gate_c: partial con NOAA configurado pero muestra corta",
              g["gate_c"]["state"] == "partial" and g["gate_c"]["badge"] == "warn", g["gate_c"])

@@ -136,6 +136,7 @@ ALERT_SHADOW_JOIN_MIN_SIGNALS = int(os.getenv("ALERT_SHADOW_JOIN_MIN_SIGNALS", "
 ALERT_SHADOW_JOIN_MIN_NOAA_SAMPLE = int(os.getenv("ALERT_SHADOW_JOIN_MIN_NOAA_SAMPLE", "10"))
 ALERT_SHADOW_WR_MIN_RESOLVED = int(os.getenv("ALERT_SHADOW_WR_MIN_RESOLVED", "8"))
 ALERT_SHADOW_WR_TARGET = float(os.getenv("ALERT_SHADOW_WR_TARGET", "45.0"))
+SHADOW_DIRECTIONAL_HISTORY_LIMIT = int(os.getenv("SHADOW_DIRECTIONAL_HISTORY_LIMIT", "500"))
 # Cutoff de stats por ciudad: "Dallas=2026-04-06,Chicago=2026-03-01"
 # Trades cerrados ANTES de la fecha indicada se ignoran en get_city_accuracy().
 CITY_STATS_CUTOFF: dict[str, str] = {}
@@ -801,6 +802,7 @@ def load_shadow_city_tracking():
         "updated_at": "",
         "cities": {},
         "recent_opportunities": [],
+        "directional_history": [],
         "summary": {
             "cycles_with_shadow": 0,
             "opportunities_seen": 0,
@@ -823,6 +825,8 @@ def load_shadow_city_tracking():
             payload["cities"] = {}
         if not isinstance(payload.get("recent_opportunities"), list):
             payload["recent_opportunities"] = []
+        if not isinstance(payload.get("directional_history"), list):
+            payload["directional_history"] = []
         if not isinstance(payload.get("summary"), dict):
             payload["summary"] = dict(default["summary"])
         return payload
@@ -837,6 +841,7 @@ def save_shadow_city_tracking(data):
     payload.setdefault("updated_at", "")
     payload.setdefault("cities", {})
     payload.setdefault("recent_opportunities", [])
+    payload.setdefault("directional_history", [])
     payload.setdefault("summary", {})
 
     ordered_cities = {}
@@ -856,6 +861,17 @@ def save_shadow_city_tracking(data):
         reverse=True,
     )[:10]
     payload["recent_opportunities"] = directional + filtered
+    payload["directional_history"] = sorted(
+        [
+            row for row in payload["directional_history"]
+            if isinstance(row, dict) and row.get("signal_key")
+        ],
+        key=lambda item: (
+            str(item.get("last_seen_at", "") or item.get("first_seen_at", "")),
+            float(item.get("best_edge_pct", 0) or 0),
+        ),
+        reverse=True,
+    )[:SHADOW_DIRECTIONAL_HISTORY_LIMIT]
 
     with open(SHADOW_TRACKING_FILE, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
@@ -1143,6 +1159,7 @@ def record_shadow_city_opportunities(opportunities, cycle_context=None):
     data = load_shadow_city_tracking()
     cities = data.setdefault("cities", {})
     recent = data.setdefault("recent_opportunities", [])
+    directional_history = data.setdefault("directional_history", [])
     summary = data.setdefault("summary", {})
 
     cycle_context = cycle_context if isinstance(cycle_context, dict) else {}
@@ -1189,6 +1206,7 @@ def record_shadow_city_opportunities(opportunities, cycle_context=None):
             "date": item.get("date", ""),
             "question": item.get("question", ""),
             "side": item.get("side", ""),
+            "edge_hit": bool(item.get("edge_hit")),
             "edge_pct": round(float(item.get("edge_pct", 0) or 0), 1),
             "expected_value": round(float(item.get("expected_value", 0) or 0), 2),
             "market_price": item.get("mkt_price"),
@@ -1207,6 +1225,7 @@ def record_shadow_city_opportunities(opportunities, cycle_context=None):
             "date": item.get("date", ""),
             "question": item.get("question", ""),
             "side": item.get("side", ""),
+            "edge_hit": bool(item.get("edge_hit")),
             "edge_pct": round(float(item.get("edge_pct", 0) or 0), 1),
             "expected_value": round(float(item.get("expected_value", 0) or 0), 2),
             "market_price": item.get("mkt_price"),
@@ -1215,6 +1234,8 @@ def record_shadow_city_opportunities(opportunities, cycle_context=None):
         })
         if item.get("first_for_cycle"):
             cycle_seen = True
+
+    directional_history[:] = _merge_shadow_signal_history(directional_history, opportunities or [])
 
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
     summary["cycles_with_shadow"] = int(summary.get("cycles_with_shadow", 0) or 0) + (1 if cycle_seen else 0)
@@ -5938,6 +5959,7 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
         )
 
     shadow_summary = shadow_tracking.get("summary", {}) if isinstance(shadow_tracking, dict) else {}
+    recent_opps = shadow_tracking.get("directional_history", []) if isinstance(shadow_tracking, dict) else []
     promotable = len(buckets["promote"])
     top_candidate_rows = [
         item for item in rows
@@ -6482,6 +6504,184 @@ def _extract_threshold_from_question(question):
     return value
 
 
+def _normalize_shadow_market_date(value):
+    """Normaliza YYYY-MM-DD o datetime ISO a una clave YYYY-MM-DD."""
+    text = str(value or "").strip()
+    return text[:10] if text else ""
+
+
+def _shadow_signal_signature(row):
+    """Construye una firma estable por señal direccional shadow."""
+    if not isinstance(row, dict):
+        return ""
+    city = str(row.get("city", "") or "").strip()
+    market_date = _normalize_shadow_market_date(row.get("date", ""))
+    side = str(row.get("side", "") or "").strip().upper()
+    question = str(row.get("question", "") or "").strip()
+    condition = _shadow_condition_code(question)
+    threshold = _extract_threshold_from_question(question)
+    threshold_key = "na"
+    if threshold is not None:
+        threshold_key = f"{threshold:.3f}".rstrip("0").rstrip(".")
+    if city and market_date and side and condition != "otro":
+        return f"{city}|{market_date}|{side}|{condition}|{threshold_key}"
+    return f"{city}|{market_date}|{side}|{question}".strip("|")
+
+
+def _build_shadow_signal_record(row):
+    """Normaliza una oportunidad direccional para persistirla y resolverla con lag NOAA."""
+    if not isinstance(row, dict):
+        return None
+    question = str(row.get("question", "") or "")
+    condition = _shadow_condition_code(question)
+    edge_pct = float(row.get("edge_pct", 0) or 0)
+    if condition not in {"at_or_above", "at_or_below"} or edge_pct <= 0:
+        return None
+    city = str(row.get("city", "") or "").strip()
+    market_date = _normalize_shadow_market_date(row.get("date", ""))
+    side = str(row.get("side", "") or "").strip().upper()
+    signal_key = _shadow_signal_signature(row)
+    if not city or not market_date or not side or not signal_key:
+        return None
+    seen_at = str(row.get("seen_at") or datetime.now(timezone.utc).isoformat())
+    threshold = _extract_threshold_from_question(question)
+    return {
+        "signal_key": signal_key,
+        "city": city,
+        "date": market_date,
+        "side": side,
+        "edge_hit": True,
+        "question": question,
+        "condition": condition,
+        "threshold": threshold,
+        "edge_pct": round(edge_pct, 1),
+        "best_edge_pct": round(edge_pct, 1),
+        "expected_value": round(float(row.get("expected_value", 0) or 0), 2),
+        "market_price": row.get("mkt_price", row.get("market_price")),
+        "our_prob": row.get("our_prob"),
+        "forecast_max": row.get("forecast_max"),
+        "first_seen_at": seen_at,
+        "last_seen_at": seen_at,
+        "times_seen": 1,
+    }
+
+
+def _merge_shadow_signal_history(existing_rows, new_rows):
+    """Fusiona señales direccionales sin contar el mismo mercado una vez por ciclo."""
+    merged = {}
+    for raw in existing_rows or []:
+        if not isinstance(raw, dict):
+            continue
+        normalized = _build_shadow_signal_record(raw) or dict(raw)
+        signal_key = str(normalized.get("signal_key") or _shadow_signal_signature(normalized)).strip()
+        if not signal_key:
+            continue
+        normalized["signal_key"] = signal_key
+        normalized["date"] = _normalize_shadow_market_date(normalized.get("date", ""))
+        normalized["times_seen"] = int(normalized.get("times_seen", 1) or 1)
+        normalized["best_edge_pct"] = round(
+            float(normalized.get("best_edge_pct", normalized.get("edge_pct", 0)) or 0),
+            1,
+        )
+        merged[signal_key] = normalized
+
+    for raw in new_rows or []:
+        normalized = _build_shadow_signal_record(raw)
+        if not normalized:
+            continue
+        signal_key = normalized["signal_key"]
+        current = merged.get(signal_key)
+        if not current:
+            merged[signal_key] = normalized
+            continue
+        current["last_seen_at"] = max(
+            str(current.get("last_seen_at", "") or ""),
+            str(normalized.get("last_seen_at", "") or ""),
+        )
+        first_seen = str(current.get("first_seen_at", "") or "")
+        normalized_first = str(normalized.get("first_seen_at", "") or "")
+        if not first_seen or (normalized_first and normalized_first < first_seen):
+            current["first_seen_at"] = normalized_first
+        current["times_seen"] = int(current.get("times_seen", 1) or 1) + 1
+        current["edge_pct"] = round(max(float(current.get("edge_pct", 0) or 0), float(normalized.get("edge_pct", 0) or 0)), 1)
+        current["best_edge_pct"] = round(max(float(current.get("best_edge_pct", 0) or 0), float(normalized.get("edge_pct", 0) or 0)), 1)
+        current["expected_value"] = round(max(float(current.get("expected_value", 0) or 0), float(normalized.get("expected_value", 0) or 0)), 2)
+        for field in ("market_price", "our_prob", "forecast_max", "threshold", "condition", "question", "city", "date", "side"):
+            if current.get(field) in (None, "", []):
+                current[field] = normalized.get(field)
+
+    return list(merged.values())
+
+
+def _build_shadow_noaa_resolution_stats(shadow_tracking, audit=None):
+    """Resuelve señales shadow persistidas contra NOAA observed usando join normalizado."""
+    shadow_tracking = shadow_tracking if isinstance(shadow_tracking, dict) else {}
+    audit = audit if isinstance(audit, dict) else load_audit_data()
+    history = shadow_tracking.get("directional_history", [])
+    if not history:
+        seed_rows = []
+        for row in shadow_tracking.get("recent_opportunities", []):
+            if isinstance(row, dict):
+                seed_rows.append(row)
+        for city_name, city_data in (shadow_tracking.get("cities", {}) or {}).items():
+            if not isinstance(city_data, dict):
+                continue
+            for edge in city_data.get("recent_edges", []):
+                if not isinstance(edge, dict):
+                    continue
+                seeded = dict(edge)
+                seeded.setdefault("city", city_name)
+                seed_rows.append(seeded)
+        history = _merge_shadow_signal_history([], seed_rows)
+
+    noaa_lookup = {}
+    observed_key = globals().get("OBSERVED_AUDIT_KEY", "observed_vs_forecast")
+    for entry in audit.get(observed_key, []):
+        if not isinstance(entry, dict) or entry.get("source") != "noaa_ncei":
+            continue
+        city = str(entry.get("city", "") or "").strip()
+        market_date = _normalize_shadow_market_date(entry.get("date", ""))
+        obs_temp = entry.get("observed_temp_c")
+        if not city or not market_date or obs_temp is None:
+            continue
+        noaa_lookup[(city, market_date)] = float(obs_temp)
+
+    total_signals = 0
+    resolved = 0
+    wins = 0
+    threshold_missing = 0
+    for row in history:
+        signal = _build_shadow_signal_record(row) or dict(row)
+        city = str(signal.get("city", "") or "").strip()
+        market_date = _normalize_shadow_market_date(signal.get("date", ""))
+        side = str(signal.get("side", "") or "").strip().upper()
+        threshold = signal.get("threshold")
+        if not city or not market_date or not side:
+            continue
+        total_signals += 1
+        observed_temp = noaa_lookup.get((city, market_date))
+        if observed_temp is None:
+            continue
+        if threshold is None:
+            threshold_missing += 1
+            continue
+        resolved += 1
+        if side == "YES" and observed_temp >= float(threshold):
+            wins += 1
+        elif side == "NO" and observed_temp < float(threshold):
+            wins += 1
+
+    win_rate = round((wins / resolved * 100), 1) if resolved > 0 else 0.0
+    return {
+        "total_signals": total_signals,
+        "resolved": resolved,
+        "wins": wins,
+        "win_rate": win_rate,
+        "noaa_matches": len(noaa_lookup),
+        "threshold_missing": threshold_missing,
+    }
+
+
 def build_dashboard_road_to_real(
     shadow_tracking=None,
     forecast_quality=None,
@@ -6500,7 +6700,6 @@ def build_dashboard_road_to_real(
         alerts = get_dashboard_alert_summary()
 
     shadow_summary = shadow_tracking.get("summary", {}) if isinstance(shadow_tracking, dict) else {}
-    recent_opps = shadow_tracking.get("recent_opportunities", []) if isinstance(shadow_tracking, dict) else []
 
     # R1: >= 30 shadow directional signals (edge_hit=True means passed condition + edge)
     directional_signals = shadow_summary.get("edge_hits", 0) or 0
@@ -6525,7 +6724,7 @@ def build_dashboard_road_to_real(
             obs_temp = entry.get("observed_temp_c")
             if obs_temp is None:
                 continue
-            key = (str(entry.get("city", "")).strip(), str(entry.get("date", "")).strip())
+            key = (str(entry.get("city", "")).strip(), _normalize_shadow_market_date(entry.get("date", "")))
             if key[0] and key[1]:
                 noaa_lookup[key] = float(obs_temp)
     # Match shadow directional signals (edge_hit=True) with NOAA observed
@@ -6535,7 +6734,7 @@ def build_dashboard_road_to_real(
         if not opp.get("edge_hit"):
             continue
         city = str(opp.get("city", "")).strip()
-        date = str(opp.get("date", "")).strip()
+        date = _normalize_shadow_market_date(opp.get("date", ""))
         if not city or not date:
             continue
         observed_temp = noaa_lookup.get((city, date))
@@ -8625,7 +8824,7 @@ def get_dashboard_alert_summary():
 
     shadow_summary = shadow_tracking.get("summary", {}) if isinstance(shadow_tracking, dict) else {}
     directional_signals = int(shadow_summary.get("edge_hits", 0) or 0)
-    recent_opps = shadow_tracking.get("recent_opportunities", []) if isinstance(shadow_tracking, dict) else []
+    recent_opps = shadow_tracking.get("directional_history", []) if isinstance(shadow_tracking, dict) else []
     noaa_lookup = {}
     observed_audit_key = globals().get("OBSERVED_AUDIT_KEY", "observed_vs_forecast")
     for entry in audit.get(observed_audit_key, []):
@@ -8634,7 +8833,7 @@ def get_dashboard_alert_summary():
         obs_temp = entry.get("observed_temp_c")
         if obs_temp is None:
             continue
-        key = (str(entry.get("city", "")).strip(), str(entry.get("date", "")).strip())
+        key = (str(entry.get("city", "")).strip(), _normalize_shadow_market_date(entry.get("date", "")))
         if key[0] and key[1]:
             noaa_lookup[key] = float(obs_temp)
 
@@ -8644,7 +8843,7 @@ def get_dashboard_alert_summary():
         if not opp.get("edge_hit"):
             continue
         city = str(opp.get("city", "")).strip()
-        market_date = str(opp.get("date", "")).strip()
+        market_date = _normalize_shadow_market_date(opp.get("date", ""))
         observed_temp = noaa_lookup.get((city, market_date))
         if observed_temp is None:
             continue
