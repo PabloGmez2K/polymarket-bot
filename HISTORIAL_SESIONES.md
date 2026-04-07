@@ -31,6 +31,7 @@ Comandos útiles:
 
 | Fecha | Tipo | Referencia | Commits clave | Resumen |
 |------|------|------------|---------------|---------|
+| 2026-04-07 | Explícita | Sesión 93 | local/live | Se documenta otro episodio recurrente de auth rota en Railway (`Unauthorized` con tokens presentes y config writable), se recupera con `doctor -> reset -> launch-login -Browserless`, se valida restart live del servicio y se corrige `run_observability_alerts()` para dejar de mandar alertas legacy de `baja accuracy` y pasar a revisión NOAA-verificada en `active/canary`. |
 | 2026-04-07 | Explícita | Sesión 92 | local | Se afinan y externalizan los umbrales de `Alertas activas` para la era NOAA-verificada: ciudades malas exigen `n>=5`, activas sin NOAA útil solo alertan por debajo de 3 casos, el join shadow→NOAA pide 20 señales y 10 observaciones NOAA, y el WR shadow no avisa hasta 8 resueltas. |
 | 2026-04-07 | Explícita | Sesión 91 | local | El bloque `Alertas activas` deja de priorizar `accuracy baja` histórica y pasa a usar señales de la era NOAA-verificada: ciudades con NOAA-verificado malo, ciudades activas sin NOAA interpretable y problemas del join shadow→NOAA, manteniendo el legacy solo como nota contextual. |
 | 2026-04-07 | Explícita | Sesión 90 | local | El bloque `Estado por ciudad` del dashboard se reorganiza en grupos semánticos (`Operativas y candidatas`, `Shadow observadas`, `Sin NOAA util`, `Fuera de observacion`) con una tabla por grupo y `main_reason` visible bajo cada ciudad para mejorar lectura humana y consumo por LLM. |

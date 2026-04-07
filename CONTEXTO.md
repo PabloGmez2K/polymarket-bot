@@ -1,6 +1,12 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 7 de abril de 2026 (Sesión 92 — umbrales de alertas NOAA afinados para deploy, local, verify 639/639)
+**Última actualización:** 7 de abril de 2026 (Sesión 93 — Railway auth recurrente documentada + alerta legacy corregida, local/live, verify 639/639)
+**Sesión 93 (7 abr 2026, Codex):** cierre operativo de deploy con Railway relogin, restart live y limpieza de alertas legacy en observabilidad.
+- **Incidente Railway confirmado como recurrente:** `tools/railway_auth_repair.ps1 doctor` volvió a mostrar el patrón de siempre: `accessToken` y `refreshToken` presentes, `Writable from this process=True`, `secondsToExpiry>0`, sin proxies persistentes ni de proceso, pero `Auth check via clean env` devolviendo `Unauthorized`. El recovery `reset + launch-login -Browserless` restauró `whoami/status`.
+- **Estado live validado:** tras `git push origin main` del commit `bb208fb`, la comprobación live inicial no mostraba arranque nuevo. Se forzó `restart --yes`, el CLI quedó colgado con mutex ocupado, se detectaron procesos `railway/node` atascados y se limpiaron. La evidencia final en logs muestra un nuevo arranque del servicio `polymarket-bot` a `2026-04-07 10:10:07 UTC`.
+- **Alerta legacy retirada de observabilidad:** `run_observability_alerts()` deja de disparar `Ciudad con baja accuracy` basada en histórico agregado/legacy y pasa a emitir solo revisión `NOAA-verificado` para ciudades `active/canary` con suficiente muestra verificada. Se evita así recomendar `BLOCKED_CITIES` por métricas pre-NOAA.
+- **Validación local:** `python verify_before_deploy.py` cierra en **639/639**.
+
 **Sesión 92 (7 abr 2026, Codex):** afinado final de umbrales del dashboard para reducir ruido en la fase NOAA-verificada temprana, sin tocar trading core, NOAA fetch core ni scheduler.
 - **Umbrales explícitos de alertas:** `bot.py` añade `ALERT_VERIFIED_BAD_MIN_TRADES`, `ALERT_VERIFIED_BAD_MAX_WIN_RATE`, `ALERT_ACTIVE_NOAA_MIN_CASES`, `ALERT_SHADOW_JOIN_MIN_SIGNALS`, `ALERT_SHADOW_JOIN_MIN_NOAA_SAMPLE`, `ALERT_SHADOW_WR_MIN_RESOLVED` y `ALERT_SHADOW_WR_TARGET` para que `Alertas activas` ya no dependa de números mágicos enterrados en `get_dashboard_alert_summary()`.
 - **Defaults más prudentes para esta fase:** por defecto una ciudad `NOAA-verificado malo` exige `n>=5`; la alerta de activas sin NOAA interpretable solo aparece si la ciudad sigue por debajo de `3` casos observados; `Shadow sin join NOAA útil` exige `>=20` señales shadow y `>=10` observaciones NOAA globales; y el `WR shadow observado` no se alerta hasta `n>=8` resueltas.

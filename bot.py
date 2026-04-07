@@ -3720,7 +3720,7 @@ def run_observability_alerts():
             changed = True
 
     # ---- v10.5.2: City Accuracy Alert ----
-    city_stats = get_city_accuracy()
+    city_stats = {}
     policy_state = load_city_policy_state()
     flagged_key = "city_accuracy_flagged"
     if flagged_key not in state:
@@ -3739,6 +3739,55 @@ def run_observability_alerts():
                 )
                 state[flagged_key][city] = {"sent_at": now_iso, **data}
                 changed = True
+
+    # ---- v10.6.11: City NOAA-verified review alert ----
+    policy_state = load_city_policy_state()
+    if "get_city_policy_metrics" in globals():
+        city_policy_metrics = get_city_policy_metrics(audit=audit)
+    else:
+        city_policy_metrics = {}
+    flagged_key = "city_policy_review_flagged"
+    if flagged_key not in state:
+        state[flagged_key] = {}
+
+    verified_bad_min_trades = int(globals().get("ALERT_VERIFIED_BAD_MIN_TRADES", 5) or 5)
+    verified_bad_max_win_rate = float(
+        globals().get(
+            "ALERT_VERIFIED_BAD_MAX_WIN_RATE",
+            globals().get("CITY_BLOCK_WIN_RATE", 25.0),
+        )
+        or globals().get("CITY_BLOCK_WIN_RATE", 25.0)
+    )
+
+    for city, buckets in city_policy_metrics.items():
+        verified = buckets.get("verified", {}) if isinstance(buckets, dict) else {}
+        trades = int(verified.get("trades", 0) or 0)
+        wins = int(verified.get("wins", 0) or 0)
+        win_rate = float(verified.get("win_rate", 0.0) or 0.0)
+        pnl = round(float(verified.get("pnl", 0.0) or 0.0), 2)
+        city_mode = get_effective_city_mode(city, policy_state=policy_state)
+        if trades < verified_bad_min_trades or win_rate > verified_bad_max_win_rate:
+            continue
+        if city_mode not in {"active", "canary"}:
+            continue
+        if city in state[flagged_key]:
+            continue
+        now_iso = datetime.now(timezone.utc).isoformat()
+        send_telegram(
+            f"âš  <b>Ciudad bajo review NOAA-verificado</b>\n"
+            f"{city}: {win_rate:.1f}% win rate ({wins}/{trades} trades NOAA-verificados)\n"
+            f"PnL NOAA-verificado: ${pnl:+.2f}\n"
+            f"<i>Revisar allowlist/canary antes de ampliar riesgo</i>"
+        )
+        state[flagged_key][city] = {
+            "sent_at": now_iso,
+            "trades": trades,
+            "wins": wins,
+            "win_rate": round(win_rate, 1),
+            "pnl": pnl,
+            "city_mode": city_mode,
+        }
+        changed = True
 
     # ---- v10.6: Low bankroll alert ----
     portfolio = _get_portfolio_and_positions()
