@@ -87,6 +87,7 @@ Comandos útiles:
 | 2026-04-04 | Explícita | Sesión 76 | `—` | Implementación local de Camino A shadow-only: filtro `ALLOWED_CONDITIONS` para dejar solo `at_or_above/at_or_below`, `range/exact` enviados a shadow tracking con `edge_hit=False`, sigma empírica por ciudad con fallback global, `MIN_EDGE=15.0`, `condition_filtered` en dashboard/Telegram/cycle_summary y suite `515/515`; sin tocar scheduler/NOAA/trade_lifecycle/deploy ni env vars Railway. |
 | 2026-04-06 | Explícita | Sesión 82 | `93c8b2e` `1daec87` | Diagnóstico estratégico completo + corrección de modelo + reactivación Dallas. (1) Verificación empírica: NOAA `daily-summaries/TMAX` = WU daily high exactamente para KORD — no se necesita scraping WU. (2) Sesgo Open-Meteo medido con 13 casos NOAA en producción: Atlanta `Bias=+1.38°C`, Chicago `Bias=+1.40°C`, Dallas `Bias≈0`. (3) `FORECAST_BIAS_C` implementado en `estimate_prob_with_city` (`mu = forecast_max + bias`). (4) Dallas sigma D0 `0.21→0.57°C`, samples D0 `2→3`. (5) `MIN_PRICE 0.08→0.20`, `MAX_PRICE 0.92→0.80`. (6) `ACTIVE_TRADING_CITIES=Dallas` en Railway (estaba `NONE`), `auto_blocked_cities` limpio. (7) NOAA decoupling (Codex): `_iter_recent_noaa_cycle_markets` + `_get_noaa_candidate_dates` + `scanned_markets` en cycle_summary — recoge observaciones sin BUY. Suite `620/620` (+8 tests). |
 | 2026-04-06 | Explícita | Sesión 85 | `—` | Política local de ciudades `shadow-first`: `sync_city_policy_state()` vuelve a degradar `active/canary -> shadow`, `blocked` queda reservado a descartes reales, y el overlay legado `auto_blocked_cities[action=auto_block]` se migra al vuelo a `auto_shadow_cities` para evitar casos tipo Dallas. Dashboard/copy distinguen `Sin muestra` vs `Sin NOAA` y `Descartes reales` vs `Shadow degradada`. `verify_before_deploy.py` cierra en `628/628`; falta push/deploy. |
+| 2026-04-07 | Explícita | Sesión 87 | `—` | Hardening local de `agent_events`: `load_agent_events()` acepta sesiones serializadas como `session_72`, extrae el sufijo numérico, mantiene la deduplicación y evita el warning live `invalid literal for int()`. `verify_before_deploy.py` amplía cobertura funcional y cierra en `637/637`. |
 
 ---
 
@@ -2433,6 +2434,22 @@ Regla recomendada:
 - `python verify_before_deploy.py` -> `632/632`
 - se añaden tests funcionales que prueban la separación `NOAA-verificado vs legacy` y que una ciudad activa con histórico legacy malo no se degrada automáticamente por esa sola razón
 - no se tocó trading core, NOAA fetch core, scheduler ni exits; el cambio queda acotado a la policy, su lectura y su persistencia
+
+## Sesión 87 — Hardening de agent_events live (7 abr 2026)
+
+**Disparador:** corregir el warning repetido en Railway `Error cargando agent_events: invalid literal for int() with base 10: 'session_72'` sin tocar trading, NOAA ni scheduler.
+
+**Implementación local:**
+
+- `load_agent_events()` deja de asumir que `session` siempre llega como entero puro;
+- ahora acepta strings tipo `session_72`, extrae el sufijo numérico y normaliza el valor a `72`;
+- la clave de deduplicación sigue usando `timestamp + session + agent + type + title normalizado`, pero ya no rompe al leer eventos antiguos o serializados con prefijo textual.
+
+**Validación y estado:**
+
+- `python verify_before_deploy.py` -> `637/637`
+- se añade un test funcional con `session="session_72"` para fijar la compatibilidad y asegurar que la carga sigue ordenando y deduplicando correctamente
+- impacto esperado: desaparece el warning repetido de `agent_events` en logs y el scoreboard/dashboard vuelve a poder leer esos eventos sin ruido
 
 ## Sesión 85 — Política de ciudades shadow-first y migración Dallas legacy (6 abr 2026)
 

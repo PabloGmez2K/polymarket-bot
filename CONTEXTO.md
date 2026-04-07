@@ -1,6 +1,12 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 6 de abril de 2026 (Sesión 86 — policy NOAA-verificada vs legacy, local, verify 632/632)
+**Última actualización:** 7 de abril de 2026 (Sesión 87 — hardening de `agent_events`, local, verify 637/637)
+**Sesión 87 (7 abr 2026, Codex):** hardening puntual del scoreboard live, sin tocar trading core, NOAA fetch core ni scheduler.
+- **Fix de compatibilidad live:** `load_agent_events()` ya no falla al leer sesiones serializadas como texto tipo `session_72`; ahora extrae el sufijo numérico, lo normaliza a entero y mantiene la deduplicación por clave estable.
+- **Impacto operativo:** desaparece el warning repetido `invalid literal for int() with base 10: 'session_72'` que estaba ensuciando logs y podía dejar cojo el bloque de eventos/agentes del dashboard.
+- **Cobertura nueva:** `verify_before_deploy.py` añade un caso funcional con `session="session_72"` y verifica tanto la normalización a `72` como la deduplicación/ordenación de eventos.
+- **Validación local:** `python verify_before_deploy.py` cierra en **637/637**.
+
 **Sesión 86 (6 abr 2026, Codex):** reinterpretación del histórico para la policy de ciudades, sin tocar trading core, NOAA fetch core ni scheduler.
 - **Nueva capa de policy:** `get_city_policy_metrics()` separa cierres por ciudad en `verified` (join `city+date` contra `observed_vs_forecast` con `source=noaa_ncei`) y `legacy` (sin NOAA-verificado).
 - **Degradación más robusta:** `build_dashboard_city_decisions()` ya no degrada `active/canary -> shadow` usando histórico agregado bruto. La regla `remove` ahora exige trades **NOAA-verificados**; si solo hay histórico legacy malo, la policy queda `provisional` y la ciudad se mantiene/observa en vez de oscilar por una era observacional antigua.

@@ -2151,6 +2151,7 @@ def run_tests():
             f.write(json.dumps({"agent": "Codex", "type": "bug_detected", "session": 32, "title": "Research: Dallas KDAL + auditoria mal nombrada", "points": 3, "timestamp": "2026-03-29T12:00:00+00:00"}) + "\n")
             f.write(json.dumps({"agent": "Codex", "type": "bug_detected", "session": 32, "title": "Research: Dallas KDAL + auditoría mal nombrada", "points": 3, "timestamp": "2026-03-29T12:00:00+00:00"}) + "\n")
             f.write(json.dumps({"agent": "Claude Code (Opus)", "type": "review_correction", "session": 32, "title": "Research adversarial review NOAA/WU", "points": 5, "timestamp": "2026-03-29T11:00:00+00:00"}) + "\n")
+            f.write(json.dumps({"agent": "Codex", "type": "validated_improvement", "session": "session_72", "title": "Focus no-cycle alert coverage", "points": 2, "timestamp": "2026-04-03T21:41:33+00:00"}) + "\n")
         events_ns = {
             "os": os,
             "json": json,
@@ -2159,8 +2160,11 @@ def run_tests():
         }
         exec(get_function_source(module_ast, code_lines, "load_agent_events"), events_ns)
         loaded_events = events_ns["load_agent_events"]()
-        test("load_agent_events: deduplica equivalentes", len(loaded_events) == 2, loaded_events)
+        test("load_agent_events: deduplica equivalentes", len(loaded_events) == 3, loaded_events)
         test("load_agent_events: ordena por timestamp desc", loaded_events[0]["agent"] == "Codex", loaded_events)
+        test("load_agent_events: acepta session_N y la normaliza a int",
+             any(item.get("session") == 72 for item in loaded_events),
+             loaded_events)
         if os.path.exists(tmp_agent_events):
             try:
                 os.remove(tmp_agent_events)

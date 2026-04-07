@@ -8150,6 +8150,10 @@ def load_agent_events(limit=None):
                 except Exception:
                     continue
                 if isinstance(item, dict):
+                    raw_session = item.get("session", 0)
+                    session_text = str(raw_session or "").strip().lower()
+                    session_match = _re.search(r"(\d+)$", session_text)
+                    session_number = int(session_match.group(1)) if session_match else 0
                     normalized_title = str(item.get("title", "") or "").strip().lower()
                     normalized_title = _unicodedata.normalize("NFKD", normalized_title)
                     normalized_title = "".join(
@@ -8158,7 +8162,7 @@ def load_agent_events(limit=None):
                     normalized_title = _re.sub(r"[^a-z0-9]+", "", normalized_title)
                     dedupe_key = (
                         str(item.get("timestamp", "") or "").strip(),
-                        int(item.get("session", 0) or 0),
+                        session_number,
                         str(item.get("agent", "") or "").strip(),
                         str(item.get("type", "") or "").strip(),
                         normalized_title,
@@ -8166,6 +8170,7 @@ def load_agent_events(limit=None):
                     if dedupe_key in seen_keys:
                         continue
                     seen_keys.add(dedupe_key)
+                    item["session"] = session_number
                     events.append(item)
     except Exception as e:
         log.warning(f"Error cargando agent_events: {e}")
