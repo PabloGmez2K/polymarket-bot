@@ -1568,6 +1568,17 @@ def run_tests():
             test("shadow tracking: join NOAA normaliza datetime en date",
                  resolution_stats["resolved"] == 1 and resolution_stats["wins"] == 1 and resolution_stats["win_rate"] == 100.0,
                  resolution_stats)
+
+            road_ns = dict(shadow_ns)
+            road_ns["build_dashboard_forecast_quality"] = lambda: {"sample_size": 12}
+            road_ns["get_city_accuracy"] = lambda: {}
+            road_ns["get_dashboard_alert_summary"] = lambda: {"active_items": []}
+            exec(get_function_source(module_ast, code_lines, "build_dashboard_road_to_real"), road_ns)
+            road = road_ns["build_dashboard_road_to_real"](shadow_tracking=tracked, forecast_quality={"sample_size": 12}, city_accuracy={}, city_decisions={"ranking_rows": []}, alerts={"active_items": []})
+            road_sim_wr = next(item for item in road["checks"] if item["id"] == "sim_wr")
+            test("road_to_real: usa directional_history sin NameError",
+                 road_sim_wr["display"] == "100.0% (n=1)",
+                 road_sim_wr)
         g = _gates_call(noaa_configured=True, observed_count=2, observed_goal=5)
         test("R1 gate_c: partial con NOAA configurado pero muestra corta",
              g["gate_c"]["state"] == "partial" and g["gate_c"]["badge"] == "warn", g["gate_c"])

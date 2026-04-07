@@ -6700,6 +6700,7 @@ def build_dashboard_road_to_real(
         alerts = get_dashboard_alert_summary()
 
     shadow_summary = shadow_tracking.get("summary", {}) if isinstance(shadow_tracking, dict) else {}
+    recent_opps = shadow_tracking.get("directional_history", []) if isinstance(shadow_tracking, dict) else []
 
     # R1: >= 30 shadow directional signals (edge_hit=True means passed condition + edge)
     directional_signals = shadow_summary.get("edge_hits", 0) or 0

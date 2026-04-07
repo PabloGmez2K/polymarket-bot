@@ -1,6 +1,20 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 7 de abril de 2026 (Sesión 94 — WR shadow observado persistente y estable, local, verify 642/642)
+**Última actualización:** 7 de abril de 2026 (Sesión 96 — hotfix dashboard Road to Real tras deploy)
+**Sesión 96 (7 abr 2026, Codex):** hotfix del crash live del dashboard tras el deploy del `WR observado direccional`.
+- **Incidente confirmado en Railway:** el endpoint `/` caía con `NameError: name 'recent_opps' is not defined` dentro de `build_dashboard_road_to_real()` al renderizar la tarjeta `Road to Real`.
+- **Causa raíz:** el refactor hacia base persistente dejó `Road to Real` iterando `recent_opps` sin volver a inicializar esa variable dentro de la función. El resto de la lógica y los datos persistentes seguían correctos; el fallo era un remanente local del builder del dashboard.
+- **Hotfix aplicado:** `build_dashboard_road_to_real()` vuelve a leer `shadow_tracking["directional_history"]` antes del join shadow→NOAA, con lo que recupera el cálculo del `WR observado direccional` y deja de romper la home del dashboard.
+- **Regresión añadida:** `verify_before_deploy.py` incorpora un test funcional específico para garantizar que `build_dashboard_road_to_real()` consume `directional_history` sin lanzar `NameError`.
+- **Validación local:** `python verify_before_deploy.py` cierra en **643/643**.
+
+**Sesión 95 (7 abr 2026, Codex):** deploy a Railway del rediseño del `WR observado direccional` y registro explícito del seguimiento post-ciclo para no perder el hilo al cerrar sesión.
+- **Deploy completado:** el commit `57be884` (`ops: persist shadow observed win-rate basis`) quedó en `origin/main` y Railway arrancó una instancia nueva a `2026-04-07 10:56:26 UTC`.
+- **Código live confirmado:** `/app/bot.py` ya contiene `directional_history`, así que la lógica nueva de base persistente para señales shadow resolubles está desplegada.
+- **Estado live aún transitorio:** `/app/data/shadow_city_tracking.json` seguía con esquema viejo justo tras el deploy porque todavía no había corrido un ciclo nuevo que reescribiera el volume con la versión nueva.
+- **Checklist post-ciclo pendiente:** en la próxima revisión live, validar que `shadow_city_tracking.json` ya incluya `directional_history`, que `recent_opportunities` persista `edge_hit`, y que el dashboard/estado derivado deje de depender de una base reciente volátil para el `WR observado direccional`.
+- **Lectura operativa recomendada:** hasta que pase ese ciclo, el deploy debe considerarse correcto pero pendiente de validación de datos escritos; la siguiente comprobación útil es post-ciclo, no inmediatamente tras el restart.
+
 **Sesión 94 (7 abr 2026, Codex):** auditoría y rediseño del `WR observado direccional` para dejar de depender de una ventana shadow volátil.
 - **Causa raíz confirmada con evidencia de código:** el check `WR observado direccional >= 45%` y la alerta asociada leían `shadow_tracking.recent_opportunities`, una lista recortada/perecedera pensada para UI reciente, no para resolución tardía con NOAA. Además `record_shadow_city_opportunities()` persistía esas filas sin `edge_hit`, de modo que `save_shadow_city_tracking()` las re-clasificaba como no direccionales al guardar y el join quedaba sesgado hacia `0/N`.
 - **Base persistente nueva para shadow observado:** `shadow_city_tracking.json` gana `directional_history`, un registro estable de señales shadow direccionales deduplicadas por firma (`city|date|side|condition|threshold`). Esta capa conserva `first_seen_at/last_seen_at/times_seen`, mantiene `recent_opportunities` solo como ventana de UI, y permite resolver señales cuando NOAA llegue con lag sin tocar trading core.
