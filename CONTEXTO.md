@@ -1,6 +1,11 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Última actualización:** 8 de abril de 2026 (Sesión 97 — validación live post-ciclo + alineación Telegram/observabilidad)
+**Última actualización:** 8 de abril de 2026 (Sesión 98 — documento canónico de estrategia operativa)
+**Sesión 98 (8 abr 2026, Codex):** consolidación documental de la operativa vigente para preparar la investigación comparativa de traders y estrategias ganadoras.
+- **Nueva fuente única para comparar estrategia:** se crea `docs/ESTRATEGIA_OPERATIVA.md` como documento canónico y compacto de la operativa actual. Resume qué mercados operamos, qué condiciones permitimos, qué filtros pasan antes de comprar, cómo calculamos probabilidad/edge, cómo dimensionamos con `Half-Kelly`, qué significan `active/canary/shadow/blocked`, y cómo se separan `Open-Meteo`, `NOAA` y `Weather Underground`.
+- **Objetivo del documento:** dejar una base explícita y comparable para futuras sesiones de research sobre otros traders, evitando reconstruir la estrategia desde `bot.py`, `CONTEXTO.md` y notas dispersas.
+- **Semántica alineada con el repo:** el documento no cambia la lógica; solo fija en lenguaje humano la estrategia real vigente en código y enlaza mejor la capa operativa con la capa de aprendizaje/observabilidad.
+
 **Sesión 97 (8 abr 2026, Codex):** validación live post-ciclo del rediseño `WR observado direccional`, alineación semántica de Telegram y contrato explícito de fuentes del sistema.
 - **Validación live cerrada con evidencia:** tras los ciclos `2026-04-07 23:00 UTC` y `2026-04-08 08:00 UTC`, Railway confirmó que `shadow_city_tracking.json` ya usa el esquema nuevo (`directional_history` existe y `recent_opportunities` persiste `edge_hit`), pero la base persistente sigue vacía en live (`directional_history=[]`). El ciclo `08:00 UTC` reescribió el volume, abrió BUYs reales en `Shanghai` y `Seoul`, y aun así mantuvo `scan.shadow=0`; por tanto el `0/72` del dashboard no representa un WR real observado, sino un estado transitorio donde el agregado histórico de `edge_hits` todavía no se materializó como señales persistidas/resolubles.
 - **Causa operativa aclarada:** el ciclo `08:00 UTC` tuvo `17` candidatos, `2` con edge, `2` BUYs reales, `0` shadow y `15` `condition_filtered`; no hubo señales shadow direccionales nuevas que pudieran poblar `directional_history`. La tarjeta `Road to Real` ya lee la base correcta, pero hoy sigue midiendo una capa aún vacía en datos live.

@@ -14,7 +14,7 @@ Principios de propósito:
 - reducir incoherencias entre producción, snapshots, postmortem, lifecycle, dashboard y documentación;
 - proteger capital primero; optimizar rentabilidad solo cuando exista evidencia suficiente.
 
-Fuente conceptual ya existente y reutilizada: `OBSERVABILIDAD_Y_APRENDIZAJE.md`, `CONTEXTO.md`, `OPERATIONS_PLAYBOOK.md`, `HISTORIAL_SESIONES.md` y el contrato operativo de `AGENTS.md` / `CLAUDE.md`.
+Fuente conceptual ya existente y reutilizada: `OBSERVABILIDAD_Y_APRENDIZAJE.md`, `docs/ESTRATEGIA_OPERATIVA.md`, `CONTEXTO.md`, `OPERATIONS_PLAYBOOK.md`, `HISTORIAL_SESIONES.md` y el contrato operativo de `AGENTS.md` / `CLAUDE.md`.
 
 ## Contrato operativo de fuentes
 
