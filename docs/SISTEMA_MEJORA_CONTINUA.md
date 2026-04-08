@@ -16,6 +16,28 @@ Principios de propósito:
 
 Fuente conceptual ya existente y reutilizada: `OBSERVABILIDAD_Y_APRENDIZAJE.md`, `CONTEXTO.md`, `OPERATIONS_PLAYBOOK.md`, `HISTORIAL_SESIONES.md` y el contrato operativo de `AGENTS.md` / `CLAUDE.md`.
 
+## Contrato operativo de fuentes
+
+El sistema necesita una semántica estable para aprender sin mezclar señales heterogéneas. El contrato canónico queda así:
+
+- **Open-Meteo decide**
+- **NOAA mide**
+- **Weather Underground resuelve**
+
+Traducción operativa:
+
+- `Open-Meteo` es la fuente de forecast usada para escaneo, probabilidad, edge y sizing.
+- `NOAA` es la capa observada usada para `observed_vs_forecast`, cobertura, `MAE`, `bias`, `NOAA-verificado` y aprendizaje por ciudad.
+- `Weather Underground` sigue siendo la referencia de settlement real de Polymarket.
+
+Regla de interpretación:
+
+- si una métrica explica una entrada o una no entrada, pertenece a la capa de decisión;
+- si una métrica evalúa cobertura, sesgo o calidad del forecast, pertenece a la capa de medición;
+- si una métrica pretende explicar PnL final o resolución, no debe presentar NOAA como settlement real.
+
+Consecuencia práctica: cualquier vista, alerta o investigación futura debe etiquetar explícitamente en qué capa está trabajando para evitar drift semántico entre trading, observabilidad y settlement.
+
 ## Estado actual resumido
 
 ### Ya validado
@@ -203,4 +225,3 @@ Regla práctica de decisión:
 - No presentar NOAA como fuente real de settlement de Polymarket.
 - No implementar alertas Telegram adicionales sin diseñar antes condición, fuente, deduplicación y acción esperada.
 - No construir un backlog enorme desconectado de evidencia live; cada bloque futuro debe nacer de una incoherencia o una limitación concreta ya observada.
-

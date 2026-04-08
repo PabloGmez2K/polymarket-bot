@@ -3762,7 +3762,9 @@ def run_observability_alerts():
                 changed = True
 
     # ---- v10.6.11: City NOAA-verified review alert ----
-    policy_state = load_city_policy_state()
+    policy_state_loader = globals().get("load_city_policy_state")
+    policy_state = policy_state_loader() if callable(policy_state_loader) else {}
+    city_mode_helper = globals().get("get_effective_city_mode")
     if "get_city_policy_metrics" in globals():
         city_policy_metrics = get_city_policy_metrics(audit=audit)
     else:
@@ -6304,8 +6306,14 @@ def _daily_summary_cycles_last_24h(now):
         "selected": 0,
         "shadow": 0,
         "buys_real": 0,
+        "buys_active": 0,
+        "buys_canary": 0,
+        "buys_other": 0,
     }
     cutoff = now - timedelta(hours=24)
+    policy_state_loader = globals().get("load_city_policy_state")
+    policy_state = policy_state_loader() if callable(policy_state_loader) else {}
+    city_mode_helper = globals().get("get_effective_city_mode")
     try:
         records = load_cycle_history()
     except Exception:
@@ -6328,6 +6336,24 @@ def _daily_summary_cycles_last_24h(now):
         stats["shadow"] += int(scan.get("shadow", 0) or 0)
         buys = rec.get("buys", []) if isinstance(rec.get("buys"), list) else []
         stats["buys_real"] += len(buys)
+        for buy in buys:
+            if not isinstance(buy, dict):
+                continue
+            city = str(buy.get("city", "") or "").strip()
+            city_mode = str(buy.get("city_mode", "") or "").strip().lower()
+            if not city_mode and city:
+                if callable(city_mode_helper):
+                    city_mode = city_mode_helper(city, policy_state=policy_state)
+                elif city in (globals().get("ACTIVE_TRADING_CITIES", []) or []):
+                    city_mode = "active"
+                elif city in (globals().get("CANARY_TRADING_CITIES", []) or []):
+                    city_mode = "canary"
+            if city_mode == "active":
+                stats["buys_active"] += 1
+            elif city_mode == "canary":
+                stats["buys_canary"] += 1
+            else:
+                stats["buys_other"] += 1
     return stats
 
 
@@ -6387,10 +6413,63 @@ def _daily_summary_noaa_last_24h(now):
     return stats
 
 
+def _get_live_operable_city_counts(policy_state=None):
+    """Cuenta ciudades operables hoy por modo efectivo (active/canary)."""
+    policy_state = _normalize_city_policy_state(policy_state or load_city_policy_state())
+    auto_canary = policy_state.get("auto_canary_cities", {}) if isinstance(policy_state, dict) else {}
+    tracked = (
+        set(ACTIVE_TRADING_CITIES)
+        | set(CANARY_TRADING_CITIES)
+        | set(auto_canary.keys() if isinstance(auto_canary, dict) else [])
+    )
+    tracked = {city for city in tracked if str(city).strip().upper() not in {"", "NONE"}}
+
+    counts = {"active": 0, "canary": 0}
+    for city in tracked:
+        mode = get_effective_city_mode(city, policy_state=policy_state)
+        if mode in counts:
+            counts[mode] += 1
+    return counts
+
+
+def _format_operable_mode_label(active_count=0, canary_count=0, shadow_only=False):
+    """Texto corto para Telegram con el universo operable actual."""
+    if shadow_only:
+        return "SHADOW-ONLY"
+
+    parts = []
+    if active_count:
+        parts.append(f"{active_count} activa" if active_count == 1 else f"{active_count} activas")
+    if canary_count:
+        parts.append(f"{canary_count} canary")
+    if not parts:
+        return "sin ciudades operables"
+    return " + ".join(parts)
+
+
+def _format_buy_mode_tag(city_mode):
+    """Tag compacto para distinguir compras active vs canary en Telegram."""
+    mode = str(city_mode or "").strip().lower()
+    if mode == "canary":
+        return "CANARY"
+    if mode == "active":
+        return "ACTIVE"
+    return mode.upper() if mode else "OPERABLE"
+
+
 def build_daily_summary_payload(now=None):
     """Construye payload del resumen diario (datos crudos sin formateo)."""
     if now is None:
         now = datetime.now(timezone.utc)
+    operable_counts_helper = globals().get("_get_live_operable_city_counts")
+    operable_counts = (
+        operable_counts_helper()
+        if callable(operable_counts_helper)
+        else {
+            "active": len(globals().get("ACTIVE_TRADING_CITIES", []) or []),
+            "canary": len(globals().get("CANARY_TRADING_CITIES", []) or []),
+        }
+    )
     return {
         "generated_at": now.isoformat(),
         "cycles_24h": _daily_summary_cycles_last_24h(now),
@@ -6400,6 +6479,8 @@ def build_daily_summary_payload(now=None):
         "logic_series": LOGIC_SERIES,
         "active_cities_count": len(ACTIVE_TRADING_CITIES),
         "shadow_only": len(ACTIVE_TRADING_CITIES) == 0,
+        "operable_active_count": operable_counts["active"],
+        "operable_canary_count": operable_counts["canary"],
     }
 
 
@@ -6409,7 +6490,26 @@ def format_daily_summary_text(payload):
     r = payload.get("resolutions_24h", {})
     n = payload.get("noaa_24h", {})
 
-    mode_label = "SHADOW-ONLY" if payload.get("shadow_only") else f"{payload.get('active_cities_count', 0)} ciudades activas"
+    mode_label_helper = globals().get("_format_operable_mode_label")
+    mode_label = (
+        mode_label_helper(
+            active_count=int(payload.get("operable_active_count", 0) or 0),
+            canary_count=int(payload.get("operable_canary_count", 0) or 0),
+            shadow_only=bool(payload.get("shadow_only")),
+        )
+        if callable(mode_label_helper)
+        else ("SHADOW-ONLY" if payload.get("shadow_only") else f"{payload.get('active_cities_count', 0)} ciudades activas")
+    )
+    buys_breakdown = []
+    if int(c.get("buys_active", 0) or 0) > 0:
+        buys_breakdown.append(f"{c.get('buys_active', 0)} active")
+    if int(c.get("buys_canary", 0) or 0) > 0:
+        buys_breakdown.append(f"{c.get('buys_canary', 0)} canary")
+    if int(c.get("buys_other", 0) or 0) > 0:
+        buys_breakdown.append(f"{c.get('buys_other', 0)} otras")
+    buys_line = f"• BUYs reales: {c.get('buys_real', 0)}"
+    if buys_breakdown:
+        buys_line += f" ({' | '.join(buys_breakdown)})"
 
     lines = [
         f"📊 <b>Resumen diario — {datetime.now(timezone.utc).strftime('%Y-%m-%d')}</b>",
@@ -6417,10 +6517,10 @@ def format_daily_summary_text(payload):
         "",
         "<b>🔄 Ciclos 24h</b>",
         f"• Ejecutados: <b>{c.get('cycles', 0)}</b>",
-        f"• Mercados escaneados: {c.get('markets_evaluated', 0)}",
+        f"• Candidatos evaluados: {c.get('markets_evaluated', 0)}",
         f"• Con edge detectado: <b>{c.get('with_edge', 0)}</b>",
-        f"• Seleccionados: {c.get('selected', 0)} | Shadow: {c.get('shadow', 0)}",
-        f"• BUYs reales: {c.get('buys_real', 0)}",
+        f"• Seleccionados para BUY: {c.get('selected', 0)} | Shadow con edge: {c.get('shadow', 0)}",
+        buys_line,
         "",
         "<b>💰 Resoluciones 24h</b>",
     ]
@@ -6443,6 +6543,8 @@ def format_daily_summary_text(payload):
     else:
         lines.append("• Sin casos nuevos en 24h")
     lines.append(f"• Acumulado histórico: {n.get('cumulative', 0)}")
+    lines.append("")
+    lines.append("<i>Caso NOAA = 1 fila city+date en observed_vs_forecast (forecast vs observado NOAA).</i>")
 
     # Próximo ciclo (usa scheduler si está disponible).
     try:
@@ -10164,8 +10266,12 @@ def cmd_log():
             n_mkts = scan.get("markets_evaluated", 0)
             n_edge = scan.get("with_edge", 0)
             n_sel = scan.get("selected", 0)
+            n_shadow = scan.get("shadow", 0)
             n_condition_filtered = scan.get("condition_filtered", 0)
-            msg += f"<b>Escaneo:</b> {n_mkts} mercados → {n_edge} con edge → {n_sel} seleccionados\n"
+            msg += (
+                f"<b>Escaneo:</b> {n_mkts} candidatos → {n_edge} con edge → "
+                f"{n_sel} seleccionados para BUY | shadow {n_shadow}\n"
+            )
 
             msg += f"Condición filtrada: {n_condition_filtered} mercados (range/exact)\n"
 
@@ -10174,7 +10280,16 @@ def cmd_log():
                 msg += f"\n<b>Compras ({len(buys)}):</b>\n"
                 for b in buys:
                     trader_icon = " " if b.get("traders") else ""
-                    msg += f"  🟢 {b.get('city','?')} {b.get('side','?')} ${b.get('amount',0):.2f} | edge {b.get('edge',0)}%{trader_icon}\n"
+                    mode_tag_helper = globals().get("_format_buy_mode_tag")
+                    mode_tag = (
+                        mode_tag_helper(b.get("city_mode"))
+                        if callable(mode_tag_helper)
+                        else str(b.get("city_mode", "") or "OPERABLE").upper()
+                    )
+                    msg += (
+                        f"  🟢 [{mode_tag}] {b.get('city','?')} {b.get('side','?')} "
+                        f"${b.get('amount',0):.2f} | edge {b.get('edge',0)}%{trader_icon}\n"
+                    )
             else:
                 msg += "\n<i>Sin compras este ciclo</i>\n"
 
@@ -10255,6 +10370,8 @@ def cmd_logfull():
         accepted = []
         near_misses = []
         no_edge = []
+        condition_filtered = []
+        shadow_edges = []
         duplicates = []
         kelly_low = []
 
@@ -10262,13 +10379,21 @@ def cmd_logfull():
             stripped = line.strip()
             if stripped.startswith("✓"):
                 accepted.append(stripped)
+            elif stripped.startswith("SHADOW-FILTER"):
+                condition_filtered.append(stripped)
+            elif stripped.startswith("SHADOW "):
+                shadow_edges.append(stripped)
             elif "BAJO" in stripped:
                 edge_match = re.search(r"edge=(\d+\.?\d*)%", stripped)
                 edge_val = float(edge_match.group(1)) if edge_match else 0
                 near_misses.append((edge_val, stripped[2:]))
             elif "SIN EDGE" in stripped:
                 no_edge.append(stripped[2:])
-            elif stripped.startswith(""):
+            elif (
+                "YA HAY ORDEN" in stripped
+                or "VENDIDO ESTE CICLO" in stripped
+                or "YA HAY POSICIÓN ABIERTA" in stripped
+            ):
                 duplicates.append(stripped[2:])
             elif "KELLY" in stripped:
                 kelly_low.append(stripped[2:])
@@ -10276,18 +10401,25 @@ def cmd_logfull():
         near_misses.sort(key=lambda x: -x[0])
 
         text = f"📋 <b>Log detallado del último ciclo</b>\n\n"
-        text += f"Total: {len(edge_analysis)} mercados evaluados\n"
+        text += f"Total: {len(edge_analysis)} candidatos evaluados\n"
         text += f"✅ Aceptados: {len(accepted)}\n"
         text += f"🔶 Near miss (edge ≥3%): {len([n for n in near_misses if n[0] >= 3])}\n"
-        text += f" Duplicados: {len(duplicates)}\n"
-        text += f" Sin edge: {len(no_edge)}\n"
-        text += f" Kelly bajo: {len(kelly_low)}\n"
+        text += f"🟣 Shadow con edge: {len(shadow_edges)}\n"
+        text += f"🟡 Condición filtrada: {len(condition_filtered)}\n"
+        text += f"🔁 Duplicados/protecciones: {len(duplicates)}\n"
+        text += f"⚪ Sin edge: {len(no_edge)}\n"
+        text += f"💸 Kelly bajo: {len(kelly_low)}\n"
 
         # Aceptados
         if accepted:
             text += f"\n<b>✅ ACEPTADOS:</b>\n"
             for line in accepted[:5]:
                 text += f"🟢 {line[2:70]}\n"
+
+        if shadow_edges:
+            text += f"\n<b>🟣 SHADOW CON EDGE:</b>\n"
+            for line in shadow_edges[:5]:
+                text += f"  {line[:80]}\n"
 
         # Near misses con cruce de traders
         interesting = [(e, t) for e, t in near_misses if e >= 3.0]
@@ -10645,7 +10777,9 @@ def cmd_info():
             mgmt = cd.get("management", {})
             scan = cd.get("scan", {})
             buys = cd.get("buys", [])
+            mode_tag_helper = globals().get("_format_buy_mode_tag")
             buys_str = ", ".join(
+                f"[{mode_tag_helper(b.get('city_mode')) if callable(mode_tag_helper) else str(b.get('city_mode', '') or 'OPERABLE').upper()}] "
                 f"{b.get('city','?')} {b.get('side','?')} ${b.get('amount',0):.2f}"
                 for b in buys
             ) if buys else "ninguna"
@@ -10667,11 +10801,14 @@ def cmd_info():
                 f"\n{cycle_label} ({cd.get('timestamp_utc','?')[:16]} UTC)\n"
                 f"  Gestión: {mgmt.get('n_kept',0)} mantenidas, {mgmt.get('n_sold',0)} vendidas, "
                 f"{mgmt.get('n_resolved',0)} resueltas\n"
-                f"  Escaneo: {scan.get('markets_evaluated',0)} mercados → "
-                f"{scan.get('selected',0)} seleccionados\n"
+                f"  Escaneo: {scan.get('markets_evaluated',0)} candidatos → "
+                f"{scan.get('with_edge',0)} con edge → {scan.get('selected',0)} seleccionados para BUY\n"
                 f"  Compras: {buys_str}\n"
             )
-            cycle_block += f"  Condición filtrada: {scan.get('condition_filtered',0)} mercados (range/exact)\n"
+            cycle_block += (
+                f"  Shadow con edge: {scan.get('shadow',0)} | "
+                f"Condición filtrada: {scan.get('condition_filtered',0)} mercados (range/exact)\n"
+            )
             if exp is not None:
                 cycle_block += f"  Exposición: ${exp:.2f}"
             if bud is not None:
@@ -10718,33 +10855,75 @@ def cmd_info():
         text += f"\n<b>Rendimiento (v10.2+):</b>{perf_block}"
     text += (
         f"\n<b>Arquitectura:</b>\n"
-        f"~330 mercados temp | Open-Meteo | normal(μ,σ)\n"
+        f"~330 mercados temp | forecast operativo: Open-Meteo | modelo normal(μ,σ)\n"
         f"Sigma: D0=1.2 D1=1.5 D2=2.0 D3=2.5 D4-5=3.0\n"
         f"Half-Kelly | Railway EU-West (Amsterdam)\n"
-        f"⚠ Polymarket resuelve con Weather Underground, no Open-Meteo"
+        f"Observed proxy: NOAA | resolución final de Polymarket: Weather Underground"
     )
 
     send_telegram_paged(text, with_menu=True)
 
 
 def cmd_accuracy():
-    """Muestra accuracy (win rate) por ciudad desde postmortem."""
+    """Resumen por ciudad, priorizando policy/NOAA-verificado sobre histórico legacy."""
     city_stats = get_city_accuracy()
-    if not city_stats:
+    audit = load_audit_data()
+    city_policy_metrics = get_city_policy_metrics(audit=audit)
+    policy_state = load_city_policy_state()
+
+    if not city_stats and not city_policy_metrics:
         send_telegram("Sin datos de accuracy todavía.", with_menu=True)
         return
 
-    sorted_cities = sorted(city_stats.items(), key=lambda x: -x[1]["trades"])
+    operable_cities = sorted(
+        {
+            city
+            for city in set(city_stats.keys()) | set(city_policy_metrics.keys()) | set(ACTIVE_TRADING_CITIES) | set(CANARY_TRADING_CITIES)
+            if get_effective_city_mode(city, policy_state=policy_state) in {"active", "canary"}
+        }
+    )
 
-    lines = ["<b>Accuracy por ciudad</b>\n"]
-    for city, data in sorted_cities:
-        blocked = " 🚫" if is_city_blocked(city) else ""
-        flag = " ⚠" if data["trades"] >= CITY_MIN_TRADES_FOR_BLOCK and data["win_rate"] <= CITY_BLOCK_WIN_RATE else ""
-        lines.append(
-            f"<b>{city}</b>{blocked}{flag}: "
-            f"{data['wins']}/{data['trades']} ({data['win_rate']}%) "
-            f"${data['pnl']:+.2f}"
-        )
+    lines = [
+        "<b>Accuracy por ciudad</b>",
+        "",
+        "<b>Operables hoy — NOAA-verificado / policy</b>",
+    ]
+
+    if operable_cities:
+        for city in operable_cities:
+            mode_tag = _format_buy_mode_tag(get_effective_city_mode(city, policy_state=policy_state))
+            buckets = city_policy_metrics.get(city, {}) if isinstance(city_policy_metrics, dict) else {}
+            verified = buckets.get("verified", {}) if isinstance(buckets, dict) else {}
+            trades = int(verified.get("trades", 0) or 0)
+            wins = int(verified.get("wins", 0) or 0)
+            win_rate = round(float(verified.get("win_rate", 0.0) or 0.0), 1)
+            pnl = round(float(verified.get("pnl", 0.0) or 0.0), 2)
+            if trades > 0:
+                flag = " ⚠" if trades >= CITY_MIN_TRADES_FOR_BLOCK and win_rate <= CITY_BLOCK_WIN_RATE else ""
+                lines.append(
+                    f"<b>{city}</b> [{mode_tag}]{flag}: "
+                    f"{wins}/{trades} ({win_rate}%) ${pnl:+.2f}"
+                )
+            else:
+                lines.append(f"<b>{city}</b> [{mode_tag}]: sin trades NOAA-verificados todavía")
+    else:
+        lines.append("<i>Sin ciudades operables hoy.</i>")
+
+    if city_stats:
+        sorted_cities = sorted(city_stats.items(), key=lambda x: -x[1]["trades"])
+        lines.extend([
+            "",
+            "<b>Histórico total postmortem</b>",
+            "<i>Incluye histórico legacy; úsalo como contexto, no como policy principal.</i>",
+        ])
+        for city, data in sorted_cities:
+            blocked = " 🚫" if is_city_blocked(city) else ""
+            flag = " ⚠" if data["trades"] >= CITY_MIN_TRADES_FOR_BLOCK and data["win_rate"] <= CITY_BLOCK_WIN_RATE else ""
+            lines.append(
+                f"<b>{city}</b>{blocked}{flag}: "
+                f"{data['wins']}/{data['trades']} ({data['win_rate']}%) "
+                f"${data['pnl']:+.2f}"
+            )
 
     send_telegram_paged("\n".join(lines), with_menu=True)
 
@@ -10769,7 +10948,7 @@ def cmd_noaa():
 
     if summary["city_rows"]:
         lines.append("")
-        lines.append("<b>Ciudades activas</b>")
+        lines.append("<b>Ciudades operables / seguidas</b>")
         for row in summary["city_rows"]:
             icon = level_icons.get(row.get("status"), "⚪")
             lines.append(f"{icon} <b>{row['city']}</b>: {row['detail']}")
@@ -10784,6 +10963,7 @@ def cmd_noaa():
             )
 
     lines.append("")
+    lines.append("<i>Caso NOAA = 1 fila city+date en observed_vs_forecast.</i>")
     lines.append("<i>NOAA es observed proxy; no equivale a la resolucion final de Polymarket.</i>")
     send_telegram_paged("\n".join(lines), with_menu=True)
 
@@ -13410,6 +13590,7 @@ def main(client):
                     "side": trade["side"],
                     "amount": trade["position"]["amount"],
                     "edge": trade["edge_pct"],
+                    "city_mode": trade.get("city_mode", ""),
                     "traders": trade.get("trader_confirmed", []),
                 })
 
@@ -13510,13 +13691,20 @@ def main(client):
         if buy_summaries:
             for b in buy_summaries:
                 trader_tag = " " if b["traders"] else ""
-                summary += f"🛒 Compra: {b['side']} {b['city']} ${b['amount']:.2f} edge={b['edge']:.0f}%{trader_tag}\n"
+                mode_tag = _format_buy_mode_tag(b.get("city_mode"))
+                summary += (
+                    f"🛒 Compra {mode_tag}: {b['side']} {b['city']} "
+                    f"${b['amount']:.2f} edge={b['edge']:.0f}%{trader_tag}\n"
+                )
         elif not mgmt["n_sold"]:
             summary += f"💤 Sin operaciones\n"
 
         # Estado
         summary += f"{'─' * 25}\n"
-        summary += f"Evaluados: {len(candidates)} | Edge: {len(trades)} | Shadow: {len(shadow_trades)}\n"
+        summary += (
+            f"Candidatos: {len(candidates)} | Con edge: {len(trades)} | "
+            f"Shadow con edge: {len(shadow_trades)}\n"
+        )
         summary += f"Condición filtrada: {condition_filtered_skip} mercados (range/exact)\n"
         summary += f"Exposición actual: ${current_exposure:.2f} | Presupuesto libre: ${budget_left:.2f}\n"
 
@@ -13555,6 +13743,7 @@ def main(client):
                     "side": b.get("side", "?"),
                     "amount": round(b.get("amount", 0), 2),
                     "edge": round(b.get("edge", 0), 1),
+                    "city_mode": b.get("city_mode", ""),
                     "traders": bool(b.get("traders")),
                 }
                 for b in (buy_summaries if 'buy_summaries' in locals() else [])

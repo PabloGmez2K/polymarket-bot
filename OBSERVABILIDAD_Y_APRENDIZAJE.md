@@ -48,6 +48,74 @@ entonces falta observabilidad.
 
 ---
 
+## Contrato de fuentes del sistema
+
+Para que el bot pueda aprender de sí mismo sin mezclar capas, el proyecto fija este contrato:
+
+- **Open-Meteo decide**
+- **NOAA mide**
+- **Weather Underground resuelve**
+
+### 1. Open-Meteo decide
+
+Open-Meteo es la fuente de forecast operativo.
+
+Se usa para:
+
+- estimar `forecast_max`
+- calcular probabilidad modelo
+- calcular `edge`
+- dimensionar posición
+- decidir si una oportunidad pasa a `BUY`, `CANARY` o `SHADOW`
+
+Esto significa que la ejecución real del bot depende del forecast de Open-Meteo, no de NOAA.
+
+### 2. NOAA mide
+
+NOAA es la capa observada del sistema.
+
+Se usa para:
+
+- poblar `observed_vs_forecast`
+- medir `MAE` y `bias`
+- contar cobertura por ciudad
+- decidir cuándo una ciudad es `interpretable`
+- construir señales `NOAA-verificado`
+- validar joins tipo `shadow -> observed`
+
+Un **caso NOAA** es una fila `city + date` en `observed_vs_forecast`.
+
+NOAA no decide entradas. NOAA sirve para medir después qué tan bien está aprendiendo el sistema.
+
+### 3. Weather Underground resuelve
+
+Weather Underground es la referencia de settlement final de Polymarket.
+
+Se usa para entender:
+
+- qué fuente manda realmente al resolver mercados
+- por qué una capa observada puede ser útil sin ser settlement exacto
+- qué discrepancias de fuente pueden seguir generando pérdidas aunque Open-Meteo y NOAA parezcan razonables
+
+### 4. Qué no comparar directamente
+
+Para evitar métricas engañosas:
+
+- no tratar `NOAA` como si fuera la fuente de entrada del bot
+- no tratar `NOAA` como si fuera settlement final de Polymarket
+- no tratar el histórico total de `postmortem` como equivalente a `NOAA-verificado`
+- no mezclar `forecast operativo`, `observed proxy` y `settlement final` en una misma métrica sin etiquetarlo explícitamente
+
+### 5. Regla práctica de lectura
+
+- si la pregunta es **“por qué compró”** → mirar Open-Meteo
+- si la pregunta es **“qué tan bien estamos midiendo”** → mirar NOAA
+- si la pregunta es **“por qué se resolvió así”** → mirar Weather Underground / settlement real
+
+Este contrato debe mantenerse visible en docs, dashboard y Telegram para que el sistema pueda aprender con semántica estable.
+
+---
+
 ## Las tres memorias del sistema
 
 ### A. Memoria operativa
