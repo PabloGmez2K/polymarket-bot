@@ -137,6 +137,7 @@ ALERT_SHADOW_JOIN_MIN_NOAA_SAMPLE = int(os.getenv("ALERT_SHADOW_JOIN_MIN_NOAA_SA
 ALERT_SHADOW_WR_MIN_RESOLVED = int(os.getenv("ALERT_SHADOW_WR_MIN_RESOLVED", "8"))
 ALERT_SHADOW_WR_TARGET = float(os.getenv("ALERT_SHADOW_WR_TARGET", "45.0"))
 SHADOW_DIRECTIONAL_HISTORY_LIMIT = int(os.getenv("SHADOW_DIRECTIONAL_HISTORY_LIMIT", "500"))
+SLOT_04H_REVIEW_REMINDER_DATE = os.getenv("SLOT_04H_REVIEW_REMINDER_DATE", "").strip()
 # Cutoff de stats por ciudad: "Dallas=2026-04-06,Chicago=2026-03-01"
 # Trades cerrados ANTES de la fecha indicada se ignoran en get_city_accuracy().
 CITY_STATS_CUTOFF: dict[str, str] = {}
@@ -777,6 +778,8 @@ def load_alerts_state():
         "daily_summary_last_sent": None,
         # v10.6.11 (M5): ciudades ya notificadas como candidatas a canary (one-shot por ciudad)
         "canary_candidate_notified": {},
+        # Recordatorios operativos one-shot programados por fecha objetivo.
+        "scheduled_review_reminders_sent": {},
     }
     if not os.path.exists(ALERTS_FILE):
         return default
@@ -802,6 +805,7 @@ def load_alerts_state():
         state.setdefault("low_bankroll_alerted", False)
         state.setdefault("daily_summary_last_sent", None)
         state.setdefault("canary_candidate_notified", {})
+        state.setdefault("scheduled_review_reminders_sent", {})
         return state
     except Exception:
         return default
@@ -3875,6 +3879,14 @@ def run_observability_alerts():
         if logger:
             logger.warning(f"Error evaluando resumen diario: {e}")
 
+    try:
+        if maybe_send_04h_slot_review_reminder(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"04h slot review reminder: fallo enviando recordatorio ({e})")
+
     if changed:
         save_alerts_state(state)
 
@@ -6595,6 +6607,56 @@ def maybe_send_daily_summary_telegram(state, now=None):
         return False
 
     state["daily_summary_last_sent"] = today
+    return True
+
+
+def maybe_send_04h_slot_review_reminder(state, now=None):
+    """
+    Envía un recordatorio one-shot para revisar el impacto del slot 04h UTC
+    cuando llegue la fecha objetivo configurada en Railway.
+    """
+    reminder_date_raw = str(SLOT_04H_REVIEW_REMINDER_DATE or "").strip()
+    if not reminder_date_raw:
+        return False
+
+    try:
+        target_date = date.fromisoformat(reminder_date_raw)
+    except ValueError:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"SLOT_04H_REVIEW_REMINDER_DATE inválida: {reminder_date_raw!r}")
+        return False
+
+    if now is None:
+        now = datetime.now(timezone.utc)
+    if now.date() < target_date:
+        return False
+
+    sent = state.setdefault("scheduled_review_reminders_sent", {})
+    if not isinstance(sent, dict):
+        sent = {}
+        state["scheduled_review_reminders_sent"] = sent
+
+    reminder_key = f"slot_04h_review:{target_date.isoformat()}"
+    if reminder_key in sent:
+        return False
+
+    review_doc = f"docs/04h-slot-observation-{target_date.isoformat()}.md"
+    send_telegram(
+        f"🗓 <b>Revisión programada — slot 04h UTC</b>\n"
+        f"Ya pasaron <b>5 días</b> desde activar <code>SCHEDULE_HOURS_UTC=4,8,16,23</code>.\n\n"
+        f"Abrir sesión Codex con este objetivo:\n"
+        f"• Pull de <code>data/runtime_import/</code> tras los ciclos nuevos\n"
+        f"• Crear <code>{review_doc}</code>\n"
+        f"• Comparar pre vs post en buys/ciclo, edge/ciclo, markets_evaluated y city_window_skipped\n"
+        f"• Verificar si 04h abrió same-day real para Tokyo/Seoul/Shanghai\n"
+        f"• Evaluar si 23h UTC aporta valor neto o es candidato a salir\n"
+        f"• Auditar en paralelo universo real por ciudad y temporalidad de <code>price_out_of_range</code>"
+    )
+    sent[reminder_key] = {
+        "sent_at": now.isoformat(),
+        "target_date": target_date.isoformat(),
+    }
     return True
 
 
