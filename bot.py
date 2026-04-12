@@ -304,6 +304,18 @@ def get_min_days_for_city(city):
     else:
         return 0  # Aún puede subir
 
+
+def compute_city_windows():
+    """
+    Pre-computa el umbral min_days por ciudad para este ciclo.
+
+    Reutiliza get_min_days_for_city() como source of truth para no divergir
+    del override manual MIN_DAYS_AHEAD ni de la lógica per-city existente.
+    Las ciudades fuera de CITY_TIMEZONES quedan fuera del dict a propósito:
+    el prefilter es permisivo y el safety net sigue viviendo en PASO 2.
+    """
+    return {city: get_min_days_for_city(city) for city in CITY_TIMEZONES}
+
 # v10.1: Gestión activa de posiciones
 # Basado en investigación: Entire-Hood corta a -10%, toma a +17%
 # Usamos umbrales un poco más amplios para nuestro bankroll pequeño
@@ -13040,6 +13052,7 @@ def main(client):
     dl.append(f"MIN_DAYS_AHEAD base: {min_days_global} (hora UTC: {datetime.now(timezone.utc).hour:02d})")
     dl.append(f"  ↳ Ajuste por zona horaria activo: ciudades asiáticas pueden requerir min_days=1 incluso a las 08:00 UTC")
     policy_state = load_city_policy_state()
+    city_windows = compute_city_windows()
 
     candidates = []
     parse_fail = 0
@@ -13051,6 +13064,8 @@ def main(client):
     allowlist_seen = set()
     price_fail = 0
     liq_fail = 0
+    city_window_skipped = 0
+    city_window_cities = set()
 
     for market in all_markets:
         question = market.get("question", "")
@@ -13115,6 +13130,12 @@ def main(client):
         # NOTA R3: ni fuera_allowlist ni shadow_only_override generan skip_log entry aquí.
         # El candidato continúa procesándose con allowlisted=False y llega a Loop B,
         # donde se loguea con datos ricos (edge_pct, our_prob, forecast_max).
+        city_window_min_days = city_windows.get(city)
+        if days_ahead == 0 and city_window_min_days is not None and city_window_min_days > 0:
+            city_window_skipped += 1
+            city_window_cities.add(city)
+            continue
+
         min_days = get_min_days_for_city(city)
 
         if days_ahead < min_days:
@@ -13218,6 +13239,8 @@ def main(client):
         candidates.append(parsed)
 
     dl.append(f"FILTROS: {len(candidates)} pasan | {parse_fail} no parseables | {date_fail} fuera de fecha | {timezone_skip} bloqueados por zona horaria | {blocked_city_skip} bloqueados por ciudad | {allowlist_city_skip} fuera de ACTIVE_TRADING_CITIES | {price_fail} fuera de precio | {liq_fail} sin liquidez")
+    if city_window_skipped:
+        dl.append(f"VENTANA: {city_window_skipped} mercados same-day fuera de ventana ({', '.join(sorted(city_window_cities))})")
     if blocked_seen:
         dl.append(f"  🚫 Ciudades bloqueadas operativamente: {', '.join(sorted(blocked_seen))} (sin NOAA utilizable para observacion)")
     if allowlist_seen:
@@ -13741,6 +13764,8 @@ def main(client):
                 "selected": len(selected) if 'selected' in locals() else 0,
                 "shadow": len(shadow_trades) if 'shadow_trades' in locals() else 0,
                 "condition_filtered": condition_filtered_skip if 'condition_filtered_skip' in locals() else 0,
+                "city_window_skipped": city_window_skipped if 'city_window_skipped' in locals() else 0,
+                "city_window_cities": sorted(city_window_cities) if 'city_window_cities' in locals() else [],
             },
             "buys": [
                 {
