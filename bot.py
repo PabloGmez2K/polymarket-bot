@@ -7295,10 +7295,10 @@ def build_dashboard_focus_center(
             _cycle_raw = load_cycle_summary_data()
             _cycle_ts = (_cycle_raw.get("timestamp_utc") if isinstance(_cycle_raw, dict) else None)
         if _cycle_ts:
-            _last_cycle = datetime.fromisoformat(
-                str(_cycle_ts).replace("Z", "+00:00")
-            ).replace(tzinfo=None)
-            _hours_ago = (datetime.utcnow() - _last_cycle).total_seconds() / 3600
+            _last_cycle = datetime.fromisoformat(str(_cycle_ts).replace("Z", "+00:00"))
+            if _last_cycle.tzinfo is None:
+                _last_cycle = _last_cycle.replace(tzinfo=timezone.utc)
+            _hours_ago = (datetime.now(timezone.utc) - _last_cycle).total_seconds() / 3600
             if _hours_ago > 12:
                 incidents.append({
                     "title": f"sin ciclo en {_hours_ago:.0f}h — verificar que el bot sigue corriendo",
@@ -9780,7 +9780,12 @@ CITY_TIMEZONES = {
     "Miami":          "America/New_York",
     "Chicago":        "America/Chicago",
     "Dallas":         "America/Chicago",
+    "Houston":        "America/Chicago",
     "Seattle":        "America/Los_Angeles",
+    "San Francisco":  "America/Los_Angeles",
+    "Los Angeles":    "America/Los_Angeles",
+    "Denver":         "America/Denver",
+    "Mexico City":    "America/Mexico_City",
 }
 
 # Alias → nombre canónico (mercados de rango usan abreviaturas)
