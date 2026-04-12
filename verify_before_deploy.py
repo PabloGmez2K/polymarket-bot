@@ -4126,15 +4126,16 @@ def run_tests():
     test("canary_candidate_notified en alerts default", '"canary_candidate_notified"' in code)
     test("run_observability_alerts invoca notify_canary_candidates", "notify_canary_candidates(state)" in code)
     test("run_observability_alerts invoca maybe_send_daily_summary_telegram", "maybe_send_daily_summary_telegram(state)" in code)
-    test("resumen diario gated en SCHEDULE_HOURS_UTC[0]", "sorted(SCHEDULE_HOURS_UTC)[0]" in code)
+    test("resumen diario gated en DAILY_SUMMARY_HOUR_UTC", "DAILY_SUMMARY_HOUR_UTC" in code)
 
-    # Functional: M4 daily summary gating (hora != target → no envía; hora target + sin flag → envía; idempotente).
+    # Functional: M4 daily summary gating (hora < target → no envía; hora >= target + sin flag → envía; idempotente).
     daily_messages = []
     daily_ns = {
         "datetime": datetime,
         "timezone": timezone,
         "timedelta": timedelta,
         "SCHEDULE_HOURS_UTC": [8, 16, 23],
+        "DAILY_SUMMARY_HOUR_UTC": 8,
         "BOT_VERSION": "v10.6.11-test",
         "LOGIC_SERIES": "10.6",
         "ACTIVE_TRADING_CITIES": set(),
@@ -4181,11 +4182,11 @@ def run_tests():
          result_idem is False and len(daily_messages) == 1,
          {"result": result_idem, "messages_count": len(daily_messages)})
 
-    # Hora distinta → no envía.
+    # Hora antes del target (4h < 8h) → no envía.
     off_state = {"daily_summary_last_sent": None}
-    off_now = datetime(2026, 4, 5, 12, 0, tzinfo=timezone.utc)
+    off_now = datetime(2026, 4, 5, 4, 0, tzinfo=timezone.utc)
     result_off = daily_ns["maybe_send_daily_summary_telegram"](off_state, now=off_now)
-    test("M4 daily summary: no envía fuera de la ventana target",
+    test("M4 daily summary: no envía antes de DAILY_SUMMARY_HOUR_UTC",
          result_off is False and off_state.get("daily_summary_last_sent") is None,
          {"result": result_off, "state": off_state})
 

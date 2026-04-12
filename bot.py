@@ -138,6 +138,11 @@ ALERT_SHADOW_WR_MIN_RESOLVED = int(os.getenv("ALERT_SHADOW_WR_MIN_RESOLVED", "8"
 ALERT_SHADOW_WR_TARGET = float(os.getenv("ALERT_SHADOW_WR_TARGET", "45.0"))
 SHADOW_DIRECTIONAL_HISTORY_LIMIT = int(os.getenv("SHADOW_DIRECTIONAL_HISTORY_LIMIT", "500"))
 SLOT_04H_REVIEW_REMINDER_DATE = os.getenv("SLOT_04H_REVIEW_REMINDER_DATE", "").strip()
+# Hora UTC (0-23) a partir de la cual se envía el resumen diario.
+# El daily se envía en el PRIMER ciclo del día cuya hora UTC >= este valor.
+# Default 8 → ciclo 08:00 UTC = 9h España (CET/invierno) / 10h España (CEST/verano).
+# Para 9h exactas en verano CEST añadir slot 7 a SCHEDULE_HOURS_UTC en Railway.
+DAILY_SUMMARY_HOUR_UTC = int(os.getenv("DAILY_SUMMARY_HOUR_UTC", "8"))
 # Cutoff de stats por ciudad: "Dallas=2026-04-06,Chicago=2026-03-01"
 # Trades cerrados ANTES de la fecha indicada se ignoran en get_city_accuracy().
 CITY_STATS_CUTOFF: dict[str, str] = {}
@@ -6583,14 +6588,13 @@ def format_daily_summary_text(payload):
 
 def maybe_send_daily_summary_telegram(state, now=None):
     """
-    Envía el resumen diario por Telegram si es la ventana de las 08 UTC y
-    no se envió ya hoy. Retorna True si state fue mutado.
+    Envía el resumen diario por Telegram en el primer ciclo del día cuya hora UTC
+    sea >= DAILY_SUMMARY_HOUR_UTC. Retorna True si state fue mutado.
     """
     if now is None:
         now = datetime.now(timezone.utc)
-    # Ventana: solo si el ciclo actual cae en la hora configurada (08 por defecto).
-    target_hour = sorted(SCHEDULE_HOURS_UTC)[0] if SCHEDULE_HOURS_UTC else 8
-    if now.hour != target_hour:
+    # Primer ciclo del día a partir de la hora configurada.
+    if now.hour < DAILY_SUMMARY_HOUR_UTC:
         return False
     today = now.date().isoformat()
     if state.get("daily_summary_last_sent") == today:
@@ -7336,7 +7340,7 @@ def build_dashboard_focus_center(
         action_title = "No tocar trading: priorizar crecimiento de muestra NOAA"
         action_badge = "accent"
         action_detail = (
-            f"Universo activo {active_count} | NOAA interpretable {observed_ready_count}/{max(1, observed_target)} | "
+            f"Universo operable {active_count} | NOAA interpretable {observed_ready_count}/{max(1, observed_target)} | "
             f"muestra global {sample_size}/{OBSERVED_FORECAST_GLOBAL_TARGET}."
         )
         if signal_status in {"stale", "empty"}:
@@ -7390,8 +7394,8 @@ def build_dashboard_focus_center(
 
     quick_stats = [
         {
-            "label": "Universo activo",
-            "value": f"{active_count} activas",
+            "label": "Universo operable",
+            "value": f"{active_count} operables",
             "detail": f"{blocked_count} bloqueadas",
             "badge": "accent" if active_count else "muted",
         },
@@ -7478,8 +7482,8 @@ def build_dashboard_focus_center(
 
     drivers = [
         _item(
-            "Universo activo vs NOAA",
-            f"{observed_ready_count}/{max(1, active_count)} cubiertas" if active_count else "0 activas",
+            "Universo operable vs NOAA",
+            f"{observed_ready_count}/{max(1, active_count)} cubiertas" if active_count else "0 operables",
             (
                 "todas las ciudades activas ya tienen NOAA interpretable"
                 if active_count and observed_ready_count >= active_count
@@ -9287,6 +9291,32 @@ def _dashboard_mode_label():
     return "REAL"
 
 
+def _build_topology_line(policy_state=None):
+    """Línea compacta de topología: 'N activas | N canary | N shadow | N bloqueadas'.
+    Itera RESOLUTION_ICAO (universo conocido) y llama get_effective_city_mode.
+    Safe at startup: uses file-based policy_state.
+    """
+    try:
+        if policy_state is None:
+            policy_state = load_city_policy_state()
+        counts = {"active": 0, "canary": 0, "shadow": 0, "blocked": 0}
+        for city in RESOLUTION_ICAO:
+            mode = get_effective_city_mode(city, policy_state=policy_state)
+            counts[mode] = counts.get(mode, 0) + 1
+        parts = []
+        if counts["active"]:
+            parts.append(f"{counts['active']} activa{'s' if counts['active'] != 1 else ''}")
+        if counts["canary"]:
+            parts.append(f"{counts['canary']} canary")
+        if counts["shadow"]:
+            parts.append(f"{counts['shadow']} shadow")
+        if counts["blocked"]:
+            parts.append(f"{counts['blocked']} bloqueada{'s' if counts['blocked'] != 1 else ''}")
+        return " | ".join(parts) if parts else "sin datos"
+    except Exception:
+        return "n/d"
+
+
 def build_dashboard_snapshot():
     """Construye el snapshot completo que renderiza el dashboard web."""
     cycle_total, cycle_series = _load_cycle_counts()
@@ -10151,13 +10181,14 @@ def cmd_estado():
             f"  Compras: {bot_state['last_orders_placed']} | Ventas: {bot_state.get('last_sells_placed', 0)}"
         )
 
-    intra_label = f"cada {INTRA_SL_INTERVAL}min" if INTRA_SL_INTERVAL > 0 else "desactivado"
+    intra_str = f" | Intra-SL cada {INTRA_SL_INTERVAL}min" if INTRA_SL_INTERVAL > 0 else ""
+    topology = _build_topology_line()
 
     send_telegram(
         f"📊 <b>Bot {BOT_VERSION} | {modo}</b>\n\n"
         f"💰 Bankroll: <b>${BANKROLL:.2f}</b> | Edge mín: {MIN_EDGE}%\n"
-        f"🔧 SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n"
-        f"🛡 Intra-SL: {intra_label}\n\n"
+        f"🔧 SL/TP en ciclo: -{STOP_LOSS_PCT}%/+{TAKE_PROFIT_PCT}%{intra_str}\n"
+        f"🗺 Ciudades: {topology}\n\n"
         f" Estado: {running}\n"
         f"📅 Último: {last_str}\n"
         f" Próximo: {next_str}\n"
@@ -14040,14 +14071,14 @@ if __name__ == "__main__":
 
     modo = "DRY RUN" if DRY_RUN else "REAL"
     schedule = ", ".join(f"{h:02d}:00" for h in sorted(SCHEDULE_HOURS_UTC))
-    intra_label = f"cada {INTRA_SL_INTERVAL}min" if INTRA_SL_INTERVAL > 0 else "desactivado"
+    intra_str = f" | Intra-SL cada {INTRA_SL_INTERVAL}min" if INTRA_SL_INTERVAL > 0 else ""
+    topology = _build_topology_line()
     send_telegram(
         f"🤖 <b>Bot {BOT_VERSION} arrancado</b>\n"
         f"Modo: {modo} | ${BANKROLL:.2f}\n"
         f"Min edge: {MIN_EDGE}% | Schedule: {schedule} UTC\n"
-        f"🔧 Gestión activa: SL {STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n"
-        f" Intra-SL: {intra_label}\n"
-        f" Zona horaria per-city activa\n"
+        f"🔧 SL/TP en ciclo: -{STOP_LOSS_PCT}%/+{TAKE_PROFIT_PCT}%{intra_str}\n"
+        f"🗺 Ciudades: {topology}\n"
         f" Traders: auto-análisis diario, descubrimiento lunes",
         with_menu=True,
     )
