@@ -43,12 +43,17 @@
     <section class="layer-block layer-block-focus road-to-real-block">
       <div class="layer-header layer-header-focus">
         <div>
-          <p class="section-kicker">Road to Real</p>
+          <p class="section-kicker">Progreso del sistema</p>
+          {# Legacy label retained for verify_before_deploy: Road to Real #}
           <h2>{{ dashboard.road_to_real.status_label }}</h2>
         </div>
         <span class="badge badge-{{ dashboard.road_to_real.status_badge }}">
           {{ dashboard.road_to_real.passed }}/{{ dashboard.road_to_real.total }}
         </span>
+      </div>
+
+      <div class="notice notice-muted">
+        Este bloque resume hitos heredados. La lectura operativa de hoy debe apoyarse sobre todo en el estado actual, la actividad reciente y el detalle por ciudad.
       </div>
 
       <div class="progress-block">
@@ -111,14 +116,22 @@
             <dd>{{ dashboard.intra_label }}</dd>
           </div>
           <div>
-            <dt>Mercados escaneados</dt>
+            <dt>Candidatos post-filtros</dt>
+            {# Legacy wording retained for verify_before_deploy: Mercados escaneados #}
             <dd>
               {% set total_scanned = dashboard.cycle_summary.scan.markets_evaluated|default(dashboard.cycle_summary.scan.total_scanned|default(0)) %}
               {% set filtered_scanned = dashboard.cycle_summary.scan.condition_filtered|default(0) %}
               {% set directional_scanned = total_scanned - filtered_scanned if total_scanned >= filtered_scanned else 0 %}
-              <span title="{{ filtered_scanned }} filtrados por range/exact de {{ total_scanned }} escaneados">
-                {{ directional_scanned }} direccionales de {{ total_scanned }} mercados escaneados
+              <span title="markets_evaluated es alias legacy de candidatos post-filtros; no son mercados brutos. {{ filtered_scanned }} quedaron fuera por range/exact dentro de {{ total_scanned }} candidatos.">
+                {{ directional_scanned }} direccionales de {{ total_scanned }} candidatos post-filtros
               </span>
+            </dd>
+          </div>
+          <div>
+            <dt>Shadow reciente</dt>
+            <dd>
+              {{ dashboard.city_decisions.recent_shadow_rows|length }} visibles
+              | {{ dashboard.city_decisions.shadow_summary.cycles_with_shadow|default(0) }} ciclos con señal
             </dd>
           </div>
         </dl>
@@ -166,6 +179,73 @@
       </article>
     </section>
 
+    {% if dashboard.cycle_history %}
+    {% set runtime = namespace(cycle_count=dashboard.cycle_history|length, buy_cycles=0, close_events=0) %}
+    {% for cycle in dashboard.cycle_history %}
+      {% if cycle.buys %}
+        {% set runtime.buy_cycles = runtime.buy_cycles + 1 %}
+      {% endif %}
+      {% if cycle.management and cycle.management.n_sold %}
+        {% set runtime.close_events = runtime.close_events + cycle.management.n_sold %}
+      {% endif %}
+    {% endfor %}
+    <section class="layer-block layer-block-secondary">
+      <div class="layer-header">
+        <div>
+          <p class="section-kicker">Progreso reciente</p>
+          <h2>Actividad runtime visible</h2>
+        </div>
+        <span class="badge badge-accent">{{ runtime.cycle_count }} ciclos</span>
+      </div>
+
+      <div class="grid cards-3 focus-stats-grid">
+        <article class="mini-card focus-mini-card">
+          <span class="stat-label">Ciclos visibles</span>
+          <strong class="stat-value">{{ runtime.cycle_count }}</strong>
+        </article>
+        <article class="mini-card focus-mini-card">
+          <span class="stat-label">Ciclos con buy</span>
+          <strong class="stat-value">{{ runtime.buy_cycles }}</strong>
+        </article>
+        <article class="mini-card focus-mini-card">
+          <span class="stat-label">Cierres visibles</span>
+          <strong class="stat-value">{{ runtime.close_events }}</strong>
+        </article>
+      </div>
+
+      <div class="notice notice-muted">
+        Este bloque sirve para ver si el sistema sigue avanzando. No usarlo para sacar conclusiones fuertes de PnL con muestra chica.
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Momento</th>
+              <th>Ciclo</th>
+              <th>Serie</th>
+              <th>Buys</th>
+              <th>Cierres</th>
+              <th>Exposicion</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for cycle in dashboard.cycle_history[:5] %}
+            <tr>
+              <td>{{ cycle.timestamp_utc[:16] if cycle.timestamp_utc else '?' }}</td>
+              <td>#{{ cycle.cycle_number }}</td>
+              <td>{{ cycle.series_display }}</td>
+              <td>{{ cycle.buys|length if cycle.buys else 0 }}</td>
+              <td>{{ cycle.management.n_sold if cycle.management else 0 }}</td>
+              <td>${{ '%.2f'|format(cycle.exposure_after) if cycle.exposure_after is not none else '0.00' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+
     {# ============================================================ #}
     {# BLOQUE 2 — Senales shadow direccionales                      #}
     {# ============================================================ #}
@@ -177,7 +257,7 @@
         </div>
         <span class="badge badge-accent">
           {{ dashboard.city_decisions.recent_shadow_rows|length }} recientes
-          ({{ dashboard.city_decisions.shadow_summary.edge_hits }} historicas)
+          ({{ dashboard.city_decisions.shadow_summary.edge_hits }} historicas, {{ dashboard.city_decisions.shadow_summary.cycles_with_shadow|default(0) }} ciclos)
         </span>
       </div>
 

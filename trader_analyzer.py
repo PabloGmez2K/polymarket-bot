@@ -62,6 +62,29 @@ HISTORY_FILE = _seed_data_file("trader_history.json")
 MIN_PRICE = 0.08
 MAX_PRICE = 0.92
 
+def _should_bypass_proxy_env():
+    proxy_vars = (
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    )
+    poisoned_markers = ("127.0.0.1:9", "localhost:9")
+    for name in proxy_vars:
+        value = os.getenv(name, "")
+        if any(marker in value for marker in poisoned_markers):
+            return True
+    return False
+
+
+def _open_url(req, timeout):
+    if _should_bypass_proxy_env():
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        return opener.open(req, timeout=timeout)
+    return urllib.request.urlopen(req, timeout=timeout)
+
 # v9: Filtro de calidad — solo traders rentables generan señales
 MIN_SIGNAL_WIN_RATE = 50.0    # WR mínimo para generar señales
 MIN_SIGNAL_PNL = 0.0          # PnL mínimo (no perder dinero)
@@ -76,8 +99,8 @@ def api_get(url, retries=3, delay=3):
         try:
             req = urllib.request.Request(url)
             req.add_header("User-Agent", "polymarket-analyzer/2.0")
-            resp = urllib.request.urlopen(req, timeout=15)
-            return json.loads(resp.read())
+            with _open_url(req, timeout=15) as resp:
+                return json.loads(resp.read())
         except Exception as e:
             if attempt == retries - 1:
                 return None

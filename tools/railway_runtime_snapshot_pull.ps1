@@ -70,13 +70,18 @@ try {
     }
 
     $policyVars = $policyVarsRaw | ConvertFrom-Json
+    $policyVarNames = $policyVars.PSObject.Properties.Name
+    function Get-EnvVarValue([string]$name) {
+        if ($policyVarNames -contains $name) { return [string]$policyVars.$name }
+        return $null  # NOT_SET — distingue de var seteada vacía
+    }
     $policySnapshot = [ordered]@{
         pulled_at = [DateTimeOffset]::UtcNow.ToString("o")
         source_service = $Service
         variables = [ordered]@{
-            ACTIVE_TRADING_CITIES = [string]$policyVars.ACTIVE_TRADING_CITIES
-            CANARY_TRADING_CITIES = [string]$policyVars.CANARY_TRADING_CITIES
-            BLOCKED_CITIES = [string]$policyVars.BLOCKED_CITIES
+            ACTIVE_TRADING_CITIES = Get-EnvVarValue "ACTIVE_TRADING_CITIES"
+            CANARY_TRADING_CITIES = Get-EnvVarValue "CANARY_TRADING_CITIES"
+            BLOCKED_CITIES = Get-EnvVarValue "BLOCKED_CITIES"
         }
     }
 
