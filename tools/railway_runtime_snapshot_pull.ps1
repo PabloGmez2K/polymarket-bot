@@ -14,7 +14,8 @@ param(
         "skip_log.jsonl",
         "trade_lifecycle.json",
         "audit.json",
-        "city_policy_state.json"
+        "city_policy_state.json",
+        "signals.json"
     )
 )
 
