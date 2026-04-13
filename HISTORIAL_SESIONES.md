@@ -2732,3 +2732,16 @@ Regla recomendada:
 - **Fix:** `json.loads(resp.read().decode("utf-8"))` — una línea en `trader_analyzer.py:103`.
 - **Validación:** `verify_before_deploy.py` → 643/643 tests.
 - **Versión activa al cerrar:** `v10.6.13` local lista para push/deploy.
+
+### Sesión 172 — Diseño canary→active automation + handoff Opus (13 abr 2026)
+
+**Modelo:** Opus. **Tarea:** diseño estratégico + handoff para sesión limpia Sonnet. Sin tocar `bot.py`, trading core, thresholds, Railway ni policy live.
+
+- **Decisión arquitectónica:** Opción B (notificación Telegram persistente, Pablo aplica manualmente) sobre auto-promoción full. Fundamento: bankroll $25, modelo en recalibración Phase 2, asimetría de riesgo degradar vs promover.
+- **Umbrales v1 congelados con justificación explícita:** `canary_trades>=5` (mínimo donde WR≥60% con alguna pérdida es alcanzable en ~5 semanas), `WR>=60%` (margen claro sobre break-even 50%), `PnL>=+$1.00` (recupera ≥1 pérdida canary), `days_since_promotion>=7` (al menos un ciclo semanal completo), `WR_degradation<=45%` (bajo break-even claro).
+- **Scope v1 = Bloques 1+2+4:** historial propio canary + integridad lifecycle (detección patrón Atlanta-inconsistency) + anti-flapping (no degradada últimos 14 días).
+- **Scope v2 = Bloques 3+5 deferidos:** corroboración externa (signals.json consensus o shadow edge reciente) + gate global post-recalibración (WR sistema ≥50% últimos 30 días). Se añade trigger alarm one-shot que avisa a Pablo por Telegram cuando precondiciones v2 se cumplan (`RECALIBRATION_PHASE2_CLOSED=true` + al menos 1 ciudad en Active + signals.json fresco).
+- **Spec completo en `docs/handoffs/canary-to-active-automation-handoff-2026-04-13.md`:** tres módulos (`notify_active_candidates`, `maybe_run_active_degradation`, `maybe_alert_v2_trigger`), Telegram templates (nueva candidata / recordatorio 24h / revocación / degradación / trigger v2), anti-spam (rate limit 22h + revocación automática), detección de acción del usuario via `os.getenv("ACTIVE_TRADING_CITIES")` runtime, overlay nuevo para degradación active→canary (no tocar `sync_city_policy_state`), test checklist con 8+ casos unitarios.
+- **Principio de diseño:** bot observa y avisa; Pablo decide y aplica. Asimetría: degradación = auto (protección capital > espera humana), promoción = manual (decisión de capital más consecuente queda con humano).
+- **Nota operativa (recurrente):** volumen bajo de trades (~1 canary/semana por ciudad) sigue siendo prioridad paralela. Este módulo ayuda indirectamente (desbloquea sizing active) pero no resuelve throughput de fondo (scan loop filtra demasiado). Anotado para backlog post-implementación.
+- **Implementación diferida:** a sesión Sonnet limpia. Opus cierra aquí; Sonnet arranca con el handoff y clear de contexto.
