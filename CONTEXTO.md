@@ -1,6 +1,9 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
 
+**Última actualización:** 13 de abril de 2026 (Sesión 170 — blocked signals settlement tracker)
+**Sesión 170 (13 abr 2026, Sonnet):** se crea `tools/blocked_signals_settlement_tracker.py` (Handoff B). Tool read-only que mide WR implícita de señales `exact/range` de quality traders bloqueadas por `condition_filtered`. Primera corrida: 18/18 = 100% WR (n=18, insufficient para decisión — necesita >= 30). Bug encoding documentado: `signals.json` almacena `°` como `U+252C U+2591`; el tool normaliza antes de matching. Outputs: `data/runtime_import_derived/blocked_signals_resolutions.jsonl` + `docs/blocked-signals-wr-baseline-2026-04-13.md`. No se toca bot.py ni trading core.
+
 **Última actualización:** 13 de abril de 2026 (Sesión 169 cont. — crosscheck automatizado + corrección ACTIVE_TRADING_CITIES)
 **Sesión 169 continuación (13 abr 2026, Sonnet):** dos cambios adicionales al cierre de la sesión. (1) Se añade `maybe_run_daily_crosscheck(state)` a `bot.py` (v10.6.12): corre el cross-check señales traders vs edge bot una vez por día en el primer ciclo, appenda a `SIGNALS_CROSSCHECK_FILE` (`/app/data/signals_crosscheck.jsonl`), manda Telegram diario con resumen MATCH/BOT_ONLY/TRADER_ONLY, y cuando acumula `SIGNALS_CROSSCHECK_NOTIFY_THRESHOLD=7` corridas manda aviso one-shot para iniciar análisis. (2) Usuario aplica `ACTIVE_TRADING_CITIES=NONE` en Railway — elimina el default hardcoded "Chicago,Atlanta,Dallas,Buenos Aires" que trataba a esas ciudades como active sin env var explícito. Ahora ninguna ciudad entra en active mode sin declaración explícita; todo el trading real pasa por `auto_canary_cities`. (3) Feature nueva documentada en backlog: graduación canary→active con criterios automáticos y reminder persistente hasta que el usuario actúe — requiere sesión dedicada Opus.
 

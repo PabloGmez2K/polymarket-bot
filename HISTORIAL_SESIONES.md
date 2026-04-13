@@ -2703,6 +2703,18 @@ Regla recomendada:
 - Fixes propuestos (no aplicados): A1=setear `ACTIVE_TRADING_CITIES` explícito en Railway, B1=añadir a `OBSERVED_AUDIT_CITIES` de a una. Decisión de aplicar → Opus.
 - Output: `docs/auto-promotion-trigger-diagnosis-2026-04-13.md`.
 
+### Sesión 170 — Blocked Signals Settlement Tracker (Handoff B) (13 abr 2026)
+
+**Modelo:** Sonnet. **Handoff:** B (experimento 2: resolución de señales `exact/range` bloqueadas).
+
+- Se crea `tools/blocked_signals_settlement_tracker.py`: tool standalone read-only que mide la WR implícita de las señales `exact/range` de quality traders que el bot filtra por `condition_filtered`.
+- **Algoritmo:** lee `signals.json`, filtra `condition in {exact, range}` con `date <= today-1`, fetch paginado de eventos cerrados via `gamma-api.polymarket.com`, match por título normalizado, calcula `win = close_price >= 0.95` para el lado de la señal.
+- **Bug encoding descubierto:** `signals.json` almacena el símbolo `°` como la secuencia corrupta `U+252C U+2591` (`┬░`) en lugar de `U+00B0`. El tool normaliza antes de comparar con la API.
+- **Primera corrida (Apr 13 snapshot, cutoff Apr 12):** 19 candidatos `exact/range`, 18 resueltos, 18 wins. **WR = 100.0% (n=18).**
+- **Veredicto:** `INSUFFICIENT SAMPLE` (n < 30). Se necesitan >= 30 resoluciones para primer corte, >= 50 para decisión robusta. El tool debe correrse nuevamente cuando haya más días acumulados.
+- **Outputs:** `data/runtime_import_derived/blocked_signals_resolutions.jsonl` (append-only, dedup por `match_key`), `docs/blocked-signals-wr-baseline-2026-04-13.md`.
+- **No tocar:** `bot.py`, `trader_analyzer.py`, `signals.json`, Railway, trading core.
+
 ### Sesión 169 cont. — Crosscheck automatizado + corrección ACTIVE_TRADING_CITIES
 
 **Modelo:** Sonnet. Continuación de la misma sesión.
