@@ -2686,3 +2686,19 @@ Regla recomendada:
 - `blocking_operational_collision_count` baja de `1` a `0`
 - Dallas queda alineada como `env=shadow`, `runtime=auto_shadow`, `cross=shadow`, `effective=shadow`
 - readout corto dejado en `docs/dallas-claim-readout-2026-04-11.md`
+
+## Sesión 169 — Cross-check edge vs traders + diagnóstico auto-promoción (13 abr 2026)
+
+**Modelo:** Sonnet. **Handoffs:** A y C del índice 2026-04-13.
+
+**Handoff A — Cross-check edge vs trader signals:**
+- Se crea `tools/signals_vs_edge_crosscheck.py` (standalone read-only).
+- Primera corrida: MATCH=14, BOT_ONLY=2 (Beijing, Chicago), TRADER_ONLY=21. Austin en TRADER_ONLY ✓, Seoul en MATCH ✓.
+- 81% de señales de quality traders caen en exact/range (bloqueadas). 8 ciudades TRADER_ONLY tienen conds operables; Austin y Toronto con consenso son las más urgentes.
+- Output: `data/runtime_import_derived/signals_crosscheck.jsonl` + `docs/signals-crosscheck-baseline-2026-04-13.md`.
+
+**Handoff C — Diagnóstico trigger auto-promoción:**
+- Dallas: `ACTIVE_TRADING_CITIES` null en Railway → código usa default con Dallas → `city_mode="active"` → nunca llega a `promotable_shadow`. Gate `city not in ACTIVE_TRADING_CITIES` también falla.
+- Lucknow, Sao Paulo, Istanbul: no en `OBSERVED_AUDIT_CITIES`, 0 trades, nunca en `auto_shadow_cities` → invisibles a `tracked_cities` → `sync_city_policy_state` nunca las evalúa. Gap estructural entre `shadow_city_tracking` y el pipeline de promoción.
+- Fixes propuestos (no aplicados): A1=setear `ACTIVE_TRADING_CITIES` explícito en Railway, B1=añadir a `OBSERVED_AUDIT_CITIES` de a una. Decisión de aplicar → Opus.
+- Output: `docs/auto-promotion-trigger-diagnosis-2026-04-13.md`.
