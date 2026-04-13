@@ -2745,3 +2745,17 @@ Regla recomendada:
 - **Principio de diseño:** bot observa y avisa; Pablo decide y aplica. Asimetría: degradación = auto (protección capital > espera humana), promoción = manual (decisión de capital más consecuente queda con humano).
 - **Nota operativa (recurrente):** volumen bajo de trades (~1 canary/semana por ciudad) sigue siendo prioridad paralela. Este módulo ayuda indirectamente (desbloquea sizing active) pero no resuelve throughput de fondo (scan loop filtra demasiado). Anotado para backlog post-implementación.
 - **Implementación diferida:** a sesión Sonnet limpia. Opus cierra aquí; Sonnet arranca con el handoff y clear de contexto.
+
+### Sesión 173 — Canary→Active automation v10.6.14 (13 abr 2026)
+
+**Modelo:** Sonnet. **Handoff:** `docs/handoffs/canary-to-active-automation-handoff-2026-04-13.md`.
+
+- **Tres módulos implementados en `bot.py` (v10.6.13→v10.6.14):**
+  - `_detect_atlanta_inconsistency(record)`: helper que detecta el patrón LOSS_TOTAL + RESOLVED_WIN positivo en timeline + post_exit_analysis confirmando win (Bloque 2 integridad).
+  - `notify_active_candidates(state)` (Módulo 1): evalúa ciudades en `auto_canary_cities` contra criterios v1 congelados (n≥5, WR≥60%, PnL≥+$1.00, days≥7, integridad OK, Bloque 4 anti-flapping). Alerta Telegram nueva candidata + recordatorio cada 22h + revocación automática + silenciamiento cuando ciudad aparece en `ACTIVE_TRADING_CITIES` runtime.
+  - `maybe_run_active_degradation(state)` (Módulo 2): degrada Active→Canary automáticamente si WR≤45% o PnL≤-$1.50 (con n≥5, anti-flapping 14 días). Overlay `auto_canary_from_active` en `city_policy_state.json`. `get_effective_city_mode()` extendido mínimamente para leer ese overlay antes de `ACTIVE_TRADING_CITIES`.
+  - `maybe_alert_v2_trigger(state)` (Módulo 3): alerta one-shot cuando `RECALIBRATION_PHASE2_CLOSED=true` + al menos 1 ciudad en Active + `signals.json` fresco (<48h). Idempotente, gate diario.
+- **Integración en `run_observability_alerts()`:** `maybe_run_active_degradation` (antes de `notify_canary_candidates`), `notify_active_candidates` (después), `maybe_alert_v2_trigger` (en gate diario junto a `maybe_run_daily_crosscheck` y `maybe_run_blocked_signals_check`).
+- **`verify_before_deploy.py`:** 643→663/663 (+20 tests: 10 estáticos + 8 funcionales + 2 idempotencia/one-shot).
+- **No tocado:** `sync_city_policy_state()`, thresholds `SHADOW_CANARY_MIN_*`, `ALLOWLIST_REMOVE_*`, `MIN_EDGE`, `MIN_DAYS_AHEAD`, trading core, NOAA client, scheduler, `signals.json`, `trader_analyzer.py`.
+- **Nota operativa recurrente:** volumen bajo del scan loop sigue siendo backlog paralelo no resuelto (condition_filtered, scheduler, filtros temporales). Este módulo ayuda indirectamente al sizing Active pero no resuelve throughput de fondo.

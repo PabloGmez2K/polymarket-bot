@@ -101,7 +101,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.13"
+BOT_VERSION = "v10.6.14"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -1020,6 +1020,10 @@ def _normalize_city_policy_state(data, default=None):
     payload["auto_shadow_cities"] = normalized_shadow
     payload["auto_blocked_cities"] = normalized_blocked
     payload["transition_history"] = normalized_history
+    if not isinstance(payload.get("auto_canary_from_active"), dict):
+        payload["auto_canary_from_active"] = {}
+    if not isinstance(payload.get("active_city_monitoring"), dict):
+        payload["active_city_monitoring"] = {}
     if not isinstance(payload.get("updated_at"), str):
         payload["updated_at"] = ""
     return payload
@@ -1068,10 +1072,13 @@ def get_effective_city_mode(city, policy_state=None):
     auto_blocked = policy_state.get("auto_blocked_cities", {}) if isinstance(policy_state, dict) else {}
     auto_shadow = policy_state.get("auto_shadow_cities", {}) if isinstance(policy_state, dict) else {}
     auto_canary = policy_state.get("auto_canary_cities", {}) if isinstance(policy_state, dict) else {}
+    auto_canary_from_active = policy_state.get("auto_canary_from_active", {}) if isinstance(policy_state, dict) else {}
     if city in auto_blocked:
         return "blocked" if not has_observed_proxy else "shadow"
     if city in auto_shadow:
         return "shadow"
+    if city in auto_canary_from_active:
+        return "canary"
     if city in ACTIVE_TRADING_CITIES:
         return "active"
     if city in auto_canary or city in CANARY_TRADING_CITIES:
@@ -3863,6 +3870,15 @@ def run_observability_alerts():
             state["low_bankroll_alerted"] = False
             changed = True
 
+    # v10.6.14 (M2): degrada ciudades Active→Canary si performance baja; antes de notify_active_candidates.
+    try:
+        if maybe_run_active_degradation(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"Error en active degradation: {e}")
+
     # v10.6.11 (M5): alerta one-shot cuando una ciudad shadow se vuelve candidata a canary.
     # Se evalúa antes del sync para que la notificación humana preceda (o acompañe) al auto-promote.
     try:
@@ -3872,6 +3888,15 @@ def run_observability_alerts():
         logger = globals().get("log")
         if logger:
             logger.warning(f"Error evaluando canary candidates: {e}")
+
+    # v10.6.14 (M1): notifica ciudades canary listas para Active (criterios v1).
+    try:
+        if notify_active_candidates(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"Error evaluando active candidates: {e}")
 
     try:
         sync_city_policy_state(notify=True)
@@ -3914,6 +3939,15 @@ def run_observability_alerts():
         logger = globals().get("log")
         if logger:
             logger.warning(f"blocked signals check: fallo ({e})")
+
+    # v10.6.14 (M3): alerta one-shot cuando las precondiciones para v2 se cumplen.
+    try:
+        if maybe_alert_v2_trigger(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"v2 trigger alarm: fallo ({e})")
 
     if changed:
         save_alerts_state(state)
@@ -7013,6 +7047,534 @@ def maybe_run_blocked_signals_check(state, now=None):
         return False
 
     state["blocked_signals_last_date"] = today
+    return True
+
+
+# =============================================================
+# v10.6.14 — Canary → Active automation (Módulos 1, 2, 3)
+# =============================================================
+
+def _detect_atlanta_inconsistency(record):
+    """True si el record tiene el patrón inconsistente Atlanta (LOSS_TOTAL + RESOLVED_WIN positivo en
+    timeline + post_exit_analysis confirmando win). Ver docs/atlanta-lifecycle-inconsistency-2026-04-12.md."""
+    if not isinstance(record, dict):
+        return False
+    close_ctx = record.get("close_context") or {}
+    if close_ctx.get("close_action") != "LOSS_TOTAL":
+        return False
+    timeline = record.get("timeline") or []
+    has_resolved_win_positive = any(
+        isinstance(e, dict)
+        and e.get("action") == "RESOLVED_WIN"
+        and float(e.get("pnl_cash") or 0) > 0
+        for e in timeline
+    )
+    if not has_resolved_win_positive:
+        return False
+    post_exit = record.get("post_exit_analysis") or {}
+    return bool(
+        post_exit.get("market_seen_after_close") is True
+        and float(post_exit.get("max_price_after_close") or 0) >= 0.95
+    )
+
+
+def notify_active_candidates(state):
+    """
+    v10.6.14 (Módulo 1): evalúa ciudades en auto_canary_cities y detecta cuáles cumplen
+    los criterios v1 para ser promovidas manualmente a Active.
+
+    Umbrales v1 CONGELADOS (sesión 172 Opus):
+    - canary_trades >= 5, WR >= 60%, PnL >= +$1.00, days_since_promotion >= 7
+
+    Envía Telegram cuando:
+    - Nueva candidata detectada (primera vez que cumple criterios).
+    - Candidata sigue cumpliendo y han pasado >= 22h desde último aviso (recordatorio).
+
+    Revoca (envía aviso + borra entry) cuando:
+    - Candidata ya no cumple criterios.
+
+    Silencia cuando:
+    - Pablo aplicó el cambio: la ciudad aparece en ACTIVE_TRADING_CITIES en runtime.
+
+    Retorna True si mutó state (caller persiste).
+    """
+    MIN_CANARY_TRADES = 5
+    MIN_WIN_RATE = 60.0
+    MIN_PNL = 1.00
+    MIN_DAYS = 7
+    RATE_LIMIT_HOURS = 22
+
+    try:
+        policy_state = load_city_policy_state()
+        lifecycle_data = load_trade_lifecycle_data()
+        lifecycle_records = lifecycle_data.get("records", []) if isinstance(lifecycle_data, dict) else []
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"notify active candidates: no pude cargar datos ({e})")
+        return False
+
+    auto_canary = policy_state.get("auto_canary_cities", {})
+    if not isinstance(auto_canary, dict):
+        auto_canary = {}
+    transition_history = policy_state.get("transition_history", [])
+    if not isinstance(transition_history, list):
+        transition_history = []
+    auto_blocked = policy_state.get("auto_blocked_cities", {})
+    if not isinstance(auto_blocked, dict):
+        auto_blocked = {}
+
+    active_env = {
+        c.strip() for c in os.getenv("ACTIVE_TRADING_CITIES", "").split(",")
+        if c.strip() and c.strip().upper() != "NONE"
+    }
+
+    notified = state.setdefault("active_candidate_notified", {})
+    if not isinstance(notified, dict):
+        notified = {}
+        state["active_candidate_notified"] = notified
+
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    changed = False
+
+    # Silencing: user already activated the city → clean state silently
+    for city in list(notified.keys()):
+        if city in active_env:
+            notified.pop(city, None)
+            changed = True
+
+    # Evaluate each canary city against v1 criteria
+    current_candidates = {}
+    for city, meta in auto_canary.items():
+        if not city or not isinstance(meta, dict):
+            continue
+        if city in active_env:
+            continue
+        if city in auto_blocked:
+            continue
+
+        promoted_at_raw = meta.get("promoted_at", "")
+        if not promoted_at_raw:
+            continue
+        try:
+            promoted_at = datetime.fromisoformat(promoted_at_raw)
+        except Exception:
+            continue
+
+        # Trades canary post-promoción (solo cerrados)
+        city_records = [
+            r for r in lifecycle_records
+            if isinstance(r, dict)
+            and r.get("city") == city
+            and r.get("closed_at")
+            and str(r.get("opened_at", "")) >= promoted_at_raw
+        ]
+
+        n_trades = len(city_records)
+        if n_trades < MIN_CANARY_TRADES:
+            continue
+
+        # Bloque 2: integrity — Atlanta inconsistency pattern
+        if any(_detect_atlanta_inconsistency(r) for r in city_records):
+            logger = globals().get("log")
+            if logger:
+                logger.info(f"notify active candidates: {city} omitida por inconsistencia Atlanta en lifecycle")
+            continue
+        # All trades must have analysis_ready
+        if not all(bool(r.get("integrity", {}).get("analysis_ready", False)) for r in city_records):
+            continue
+
+        n_wins = sum(1 for r in city_records if float(r.get("pnl_cash") or 0) > 0)
+        n_losses = n_trades - n_wins
+        pnl = sum(float(r.get("pnl_cash") or 0) for r in city_records)
+        win_rate = round(n_wins / n_trades * 100, 1)
+        best_edge = float(meta.get("best_edge_pct") or 0)
+        days_since_promotion = (now - promoted_at).days
+
+        # Bloque 1
+        if win_rate < MIN_WIN_RATE:
+            continue
+        if pnl < MIN_PNL:
+            continue
+        if days_since_promotion < MIN_DAYS:
+            continue
+
+        # Bloque 4: anti-flapping — no demoted to shadow in last 14 days
+        cutoff_14d = (now - timedelta(days=14)).isoformat()
+        recently_demoted = any(
+            isinstance(h, dict)
+            and h.get("city") == city
+            and h.get("to") == "shadow"
+            and str(h.get("at", "")) >= cutoff_14d
+            for h in transition_history
+        )
+        if recently_demoted:
+            continue
+
+        current_candidates[city] = {
+            "trades": n_trades,
+            "wins": n_wins,
+            "losses": n_losses,
+            "win_rate": win_rate,
+            "pnl": round(pnl, 2),
+            "best_edge": best_edge,
+            "days": days_since_promotion,
+            "promoted_at_date": promoted_at.strftime("%Y-%m-%d"),
+        }
+
+    current_active_cities_str = ",".join(sorted(active_env)) if active_env else ""
+
+    for city, stats in current_candidates.items():
+        city_env_str = (current_active_cities_str + "," + city) if current_active_cities_str else city
+        prev = notified.get(city)
+
+        if prev is None:
+            # Nueva candidata → alerta
+            try:
+                send_telegram(
+                    f"\U0001f680 <b>Ciudad lista para Active</b>\n"
+                    f"{city} cumple todos los criterios canary \u2192 active.\n\n"
+                    f"Evidencia canary (desde {stats['promoted_at_date']}):\n"
+                    f"\u2022 Trades: {stats['trades']} ({stats['wins']}W / {stats['losses']}L)"
+                    f" \u2014 WR {stats['win_rate']:.1f}%\n"
+                    f"\u2022 PnL acumulado: ${stats['pnl']:+.2f}\n"
+                    f"\u2022 Mejor edge: {stats['best_edge']:.1f}%\n"
+                    f"\u2022 D\u00edas en canary: {stats['days']}\n"
+                    f"\u2022 Integridad de datos: OK \u2713\n\n"
+                    f"Para activar en Railway aplicar exactamente:\n"
+                    f"<code>ACTIVE_TRADING_CITIES={city_env_str}</code>\n\n"
+                    f"Mientras no apliques el cambio, este aviso se repetir\u00e1 cada 24h.\n"
+                    f"Si los criterios dejan de cumplirse, te llegar\u00e1 aviso de revocaci\u00f3n."
+                )
+            except Exception as e:
+                logger = globals().get("log")
+                if logger:
+                    logger.warning(f"notify active candidates: fallo al enviar Telegram ({e})")
+                continue
+            notified[city] = {
+                "first_notified_at": now_iso,
+                "last_notified_at": now_iso,
+                "trades": stats["trades"],
+                "win_rate": stats["win_rate"],
+                "pnl": stats["pnl"],
+                "days_since_promotion": stats["days"],
+            }
+            changed = True
+        else:
+            # Candidata existente → recordatorio si pasaron >= 22h
+            last_notified_raw = prev.get("last_notified_at", now_iso)
+            try:
+                last_notified = datetime.fromisoformat(last_notified_raw)
+            except Exception:
+                last_notified = now
+            hours_since = (now - last_notified).total_seconds() / 3600
+            if hours_since < RATE_LIMIT_HOURS:
+                continue
+            try:
+                send_telegram(
+                    f"\U0001f514 <b>Recordatorio \u2014 {city} sigue lista para Active</b>\n"
+                    f"Han pasado 24h desde el primer aviso y los criterios siguen cumpli\u00e9ndose.\n\n"
+                    f"Evidencia actualizada:\n"
+                    f"\u2022 Trades: {stats['trades']} \u2014 WR {stats['win_rate']:.1f}%"
+                    f" \u2014 PnL ${stats['pnl']:+.2f}\n\n"
+                    f"Env var para aplicar:\n"
+                    f"<code>ACTIVE_TRADING_CITIES={city_env_str}</code>"
+                )
+            except Exception as e:
+                logger = globals().get("log")
+                if logger:
+                    logger.warning(f"notify active candidates: fallo al enviar recordatorio ({e})")
+                continue
+            notified[city]["last_notified_at"] = now_iso
+            notified[city]["trades"] = stats["trades"]
+            notified[city]["win_rate"] = stats["win_rate"]
+            notified[city]["pnl"] = stats["pnl"]
+            changed = True
+
+    # Revocación: ciudades que ya no cumplen criterios
+    for city in list(notified.keys()):
+        if city not in current_candidates and city not in active_env:
+            meta = auto_canary.get(city, {})
+            promoted_at_raw = meta.get("promoted_at", "") if isinstance(meta, dict) else ""
+            city_records = [
+                r for r in lifecycle_records
+                if isinstance(r, dict)
+                and r.get("city") == city
+                and r.get("closed_at")
+                and str(r.get("opened_at", "")) >= promoted_at_raw
+            ] if promoted_at_raw else []
+            n_trades = len(city_records)
+            n_wins = sum(1 for r in city_records if float(r.get("pnl_cash") or 0) > 0)
+            pnl = round(sum(float(r.get("pnl_cash") or 0) for r in city_records), 2)
+            win_rate = round(n_wins / n_trades * 100, 1) if n_trades > 0 else 0.0
+            try:
+                send_telegram(
+                    f"\U0001f6ab <b>{city} ya no cumple criterios para Active</b>\n"
+                    f"Raz\u00f3n: criterios dejaron de cumplirse\n"
+                    f"(WR ca\u00edy\u00f3 a {win_rate:.1f}% / PnL ${pnl:+.2f} / n={n_trades})\n\n"
+                    f"La candidatura queda revocada. Si vuelve a cumplir, recibir\u00e1s nueva alerta."
+                )
+            except Exception as e:
+                logger = globals().get("log")
+                if logger:
+                    logger.warning(f"notify active candidates: fallo al enviar revocaci\u00f3n ({e})")
+            notified.pop(city, None)
+            changed = True
+
+    return changed
+
+
+def maybe_run_active_degradation(state):
+    """
+    v10.6.14 (Módulo 2): degrada ciudades Active→Canary automáticamente si la performance
+    cae bajo umbral. Corre en cada ciclo de observability.
+
+    Criterios v1 CONGELADOS (sesión 172 Opus):
+    - active_trades >= 5 AND (WR <= 45% OR PnL <= -1.50)
+    - Anti-flapping: no degradada en últimos 14 días.
+
+    Usa overlay auto_canary_from_active en city_policy_state para que
+    get_effective_city_mode() trate la ciudad como canary aunque esté en ACTIVE_TRADING_CITIES.
+
+    Retorna True si state (alerts_state) fue mutado.
+    """
+    active_env = {
+        c.strip() for c in os.getenv("ACTIVE_TRADING_CITIES", "").split(",")
+        if c.strip() and c.strip().upper() != "NONE"
+    }
+    if not active_env:
+        return False
+
+    try:
+        policy_state = load_city_policy_state()
+        lifecycle_data = load_trade_lifecycle_data()
+        lifecycle_records = lifecycle_data.get("records", []) if isinstance(lifecycle_data, dict) else []
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"active degradation: no pude cargar datos ({e})")
+        return False
+
+    monitoring = policy_state.get("active_city_monitoring", {})
+    if not isinstance(monitoring, dict):
+        monitoring = {}
+    policy_state["active_city_monitoring"] = monitoring
+
+    auto_canary_from_active = policy_state.get("auto_canary_from_active", {})
+    if not isinstance(auto_canary_from_active, dict):
+        auto_canary_from_active = {}
+    policy_state["auto_canary_from_active"] = auto_canary_from_active
+
+    transition_history = policy_state.get("transition_history", [])
+    if not isinstance(transition_history, list):
+        transition_history = []
+
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    changed_alerts = False
+    changed_policy = False
+
+    for city in list(active_env):
+        if city in auto_canary_from_active:
+            continue
+
+        # Registrar monitoreo si primera vez que vemos esta ciudad en active
+        if city not in monitoring:
+            monitoring[city] = {"started_at": now_iso}
+            changed_policy = True
+
+        started_at_raw = monitoring[city].get("started_at", now_iso)
+
+        # Trades activos cerrados desde el inicio de monitoreo
+        city_records = [
+            r for r in lifecycle_records
+            if isinstance(r, dict)
+            and r.get("city") == city
+            and r.get("closed_at")
+            and str(r.get("opened_at", "")) >= started_at_raw
+        ]
+
+        n_trades = len(city_records)
+        if n_trades < 5:
+            continue
+
+        # Anti-flapping: no degradada a canary en últimos 14 días
+        cutoff_14d = (now - timedelta(days=14)).isoformat()
+        recently_degraded = any(
+            isinstance(h, dict)
+            and h.get("city") == city
+            and h.get("to") in ("active_to_canary",)
+            and str(h.get("at", "")) >= cutoff_14d
+            for h in transition_history
+        )
+        if recently_degraded:
+            continue
+
+        n_wins = sum(1 for r in city_records if float(r.get("pnl_cash") or 0) > 0)
+        pnl = sum(float(r.get("pnl_cash") or 0) for r in city_records)
+        win_rate = round(n_wins / n_trades * 100, 1) if n_trades > 0 else 0.0
+
+        if win_rate <= 45.0:
+            reason_short = f"WR {win_rate:.1f}% \u2264 45%"
+        elif pnl <= -1.50:
+            reason_short = f"PnL ${pnl:+.2f} \u2264 -$1.50"
+        else:
+            continue
+
+        # Construir nuevo env var copiable
+        new_active = sorted(active_env - {city})
+        new_cities_str = ",".join(new_active) if new_active else "NONE"
+
+        # Añadir overlay
+        auto_canary_from_active[city] = {
+            "degraded_at": now_iso,
+            "reason": reason_short,
+            "metrics": {
+                "trades": n_trades,
+                "wins": n_wins,
+                "win_rate": win_rate,
+                "pnl": round(pnl, 2),
+            },
+        }
+
+        # Registrar en transition_history
+        transition_history.append({
+            "at": now_iso,
+            "city": city,
+            "from": "active",
+            "to": "active_to_canary",
+            "action": "auto_degrade_active",
+            "reason": reason_short,
+        })
+        policy_state["transition_history"] = transition_history
+        changed_policy = True
+
+        try:
+            send_telegram(
+                f"\u26a0\ufe0f <b>Ciudad degradada Active \u2192 Canary</b>\n"
+                f"{city} ha sido degradada autom\u00e1ticamente por performance pobre.\n\n"
+                f"Evidencia (desde activaci\u00f3n):\n"
+                f"\u2022 Trades: {n_trades} \u2014 WR {win_rate:.1f}% \u2014 PnL ${pnl:+.2f}\n"
+                f"\u2022 Raz\u00f3n: {reason_short}\n\n"
+                f"El bot ya operaba {city} con sizing active. A partir de este ciclo vuelve a "
+                f"sizing canary (posici\u00f3n peque\u00f1a).\n\n"
+                f"Para limpiar el env var en Railway:\n"
+                f"<code>ACTIVE_TRADING_CITIES={new_cities_str}</code>\n"
+                f"(opcional \u2014 el overlay runtime ya la excluye)."
+            )
+        except Exception as e:
+            logger = globals().get("log")
+            if logger:
+                logger.warning(f"active degradation: fallo al enviar Telegram ({e})")
+
+        changed_alerts = True
+
+    if changed_policy:
+        try:
+            policy_state["updated_at"] = now_iso
+            save_city_policy_state(policy_state)
+        except Exception as e:
+            logger = globals().get("log")
+            if logger:
+                logger.warning(f"active degradation: fallo al guardar policy_state ({e})")
+
+    return changed_alerts
+
+
+def maybe_alert_v2_trigger(state, now=None):
+    """
+    v10.6.14 (Módulo 3): alarma one-shot cuando las condiciones para habilitar v2 se cumplen.
+    Bloques 3+5 (corroboración externa + gate global post-recalibración) están DEFERIDOS a v2.
+    Este módulo solo avisa cuándo es momento de arrancarlos.
+
+    Precondiciones:
+    1. RECALIBRATION_PHASE2_CLOSED=true (env var) o data/recalibration_phase2_status.json con status=closed
+    2. Al menos 1 ciudad en ACTIVE_TRADING_CITIES (distinto de NONE)
+    3. data/runtime_import/signals.json fresco (< 48h)
+
+    One-shot: idempotencia via state["v2_trigger_notified"].
+    Retorna True si state fue mutado.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    today = now.date().isoformat()
+
+    # Verificar solo una vez por día
+    if state.get("v2_trigger_last_check") == today:
+        return False
+
+    # Idempotencia
+    if state.get("v2_trigger_notified"):
+        state["v2_trigger_last_check"] = today
+        return True
+
+    # Precondición 1: recalibración Phase 2 cerrada
+    phase2_closed = str(os.getenv("RECALIBRATION_PHASE2_CLOSED", "")).strip().lower() == "true"
+    if not phase2_closed:
+        phase2_file = _data_path("recalibration_phase2_status.json")
+        if os.path.exists(phase2_file):
+            try:
+                with open(phase2_file, "r", encoding="utf-8") as f:
+                    phase2_data = json.load(f)
+                phase2_closed = isinstance(phase2_data, dict) and phase2_data.get("status") == "closed"
+            except Exception:
+                pass
+    if not phase2_closed:
+        state["v2_trigger_last_check"] = today
+        return True
+
+    # Precondición 2: al menos una ciudad en Active
+    active_env = {
+        c.strip() for c in os.getenv("ACTIVE_TRADING_CITIES", "").split(",")
+        if c.strip() and c.strip().upper() != "NONE"
+    }
+    if not active_env:
+        state["v2_trigger_last_check"] = today
+        return True
+
+    # Precondición 3: signals.json fresco (< 48h)
+    if not os.path.exists(SIGNALS_FILE):
+        state["v2_trigger_last_check"] = today
+        return True
+    try:
+        with open(SIGNALS_FILE, "r", encoding="utf-8-sig") as f:
+            sig_data = json.load(f)
+        generated_raw = sig_data.get("generated") or sig_data.get("updated_at", "")
+        generated = datetime.fromisoformat(generated_raw)
+        age_hours = (now - generated).total_seconds() / 3600
+        if age_hours > 48:
+            state["v2_trigger_last_check"] = today
+            return True
+    except Exception:
+        state["v2_trigger_last_check"] = today
+        return True
+
+    # Todas las precondiciones cumplidas — alerta one-shot
+    n_cities_active = len(active_env)
+    try:
+        send_telegram(
+            f"\U0001f3af <b>Condiciones para v2 cumplidas</b>\n\n"
+            f"Canary\u2192Active v1 ha estado corriendo con {n_cities_active} ciudad(es) en Active "
+            f"y la recalibraci\u00f3n Phase 2 est\u00e1 cerrada. Es momento de a\u00f1adir los Bloques 3+5 "
+            f"(corroboraci\u00f3n externa + gate global post-recalibraci\u00f3n) al gate de promoci\u00f3n.\n\n"
+            f"Para arrancar la sesi\u00f3n limpia con Opus, copiar exactamente:\n\n"
+            f"<code>Leer docs/handoffs/canary-to-active-automation-handoff-2026-04-13.md \u00a76 "
+            f"(Bloques 3+5 v2). Extender notify_active_candidates con: (Bloque 3) corroboraci\u00f3n "
+            f"trader_signals o shadow_edge reciente, (Bloque 5) gate global WR sistema >= 50% "
+            f"\u00faltimos 30 d\u00edas. No tocar criterios v1 ya en producci\u00f3n. "
+            f"Verificar con verify_before_deploy.py. Cierre: commit + push + deploy Railway.</code>\n\n"
+            f"Este aviso es one-shot. No se repetir\u00e1."
+        )
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"v2 trigger alarm: fallo al enviar Telegram ({e})")
+        state["v2_trigger_last_check"] = today
+        return True
+
+    state["v2_trigger_notified"] = {"at": now.isoformat()}
+    state["v2_trigger_last_check"] = today
     return True
 
 

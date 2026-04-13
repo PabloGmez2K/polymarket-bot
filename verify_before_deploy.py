@@ -4276,6 +4276,281 @@ def run_tests():
          {"fired": fire3, "state": cand_state})
 
     # ============================================================
+    # v10.6.14 — Canary→Active automation (Modulos 1, 2, 3)
+    # ============================================================
+    print("\n v10.6.14: notify_active_candidates + maybe_run_active_degradation + maybe_alert_v2_trigger")
+
+    # Static checks
+    test("v10.6.14: notify_active_candidates definida", "def notify_active_candidates(" in code)
+    test("v10.6.14: maybe_run_active_degradation definida", "def maybe_run_active_degradation(" in code)
+    test("v10.6.14: maybe_alert_v2_trigger definida", "def maybe_alert_v2_trigger(" in code)
+    test("v10.6.14: _detect_atlanta_inconsistency definida", "def _detect_atlanta_inconsistency(" in code)
+    test("v10.6.14: active_candidate_notified en alerts state", '"active_candidate_notified"' in code)
+    test("v10.6.14: auto_canary_from_active en policy_state", '"auto_canary_from_active"' in code)
+    test("v10.6.14: run_observability_alerts invoca notify_active_candidates", "notify_active_candidates(state)" in code)
+    test("v10.6.14: run_observability_alerts invoca maybe_run_active_degradation", "maybe_run_active_degradation(state)" in code)
+    test("v10.6.14: run_observability_alerts invoca maybe_alert_v2_trigger", "maybe_alert_v2_trigger(state)" in code)
+    test("v10.6.14: get_effective_city_mode chequea auto_canary_from_active antes de ACTIVE_TRADING_CITIES",
+         "auto_canary_from_active" in code
+         and code.index("auto_canary_from_active") < code.index("if city in ACTIVE_TRADING_CITIES"))
+
+    # Functional: notify_active_candidates
+    active_msgs_v14 = []
+
+    def _make_lifecycle_record_v14(city, opened_at_iso, closed_at_iso, pnl_cash, analysis_ready=True, add_atlanta=False):
+        rec = {
+            "city": city,
+            "opened_at": opened_at_iso,
+            "closed_at": closed_at_iso,
+            "pnl_cash": pnl_cash,
+            "integrity": {"analysis_ready": analysis_ready},
+            "close_context": {},
+            "timeline": [],
+            "post_exit_analysis": {},
+        }
+        if add_atlanta:
+            rec["close_context"] = {"close_action": "LOSS_TOTAL"}
+            rec["timeline"] = [{"action": "RESOLVED_WIN", "pnl_cash": 0.63}]
+            rec["post_exit_analysis"] = {"market_seen_after_close": True, "max_price_after_close": 0.9995}
+        return rec
+
+    promoted_iso = "2026-04-01T00:00:00+00:00"  # 12 days before today in test context
+
+    active_ns = {
+        "datetime": datetime,
+        "timezone": timezone,
+        "timedelta": timedelta,
+        "os": __import__("os"),
+        "json": __import__("json"),
+        "send_telegram": lambda text, with_menu=False, custom_keyboard=None: active_msgs_v14.append(text),
+        "load_city_policy_state": lambda: {
+            "logic_series": "10.6",
+            "auto_canary_cities": {
+                "Seoul": {"promoted_at": promoted_iso, "best_edge_pct": 12.0},
+            },
+            "auto_shadow_cities": {},
+            "auto_blocked_cities": {},
+            "auto_canary_from_active": {},
+            "active_city_monitoring": {},
+            "transition_history": [],
+        },
+        "load_trade_lifecycle_data": lambda: {
+            "records": [
+                _make_lifecycle_record_v14("Seoul", "2026-04-02T10:00:00+00:00", "2026-04-02T20:00:00+00:00", 0.50),
+                _make_lifecycle_record_v14("Seoul", "2026-04-03T10:00:00+00:00", "2026-04-03T20:00:00+00:00", 0.50),
+                _make_lifecycle_record_v14("Seoul", "2026-04-04T10:00:00+00:00", "2026-04-04T20:00:00+00:00", 0.50),
+                _make_lifecycle_record_v14("Seoul", "2026-04-05T10:00:00+00:00", "2026-04-05T20:00:00+00:00", -0.40),
+            ]
+        },
+    }
+    exec(get_function_source(module_ast, code_lines, "_detect_atlanta_inconsistency"), active_ns)
+    exec(get_function_source(module_ast, code_lines, "notify_active_candidates"), active_ns)
+
+    # Test 1: ciudad con 4 trades (n<5) → NO alerta
+    st1 = {}
+    fire_t1 = active_ns["notify_active_candidates"](st1)
+    test("v10.6.14 active candidates: ciudad con 4 trades no alerta (n<5)",
+         fire_t1 is False and not active_msgs_v14,
+         {"fired": fire_t1, "msgs": len(active_msgs_v14)})
+
+    # Test 2: ciudad con 5 trades, WR 80%, PnL +$2.10, days=12, integridad OK → ALERTA
+    active_ns2 = dict(active_ns)
+    active_msgs2 = []
+    active_ns2["send_telegram"] = lambda text, with_menu=False, custom_keyboard=None: active_msgs2.append(text)
+    active_ns2["load_trade_lifecycle_data"] = lambda: {
+        "records": [
+            _make_lifecycle_record_v14("Seoul", "2026-04-02T10:00:00+00:00", "2026-04-02T20:00:00+00:00", 0.50),
+            _make_lifecycle_record_v14("Seoul", "2026-04-03T10:00:00+00:00", "2026-04-03T20:00:00+00:00", 0.50),
+            _make_lifecycle_record_v14("Seoul", "2026-04-04T10:00:00+00:00", "2026-04-04T20:00:00+00:00", 0.50),
+            _make_lifecycle_record_v14("Seoul", "2026-04-05T10:00:00+00:00", "2026-04-05T20:00:00+00:00", 0.50),
+            _make_lifecycle_record_v14("Seoul", "2026-04-06T10:00:00+00:00", "2026-04-06T20:00:00+00:00", 0.10),
+        ]
+    }
+    exec(get_function_source(module_ast, code_lines, "notify_active_candidates"), active_ns2)
+    st2 = {}
+    fire_t2 = active_ns2["notify_active_candidates"](st2)
+    test("v10.6.14 active candidates: ciudad con 5 trades WR>=60% PnL>=+$1 days>=7 alerta",
+         fire_t2 is True and len(active_msgs2) == 1 and "Seoul" in active_msgs2[0],
+         {"fired": fire_t2, "msgs": active_msgs2})
+
+    # Test 3: re-invocación 1h después → NO alerta (rate limit)
+    fire_t3 = active_ns2["notify_active_candidates"](st2)
+    test("v10.6.14 active candidates: re-invocacion 1h despues no envia recordatorio (rate limit)",
+         fire_t3 is False and len(active_msgs2) == 1,
+         {"fired": fire_t3, "msgs": len(active_msgs2)})
+
+    # Test 4: re-invocación 25h después → recordatorio
+    import copy as _copy_v14
+    st4 = _copy_v14.deepcopy(st2)
+    notified_entry = st4.get("active_candidate_notified", {}).get("Seoul", {})
+    if notified_entry:
+        past_ts = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
+        notified_entry["last_notified_at"] = past_ts
+    active_msgs4 = []
+    active_ns4 = dict(active_ns2)
+    active_ns4["send_telegram"] = lambda text, with_menu=False, custom_keyboard=None: active_msgs4.append(text)
+    exec(get_function_source(module_ast, code_lines, "notify_active_candidates"), active_ns4)
+    fire_t4 = active_ns4["notify_active_candidates"](st4)
+    test("v10.6.14 active candidates: re-invocacion 25h despues envia recordatorio",
+         fire_t4 is True and len(active_msgs4) == 1 and "Recordatorio" in active_msgs4[0],
+         {"fired": fire_t4, "msgs": active_msgs4})
+
+    # Test 5: Atlanta inconsistency → NO alerta
+    active_ns5 = dict(active_ns2)
+    active_msgs5 = []
+    active_ns5["send_telegram"] = lambda text, with_menu=False, custom_keyboard=None: active_msgs5.append(text)
+    active_ns5["load_trade_lifecycle_data"] = lambda: {
+        "records": [
+            _make_lifecycle_record_v14("Seoul", "2026-04-02T10:00:00+00:00", "2026-04-02T20:00:00+00:00", 0.50),
+            _make_lifecycle_record_v14("Seoul", "2026-04-03T10:00:00+00:00", "2026-04-03T20:00:00+00:00", 0.50),
+            _make_lifecycle_record_v14("Seoul", "2026-04-04T10:00:00+00:00", "2026-04-04T20:00:00+00:00", 0.50),
+            _make_lifecycle_record_v14("Seoul", "2026-04-05T10:00:00+00:00", "2026-04-05T20:00:00+00:00", 0.50),
+            _make_lifecycle_record_v14("Seoul", "2026-04-06T10:00:00+00:00", "2026-04-06T20:00:00+00:00", 0.10, add_atlanta=True),
+        ]
+    }
+    exec(get_function_source(module_ast, code_lines, "_detect_atlanta_inconsistency"), active_ns5)
+    exec(get_function_source(module_ast, code_lines, "notify_active_candidates"), active_ns5)
+    st5 = {}
+    fire_t5 = active_ns5["notify_active_candidates"](st5)
+    test("v10.6.14 active candidates: Atlanta inconsistency en lifecycle - no alerta",
+         fire_t5 is False and not active_msgs5,
+         {"fired": fire_t5, "msgs": active_msgs5})
+
+    # Test 6: ciudad ya en ACTIVE_TRADING_CITIES → silencio + limpiar state
+    active_ns6_msgs = []
+    active_ns6 = dict(active_ns2)
+    active_ns6["send_telegram"] = lambda text, with_menu=False, custom_keyboard=None: active_ns6_msgs.append(text)
+    active_ns6["os"] = type("_FakeOS", (), {
+        "getenv": staticmethod(lambda k, d="": "Seoul" if k == "ACTIVE_TRADING_CITIES" else d),
+        "path": __import__("os").path,
+    })()
+    exec(get_function_source(module_ast, code_lines, "notify_active_candidates"), active_ns6)
+    st6 = {"active_candidate_notified": {"Seoul": {"first_notified_at": "2026-04-10T10:00:00+00:00", "last_notified_at": "2026-04-10T10:00:00+00:00"}}}
+    fire_t6 = active_ns6["notify_active_candidates"](st6)
+    test("v10.6.14 active candidates: ciudad ya en ACTIVE_TRADING_CITIES silencio limpia state",
+         fire_t6 is True
+         and "Seoul" not in st6.get("active_candidate_notified", {})
+         and not active_ns6_msgs,
+         {"fired": fire_t6, "state": st6, "msgs": active_ns6_msgs})
+
+    # Functional: maybe_run_active_degradation
+    degrade_msgs = []
+    policy_saved = []
+
+    def _fake_save_policy_v14(data):
+        policy_saved.append(data)
+
+    degrade_ns = {
+        "datetime": datetime,
+        "timezone": timezone,
+        "timedelta": timedelta,
+        "os": type("_FakeOS14", (), {
+            "getenv": staticmethod(lambda k, d="": "Tokyo" if k == "ACTIVE_TRADING_CITIES" else d),
+            "path": __import__("os").path,
+        })(),
+        "json": __import__("json"),
+        "send_telegram": lambda text, with_menu=False, custom_keyboard=None: degrade_msgs.append(text),
+        "load_city_policy_state": lambda: {
+            "logic_series": "10.6",
+            "auto_canary_cities": {},
+            "auto_shadow_cities": {},
+            "auto_blocked_cities": {},
+            "auto_canary_from_active": {},
+            "active_city_monitoring": {"Tokyo": {"started_at": "2026-04-01T00:00:00+00:00"}},
+            "transition_history": [],
+        },
+        "load_trade_lifecycle_data": lambda: {
+            "records": [
+                _make_lifecycle_record_v14("Tokyo", "2026-04-02T10:00:00+00:00", "2026-04-02T20:00:00+00:00", -0.50),
+                _make_lifecycle_record_v14("Tokyo", "2026-04-03T10:00:00+00:00", "2026-04-03T20:00:00+00:00", -0.50),
+                _make_lifecycle_record_v14("Tokyo", "2026-04-04T10:00:00+00:00", "2026-04-04T20:00:00+00:00", -0.50),
+                _make_lifecycle_record_v14("Tokyo", "2026-04-05T10:00:00+00:00", "2026-04-05T20:00:00+00:00", 0.50),
+                _make_lifecycle_record_v14("Tokyo", "2026-04-06T10:00:00+00:00", "2026-04-06T20:00:00+00:00", -0.50),
+            ]
+        },
+        "save_city_policy_state": _fake_save_policy_v14,
+    }
+    exec(get_function_source(module_ast, code_lines, "maybe_run_active_degradation"), degrade_ns)
+    # Test 7: ciudad active con 5 trades, WR 20% → degrada + alerta
+    st_deg = {}
+    fire_deg = degrade_ns["maybe_run_active_degradation"](st_deg)
+    test("v10.6.14 active degradation: ciudad con WR<=45% degrada y envia Telegram",
+         fire_deg is True
+         and len(degrade_msgs) == 1
+         and "Tokyo" in degrade_msgs[0]
+         and len(policy_saved) >= 1
+         and "Tokyo" in policy_saved[-1].get("auto_canary_from_active", {}),
+         {"fired": fire_deg, "msgs": degrade_msgs, "saved": len(policy_saved)})
+
+    # Functional: maybe_alert_v2_trigger
+    # Test 8: precondiciones parciales (phase2 no cerrada) → NO alerta; todas → alerta una vez; 2da invocación → idempotente
+    v2_msgs = []
+    v2_ns = {
+        "datetime": datetime,
+        "timezone": timezone,
+        "timedelta": timedelta,
+        "os": type("_FakeOSv2a", (), {
+            "getenv": staticmethod(lambda k, d="": {
+                "RECALIBRATION_PHASE2_CLOSED": "false",
+                "ACTIVE_TRADING_CITIES": "Tokyo",
+            }.get(k, d)),
+            "path": __import__("os").path,
+            "makedirs": __import__("os").makedirs,
+        })(),
+        "json": __import__("json"),
+        "SIGNALS_FILE": "__nonexistent_signals__.json",
+        "_data_path": lambda f: f,
+        "send_telegram": lambda text, with_menu=False, custom_keyboard=None: v2_msgs.append(text),
+    }
+    exec(get_function_source(module_ast, code_lines, "maybe_alert_v2_trigger"), v2_ns)
+    st_v2a = {}
+    fire_v2a = v2_ns["maybe_alert_v2_trigger"](st_v2a)
+    test("v10.6.14 v2 trigger: phase2 no cerrada - no alerta",
+         fire_v2a is True and not v2_msgs,
+         {"fired": fire_v2a, "msgs": v2_msgs})
+
+    # Todas las precondiciones cumplidas → alerta one-shot
+    import tempfile as _tmpfile_v14, os as _os_v14
+    _sig_tmp = _tmpfile_v14.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8")
+    _sig_tmp.write('{"generated": "' + datetime.now(timezone.utc).isoformat() + '", "signals": []}')
+    _sig_tmp.close()
+    try:
+        v2_msgs2 = []
+        v2_ns2 = {
+            "datetime": datetime,
+            "timezone": timezone,
+            "timedelta": timedelta,
+            "os": type("_FakeOSv2b", (), {
+                "getenv": staticmethod(lambda k, d="": {
+                    "RECALIBRATION_PHASE2_CLOSED": "true",
+                    "ACTIVE_TRADING_CITIES": "Tokyo",
+                }.get(k, d)),
+                "path": _os_v14.path,
+                "makedirs": _os_v14.makedirs,
+            })(),
+            "json": __import__("json"),
+            "SIGNALS_FILE": _sig_tmp.name,
+            "_data_path": lambda f: "__nonexistent_phase2__.json",
+            "send_telegram": lambda text, with_menu=False, custom_keyboard=None: v2_msgs2.append(text),
+        }
+        exec(get_function_source(module_ast, code_lines, "maybe_alert_v2_trigger"), v2_ns2)
+        st_v2b = {}
+        fire_v2b = v2_ns2["maybe_alert_v2_trigger"](st_v2b)
+        test("v10.6.14 v2 trigger: precondiciones completas alerta one-shot",
+             fire_v2b is True and len(v2_msgs2) == 1 and "v2" in v2_msgs2[0].lower(),
+             {"fired": fire_v2b, "msgs": v2_msgs2})
+        # Segunda invocación mismo día → no alerta (idempotente vía daily gate)
+        fire_v2c = v2_ns2["maybe_alert_v2_trigger"](st_v2b)
+        test("v10.6.14 v2 trigger: segunda invocacion no alerta (idempotente)",
+             len(v2_msgs2) == 1,
+             {"fired": fire_v2c, "msgs_count": len(v2_msgs2)})
+    finally:
+        try:
+            _os_v14.unlink(_sig_tmp.name)
+        except Exception:
+            pass
+
+    # ============================================================
     # R3 — Skip log por ciclo (docs/control-center-r3-contract.md)
     # ============================================================
     print("\n R3: skip_log")
@@ -4524,7 +4799,7 @@ def run_tests():
         except Exception:
             pass
 
-    test("Version v10.6.13", 'BOT_VERSION = "v10.6.13"' in code)
+    test("Version v10.6.14", 'BOT_VERSION = "v10.6.14"' in code)
 
     # ---- Resultado ----
     print(f"\n{'='*50}")
