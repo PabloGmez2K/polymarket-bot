@@ -101,7 +101,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.11"
+BOT_VERSION = "v10.6.13"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -504,6 +504,7 @@ SKIP_LOG_MAX_SIZE_BYTES = 20 * 1024 * 1024  # 20 MB — rotación del contrato R
 AGENT_EVENTS_FILE = _sync_agent_events_seed()
 SIGNALS_FILE = _seed_data_file("signals.json")
 SIGNALS_CROSSCHECK_FILE = _data_path("signals_crosscheck.jsonl")
+BLOCKED_SIGNALS_FILE = _data_path("blocked_signals_resolutions.jsonl")
 TRADERS_DB_FILE = _seed_data_file("traders_db.json")
 
 
@@ -3905,6 +3906,15 @@ def run_observability_alerts():
         if logger:
             logger.warning(f"crosscheck diario: fallo ({e})")
 
+    # v10.6.13: seguimiento resoluciones blocked signals (exact/range), una vez por día.
+    try:
+        if maybe_run_blocked_signals_check(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"blocked signals check: fallo ({e})")
+
     if changed:
         save_alerts_state(state)
 
@@ -6809,6 +6819,200 @@ def maybe_run_daily_crosscheck(state, now=None):
         return False
 
     state["crosscheck_last_date"] = today
+    return True
+
+
+def maybe_run_blocked_signals_check(state, now=None):
+    """
+    v10.6.13: mide diariamente la WR de señales exact/range bloqueadas por
+    condition_filtered. Corre una vez por día (primer ciclo del día).
+    Appenda a BLOCKED_SIGNALS_FILE y manda Telegram con WR actualizada.
+    Avisos one-shot con instrucción copiable en n=30 (Sonnet) y n=50 (Opus).
+    Retorna True si state fue mutado.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    today = now.date().isoformat()
+    if state.get("blocked_signals_last_date") == today:
+        return False
+
+    try:
+        if not os.path.exists(SIGNALS_FILE):
+            return False
+
+        # --- Leer signals.json (puede tener UTF-8 BOM) ---
+        try:
+            with open(SIGNALS_FILE, "r", encoding="utf-8-sig") as f:
+                sig_data = json.load(f)
+        except Exception:
+            with open(SIGNALS_FILE, "r", encoding="utf-8") as f:
+                sig_data = json.load(f)
+
+        signals = sig_data.get("signals", []) if isinstance(sig_data, dict) else []
+
+        cutoff = (now.date() - timedelta(days=1)).isoformat()
+        candidates = [
+            s for s in signals
+            if isinstance(s, dict)
+            and s.get("condition") in {"exact", "range"}
+            and s.get("date", "") <= cutoff
+        ]
+
+        if not candidates:
+            state["blocked_signals_last_date"] = today
+            return True
+
+        # --- Cargar claves ya procesadas ---
+        existing_keys = set()
+        if os.path.exists(BLOCKED_SIGNALS_FILE):
+            try:
+                with open(BLOCKED_SIGNALS_FILE, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            rec = json.loads(line)
+                            existing_keys.add(rec.get("match_key", ""))
+            except Exception:
+                pass
+
+        new_candidates = [s for s in candidates if s.get("match_key", "") not in existing_keys]
+
+        if new_candidates:
+            # --- Fetch mercados cerrados (últimas 3 páginas = ~300 eventos = ~1 semana) ---
+            market_map = {}
+            for offset in range(0, 300, 100):
+                try:
+                    events = api_get(
+                        f"/events?tag_id={DAILY_TEMP_TAG_ID}"
+                        f"&closed=true&limit=100&offset={offset}"
+                        f"&order=startDate&ascending=false",
+                        retries=2, delay=3,
+                    )
+                    time.sleep(0.3)
+                except Exception:
+                    break
+                if not events:
+                    break
+                for event in events:
+                    for market in event.get("markets", []):
+                        q = market.get("question", "").strip()
+                        if q:
+                            market_map[q.lower()] = market
+                if len(events) < 100:
+                    break
+
+            # --- Procesar nuevas señales ---
+            new_records = []
+            for signal in new_candidates:
+                title = signal.get("title", "").strip()
+                # Normalizar bug encoding: U+252C U+2591 (┬░) → ° (U+00B0)
+                normalized = title.replace("\u252c\u2591", "\u00b0").lower()
+                market = market_map.get(normalized)
+                if not market:
+                    continue
+
+                prices_raw = market.get("outcomePrices", "[]")
+                try:
+                    prices = json.loads(prices_raw) if isinstance(prices_raw, str) else prices_raw
+                    yes_p, no_p = float(prices[0]), float(prices[1])
+                except Exception:
+                    continue
+
+                outcome = signal.get("outcome", "")
+                resolved = yes_p >= 0.95 or no_p >= 0.95
+                if outcome == "Yes":
+                    win = yes_p >= 0.95
+                elif outcome == "No":
+                    win = no_p >= 0.95
+                else:
+                    win = False
+
+                new_records.append({
+                    "checked_at": now.isoformat(),
+                    "match_key": signal.get("match_key", ""),
+                    "city": signal.get("city", ""),
+                    "date": signal.get("date", ""),
+                    "condition": signal.get("condition", ""),
+                    "trader": signal.get("trader", ""),
+                    "trader_historical_wr": signal.get("trader_win_rate", 0),
+                    "outcome": outcome,
+                    "avg_price_entered": signal.get("avg_price", 0),
+                    "close_price": yes_p if outcome == "Yes" else no_p,
+                    "resolved": resolved,
+                    "win_for_trader": bool(win and resolved),
+                    "has_consensus": signal.get("has_consensus", False),
+                })
+
+            if new_records:
+                blocked_dir = os.path.dirname(BLOCKED_SIGNALS_FILE)
+                if blocked_dir:
+                    os.makedirs(blocked_dir, exist_ok=True)
+                with open(BLOCKED_SIGNALS_FILE, "a", encoding="utf-8") as f:
+                    for rec in new_records:
+                        f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
+
+        # --- Leer totales del JSONL completo ---
+        all_records = []
+        if os.path.exists(BLOCKED_SIGNALS_FILE):
+            try:
+                with open(BLOCKED_SIGNALS_FILE, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            all_records.append(json.loads(line))
+            except Exception:
+                pass
+
+        resolved_recs = [r for r in all_records if r.get("resolved")]
+        n_resolved = len(resolved_recs)
+        n_win = sum(1 for r in resolved_recs if r.get("win_for_trader"))
+        wr_pct = round(n_win / n_resolved * 100, 1) if n_resolved > 0 else 0.0
+
+        # --- Telegram diario ---
+        send_telegram(
+            f"\U0001f4ca <b>Blocked signals (exact/range) — WR diaria</b>\n"
+            f"Resueltas: {n_resolved} | Wins: {n_win} | WR: {wr_pct}%\n"
+            f"<i>Necesita n\u226530 para primer corte, n\u226550 para decision robusta</i>"
+        )
+
+        # --- Aviso one-shot n>=30: instruccion para Sonnet ---
+        if n_resolved >= 30 and not state.get("blocked_signals_30_notified"):
+            send_telegram(
+                f"\U0001f514 <b>Blocked signals — primera muestra lista (n={n_resolved})</b>\n"
+                f"WR actual: {wr_pct}% ({n_win}/{n_resolved} wins)\n\n"
+                f"<b>Instruccion para Sonnet:</b>\n"
+                f"<code>Analizar blocked_signals_resolutions.jsonl ({n_resolved} resoluciones). "
+                f"Calcular WR total, por condition (exact/range) y por ciudad (n\u22653). "
+                f"Comparar con threshold 55% para reabrir condition_filtered. "
+                f"Contexto: docs/next-session-handoff-2026-04-13-B-blocked-settlement.md "
+                f"y docs/blocked-signals-wr-baseline-2026-04-13.md</code>"
+            )
+            state["blocked_signals_30_notified"] = True
+
+        # --- Aviso one-shot n>=50: instruccion para Opus ---
+        if n_resolved >= 50 and not state.get("blocked_signals_50_notified"):
+            verdict = "REOPEN CANDIDATE" if wr_pct >= 55 else ("GRAY ZONE" if wr_pct >= 50 else "FILTER VALIDATED")
+            send_telegram(
+                f"\U0001f52c <b>Blocked signals — muestra robusta (n={n_resolved})</b>\n"
+                f"WR: {wr_pct}% ({n_win}/{n_resolved}) — {verdict}\n\n"
+                f"<b>Instruccion para Opus:</b>\n"
+                f"<code>Decision condition_filtered: WR={wr_pct}% en n={n_resolved} señales "
+                f"exact/range de quality traders. "
+                f"Si WR\u226555%: disenar experimento canary minimo "
+                f"(1 condicion, 1 ciudad, edge\u226520%, sizing minimo). "
+                f"Archivos: blocked_signals_resolutions.jsonl, "
+                f"docs/blocked-signals-wr-baseline-2026-04-13.md, "
+                f"docs/next-session-handoff-2026-04-13-B-blocked-settlement.md</code>"
+            )
+            state["blocked_signals_50_notified"] = True
+
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"blocked signals check: fallo ({e})")
+        return False
+
+    state["blocked_signals_last_date"] = today
     return True
 
 

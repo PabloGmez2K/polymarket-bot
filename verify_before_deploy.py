@@ -4524,7 +4524,7 @@ def run_tests():
         except Exception:
             pass
 
-    test("Version v10.6.11", 'BOT_VERSION = "v10.6.11"' in code)
+    test("Version v10.6.13", 'BOT_VERSION = "v10.6.13"' in code)
 
     # ---- Resultado ----
     print(f"\n{'='*50}")
