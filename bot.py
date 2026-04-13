@@ -138,6 +138,9 @@ ALERT_SHADOW_WR_MIN_RESOLVED = int(os.getenv("ALERT_SHADOW_WR_MIN_RESOLVED", "8"
 ALERT_SHADOW_WR_TARGET = float(os.getenv("ALERT_SHADOW_WR_TARGET", "45.0"))
 SHADOW_DIRECTIONAL_HISTORY_LIMIT = int(os.getenv("SHADOW_DIRECTIONAL_HISTORY_LIMIT", "500"))
 SLOT_04H_REVIEW_REMINDER_DATE = os.getenv("SLOT_04H_REVIEW_REMINDER_DATE", "").strip()
+# v10.6.12: daily cross-check señales traders vs edge bot
+# Número de corridas acumuladas antes de avisar "listo para análisis".
+SIGNALS_CROSSCHECK_NOTIFY_THRESHOLD = int(os.getenv("SIGNALS_CROSSCHECK_NOTIFY_THRESHOLD", "7"))
 # Hora UTC (0-23) a partir de la cual se envía el resumen diario.
 # El daily se envía en el PRIMER ciclo del día cuya hora UTC >= este valor.
 # Default 8 → ciclo 08:00 UTC = 9h España (CET/invierno) / 10h España (CEST/verano).
@@ -500,6 +503,7 @@ SKIP_LOG_FILE = _data_path("skip_log.jsonl")
 SKIP_LOG_MAX_SIZE_BYTES = 20 * 1024 * 1024  # 20 MB — rotación del contrato R3
 AGENT_EVENTS_FILE = _sync_agent_events_seed()
 SIGNALS_FILE = _seed_data_file("signals.json")
+SIGNALS_CROSSCHECK_FILE = _data_path("signals_crosscheck.jsonl")
 TRADERS_DB_FILE = _seed_data_file("traders_db.json")
 
 
@@ -3892,6 +3896,15 @@ def run_observability_alerts():
         if logger:
             logger.warning(f"04h slot review reminder: fallo enviando recordatorio ({e})")
 
+    # v10.6.12: cross-check señales traders vs edge bot, una vez por día.
+    try:
+        if maybe_run_daily_crosscheck(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"crosscheck diario: fallo ({e})")
+
     if changed:
         save_alerts_state(state)
 
@@ -6661,6 +6674,141 @@ def maybe_send_04h_slot_review_reminder(state, now=None):
         "sent_at": now.isoformat(),
         "target_date": target_date.isoformat(),
     }
+    return True
+
+
+def maybe_run_daily_crosscheck(state, now=None):
+    """
+    v10.6.12: corre el cross-check señales traders vs edge bot una vez por día
+    (primer ciclo de cada día). Appenda a SIGNALS_CROSSCHECK_FILE y manda Telegram
+    con un resumen breve. Cuando acumula SIGNALS_CROSSCHECK_NOTIFY_THRESHOLD corridas
+    envía un aviso one-shot indicando que hay suficiente serie temporal para analizar.
+    Retorna True si state fue mutado.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    today = now.date().isoformat()
+    if state.get("crosscheck_last_date") == today:
+        return False
+
+    try:
+        if not os.path.exists(SIGNALS_FILE) or not os.path.exists(SHADOW_TRACKING_FILE):
+            return False
+
+        with open(SIGNALS_FILE, "r", encoding="utf-8") as f:
+            sig_data = json.load(f)
+        with open(SHADOW_TRACKING_FILE, "r", encoding="utf-8") as f:
+            shadow_data = json.load(f)
+
+        signals = sig_data.get("signals", []) if isinstance(sig_data, dict) else []
+        shadow_cities = shadow_data.get("cities", {}) if isinstance(shadow_data, dict) else {}
+        signals_generated_at = sig_data.get("generated", "") if isinstance(sig_data, dict) else ""
+        shadow_updated_at = shadow_data.get("updated_at", "") if isinstance(shadow_data, dict) else ""
+
+        # Aggregate signal stats per city
+        city_stats = {}
+        allowed_conds = {"at_or_above", "at_or_below"}
+        for s in signals:
+            if not isinstance(s, dict):
+                continue
+            city = s.get("city", "")
+            if not city:
+                continue
+            if city not in city_stats:
+                city_stats[city] = {"n": 0, "consensus": 0, "allowed": 0, "max_wr": 0.0}
+            st = city_stats[city]
+            st["n"] += 1
+            if s.get("has_consensus"):
+                st["consensus"] += 1
+            if s.get("condition") in allowed_conds:
+                st["allowed"] += 1
+            wr = float(s.get("trader_win_rate") or 0)
+            if wr > st["max_wr"]:
+                st["max_wr"] = wr
+
+        # Compute buckets
+        signal_city_set = set(city_stats.keys())
+        bot_edge_set = {
+            c for c, d in shadow_cities.items()
+            if isinstance(d, dict) and int(d.get("edge_hits", 0) or 0) >= 1
+        }
+        match_cities = sorted(signal_city_set & bot_edge_set)
+        bot_only_cities = sorted(bot_edge_set - signal_city_set)
+        trader_only_cities = sorted(signal_city_set - bot_edge_set)
+        actionable_trader_only = [c for c in trader_only_cities if city_stats[c]["allowed"] > 0]
+
+        # Append record to JSONL
+        record = {
+            "run_at": now.isoformat(),
+            "signals_generated_at": signals_generated_at,
+            "shadow_updated_at": shadow_updated_at,
+            "match_cities": match_cities,
+            "bot_only_cities": bot_only_cities,
+            "trader_only_cities": trader_only_cities,
+            "match_count": len(match_cities),
+            "bot_only_count": len(bot_only_cities),
+            "trader_only_count": len(trader_only_cities),
+            "consensus_match_count": sum(
+                1 for c in match_cities if city_stats.get(c, {}).get("consensus", 0) > 0
+            ),
+            "consensus_trader_only_count": sum(
+                1 for c in trader_only_cities if city_stats.get(c, {}).get("consensus", 0) > 0
+            ),
+            "actionable_trader_only_count": len(actionable_trader_only),
+        }
+        crosscheck_dir = os.path.dirname(SIGNALS_CROSSCHECK_FILE)
+        if crosscheck_dir:
+            os.makedirs(crosscheck_dir, exist_ok=True)
+        with open(SIGNALS_CROSSCHECK_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+
+        # Count records in JSONL
+        try:
+            with open(SIGNALS_CROSSCHECK_FILE, "r", encoding="utf-8") as f:
+                n_records = sum(1 for line in f if line.strip())
+        except Exception:
+            n_records = 1
+
+        # Daily Telegram message
+        action_lines = ""
+        for c in actionable_trader_only[:4]:
+            st = city_stats[c]
+            cons_tag = " (consenso)" if st["consensus"] > 0 else ""
+            action_lines += f"\n  • {c}: {st['allowed']} señal(es){cons_tag}"
+
+        daily_msg = (
+            f"📊 <b>Cross-check diario traders vs bot</b>\n"
+            f"MATCH {len(match_cities)} | BOT_ONLY {len(bot_only_cities)} | TRADER_ONLY {len(trader_only_cities)}\n"
+        )
+        if actionable_trader_only:
+            daily_msg += f"Traders ven oportunidad (conds operables) sin edge bot:{action_lines}\n"
+        daily_msg += f"<i>Corrida {n_records}/{SIGNALS_CROSSCHECK_NOTIFY_THRESHOLD}</i>"
+        send_telegram(daily_msg)
+
+        # One-shot "ready for analysis" notification at threshold
+        if (
+            n_records >= SIGNALS_CROSSCHECK_NOTIFY_THRESHOLD
+            and not state.get("crosscheck_analysis_notified")
+        ):
+            send_telegram(
+                f"🔬 <b>Cross-check listo para análisis</b>\n"
+                f"{n_records} corridas acumuladas — serie temporal suficiente.\n\n"
+                f"Preguntas que ya puedes responder:\n"
+                f"• ¿Las mismas ciudades TRADER_ONLY aparecen cada día?\n"
+                f"• ¿Austin/Toronto siguen siendo actionable de forma consistente?\n"
+                f"• ¿El ratio MATCH/TRADER_ONLY cambia con el tiempo?\n\n"
+                f"Iniciar sesión Sonnet: <i>\"Analizar signals_crosscheck.jsonl, "
+                f"{n_records} corridas\"</i>"
+            )
+            state["crosscheck_analysis_notified"] = True
+
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"crosscheck diario: fallo ({e})")
+        return False
+
+    state["crosscheck_last_date"] = today
     return True
 
 
