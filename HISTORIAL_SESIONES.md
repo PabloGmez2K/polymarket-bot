@@ -2722,3 +2722,13 @@ Regla recomendada:
 - Se añade `maybe_run_daily_crosscheck(state)` a `bot.py` (v10.6.12): corre el crosscheck traders vs edge en el primer ciclo de cada día, appenda a `/app/data/signals_crosscheck.jsonl`, manda Telegram diario y aviso one-shot al acumular 7 corridas.
 - Usuario aplica `ACTIVE_TRADING_CITIES=NONE` en Railway: elimina el default hardcoded `Chicago,Atlanta,Dallas,Buenos Aires` que trataba esas 4 ciudades como active sin env var explícito. Ahora ninguna ciudad entra en active mode sin declaración humana.
 - Backlog documentado: feature canary→active graduation con criterios automáticos + reminder persistente hasta que el usuario actúe. Requiere sesión dedicada Opus.
+
+### Sesión 171 — Fix encoding ° en signals.json (13 abr 2026)
+
+**Modelo:** Sonnet. **Tarea:** bug fix de codificación.
+
+- **Bug:** `trader_analyzer.py` escribía `°` como `┬░` (U+252C U+2591) en `signals.json` en lugar de `°` (U+00B0). Descubierto en sesión 170 al normalizar títulos para el settlement tracker.
+- **Root cause:** `api_get()` línea 103 llamaba `json.loads(resp.read())` sin encoding explícito. En Windows con CP437 como code page del sistema, los bytes UTF-8 `\xC2\xB0` se decodificaban como CP437 produciendo `┬░`.
+- **Fix:** `json.loads(resp.read().decode("utf-8"))` — una línea en `trader_analyzer.py:103`.
+- **Validación:** `verify_before_deploy.py` → 643/643 tests.
+- **Versión activa al cerrar:** `v10.6.13` local lista para push/deploy.

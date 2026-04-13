@@ -1758,3 +1758,8 @@ git push
 - **Corrección mínima aplicada:** `DEFAULT_ACTIVE_CITIES` pasa a vacío para que la herramienta no convierta un claim auditado heredado en verdad declarativa por defecto. Si una sesión quiere evaluar listas env explícitas, todavía puede pasarlas como argumentos.
 - **Estado nuevo tras regenerar artefactos:** `data/runtime_policy_effective_view.json` y `docs/runtime_policy_effective_view_latest.md` quedan con `Dallas => env=shadow, runtime=auto_shadow, cross=shadow, effective=shadow`. `collision_count` baja `4 -> 3`, desaparece `blocking_operational_collision`, y el preflight queda en `observe => ok=7, warning=1, error=0` y `operational => ok=7, warning=1, error=0`.
 - **Readout corto nuevo:** se crea `docs/dallas-claim-readout-2026-04-11.md` para dejar explícito qué se limpió, por qué el blocker no era runtime real y qué ruido visible sigue quedando (`Atlanta` como `documented_drift`; `lucknow` y `sao paulo` como `collision_noise`).
+**Última actualización:** 13 de abril de 2026 (Sesión 171 — fix encoding ° en signals.json)
+**Sesión 171 (13 abr 2026, Sonnet):** bug fix de codificación de una línea en `trader_analyzer.py`.
+- **Bug:** `api_get()` llamaba `json.loads(resp.read())` sin encoding explícito. En Windows con CP437, los bytes UTF-8 `\xC2\xB0` del símbolo `°` se decodificaban como CP437, produciendo `┬░` (U+252C U+2591) en `signals.json`.
+- **Fix:** `json.loads(resp.read().decode("utf-8"))` en `trader_analyzer.py:103`.
+- **Validación:** `verify_before_deploy.py` → 643/643.

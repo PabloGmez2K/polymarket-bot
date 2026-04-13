@@ -100,7 +100,7 @@ def api_get(url, retries=3, delay=3):
             req = urllib.request.Request(url)
             req.add_header("User-Agent", "polymarket-analyzer/2.0")
             with _open_url(req, timeout=15) as resp:
-                return json.loads(resp.read())
+                return json.loads(resp.read().decode("utf-8"))
         except Exception as e:
             if attempt == retries - 1:
                 return None
