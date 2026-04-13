@@ -1,0 +1,685 @@
+{
+  "generated_at": "2026-04-08T15:38:15+00:00",
+  "inputs": {
+    "enrichment": "C:\\Projects\\polymarket-bot\\data\\directional_trader_enrichment.json",
+    "probe": "C:\\Projects\\polymarket-bot\\data\\settlement_fidelity_probe.json"
+  },
+  "city_rows": [
+    {
+      "city": "Shanghai",
+      "policy_mode": "shadow",
+      "reference_traders": [
+        "Academic-Maniac",
+        "Entire-Hood",
+        "Motionless-Stalk",
+        "White-Donkey"
+      ],
+      "reference_quality_counts": {
+        "high_priority_reference": 3,
+        "candidate_reference": 1
+      },
+      "current_probe_markets": 2,
+      "probe_conditions": {
+        "at_or_below": 1,
+        "at_or_above": 1
+      },
+      "openmeteo_available": 2,
+      "top_reference_examples": [
+        {
+          "trader": "Entire-Hood",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 81.0,
+          "closed_pnl": 615.88,
+          "active_directional": 5
+        },
+        {
+          "trader": "Academic-Maniac",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 76.0,
+          "closed_pnl": 326.68,
+          "active_directional": 14
+        },
+        {
+          "trader": "Motionless-Stalk",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 66.3,
+          "closed_pnl": 53.35,
+          "active_directional": 6
+        },
+        {
+          "trader": "White-Donkey",
+          "reference_quality": "candidate_reference",
+          "closed_win_rate": 52.5,
+          "closed_pnl": 195.21,
+          "active_directional": 13
+        }
+      ],
+      "priority_score": 14
+    },
+    {
+      "city": "Ankara",
+      "policy_mode": "blocked",
+      "reference_traders": [
+        "Academic-Maniac",
+        "Entire-Hood",
+        "Massive-Distribution",
+        "Motionless-Stalk",
+        "White-Donkey"
+      ],
+      "reference_quality_counts": {
+        "high_priority_reference": 4,
+        "candidate_reference": 1
+      },
+      "current_probe_markets": 0,
+      "probe_conditions": {},
+      "openmeteo_available": 0,
+      "top_reference_examples": [
+        {
+          "trader": "Entire-Hood",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 81.0,
+          "closed_pnl": 615.88,
+          "active_directional": 5
+        },
+        {
+          "trader": "Academic-Maniac",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 76.0,
+          "closed_pnl": 326.68,
+          "active_directional": 14
+        },
+        {
+          "trader": "Motionless-Stalk",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 66.3,
+          "closed_pnl": 53.35,
+          "active_directional": 6
+        },
+        {
+          "trader": "Massive-Distribution",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 79.0,
+          "closed_pnl": 41.3,
+          "active_directional": 6
+        },
+        {
+          "trader": "White-Donkey",
+          "reference_quality": "candidate_reference",
+          "closed_win_rate": 52.5,
+          "closed_pnl": 195.21,
+          "active_directional": 13
+        }
+      ],
+      "priority_score": 12
+    },
+    {
+      "city": "Austin",
+      "policy_mode": "untracked",
+      "reference_traders": [
+        "Academic-Maniac",
+        "Entire-Hood",
+        "Massive-Distribution",
+        "White-Donkey"
+      ],
+      "reference_quality_counts": {
+        "high_priority_reference": 3,
+        "candidate_reference": 1
+      },
+      "current_probe_markets": 0,
+      "probe_conditions": {},
+      "openmeteo_available": 0,
+      "top_reference_examples": [
+        {
+          "trader": "Entire-Hood",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 81.0,
+          "closed_pnl": 615.88,
+          "active_directional": 5
+        },
+        {
+          "trader": "Academic-Maniac",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 76.0,
+          "closed_pnl": 326.68,
+          "active_directional": 14
+        },
+        {
+          "trader": "Massive-Distribution",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 79.0,
+          "closed_pnl": 41.3,
+          "active_directional": 6
+        },
+        {
+          "trader": "White-Donkey",
+          "reference_quality": "candidate_reference",
+          "closed_win_rate": 52.5,
+          "closed_pnl": 195.21,
+          "active_directional": 13
+        }
+      ],
+      "priority_score": 10
+    },
+    {
+      "city": "Wuhan",
+      "policy_mode": "untracked",
+      "reference_traders": [
+        "Academic-Maniac",
+        "Entire-Hood",
+        "Massive-Distribution",
+        "White-Donkey"
+      ],
+      "reference_quality_counts": {
+        "high_priority_reference": 3,
+        "candidate_reference": 1
+      },
+      "current_probe_markets": 0,
+      "probe_conditions": {},
+      "openmeteo_available": 0,
+      "top_reference_examples": [
+        {
+          "trader": "Entire-Hood",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 81.0,
+          "closed_pnl": 615.88,
+          "active_directional": 5
+        },
+        {
+          "trader": "Academic-Maniac",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 76.0,
+          "closed_pnl": 326.68,
+          "active_directional": 14
+        },
+        {
+          "trader": "Massive-Distribution",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 79.0,
+          "closed_pnl": 41.3,
+          "active_directional": 6
+        },
+        {
+          "trader": "White-Donkey",
+          "reference_quality": "candidate_reference",
+          "closed_win_rate": 52.5,
+          "closed_pnl": 195.21,
+          "active_directional": 13
+        }
+      ],
+      "priority_score": 10
+    },
+    {
+      "city": "Chicago",
+      "policy_mode": "active",
+      "reference_traders": [
+        "Academic-Maniac",
+        "Motionless-Stalk"
+      ],
+      "reference_quality_counts": {
+        "high_priority_reference": 2
+      },
+      "current_probe_markets": 0,
+      "probe_conditions": {},
+      "openmeteo_available": 0,
+      "top_reference_examples": [
+        {
+          "trader": "Academic-Maniac",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 76.0,
+          "closed_pnl": 326.68,
+          "active_directional": 14
+        },
+        {
+          "trader": "Motionless-Stalk",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 66.3,
+          "closed_pnl": 53.35,
+          "active_directional": 6
+        }
+      ],
+      "priority_score": 9
+    },
+    {
+      "city": "Seoul",
+      "policy_mode": "shadow",
+      "reference_traders": [
+        "Academic-Maniac"
+      ],
+      "reference_quality_counts": {
+        "high_priority_reference": 1
+      },
+      "current_probe_markets": 2,
+      "probe_conditions": {
+        "at_or_below": 1,
+        "at_or_above": 1
+      },
+      "openmeteo_available": 2,
+      "top_reference_examples": [
+        {
+          "trader": "Academic-Maniac",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 76.0,
+          "closed_pnl": 326.68,
+          "active_directional": 14
+        }
+      ],
+      "priority_score": 7
+    },
+    {
+      "city": "Mexico City",
+      "policy_mode": "untracked",
+      "reference_traders": [
+        "Massive-Distribution",
+        "Motionless-Stalk"
+      ],
+      "reference_quality_counts": {
+        "high_priority_reference": 2
+      },
+      "current_probe_markets": 0,
+      "probe_conditions": {},
+      "openmeteo_available": 0,
+      "top_reference_examples": [
+        {
+          "trader": "Motionless-Stalk",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 66.3,
+          "closed_pnl": 53.35,
+          "active_directional": 6
+        },
+        {
+          "trader": "Massive-Distribution",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 79.0,
+          "closed_pnl": 41.3,
+          "active_directional": 6
+        }
+      ],
+      "priority_score": 6
+    },
+    {
+      "city": "Panama City",
+      "policy_mode": "untracked",
+      "reference_traders": [
+        "Entire-Hood",
+        "Motionless-Stalk"
+      ],
+      "reference_quality_counts": {
+        "high_priority_reference": 2
+      },
+      "current_probe_markets": 0,
+      "probe_conditions": {},
+      "openmeteo_available": 0,
+      "top_reference_examples": [
+        {
+          "trader": "Entire-Hood",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 81.0,
+          "closed_pnl": 615.88,
+          "active_directional": 5
+        },
+        {
+          "trader": "Motionless-Stalk",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 66.3,
+          "closed_pnl": 53.35,
+          "active_directional": 6
+        }
+      ],
+      "priority_score": 6
+    },
+    {
+      "city": "Munich",
+      "policy_mode": "shadow",
+      "reference_traders": [
+        "Entire-Hood"
+      ],
+      "reference_quality_counts": {
+        "high_priority_reference": 1
+      },
+      "current_probe_markets": 0,
+      "probe_conditions": {},
+      "openmeteo_available": 0,
+      "top_reference_examples": [
+        {
+          "trader": "Entire-Hood",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 81.0,
+          "closed_pnl": 615.88,
+          "active_directional": 5
+        }
+      ],
+      "priority_score": 5
+    },
+    {
+      "city": "Denver",
+      "policy_mode": "untracked",
+      "reference_traders": [
+        "Motionless-Stalk",
+        "White-Donkey"
+      ],
+      "reference_quality_counts": {
+        "high_priority_reference": 1,
+        "candidate_reference": 1
+      },
+      "current_probe_markets": 0,
+      "probe_conditions": {},
+      "openmeteo_available": 0,
+      "top_reference_examples": [
+        {
+          "trader": "Motionless-Stalk",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 66.3,
+          "closed_pnl": 53.35,
+          "active_directional": 6
+        },
+        {
+          "trader": "White-Donkey",
+          "reference_quality": "candidate_reference",
+          "closed_win_rate": 52.5,
+          "closed_pnl": 195.21,
+          "active_directional": 13
+        }
+      ],
+      "priority_score": 4
+    },
+    {
+      "city": "Paris",
+      "policy_mode": "blocked",
+      "reference_traders": [
+        "Motionless-Stalk"
+      ],
+      "reference_quality_counts": {
+        "high_priority_reference": 1
+      },
+      "current_probe_markets": 2,
+      "probe_conditions": {
+        "at_or_below": 1,
+        "at_or_above": 1
+      },
+      "openmeteo_available": 2,
+      "top_reference_examples": [
+        {
+          "trader": "Motionless-Stalk",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 66.3,
+          "closed_pnl": 53.35,
+          "active_directional": 6
+        }
+      ],
+      "priority_score": 4
+    },
+    {
+      "city": "Amsterdam",
+      "policy_mode": "untracked",
+      "reference_traders": [
+        "Entire-Hood"
+      ],
+      "reference_quality_counts": {
+        "high_priority_reference": 1
+      },
+      "current_probe_markets": 0,
+      "probe_conditions": {},
+      "openmeteo_available": 0,
+      "top_reference_examples": [
+        {
+          "trader": "Entire-Hood",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 81.0,
+          "closed_pnl": 615.88,
+          "active_directional": 5
+        }
+      ],
+      "priority_score": 3
+    },
+    {
+      "city": "Busan",
+      "policy_mode": "untracked",
+      "reference_traders": [
+        "Massive-Distribution"
+      ],
+      "reference_quality_counts": {
+        "high_priority_reference": 1
+      },
+      "current_probe_markets": 0,
+      "probe_conditions": {},
+      "openmeteo_available": 0,
+      "top_reference_examples": [
+        {
+          "trader": "Massive-Distribution",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 79.0,
+          "closed_pnl": 41.3,
+          "active_directional": 6
+        }
+      ],
+      "priority_score": 3
+    },
+    {
+      "city": "Los Angeles",
+      "policy_mode": "untracked",
+      "reference_traders": [
+        "Massive-Distribution"
+      ],
+      "reference_quality_counts": {
+        "high_priority_reference": 1
+      },
+      "current_probe_markets": 0,
+      "probe_conditions": {},
+      "openmeteo_available": 0,
+      "top_reference_examples": [
+        {
+          "trader": "Massive-Distribution",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 79.0,
+          "closed_pnl": 41.3,
+          "active_directional": 6
+        }
+      ],
+      "priority_score": 3
+    },
+    {
+      "city": "Lucknow",
+      "policy_mode": "untracked",
+      "reference_traders": [
+        "Massive-Distribution"
+      ],
+      "reference_quality_counts": {
+        "high_priority_reference": 1
+      },
+      "current_probe_markets": 0,
+      "probe_conditions": {},
+      "openmeteo_available": 0,
+      "top_reference_examples": [
+        {
+          "trader": "Massive-Distribution",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 79.0,
+          "closed_pnl": 41.3,
+          "active_directional": 6
+        }
+      ],
+      "priority_score": 3
+    },
+    {
+      "city": "Warsaw",
+      "policy_mode": "untracked",
+      "reference_traders": [
+        "Academic-Maniac"
+      ],
+      "reference_quality_counts": {
+        "high_priority_reference": 1
+      },
+      "current_probe_markets": 0,
+      "probe_conditions": {},
+      "openmeteo_available": 0,
+      "top_reference_examples": [
+        {
+          "trader": "Academic-Maniac",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 76.0,
+          "closed_pnl": 326.68,
+          "active_directional": 14
+        }
+      ],
+      "priority_score": 3
+    },
+    {
+      "city": "Singapore",
+      "policy_mode": "blocked",
+      "reference_traders": [
+        "White-Donkey"
+      ],
+      "reference_quality_counts": {
+        "candidate_reference": 1
+      },
+      "current_probe_markets": 0,
+      "probe_conditions": {},
+      "openmeteo_available": 0,
+      "top_reference_examples": [
+        {
+          "trader": "White-Donkey",
+          "reference_quality": "candidate_reference",
+          "closed_win_rate": 52.5,
+          "closed_pnl": 195.21,
+          "active_directional": 13
+        }
+      ],
+      "priority_score": 0
+    },
+    {
+      "city": "Tel Aviv",
+      "policy_mode": "blocked",
+      "reference_traders": [
+        "White-Donkey"
+      ],
+      "reference_quality_counts": {
+        "candidate_reference": 1
+      },
+      "current_probe_markets": 0,
+      "probe_conditions": {},
+      "openmeteo_available": 0,
+      "top_reference_examples": [
+        {
+          "trader": "White-Donkey",
+          "reference_quality": "candidate_reference",
+          "closed_win_rate": 52.5,
+          "closed_pnl": 195.21,
+          "active_directional": 13
+        }
+      ],
+      "priority_score": 0
+    }
+  ],
+  "trader_rows": [
+    {
+      "trader": "Entire-Hood",
+      "reference_quality": "high_priority_reference",
+      "closed_win_rate": 81.0,
+      "closed_pnl": 615.88,
+      "n_closed_directional_weather": 8,
+      "dominant_city": "Wuhan",
+      "policy_modes_seen": {
+        "Wuhan": "untracked",
+        "Shanghai": "shadow",
+        "Ankara": "blocked",
+        "Panama City": "untracked",
+        "Amsterdam": "untracked",
+        "Austin": "untracked",
+        "Munich": "shadow"
+      },
+      "cities_in_probe_now": [
+        "Shanghai"
+      ]
+    },
+    {
+      "trader": "Academic-Maniac",
+      "reference_quality": "high_priority_reference",
+      "closed_win_rate": 76.0,
+      "closed_pnl": 326.68,
+      "n_closed_directional_weather": 22,
+      "dominant_city": "Ankara",
+      "policy_modes_seen": {
+        "Ankara": "blocked",
+        "Shanghai": "shadow",
+        "Chicago": "active",
+        "Wuhan": "untracked",
+        "Austin": "untracked",
+        "Seoul": "shadow",
+        "Warsaw": "untracked"
+      },
+      "cities_in_probe_now": [
+        "Shanghai",
+        "Seoul"
+      ]
+    },
+    {
+      "trader": "Motionless-Stalk",
+      "reference_quality": "high_priority_reference",
+      "closed_win_rate": 66.3,
+      "closed_pnl": 53.35,
+      "n_closed_directional_weather": 14,
+      "dominant_city": "Ankara",
+      "policy_modes_seen": {
+        "Ankara": "blocked",
+        "Shanghai": "shadow",
+        "Denver": "untracked",
+        "Chicago": "active",
+        "Paris": "blocked",
+        "Panama City": "untracked",
+        "Mexico City": "untracked"
+      },
+      "cities_in_probe_now": [
+        "Shanghai",
+        "Paris"
+      ]
+    },
+    {
+      "trader": "Massive-Distribution",
+      "reference_quality": "high_priority_reference",
+      "closed_win_rate": 79.0,
+      "closed_pnl": 41.3,
+      "n_closed_directional_weather": 11,
+      "dominant_city": "Ankara",
+      "policy_modes_seen": {
+        "Ankara": "blocked",
+        "Wuhan": "untracked",
+        "Austin": "untracked",
+        "Mexico City": "untracked",
+        "Busan": "untracked",
+        "Lucknow": "untracked",
+        "Los Angeles": "untracked"
+      },
+      "cities_in_probe_now": []
+    },
+    {
+      "trader": "White-Donkey",
+      "reference_quality": "candidate_reference",
+      "closed_win_rate": 52.5,
+      "closed_pnl": 195.21,
+      "n_closed_directional_weather": 19,
+      "dominant_city": "Shanghai",
+      "policy_modes_seen": {
+        "Shanghai": "shadow",
+        "Ankara": "blocked",
+        "Wuhan": "untracked",
+        "Tel Aviv": "blocked",
+        "Austin": "untracked",
+        "Singapore": "blocked",
+        "Denver": "untracked"
+      },
+      "cities_in_probe_now": [
+        "Shanghai"
+      ]
+    }
+  ],
+  "summary": {
+    "n_reference_traders": 5,
+    "n_cities_crossed": 18,
+    "policy_mode_counts": {
+      "shadow": 3,
+      "blocked": 4,
+      "untracked": 10,
+      "active": 1
+    }
+  }
+}

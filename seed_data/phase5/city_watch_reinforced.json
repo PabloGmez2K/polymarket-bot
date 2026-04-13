@@ -1,0 +1,161 @@
+{
+  "generated_at": "2026-04-08T15:46:38+00:00",
+  "inputs": {
+    "watchlist": "C:\\Projects\\polymarket-bot\\data\\city_watchlist_phase4.json",
+    "cross": "C:\\Projects\\polymarket-bot\\data\\reference_trader_city_market_cross.json",
+    "enrichment": "C:\\Projects\\polymarket-bot\\data\\directional_trader_enrichment.json",
+    "probe": "C:\\Projects\\polymarket-bot\\data\\settlement_fidelity_probe.json"
+  },
+  "cities": [
+    {
+      "city": "Shanghai",
+      "policy_mode": "shadow",
+      "action": "prepare_test",
+      "priority_score": 14,
+      "next_step": "prepare_shadow_test_design",
+      "note": "Ciudad puente principal: ya esta en shadow, tiene 4 referencias reales y mercados visibles ahora mismo. Es la mejor candidata para un test controlado futuro sin tocar aun el core.",
+      "reference_count": 4,
+      "reference_traders": [
+        {
+          "trader": "Academic-Maniac",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 76.0,
+          "closed_pnl": 326.68,
+          "n_closed_directional_weather": 22,
+          "active_directional": 14
+        },
+        {
+          "trader": "Entire-Hood",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 81.0,
+          "closed_pnl": 615.88,
+          "n_closed_directional_weather": 8,
+          "active_directional": 5
+        },
+        {
+          "trader": "Motionless-Stalk",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 66.3,
+          "closed_pnl": 53.35,
+          "n_closed_directional_weather": 14,
+          "active_directional": 6
+        },
+        {
+          "trader": "White-Donkey",
+          "reference_quality": "candidate_reference",
+          "closed_win_rate": 52.5,
+          "closed_pnl": 195.21,
+          "n_closed_directional_weather": 19,
+          "active_directional": 13
+        }
+      ],
+      "current_probe_markets": [
+        {
+          "condition": "at_or_below",
+          "threshold": 13,
+          "threshold_unit": "C",
+          "market_prob_yes": 0.0,
+          "openmeteo_forecast_max_c": 15.5
+        },
+        {
+          "condition": "at_or_above",
+          "threshold": 23,
+          "threshold_unit": "C",
+          "market_prob_yes": 0.002,
+          "openmeteo_forecast_max_c": 15.5
+        }
+      ],
+      "cross_summary": {
+        "reference_quality_counts": {
+          "high_priority_reference": 3,
+          "candidate_reference": 1
+        },
+        "probe_conditions": {
+          "at_or_below": 1,
+          "at_or_above": 1
+        },
+        "current_probe_markets": 2
+      }
+    },
+    {
+      "city": "Chicago",
+      "policy_mode": "active",
+      "action": "watch_active",
+      "priority_score": 9,
+      "next_step": "watch_live_active_city",
+      "note": "Ciudad operativa principal con señal trader real. Aunque no aparece en el probe actual, dos referencias fuertes la tocan y merece vigilancia reforzada antes de cambiar logica.",
+      "reference_count": 2,
+      "reference_traders": [
+        {
+          "trader": "Academic-Maniac",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 76.0,
+          "closed_pnl": 326.68,
+          "n_closed_directional_weather": 22,
+          "active_directional": 14
+        },
+        {
+          "trader": "Motionless-Stalk",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 66.3,
+          "closed_pnl": 53.35,
+          "n_closed_directional_weather": 14,
+          "active_directional": 6
+        }
+      ],
+      "current_probe_markets": [],
+      "cross_summary": {
+        "reference_quality_counts": {
+          "high_priority_reference": 2
+        },
+        "probe_conditions": {},
+        "current_probe_markets": 0
+      }
+    },
+    {
+      "city": "Seoul",
+      "policy_mode": "shadow",
+      "action": "observe_closely",
+      "priority_score": 7,
+      "next_step": "expand_shadow_observability",
+      "note": "Ciudad shadow con mercados visibles y al menos una referencia fuerte activa. Buena candidata para observabilidad reforzada sin convertirla todavia en ciudad de trading.",
+      "reference_count": 1,
+      "reference_traders": [
+        {
+          "trader": "Academic-Maniac",
+          "reference_quality": "high_priority_reference",
+          "closed_win_rate": 76.0,
+          "closed_pnl": 326.68,
+          "n_closed_directional_weather": 22,
+          "active_directional": 14
+        }
+      ],
+      "current_probe_markets": [
+        {
+          "condition": "at_or_below",
+          "threshold": 5,
+          "threshold_unit": "C",
+          "market_prob_yes": 0.0,
+          "openmeteo_forecast_max_c": 8.7
+        },
+        {
+          "condition": "at_or_above",
+          "threshold": 15,
+          "threshold_unit": "C",
+          "market_prob_yes": 0.0005,
+          "openmeteo_forecast_max_c": 8.7
+        }
+      ],
+      "cross_summary": {
+        "reference_quality_counts": {
+          "high_priority_reference": 1
+        },
+        "probe_conditions": {
+          "at_or_below": 1,
+          "at_or_above": 1
+        },
+        "current_probe_markets": 2
+      }
+    }
+  ]
+}

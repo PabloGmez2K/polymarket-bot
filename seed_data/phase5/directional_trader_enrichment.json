@@ -1,0 +1,1273 @@
+{
+  "generated_at": "2026-04-08T15:30:23+00:00",
+  "input": "C:\\Projects\\polymarket-bot\\data\\directional_trader_census.json",
+  "summary": {
+    "n_traders_enriched": 5,
+    "reference_quality_counts": {
+      "high_priority_reference": 4,
+      "candidate_reference": 1
+    }
+  },
+  "traders": [
+    {
+      "address": "0xb40e89677d59665d5188541ad860450a6e2a7cc9",
+      "pseudonym": "Entire-Hood",
+      "census_snapshot": {
+        "address": "0xb40e89677d59665d5188541ad860450a6e2a7cc9",
+        "pseudonym": "Entire-Hood",
+        "n_buy_trades": 3,
+        "n_markets": 3,
+        "total_notional": 32.87,
+        "avg_price": 0.5424,
+        "price_style": "mid_range",
+        "dominant_city": "Wuhan",
+        "top_cities": {
+          "Wuhan": 1,
+          "Shanghai": 1,
+          "Ankara": 1
+        },
+        "conditions": {
+          "at_or_above": 2,
+          "at_or_below": 1
+        },
+        "outcomes": {
+          "No": 2,
+          "Yes": 1
+        },
+        "type_hint": "directional_forecast_candidate",
+        "sample_positions": [
+          {
+            "city": "Wuhan",
+            "condition": "at_or_above",
+            "date_str": "April 8",
+            "threshold": 24,
+            "unit": "C",
+            "outcome": "No",
+            "price": 0.65,
+            "size": 7.2705,
+            "market_prob_yes": 0.002
+          },
+          {
+            "city": "Shanghai",
+            "condition": "at_or_above",
+            "date_str": "April 9",
+            "threshold": 30,
+            "unit": "C",
+            "outcome": "No",
+            "price": 0.58,
+            "size": 25.454,
+            "market_prob_yes": 0.323
+          },
+          {
+            "city": "Ankara",
+            "condition": "at_or_below",
+            "date_str": "April 8",
+            "threshold": 8,
+            "unit": "C",
+            "outcome": "Yes",
+            "price": 0.48,
+            "size": 27.8759,
+            "market_prob_yes": 0.0
+          }
+        ]
+      },
+      "active_summary": {
+        "n_active_directional": 5,
+        "top_active_cities": {
+          "Shanghai": 1,
+          "Panama City": 1,
+          "Amsterdam": 1,
+          "Austin": 1,
+          "Munich": 1
+        },
+        "active_conditions": {
+          "at_or_above": 4,
+          "at_or_below": 1
+        },
+        "sample_active_directional": [
+          {
+            "title": "Will the highest temperature in Shanghai be 30°C or higher on April 9?",
+            "city": "Shanghai",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "avg_price": 0.6107,
+            "cur_price": 0.669,
+            "cash_pnl": 9.16,
+            "percent_pnl": 9.5
+          },
+          {
+            "title": "Will the highest temperature in Panama City be 26°C or below on April 7?",
+            "city": "Panama City",
+            "condition": "at_or_below",
+            "outcome": "No",
+            "avg_price": 0.931,
+            "cur_price": 0.9995,
+            "cash_pnl": 7.19,
+            "percent_pnl": 7.4
+          },
+          {
+            "title": "Will the highest temperature in Amsterdam be 15°C or higher on April 8?",
+            "city": "Amsterdam",
+            "condition": "at_or_above",
+            "outcome": "Yes",
+            "avg_price": 0.0338,
+            "cur_price": 1.0,
+            "cash_pnl": 96.61,
+            "percent_pnl": 2849.9
+          },
+          {
+            "title": "Will the highest temperature in Austin be 74°F or higher on April 9?",
+            "city": "Austin",
+            "condition": "at_or_above",
+            "outcome": "Yes",
+            "avg_price": 0.9606,
+            "cur_price": 0.9785,
+            "cash_pnl": 1.45,
+            "percent_pnl": 1.9
+          },
+          {
+            "title": "Will the highest temperature in Munich be 16°C or higher on April 9?",
+            "city": "Munich",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "avg_price": 0.7742,
+            "cur_price": 0.755,
+            "cash_pnl": -1.63,
+            "percent_pnl": -2.5
+          }
+        ]
+      },
+      "closed_summary": {
+        "n_closed_positions": 100,
+        "wins": 81,
+        "losses": 19,
+        "pushes": 0,
+        "win_rate": 81.0,
+        "total_closed_pnl": 615.88,
+        "n_closed_weather": 74,
+        "n_closed_directional_weather": 8,
+        "directional_weather_pnl": 113.1,
+        "closed_weather_conditions": {
+          "exact": 45,
+          "range": 21,
+          "at_or_above": 7,
+          "at_or_below": 1
+        },
+        "sample_closed_directional": [
+          {
+            "title": "Will the highest temperature in Shanghai be 30°C or higher on April 9?",
+            "city": "Shanghai",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "cash_pnl": 9.16,
+            "percent_pnl": 9.5
+          },
+          {
+            "title": "Will the highest temperature in Panama City be 26°C or below on April 7?",
+            "city": "Panama City",
+            "condition": "at_or_below",
+            "outcome": "No",
+            "cash_pnl": 7.19,
+            "percent_pnl": 7.4
+          },
+          {
+            "title": "Will the highest temperature in Amsterdam be 15°C or higher on April 8?",
+            "city": "Amsterdam",
+            "condition": "at_or_above",
+            "outcome": "Yes",
+            "cash_pnl": 96.61,
+            "percent_pnl": 2849.9
+          },
+          {
+            "title": "Will the highest temperature in Austin be 74°F or higher on April 9?",
+            "city": "Austin",
+            "condition": "at_or_above",
+            "outcome": "Yes",
+            "cash_pnl": 1.45,
+            "percent_pnl": 1.9
+          },
+          {
+            "title": "Will the highest temperature in Munich be 16°C or higher on April 9?",
+            "city": "Munich",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "cash_pnl": -1.63,
+            "percent_pnl": -2.5
+          },
+          {
+            "title": "Will the highest temperature in Milan be 24°C or higher on April 9?",
+            "city": "Milan",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "cash_pnl": -3.58,
+            "percent_pnl": -7.3
+          },
+          {
+            "title": "Will the highest temperature in Shanghai be 30°C or higher on April 9?",
+            "city": "Shanghai",
+            "condition": "at_or_above",
+            "outcome": "Yes",
+            "cash_pnl": 2.2,
+            "percent_pnl": 5.7
+          },
+          {
+            "title": "Will the highest temperature in Houston be 86°F or higher on April 7?",
+            "city": "Houston",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "cash_pnl": 1.7,
+            "percent_pnl": 5.8
+          }
+        ]
+      },
+      "reference_quality": "high_priority_reference"
+    },
+    {
+      "address": "0xa6fbd527070abf16092d05512e4c603516de58e2",
+      "pseudonym": "Academic-Maniac",
+      "census_snapshot": {
+        "address": "0xa6fbd527070abf16092d05512e4c603516de58e2",
+        "pseudonym": "Academic-Maniac",
+        "n_buy_trades": 7,
+        "n_markets": 2,
+        "total_notional": 50.81,
+        "avg_price": 0.5812,
+        "price_style": "mid_range",
+        "dominant_city": "Ankara",
+        "top_cities": {
+          "Ankara": 5,
+          "Shanghai": 2
+        },
+        "conditions": {
+          "at_or_above": 2,
+          "at_or_below": 5
+        },
+        "outcomes": {
+          "No": 7
+        },
+        "type_hint": "directional_forecast_candidate",
+        "sample_positions": [
+          {
+            "city": "Shanghai",
+            "condition": "at_or_above",
+            "date_str": "April 9",
+            "threshold": 30,
+            "unit": "C",
+            "outcome": "No",
+            "price": 0.63,
+            "size": 19.4239,
+            "market_prob_yes": 0.323
+          },
+          {
+            "city": "Shanghai",
+            "condition": "at_or_above",
+            "date_str": "April 9",
+            "threshold": 30,
+            "unit": "C",
+            "outcome": "No",
+            "price": 0.64,
+            "size": 19.64,
+            "market_prob_yes": 0.323
+          },
+          {
+            "city": "Ankara",
+            "condition": "at_or_below",
+            "date_str": "April 8",
+            "threshold": 8,
+            "unit": "C",
+            "outcome": "No",
+            "price": 0.51,
+            "size": 7.6284,
+            "market_prob_yes": 0.0
+          },
+          {
+            "city": "Ankara",
+            "condition": "at_or_below",
+            "date_str": "April 8",
+            "threshold": 8,
+            "unit": "C",
+            "outcome": "No",
+            "price": 0.51,
+            "size": 19.51,
+            "market_prob_yes": 0.0
+          },
+          {
+            "city": "Ankara",
+            "condition": "at_or_below",
+            "date_str": "April 8",
+            "threshold": 8,
+            "unit": "C",
+            "outcome": "No",
+            "price": 0.52,
+            "size": 6.832,
+            "market_prob_yes": 0.0
+          },
+          {
+            "city": "Ankara",
+            "condition": "at_or_below",
+            "date_str": "April 8",
+            "threshold": 8,
+            "unit": "C",
+            "outcome": "No",
+            "price": 0.58,
+            "size": 7.832,
+            "market_prob_yes": 0.0
+          }
+        ]
+      },
+      "active_summary": {
+        "n_active_directional": 14,
+        "top_active_cities": {
+          "Chicago": 3,
+          "Wuhan": 2,
+          "Austin": 1,
+          "Seoul": 1,
+          "Warsaw": 1
+        },
+        "active_conditions": {
+          "at_or_above": 9,
+          "at_or_below": 5
+        },
+        "sample_active_directional": [
+          {
+            "title": "Will the highest temperature in Austin be 66°F or higher on April 11?",
+            "city": "Austin",
+            "condition": "at_or_above",
+            "outcome": "Yes",
+            "avg_price": 0.2173,
+            "cur_price": 0.985,
+            "cash_pnl": 42.2,
+            "percent_pnl": 353.2
+          },
+          {
+            "title": "Will the highest temperature in Seoul be 15°C or higher on April 8?",
+            "city": "Seoul",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "avg_price": 0.9846,
+            "cur_price": 0.9995,
+            "cash_pnl": 0.4,
+            "percent_pnl": 1.5
+          },
+          {
+            "title": "Will the highest temperature in Wuhan be 24°C or higher on April 8?",
+            "city": "Wuhan",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "avg_price": 0.7618,
+            "cur_price": 0.9985,
+            "cash_pnl": 6.3,
+            "percent_pnl": 31.1
+          },
+          {
+            "title": "Will the highest temperature in Warsaw be 11°C or higher on April 8?",
+            "city": "Warsaw",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "avg_price": 0.9672,
+            "cur_price": 0.9975,
+            "cash_pnl": 0.74,
+            "percent_pnl": 3.1
+          },
+          {
+            "title": "Will the highest temperature in Chicago be 46°F or higher on April 11?",
+            "city": "Chicago",
+            "condition": "at_or_above",
+            "outcome": "Yes",
+            "avg_price": 0.2439,
+            "cur_price": 0.9855,
+            "cash_pnl": 15.32,
+            "percent_pnl": 304.0
+          },
+          {
+            "title": "Will the highest temperature in Amsterdam be 10°C or below on April 9?",
+            "city": "Amsterdam",
+            "condition": "at_or_below",
+            "outcome": "No",
+            "avg_price": 0.999,
+            "cur_price": 0.9995,
+            "cash_pnl": 0.01,
+            "percent_pnl": 0.0
+          },
+          {
+            "title": "Will the highest temperature in Shanghai be 20°C or below on April 9?",
+            "city": "Shanghai",
+            "condition": "at_or_below",
+            "outcome": "No",
+            "avg_price": 0.9979,
+            "cur_price": 0.9985,
+            "cash_pnl": 0.01,
+            "percent_pnl": 0.1
+          },
+          {
+            "title": "Will the highest temperature in Paris be 28°C or higher on April 8?",
+            "city": "Paris",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "avg_price": 0.9988,
+            "cur_price": 0.9965,
+            "cash_pnl": -0.04,
+            "percent_pnl": -0.2
+          }
+        ]
+      },
+      "closed_summary": {
+        "n_closed_positions": 100,
+        "wins": 76,
+        "losses": 24,
+        "pushes": 0,
+        "win_rate": 76.0,
+        "total_closed_pnl": 326.68,
+        "n_closed_weather": 100,
+        "n_closed_directional_weather": 22,
+        "directional_weather_pnl": 70.43,
+        "closed_weather_conditions": {
+          "exact": 62,
+          "at_or_above": 16,
+          "range": 16,
+          "at_or_below": 6
+        },
+        "sample_closed_directional": [
+          {
+            "title": "Will the highest temperature in Austin be 66°F or higher on April 11?",
+            "city": "Austin",
+            "condition": "at_or_above",
+            "outcome": "Yes",
+            "cash_pnl": 42.2,
+            "percent_pnl": 353.2
+          },
+          {
+            "title": "Will the highest temperature in Seoul be 15°C or higher on April 8?",
+            "city": "Seoul",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "cash_pnl": 0.4,
+            "percent_pnl": 1.5
+          },
+          {
+            "title": "Will the highest temperature in Wuhan be 24°C or higher on April 8?",
+            "city": "Wuhan",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "cash_pnl": 6.3,
+            "percent_pnl": 31.1
+          },
+          {
+            "title": "Will the highest temperature in Warsaw be 11°C or higher on April 8?",
+            "city": "Warsaw",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "cash_pnl": 0.74,
+            "percent_pnl": 3.1
+          },
+          {
+            "title": "Will the highest temperature in Chicago be 46°F or higher on April 11?",
+            "city": "Chicago",
+            "condition": "at_or_above",
+            "outcome": "Yes",
+            "cash_pnl": 15.32,
+            "percent_pnl": 304.0
+          },
+          {
+            "title": "Will the highest temperature in Amsterdam be 10°C or below on April 9?",
+            "city": "Amsterdam",
+            "condition": "at_or_below",
+            "outcome": "No",
+            "cash_pnl": 0.01,
+            "percent_pnl": 0.0
+          },
+          {
+            "title": "Will the highest temperature in Shanghai be 20°C or below on April 9?",
+            "city": "Shanghai",
+            "condition": "at_or_below",
+            "outcome": "No",
+            "cash_pnl": 0.01,
+            "percent_pnl": 0.1
+          },
+          {
+            "title": "Will the highest temperature in Paris be 28°C or higher on April 8?",
+            "city": "Paris",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "cash_pnl": -0.04,
+            "percent_pnl": -0.2
+          }
+        ]
+      },
+      "reference_quality": "high_priority_reference"
+    },
+    {
+      "address": "0xe3479950ef6e8984df109ec5c9be40630f9fb438",
+      "pseudonym": "Motionless-Stalk",
+      "census_snapshot": {
+        "address": "0xe3479950ef6e8984df109ec5c9be40630f9fb438",
+        "pseudonym": "Motionless-Stalk",
+        "n_buy_trades": 9,
+        "n_markets": 2,
+        "total_notional": 24.82,
+        "avg_price": 0.5406,
+        "price_style": "mid_range",
+        "dominant_city": "Ankara",
+        "top_cities": {
+          "Ankara": 6,
+          "Shanghai": 3
+        },
+        "conditions": {
+          "at_or_above": 3,
+          "at_or_below": 6
+        },
+        "outcomes": {
+          "No": 9
+        },
+        "type_hint": "directional_forecast_candidate",
+        "sample_positions": [
+          {
+            "city": "Shanghai",
+            "condition": "at_or_above",
+            "date_str": "April 9",
+            "threshold": 30,
+            "unit": "C",
+            "outcome": "No",
+            "price": 0.635,
+            "size": 2.9453,
+            "market_prob_yes": 0.323
+          },
+          {
+            "city": "Shanghai",
+            "condition": "at_or_above",
+            "date_str": "April 9",
+            "threshold": 30,
+            "unit": "C",
+            "outcome": "No",
+            "price": 0.58,
+            "size": 1.958,
+            "market_prob_yes": 0.323
+          },
+          {
+            "city": "Shanghai",
+            "condition": "at_or_above",
+            "date_str": "April 9",
+            "threshold": 30,
+            "unit": "C",
+            "outcome": "No",
+            "price": 0.62,
+            "size": 1.962,
+            "market_prob_yes": 0.323
+          },
+          {
+            "city": "Ankara",
+            "condition": "at_or_below",
+            "date_str": "April 8",
+            "threshold": 8,
+            "unit": "C",
+            "outcome": "No",
+            "price": 0.53,
+            "size": 4.8825,
+            "market_prob_yes": 0.0
+          },
+          {
+            "city": "Ankara",
+            "condition": "at_or_below",
+            "date_str": "April 8",
+            "threshold": 8,
+            "unit": "C",
+            "outcome": "No",
+            "price": 0.52,
+            "size": 4.88,
+            "market_prob_yes": 0.0
+          },
+          {
+            "city": "Ankara",
+            "condition": "at_or_below",
+            "date_str": "April 8",
+            "threshold": 8,
+            "unit": "C",
+            "outcome": "No",
+            "price": 0.53,
+            "size": 2.9295,
+            "market_prob_yes": 0.0
+          }
+        ]
+      },
+      "active_summary": {
+        "n_active_directional": 6,
+        "top_active_cities": {
+          "Denver": 2,
+          "Chicago": 1,
+          "Paris": 1,
+          "Panama City": 1,
+          "Mexico City": 1
+        },
+        "active_conditions": {
+          "at_or_above": 5,
+          "at_or_below": 1
+        },
+        "sample_active_directional": [
+          {
+            "title": "Will the highest temperature in Chicago be 46°F or higher on April 11?",
+            "city": "Chicago",
+            "condition": "at_or_above",
+            "outcome": "Yes",
+            "avg_price": 0.9541,
+            "cur_price": 0.9855,
+            "cash_pnl": 0.08,
+            "percent_pnl": 3.3
+          },
+          {
+            "title": "Will the highest temperature in Denver be 62°F or higher on April 10?",
+            "city": "Denver",
+            "condition": "at_or_above",
+            "outcome": "Yes",
+            "avg_price": 0.9225,
+            "cur_price": 0.954,
+            "cash_pnl": 0.07,
+            "percent_pnl": 3.4
+          },
+          {
+            "title": "Will the highest temperature in Denver be 60°F or higher on April 11?",
+            "city": "Denver",
+            "condition": "at_or_above",
+            "outcome": "Yes",
+            "avg_price": 0.9098,
+            "cur_price": 0.9905,
+            "cash_pnl": 0.14,
+            "percent_pnl": 8.9
+          },
+          {
+            "title": "Will the highest temperature in Paris be 18°C or below on April 10?",
+            "city": "Paris",
+            "condition": "at_or_below",
+            "outcome": "Yes",
+            "avg_price": 0.7335,
+            "cur_price": 0.935,
+            "cash_pnl": 0.36,
+            "percent_pnl": 27.5
+          },
+          {
+            "title": "Will the highest temperature in Panama City be 29°C or higher on April 9?",
+            "city": "Panama City",
+            "condition": "at_or_above",
+            "outcome": "Yes",
+            "avg_price": 0.8782,
+            "cur_price": 0.987,
+            "cash_pnl": 0.12,
+            "percent_pnl": 12.4
+          },
+          {
+            "title": "Will the highest temperature in Mexico City be 23°C or higher on April 9?",
+            "city": "Mexico City",
+            "condition": "at_or_above",
+            "outcome": "Yes",
+            "avg_price": 0.7749,
+            "cur_price": 0.954,
+            "cash_pnl": 0.21,
+            "percent_pnl": 23.1
+          }
+        ]
+      },
+      "closed_summary": {
+        "n_closed_positions": 100,
+        "wins": 65,
+        "losses": 33,
+        "pushes": 2,
+        "win_rate": 66.3,
+        "total_closed_pnl": 53.35,
+        "n_closed_weather": 48,
+        "n_closed_directional_weather": 14,
+        "directional_weather_pnl": 1.37,
+        "closed_weather_conditions": {
+          "at_or_above": 11,
+          "exact": 25,
+          "at_or_below": 3,
+          "range": 9
+        },
+        "sample_closed_directional": [
+          {
+            "title": "Will the highest temperature in Chicago be 46°F or higher on April 11?",
+            "city": "Chicago",
+            "condition": "at_or_above",
+            "outcome": "Yes",
+            "cash_pnl": 0.08,
+            "percent_pnl": 3.3
+          },
+          {
+            "title": "Will the highest temperature in Denver be 62°F or higher on April 10?",
+            "city": "Denver",
+            "condition": "at_or_above",
+            "outcome": "Yes",
+            "cash_pnl": 0.07,
+            "percent_pnl": 3.4
+          },
+          {
+            "title": "Will the highest temperature in Denver be 60°F or higher on April 11?",
+            "city": "Denver",
+            "condition": "at_or_above",
+            "outcome": "Yes",
+            "cash_pnl": 0.14,
+            "percent_pnl": 8.9
+          },
+          {
+            "title": "Will the highest temperature in Paris be 18°C or below on April 10?",
+            "city": "Paris",
+            "condition": "at_or_below",
+            "outcome": "Yes",
+            "cash_pnl": 0.36,
+            "percent_pnl": 27.5
+          },
+          {
+            "title": "Will the highest temperature in Panama City be 29°C or higher on April 9?",
+            "city": "Panama City",
+            "condition": "at_or_above",
+            "outcome": "Yes",
+            "cash_pnl": 0.12,
+            "percent_pnl": 12.4
+          },
+          {
+            "title": "Will the highest temperature in Mexico City be 23°C or higher on April 9?",
+            "city": "Mexico City",
+            "condition": "at_or_above",
+            "outcome": "Yes",
+            "cash_pnl": 0.21,
+            "percent_pnl": 23.1
+          },
+          {
+            "title": "Will the highest temperature in Chicago be 50°F or higher on April 8?",
+            "city": "Chicago",
+            "condition": "at_or_above",
+            "outcome": "Yes",
+            "cash_pnl": 0.11,
+            "percent_pnl": 14.4
+          },
+          {
+            "title": "Will the highest temperature in Dallas be 70°F or higher on April 9?",
+            "city": "Dallas",
+            "condition": "at_or_above",
+            "outcome": "Yes",
+            "cash_pnl": 0.04,
+            "percent_pnl": 6.4
+          }
+        ]
+      },
+      "reference_quality": "high_priority_reference"
+    },
+    {
+      "address": "0x75f33dacb4a16cbadd55c22e3271f0d28a77fe29",
+      "pseudonym": "Massive-Distribution",
+      "census_snapshot": {
+        "address": "0x75f33dacb4a16cbadd55c22e3271f0d28a77fe29",
+        "pseudonym": "Massive-Distribution",
+        "n_buy_trades": 5,
+        "n_markets": 2,
+        "total_notional": 18.29,
+        "avg_price": 0.4478,
+        "price_style": "mid_range",
+        "dominant_city": "Ankara",
+        "top_cities": {
+          "Ankara": 4,
+          "Wuhan": 1
+        },
+        "conditions": {
+          "at_or_above": 1,
+          "at_or_below": 4
+        },
+        "outcomes": {
+          "Yes": 3,
+          "No": 2
+        },
+        "type_hint": "directional_forecast_candidate",
+        "sample_positions": [
+          {
+            "city": "Wuhan",
+            "condition": "at_or_above",
+            "date_str": "April 8",
+            "threshold": 24,
+            "unit": "C",
+            "outcome": "Yes",
+            "price": 0.291,
+            "size": 6.7519,
+            "market_prob_yes": 0.002
+          },
+          {
+            "city": "Ankara",
+            "condition": "at_or_below",
+            "date_str": "April 8",
+            "threshold": 8,
+            "unit": "C",
+            "outcome": "Yes",
+            "price": 0.38,
+            "size": 7.752,
+            "market_prob_yes": 0.0
+          },
+          {
+            "city": "Ankara",
+            "condition": "at_or_below",
+            "date_str": "April 8",
+            "threshold": 8,
+            "unit": "C",
+            "outcome": "No",
+            "price": 0.53,
+            "size": 9.765,
+            "market_prob_yes": 0.0
+          },
+          {
+            "city": "Ankara",
+            "condition": "at_or_below",
+            "date_str": "April 8",
+            "threshold": 8,
+            "unit": "C",
+            "outcome": "Yes",
+            "price": 0.43,
+            "size": 6.8102,
+            "market_prob_yes": 0.0
+          },
+          {
+            "city": "Ankara",
+            "condition": "at_or_below",
+            "date_str": "April 8",
+            "threshold": 8,
+            "unit": "C",
+            "outcome": "No",
+            "price": 0.54,
+            "size": 9.77,
+            "market_prob_yes": 0.0
+          }
+        ]
+      },
+      "active_summary": {
+        "n_active_directional": 6,
+        "top_active_cities": {
+          "Austin": 1,
+          "Mexico City": 1,
+          "Busan": 1,
+          "Lucknow": 1,
+          "Los Angeles": 1
+        },
+        "active_conditions": {
+          "at_or_above": 4,
+          "at_or_below": 2
+        },
+        "sample_active_directional": [
+          {
+            "title": "Will the highest temperature in Austin be 84°F or higher on April 8?",
+            "city": "Austin",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "avg_price": 0.8704,
+            "cur_price": 0.902,
+            "cash_pnl": 0.65,
+            "percent_pnl": 3.6
+          },
+          {
+            "title": "Will the highest temperature in Mexico City be 26°C or higher on April 8?",
+            "city": "Mexico City",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "avg_price": 0.6454,
+            "cur_price": 0.6949,
+            "cash_pnl": 0.88,
+            "percent_pnl": 7.7
+          },
+          {
+            "title": "Will the highest temperature in Busan be 12°C or below on April 8?",
+            "city": "Busan",
+            "condition": "at_or_below",
+            "outcome": "No",
+            "avg_price": 0.96,
+            "cur_price": 1.0,
+            "cash_pnl": 0.36,
+            "percent_pnl": 4.2
+          },
+          {
+            "title": "Will the highest temperature in Lucknow be 28°C or below on April 8?",
+            "city": "Lucknow",
+            "condition": "at_or_below",
+            "outcome": "Yes",
+            "avg_price": 0.9421,
+            "cur_price": 0.9995,
+            "cash_pnl": 0.43,
+            "percent_pnl": 6.1
+          },
+          {
+            "title": "Will the highest temperature in Los Angeles be 76°F or higher on April 8?",
+            "city": "Los Angeles",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "avg_price": 0.9427,
+            "cur_price": 0.9695,
+            "cash_pnl": 0.2,
+            "percent_pnl": 2.8
+          },
+          {
+            "title": "Will the highest temperature in Seattle be 64°F or higher on April 8?",
+            "city": "Seattle",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "avg_price": 0.9596,
+            "cur_price": 0.9715,
+            "cash_pnl": 0.09,
+            "percent_pnl": 1.2
+          }
+        ]
+      },
+      "closed_summary": {
+        "n_closed_positions": 100,
+        "wins": 79,
+        "losses": 21,
+        "pushes": 0,
+        "win_rate": 79.0,
+        "total_closed_pnl": 41.3,
+        "n_closed_weather": 100,
+        "n_closed_directional_weather": 11,
+        "directional_weather_pnl": 3.55,
+        "closed_weather_conditions": {
+          "exact": 61,
+          "range": 28,
+          "at_or_above": 8,
+          "at_or_below": 3
+        },
+        "sample_closed_directional": [
+          {
+            "title": "Will the highest temperature in Austin be 84°F or higher on April 8?",
+            "city": "Austin",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "cash_pnl": 0.65,
+            "percent_pnl": 3.6
+          },
+          {
+            "title": "Will the highest temperature in Mexico City be 26°C or higher on April 8?",
+            "city": "Mexico City",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "cash_pnl": 0.88,
+            "percent_pnl": 7.7
+          },
+          {
+            "title": "Will the highest temperature in Busan be 12°C or below on April 8?",
+            "city": "Busan",
+            "condition": "at_or_below",
+            "outcome": "No",
+            "cash_pnl": 0.36,
+            "percent_pnl": 4.2
+          },
+          {
+            "title": "Will the highest temperature in Lucknow be 28°C or below on April 8?",
+            "city": "Lucknow",
+            "condition": "at_or_below",
+            "outcome": "Yes",
+            "cash_pnl": 0.43,
+            "percent_pnl": 6.1
+          },
+          {
+            "title": "Will the highest temperature in Los Angeles be 76°F or higher on April 8?",
+            "city": "Los Angeles",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "cash_pnl": 0.2,
+            "percent_pnl": 2.8
+          },
+          {
+            "title": "Will the highest temperature in Seattle be 64°F or higher on April 8?",
+            "city": "Seattle",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "cash_pnl": 0.09,
+            "percent_pnl": 1.2
+          },
+          {
+            "title": "Will the highest temperature in Paris be 28°C or higher on April 8?",
+            "city": "Paris",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "cash_pnl": 0.05,
+            "percent_pnl": 0.9
+          },
+          {
+            "title": "Will the highest temperature in Wellington be 22°C or higher on April 8?",
+            "city": "Wellington",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "cash_pnl": 0.13,
+            "percent_pnl": 2.2
+          }
+        ]
+      },
+      "reference_quality": "high_priority_reference"
+    },
+    {
+      "address": "0x993fe20a9ecfb7e3c072f7f8c3dcbf87243b35cb",
+      "pseudonym": "White-Donkey",
+      "census_snapshot": {
+        "address": "0x993fe20a9ecfb7e3c072f7f8c3dcbf87243b35cb",
+        "pseudonym": "White-Donkey",
+        "n_buy_trades": 18,
+        "n_markets": 3,
+        "total_notional": 115.26,
+        "avg_price": 0.6025,
+        "price_style": "mid_range",
+        "dominant_city": "Shanghai",
+        "top_cities": {
+          "Shanghai": 12,
+          "Ankara": 5,
+          "Wuhan": 1
+        },
+        "conditions": {
+          "at_or_above": 13,
+          "at_or_below": 5
+        },
+        "outcomes": {
+          "No": 18
+        },
+        "type_hint": "directional_forecast_candidate",
+        "sample_positions": [
+          {
+            "city": "Wuhan",
+            "condition": "at_or_above",
+            "date_str": "April 8",
+            "threshold": 24,
+            "unit": "C",
+            "outcome": "No",
+            "price": 0.7,
+            "size": 17.0898,
+            "market_prob_yes": 0.002
+          },
+          {
+            "city": "Shanghai",
+            "condition": "at_or_above",
+            "date_str": "April 9",
+            "threshold": 30,
+            "unit": "C",
+            "outcome": "No",
+            "price": 0.64,
+            "size": 7.0409,
+            "market_prob_yes": 0.323
+          },
+          {
+            "city": "Shanghai",
+            "condition": "at_or_above",
+            "date_str": "April 9",
+            "threshold": 30,
+            "unit": "C",
+            "outcome": "No",
+            "price": 0.639,
+            "size": 11.695,
+            "market_prob_yes": 0.323
+          },
+          {
+            "city": "Shanghai",
+            "condition": "at_or_above",
+            "date_str": "April 9",
+            "threshold": 30,
+            "unit": "C",
+            "outcome": "No",
+            "price": 0.639,
+            "size": 6.8442,
+            "market_prob_yes": 0.323
+          },
+          {
+            "city": "Shanghai",
+            "condition": "at_or_above",
+            "date_str": "April 9",
+            "threshold": 30,
+            "unit": "C",
+            "outcome": "No",
+            "price": 0.58,
+            "size": 10.769,
+            "market_prob_yes": 0.323
+          },
+          {
+            "city": "Shanghai",
+            "condition": "at_or_above",
+            "date_str": "April 9",
+            "threshold": 30,
+            "unit": "C",
+            "outcome": "No",
+            "price": 0.579,
+            "size": 8.8105,
+            "market_prob_yes": 0.323
+          }
+        ]
+      },
+      "active_summary": {
+        "n_active_directional": 13,
+        "top_active_cities": {
+          "Tel Aviv": 2,
+          "Austin": 2,
+          "Singapore": 1,
+          "Wuhan": 1,
+          "Denver": 1
+        },
+        "active_conditions": {
+          "at_or_above": 10,
+          "at_or_below": 3
+        },
+        "sample_active_directional": [
+          {
+            "title": "Will the highest temperature in Singapore be 34°C or higher on April 8?",
+            "city": "Singapore",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "avg_price": 0.7176,
+            "cur_price": 0.9995,
+            "cash_pnl": 17.34,
+            "percent_pnl": 39.3
+          },
+          {
+            "title": "Will the highest temperature in Wuhan be 24°C or higher on April 8?",
+            "city": "Wuhan",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "avg_price": 0.7314,
+            "cur_price": 0.9985,
+            "cash_pnl": 15.99,
+            "percent_pnl": 36.5
+          },
+          {
+            "title": "Will the highest temperature in Denver be 60°F or higher on April 11?",
+            "city": "Denver",
+            "condition": "at_or_above",
+            "outcome": "Yes",
+            "avg_price": 0.7569,
+            "cur_price": 0.9905,
+            "cash_pnl": 7.0,
+            "percent_pnl": 30.8
+          },
+          {
+            "title": "Will the highest temperature in Tel Aviv be 25°C or higher on April 9?",
+            "city": "Tel Aviv",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "avg_price": 0.9925,
+            "cur_price": 0.9915,
+            "cash_pnl": -0.03,
+            "percent_pnl": -0.1
+          },
+          {
+            "title": "Will the highest temperature in Seoul be 15°C or higher on April 8?",
+            "city": "Seoul",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "avg_price": 0.9777,
+            "cur_price": 0.9995,
+            "cash_pnl": 0.56,
+            "percent_pnl": 2.2
+          },
+          {
+            "title": "Will the highest temperature in Tel Aviv be 24°C or higher on April 8?",
+            "city": "Tel Aviv",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "avg_price": 0.9817,
+            "cur_price": 0.9985,
+            "cash_pnl": 0.43,
+            "percent_pnl": 1.7
+          },
+          {
+            "title": "Will the highest temperature in Warsaw be 11°C or higher on April 8?",
+            "city": "Warsaw",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "avg_price": 0.969,
+            "cur_price": 0.9975,
+            "cash_pnl": 0.63,
+            "percent_pnl": 2.9
+          },
+          {
+            "title": "Will the highest temperature in Busan be 22°C or higher on April 8?",
+            "city": "Busan",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "avg_price": 0.9794,
+            "cur_price": 0.9995,
+            "cash_pnl": 0.41,
+            "percent_pnl": 2.0
+          }
+        ]
+      },
+      "closed_summary": {
+        "n_closed_positions": 100,
+        "wins": 52,
+        "losses": 47,
+        "pushes": 1,
+        "win_rate": 52.5,
+        "total_closed_pnl": 195.21,
+        "n_closed_weather": 75,
+        "n_closed_directional_weather": 19,
+        "directional_weather_pnl": 62.71,
+        "closed_weather_conditions": {
+          "exact": 46,
+          "at_or_above": 13,
+          "at_or_below": 6,
+          "range": 10
+        },
+        "sample_closed_directional": [
+          {
+            "title": "Will the highest temperature in Singapore be 34°C or higher on April 8?",
+            "city": "Singapore",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "cash_pnl": 17.34,
+            "percent_pnl": 39.3
+          },
+          {
+            "title": "Will the highest temperature in Wuhan be 24°C or higher on April 8?",
+            "city": "Wuhan",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "cash_pnl": 15.99,
+            "percent_pnl": 36.5
+          },
+          {
+            "title": "Will the highest temperature in Denver be 60°F or higher on April 11?",
+            "city": "Denver",
+            "condition": "at_or_above",
+            "outcome": "Yes",
+            "cash_pnl": 7.0,
+            "percent_pnl": 30.8
+          },
+          {
+            "title": "Will the highest temperature in Tel Aviv be 25°C or higher on April 9?",
+            "city": "Tel Aviv",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "cash_pnl": -0.03,
+            "percent_pnl": -0.1
+          },
+          {
+            "title": "Will the highest temperature in Seoul be 15°C or higher on April 8?",
+            "city": "Seoul",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "cash_pnl": 0.56,
+            "percent_pnl": 2.2
+          },
+          {
+            "title": "Will the highest temperature in Tel Aviv be 24°C or higher on April 8?",
+            "city": "Tel Aviv",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "cash_pnl": 0.43,
+            "percent_pnl": 1.7
+          },
+          {
+            "title": "Will the highest temperature in Warsaw be 11°C or higher on April 8?",
+            "city": "Warsaw",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "cash_pnl": 0.63,
+            "percent_pnl": 2.9
+          },
+          {
+            "title": "Will the highest temperature in Busan be 22°C or higher on April 8?",
+            "city": "Busan",
+            "condition": "at_or_above",
+            "outcome": "No",
+            "cash_pnl": 0.41,
+            "percent_pnl": 2.0
+          }
+        ]
+      },
+      "reference_quality": "candidate_reference"
+    }
+  ]
+}

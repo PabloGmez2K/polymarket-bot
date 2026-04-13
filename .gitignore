@@ -34,3 +34,44 @@ _tmp_*
 .env
 *.env
 keys.env
+
+# ─── Runtime imports (Railway snapshot, never canonical) ─────────────────────
+data/runtime_import/
+data/runtime_import_derived/
+
+# ─── Tool-generated output snapshots (regenerable) ───────────────────────────
+data/system_alignment_check.json
+data/system_alignment_check_operational.json
+data/runtime_policy_effective_view.json
+data/city_intelligence_pipeline.json
+data/city_intelligence_alert_state.json
+data/city_intelligence_daily_summary_state.json
+data/city_phase5_contrast.json
+data/city_probe_visibility_tracker.json
+data/city_promotion_gate.json
+data/city_validation_ledger.json
+data/city_watch_reinforced.json
+data/city_watchlist_phase4.json
+data/phase5_visibility_alert_state.json
+data/phase5_visibility_pipeline.json
+data/directional_trader_census.json
+data/directional_trader_enrichment.json
+data/reference_trader_city_market_cross.json
+data/settlement_fidelity_probe.json
+data/shanghai_shadow_test.json
+data/shanghai_vs_chicago_comparator.json
+data/chicago_active_benchmark.json
+
+# ─── Docs: regenerable readouts (scripts write these automatically) ───────────
+docs/*_latest.md
+docs/*-latest.md
+docs/*_runtime_import.md
+
+# ─── Docs: session-ephemeral artifacts ───────────────────────────────────────
+docs/next-session-handoff-*.md
+docs/claude-opus-prompt-*.md
+docs/codex-prompt-*.md
+docs/*-readout-*.md
+
+# ─── Root: research / session artifacts ──────────────────────────────────────
+RESEARCH_*.md

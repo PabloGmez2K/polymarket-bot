@@ -1,6 +1,6 @@
 # Skip Log Analyzer
 
-`tools/analyze_skip_log.py` es un analizador offline para `data/skip_log.jsonl` y sus rotaciones `data/skip_log.YYYY-MM-DD.jsonl`. Lee JSON Lines directo con `json.loads(line)`, no importa `bot.py`, tolera filas malformadas con warning a `stderr` y no escribe nada salvo que se use `--csv`.
+`tools/analyze_skip_log.py` es un analizador offline para `data/runtime_import/skip_log.jsonl` y sus rotaciones, con fallback a `data/skip_log.jsonl` si no existe snapshot runtime importado. Lee JSON Lines directo con `json.loads(line)`, no importa `bot.py`, tolera filas malformadas con warning a `stderr` y no escribe nada salvo que se use `--csv`.
 
 ## Instalación
 
@@ -10,7 +10,7 @@ No requiere instalación extra: es un script Python puro con librería estándar
 python tools/analyze_skip_log.py
 ```
 
-Si `data/skip_log.jsonl` no existe, el script termina con exit code `1`. Si el archivo existe pero todavía no tiene filas válidas, imprime:
+Si no existe `skip_log.jsonl` ni en `data/runtime_import/` ni en `data/`, el script termina con exit code `1`. Si el archivo existe pero todavía no tiene filas válidas, imprime:
 
 ```text
 skip_log vacío — aún no corrió ningún ciclo con R3

@@ -17,6 +17,7 @@ from typing import Iterable
 
 DEFAULT_MIN_EDGE = 3.0
 DEFAULT_LAST_N_CYCLES = 30
+DEFAULT_RUNTIME_IMPORT_DIRNAME = "runtime_import"
 EXPECTED_SKIP_REASONS = [
     "no_edge",
     "below_min_edge",
@@ -41,7 +42,7 @@ ROTATED_LOG_RE = re.compile(r"^skip_log\.(\d{4}-\d{2}-\d{2})\.jsonl$")
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Analyze data/skip_log.jsonl and rotated R3 skip logs."
+        description="Analyze skip_log.jsonl from data/runtime_import/ (preferred) or data/ and rotated R3 skip logs."
     )
     parser.add_argument(
         "--last-n-cycles",
@@ -468,10 +469,12 @@ def main() -> int:
         sys.stdout.reconfigure(encoding="utf-8")
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")
-    data_dir = Path(__file__).resolve().parent.parent / "data"
+    repo_data_dir = Path(__file__).resolve().parent.parent / "data"
+    runtime_import_dir = repo_data_dir / DEFAULT_RUNTIME_IMPORT_DIRNAME
+    data_dir = runtime_import_dir if (runtime_import_dir / "skip_log.jsonl").exists() else repo_data_dir
     current_log = data_dir / "skip_log.jsonl"
     if not current_log.exists():
-        print("data/skip_log.jsonl no existe.", file=sys.stderr)
+        print("skip_log.jsonl no existe ni en data/runtime_import ni en data/.", file=sys.stderr)
         return 1
 
     all_records, _malformed = load_records(data_dir)

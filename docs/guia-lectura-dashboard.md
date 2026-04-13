@@ -11,7 +11,7 @@ Regla rápida de colores: `good` = sano/listo, `accent` = en progreso o foco del
 1. Mirá el badge de modo arriba a la derecha. Hoy lo esperable es `DRY RUN` o `SHADOW-ONLY`, no `REAL`. Si aparece `REAL`, frená y confirmá si hubo un cambio deliberado de modo.
 2. Mirá el bloque `Estado del bot`. Lo sano hoy es `Sano`, `Sano con alertas` o `Sano con limitaciones`. Si ves `Intervención requerida`, no sigas leyendo el resto como si fuera rutina: primero resolvé la incidencia.
 3. Mirá la tarjeta `Acción`. Hoy lo normal en shadow-only es una acción tipo “priorizar crecimiento de muestra NOAA” o “seguir monitorizando”. Si la acción pide reparar señales, reconciliar pending exits o recargar bankroll, esa es la prioridad del día.
-4. Mirá `Road to Real`. Hoy es normal que no esté completo. Lo importante es que no haya una regresión rara y que el check `Sin alertas críticas activas` siga en `OK`. Si ese check está en rojo, revisá alertas antes de cualquier otra cosa.
+4. Mirá `Progreso del sistema`. Es un checklist heredado útil para contexto, pero no es la verdad operativa principal. Lo importante es que no haya una regresión rara y que el check `Sin alertas críticas activas` siga en `OK`. Si ese check está en rojo, revisá alertas antes de cualquier otra cosa.
 5. Mirá `Señales shadow direccionales`. Puede haber pocas o ninguna según el día. Lo anormal no es “0 ahora”, sino “0 todo el día” o muchos ciclos sin actividad cuando sí hubo mercados escaneados; en ese caso revisá si el scan está viendo mercados direccionales o si todo está siendo filtrado.
 
 ## Bloque por bloque
@@ -31,10 +31,10 @@ Regla rápida de colores: `good` = sano/listo, `accent` = en progreso o foco del
   - El aviso aparece en el dashboard live
   - Se usa el dashboard desde una URL pública sin autenticación
 
-### Road to Real
+### Progreso del sistema
 
 - **Qué pregunta responde**
-  ¿Qué tan lejos estamos de volver a operar con dinero real y cuál es el cuello de botella hoy?
+  ¿Qué progreso acumulado tiene el sistema y qué cuello de botella visible sigue frenando el avance?
 
 - **Qué significa cada campo visible**
 
@@ -69,7 +69,7 @@ Regla rápida de colores: `good` = sano/listo, `accent` = en progreso o foco del
 | `Cash` y `Posiciones abiertas` | Caja disponible y cuántas posiciones vivas hay | Caja no crítica y sin sorpresas | Si la cartera cae cerca del umbral o hay posiciones inesperadas, revisar cartera |
 | `Ultimo ciclo` | Última ejecución registrada | Reciente | Si dice `Sin ciclos aún` o está muy viejo en live, revisar que el bot siga corriendo |
 | `Proximo ciclo` | Próxima ejecución esperada | Una hora futura razonable | Si dice `No programado`, revisar scheduler o contexto local |
-| `Mercados escaneados` | Cuántos mercados vio el bot, cuántos fueron direccionales y cuántos se filtraron por `range/exact` | Que existan direccionales cuando hay mercado | Si todo termina en filtrados, revisar si el universo del día es puro `range/exact` |
+| `Candidatos post-filtros` | Alias humano de `markets_evaluated`, cuyo nombre canónico es `candidates_after_prefilters`: candidatos que sobrevivieron parseo, fecha, timezone, policy, precio y liquidez; además muestra cuántos quedaron fuera por `range/exact` | Que existan direccionales cuando hay mercado | Si todo termina en filtrados, revisar si el universo del día es puro `range/exact` |
 | `Version` | Versión y serie lógica del bot | Coherente con la versión desplegada | Si no coincide con lo esperado, revisar deploy |
 | `Acción` | Prioridad operativa del día | Algo tipo “seguir monitorizando” o “ganar muestra NOAA” | Si pide reparar señales, pending exits o bankroll, hacer eso primero |
 | `PnL serie / Win rate / Cierres` | KPIs de la serie actual | Solo son útiles con muestra | Si hay menos de 5 cierres, tratarlos como orientación débil |
@@ -103,7 +103,7 @@ Regla rápida de colores: `good` = sano/listo, `accent` = en progreso o foco del
 - **Señales de alarma**
   - Muchos ciclos sin ninguna señal direccional y sin explicación visible
   - Filas con `Condicion` distinta de direccional
-  - La tabla queda vacía mientras `Mercados escaneados` sigue alto todos los días
+  - La tabla queda vacía mientras `Candidatos post-filtros` sigue alto todos los días
   - Se acumulan señales, pero nunca aparecen resoluciones observadas
 
 ### Bloque 3: Salud del sistema
@@ -294,7 +294,7 @@ Eso significa que el histórico real de esa ciudad ya tiene evidencia mala o una
 
 Abrí el ranking, confirmá si además está `Bloqueada`, `Shadow degradada` o `Revisar salida`. Si sigue activa, la acción correcta es revisar por qué todavía no salió de carrera.
 
-### `Road to Real` no avanza en 3 días
+### `Progreso del sistema` no avanza en 3 días
 
 Primero mirá qué check está clavado. Si es NOAA, el problema es observabilidad; si es shadow, el problema es falta de señales útiles; si es alertas críticas, el problema es operativo.
 
@@ -302,7 +302,7 @@ No saques conclusiones globales por el porcentaje total. El valor del bloque est
 
 ### `shadow` tiene 0 edges todo el día
 
-Puede ser normal en un día flojo, pero no si además hubo muchos mercados direccionales escaneados. Mirá `Mercados escaneados` y cuántos fueron `direccionales`.
+Puede ser normal en un día flojo, pero no si además hubo muchos candidatos post-filtros. Mirá `Candidatos post-filtros` y cuántos fueron `direccionales`.
 
 Si hubo scan pero no hubo edges en todo el día, revisá si el mercado ofrecía edge real, si todo quedó en `condition_filtered` o si hay un problema de señales.
 
