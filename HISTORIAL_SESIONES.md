@@ -2702,3 +2702,11 @@ Regla recomendada:
 - Lucknow, Sao Paulo, Istanbul: no en `OBSERVED_AUDIT_CITIES`, 0 trades, nunca en `auto_shadow_cities` → invisibles a `tracked_cities` → `sync_city_policy_state` nunca las evalúa. Gap estructural entre `shadow_city_tracking` y el pipeline de promoción.
 - Fixes propuestos (no aplicados): A1=setear `ACTIVE_TRADING_CITIES` explícito en Railway, B1=añadir a `OBSERVED_AUDIT_CITIES` de a una. Decisión de aplicar → Opus.
 - Output: `docs/auto-promotion-trigger-diagnosis-2026-04-13.md`.
+
+### Sesión 169 cont. — Crosscheck automatizado + corrección ACTIVE_TRADING_CITIES
+
+**Modelo:** Sonnet. Continuación de la misma sesión.
+
+- Se añade `maybe_run_daily_crosscheck(state)` a `bot.py` (v10.6.12): corre el crosscheck traders vs edge en el primer ciclo de cada día, appenda a `/app/data/signals_crosscheck.jsonl`, manda Telegram diario y aviso one-shot al acumular 7 corridas.
+- Usuario aplica `ACTIVE_TRADING_CITIES=NONE` en Railway: elimina el default hardcoded `Chicago,Atlanta,Dallas,Buenos Aires` que trataba esas 4 ciudades como active sin env var explícito. Ahora ninguna ciudad entra en active mode sin declaración humana.
+- Backlog documentado: feature canary→active graduation con criterios automáticos + reminder persistente hasta que el usuario actúe. Requiere sesión dedicada Opus.
