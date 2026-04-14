@@ -3967,6 +3967,15 @@ def run_observability_alerts():
         if logger:
             logger.warning(f"v2 trigger alarm: fallo ({e})")
 
+    # v10.6.16: checkpoint automático canary condition_filtered exact/range (día 7+).
+    try:
+        if maybe_run_condition_monitor(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"condition monitor: fallo ({e})")
+
     if changed:
         save_alerts_state(state)
 
@@ -7593,6 +7602,304 @@ def maybe_alert_v2_trigger(state, now=None):
 
     state["v2_trigger_notified"] = {"at": now.isoformat()}
     state["v2_trigger_last_check"] = today
+    return True
+
+
+def _condition_monitor_stats(today=None):
+    """
+    v10.6.16: Calcula WR de trades con condition exact/range desde apertura canary (2026-04-14).
+    Lee trade_lifecycle.json; retorna dict con n_closed, n_wins, wr, wr_pct, by_city,
+    days_since_open, verdict, kill_switch, file_found.
+    """
+    from datetime import date as _date
+    if today is None:
+        today = _date.today()
+
+    CANARY_OPEN = _date(2026, 4, 14)
+    days_since = (today - CANARY_OPEN).days
+
+    result = {
+        "n_closed": 0,
+        "n_wins": 0,
+        "wr": 0.0,
+        "wr_pct": "0.0",
+        "by_city": {},
+        "days_since_open": days_since,
+        "verdict": "INSUFFICIENT",
+        "kill_switch": False,
+        "file_found": False,
+    }
+
+    lifecycle_path = TRADE_LIFECYCLE_FILE
+    if not os.path.exists(lifecycle_path):
+        return result
+
+    result["file_found"] = True
+    try:
+        with open(lifecycle_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return result
+
+    records = data.get("records", []) if isinstance(data, dict) else []
+    canary_start = CANARY_OPEN.isoformat()
+
+    trades = []
+    for r in records:
+        if not isinstance(r, dict):
+            continue
+        if r.get("condition") not in {"exact", "range"}:
+            continue
+        opened = str(r.get("opened_at") or "")
+        if opened[:10] < canary_start:
+            continue
+        if r.get("status") != "closed":
+            continue
+        trades.append(r)
+
+    n_closed = len(trades)
+    n_wins = 0
+    by_city = {}
+    for r in trades:
+        cc = r.get("close_context") or {}
+        pnl = cc.get("pnl_cash")
+        win = False
+        if pnl is not None:
+            try:
+                win = float(pnl) > 0
+            except (TypeError, ValueError):
+                pass
+        if not win:
+            win = cc.get("close_action") == "RESOLVED_WIN"
+        if win:
+            n_wins += 1
+        city = r.get("city", "?")
+        if city not in by_city:
+            by_city[city] = {"wins": 0, "total": 0}
+        by_city[city]["total"] += 1
+        if win:
+            by_city[city]["wins"] += 1
+
+    wr = (n_wins / n_closed) if n_closed > 0 else 0.0
+    wr_pct = f"{wr * 100:.1f}"
+    kill_switch = wr < 0.45 and n_closed >= 20
+
+    if kill_switch:
+        verdict = "KILL_SWITCH"
+    elif days_since >= 14:
+        if n_closed >= 30 and wr >= 0.55:
+            verdict = "PROMOTE"
+        elif n_closed >= 30 and wr >= 0.50:
+            verdict = "EXTEND"
+        elif n_closed >= 30:
+            verdict = "CLOSE"
+        else:
+            verdict = "INSUFFICIENT"
+    elif days_since >= 7:
+        if n_closed >= 15 and wr < 0.50:
+            verdict = "CLOSE"
+        elif n_closed >= 15 and wr < 0.70:
+            verdict = "ALERT"
+        elif n_closed >= 15:
+            verdict = "OK"
+        else:
+            verdict = "INSUFFICIENT"
+    else:
+        verdict = "INSUFFICIENT"
+
+    result.update({
+        "n_closed": n_closed,
+        "n_wins": n_wins,
+        "wr": wr,
+        "wr_pct": wr_pct,
+        "by_city": by_city,
+        "verdict": verdict,
+        "kill_switch": kill_switch,
+    })
+    return result
+
+
+def _condition_monitor_city_breakdown(by_city):
+    """Formatea desglose por ciudad para Telegram (top 5 por volumen)."""
+    lines = []
+    for city, cs in sorted(by_city.items(), key=lambda x: -x[1]["total"])[:5]:
+        cwr = cs["wins"] / cs["total"] * 100 if cs["total"] > 0 else 0
+        lines.append(f"{city} {cs['wins']}/{cs['total']} ({cwr:.0f}%)")
+    return ", ".join(lines) if lines else "sin datos"
+
+
+def _build_condition_checkpoint_message(stats, is_checkpoint):
+    """
+    v10.6.16: Construye el mensaje Telegram para checkpoint o kill-switch del canary
+    condition_filtered. Siempre incluye instrucción lista para sesión Sonnet/Codex.
+    """
+    from datetime import date as _date
+    n = stats["n_closed"]
+    wins = stats["n_wins"]
+    wr_pct = stats["wr_pct"]
+    days = stats["days_since_open"]
+    verdict = stats["verdict"]
+    kill = stats["kill_switch"]
+    city_str = _condition_monitor_city_breakdown(stats["by_city"])
+
+    today = _date.today()
+    CHECKPOINT_DAY14 = _date(2026, 4, 28)
+    next_checkpoint = CHECKPOINT_DAY14 if today < CHECKPOINT_DAY14 else None
+
+    handoff_main = "docs/handoffs/condition-filtered-monitor-handoff-2026-04-14.md"
+    handoff_impl = "docs/handoffs/condition-filtered-canary-implement-2026-04-14.md"
+
+    if kill:
+        return (
+            f"\U0001f6a8 <b>KILL-SWITCH condition_filtered</b>\n\n"
+            f"WR bot exact/range: {wr_pct}% ({wins}/{n})\n"
+            f"Threshold: &lt;45% con n\u226520 \u2192 CUMPLIDO\n"
+            f"Ciudades: {city_str}\n\n"
+            f"<b>Para sesi\u00f3n Sonnet/Codex:</b>\n"
+            f"<code>Leer {handoff_main} y {handoff_impl}.\n"
+            f"WR={wr_pct}% n={n} \u2192 kill-switch activado.\n"
+            f"Acci\u00f3n urgente: setear QUALITY_TRADER_CONDITIONS=\"\" en Railway "
+            f"y actualizar CONTEXTO.md secci\u00f3n \"Condition filtered reopen\".</code>\n\n"
+            f"Este aviso se repetir\u00e1 diariamente hasta que se ejecute la acci\u00f3n."
+        )
+
+    if verdict == "CLOSE":
+        accion = (
+            f"WR={wr_pct}% n={n} &lt; 50% threshold d\u00eda {days}.\n"
+            f"Acci\u00f3n requerida: cerrar canary. Setear QUALITY_TRADER_CONDITIONS=\"\" "
+            f"en Railway y actualizar CONTEXTO.md."
+        )
+        return (
+            f"\u26a0\ufe0f <b>ALERTA condition_filtered \u2014 D\u00eda {days}</b>\n\n"
+            f"WR bot exact/range: {wr_pct}% ({wins}/{n})\n"
+            f"Estado: \u26a0\ufe0f BAJO THRESHOLD\n"
+            f"Ciudades: {city_str}\n\n"
+            f"<b>Para sesi\u00f3n Sonnet:</b>\n"
+            f"<code>Leer {handoff_main} y {handoff_impl}.\n"
+            f"{accion}</code>"
+        )
+
+    if verdict == "ALERT":
+        next_str = f"\nPr\u00f3ximo checkpoint: {next_checkpoint}" if next_checkpoint else ""
+        return (
+            f"\U0001f4ca Checkpoint condition_filtered \u2014 D\u00eda {days}\n\n"
+            f"WR bot exact/range: {wr_pct}% ({wins}/{n})\n"
+            f"Estado: \u26a0\ufe0f ALERTA (50-70%) \u2014 continuar sin cambios de sizing{next_str}\n"
+            f"Ciudades: {city_str}\n\n"
+            f"<b>Para sesi\u00f3n Sonnet (no urgente):</b>\n"
+            f"<code>Leer {handoff_main}.\n"
+            f"WR={wr_pct}% n={n} d\u00eda {days}. Estado: ALERT.\n"
+            f"Acci\u00f3n: actualizar CONTEXTO.md con m\u00e9tricas. Sin cambios en Railway.</code>"
+        )
+
+    if verdict == "PROMOTE":
+        return (
+            f"\u2705 <b>PROMOVER condition_filtered \u2014 D\u00eda {days}</b>\n\n"
+            f"WR bot exact/range: {wr_pct}% ({wins}/{n})\n"
+            f"Estado: \u2705 WR\u226555% n\u226530 \u2192 listo para promover\n"
+            f"Ciudades: {city_str}\n\n"
+            f"<b>Para sesi\u00f3n Sonnet:</b>\n"
+            f"<code>Leer {handoff_main} y {handoff_impl}.\n"
+            f"WR={wr_pct}% n={n} d\u00eda {days}. Verdict: PROMOTE.\n"
+            f"Acci\u00f3n: quitar EXACT_RANGE_SIZE_SCALE de Railway (mantener trader-gate y edge buffer). "
+            f"Actualizar CONTEXTO.md.</code>"
+        )
+
+    if verdict == "EXTEND":
+        return (
+            f"\U0001f4ca Checkpoint condition_filtered \u2014 D\u00eda {days}\n\n"
+            f"WR bot exact/range: {wr_pct}% ({wins}/{n})\n"
+            f"Estado: WR 50-55% \u2192 extender canary 14 d\u00edas m\u00e1s\n"
+            f"Ciudades: {city_str}\n\n"
+            f"<b>Para sesi\u00f3n Sonnet (no urgente):</b>\n"
+            f"<code>Leer {handoff_main}.\n"
+            f"WR={wr_pct}% n={n} d\u00eda {days}. Verdict: EXTEND.\n"
+            f"Acci\u00f3n: mantener canary sin cambios. Actualizar CONTEXTO.md con m\u00e9tricas.</code>"
+        )
+
+    # OK (WR>=70%, n>=15)
+    next_str = f"\nPr\u00f3ximo checkpoint: {next_checkpoint}" if next_checkpoint else ""
+    return (
+        f"\u2705 Checkpoint condition_filtered \u2014 D\u00eda {days}\n\n"
+        f"WR bot exact/range: {wr_pct}% ({wins}/{n})\n"
+        f"Estado: \u2705 OK{next_str}\n"
+        f"Ciudades: {city_str}\n\n"
+        f"<b>Para sesi\u00f3n Sonnet (no urgente):</b>\n"
+        f"<code>Leer {handoff_main}.\n"
+        f"WR={wr_pct}% n={n} d\u00eda {days}. Estado: OK.\n"
+        f"Acci\u00f3n: actualizar CONTEXTO.md con m\u00e9tricas actuales. Sin cambios en Railway.</code>"
+    )
+
+
+def maybe_run_condition_monitor(state, now=None):
+    """
+    v10.6.16: checkpoint automático del canary condition_filtered exact/range.
+
+    Dispara desde el día 7 (2026-04-21):
+    - En fechas exactas de checkpoint (día 7 y día 14)
+    - Cuando kill-switch se activa (WR<45% n>=20), diariamente hasta acción
+    - Anti-spam: un envío por fecha de checkpoint; kill-switch se repite diariamente
+
+    Retorna True si state fue mutado.
+    """
+    from datetime import date as _date
+    if now is None:
+        now = datetime.now(timezone.utc)
+    today = now.date()
+    today_str = today.isoformat()
+
+    CANARY_OPEN = _date(2026, 4, 14)
+    CHECKPOINT_DAY7 = _date(2026, 4, 21)
+    CHECKPOINT_DAY14 = _date(2026, 4, 28)
+
+    days_since = (today - CANARY_OPEN).days
+    if days_since < 7:
+        return False
+
+    is_checkpoint = today in {CHECKPOINT_DAY7, CHECKPOINT_DAY14}
+
+    # Anti-spam para checkpoints normales: un envío por fecha
+    last_sent = state.get("last_condition_checkpoint") or {}
+    if isinstance(last_sent, str):
+        last_sent = {"date": last_sent}
+
+    # Siempre calcular stats (necesario para kill-switch check)
+    try:
+        stats = _condition_monitor_stats(today=today)
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"condition monitor: error calculando stats ({e})")
+        return False
+
+    kill = stats.get("kill_switch", False)
+
+    # Kill-switch repite diariamente; checkpoints solo si no enviado hoy
+    if kill:
+        if last_sent.get("date") == today_str and last_sent.get("type") == "kill":
+            return False  # ya enviado hoy
+    elif is_checkpoint:
+        if last_sent.get("date") == today_str:
+            return False  # ya enviado hoy
+    else:
+        return False  # no es checkpoint ni kill-switch
+
+    try:
+        msg = _build_condition_checkpoint_message(stats, is_checkpoint=is_checkpoint)
+        send_telegram(msg)
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"condition monitor: fallo al enviar Telegram ({e})")
+        return False
+
+    state["last_condition_checkpoint"] = {
+        "date": today_str,
+        "type": "kill" if kill else "checkpoint",
+        "wr_pct": stats["wr_pct"],
+        "n": stats["n_closed"],
+        "verdict": stats["verdict"],
+    }
     return True
 
 

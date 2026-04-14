@@ -4840,6 +4840,44 @@ def run_tests():
         'c.get("exact_range_canary") and isinstance(position, dict)' in code,
     )
 
+    # ---- v10.6.16: condition_reopen_monitor ----
+    test(
+        "v10.6.16: maybe_run_condition_monitor definida",
+        "def maybe_run_condition_monitor(" in code,
+    )
+    test(
+        "v10.6.16: _condition_monitor_stats definida",
+        "def _condition_monitor_stats(" in code,
+    )
+    test(
+        "v10.6.16: _build_condition_checkpoint_message definida",
+        "def _build_condition_checkpoint_message(" in code,
+    )
+    test(
+        "v10.6.16: checkpoint day 7 definido (2026-04-21)",
+        "date(2026, 4, 21)" in code,
+    )
+    test(
+        "v10.6.16: checkpoint day 14 definido (2026-04-28)",
+        "date(2026, 4, 28)" in code,
+    )
+    test(
+        "v10.6.16: kill-switch threshold WR<0.45 n>=20 presente",
+        "0.45" in code and "n_closed >= 20" in code,
+    )
+    test(
+        "v10.6.16: last_condition_checkpoint anti-spam en state",
+        '"last_condition_checkpoint"' in code,
+    )
+    test(
+        "v10.6.16: maybe_run_condition_monitor integrado en ciclo diario",
+        "maybe_run_condition_monitor(state)" in code,
+    )
+    test(
+        "v10.6.16: tools/condition_reopen_monitor.py existe",
+        os.path.exists(os.path.join(os.path.dirname(__file__), "tools", "condition_reopen_monitor.py")),
+    )
+
     # ---- Resultado ----
     print(f"\n{'='*50}")
     total = passed + failed
