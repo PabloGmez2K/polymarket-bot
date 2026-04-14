@@ -11046,6 +11046,9 @@ RESOLUTION_ICAO = {
     "Madrid":         {"icao": "LEMD", "wu_url": _wu_history_url("LEMD"), "noaa_station_id": "08221099999", "noaa_daily_station_id": "SPE00120278"},
     "Seattle":        {"icao": "KSEA", "wu_url": _wu_history_url("KSEA"), "noaa_station_id": "72793024233", "noaa_daily_station_id": "USW00024233"},
     "Dallas":         {"icao": "KDAL", "wu_url": _wu_history_url("KDAL"), "noaa_station_id": "72258303927", "noaa_daily_station_id": "USW00013960"},
+    # ISD 72254013904 registrado hasta 2025-08-27 (feed migrado); GHCND USW00013904
+    # verificado: 182 registros TMAX oct-2025/mar-2026. El bot usa daily path (prioridad 1).
+    "Austin":         {"icao": "KAUS", "wu_url": _wu_history_url("KAUS"), "noaa_station_id": "72254013904", "noaa_daily_station_id": "USW00013904"},
     "Lucknow":        {"icao": "VILK", "wu_url": _wu_history_url("VILK")},
     "Sao Paulo":      {"icao": "SBGR", "wu_url": _wu_history_url("SBGR")},
     "Taipei":         {"icao": "RCTP", "wu_url": _wu_history_url("RCTP")},
@@ -11071,6 +11074,7 @@ RESOLUTION_ICAO = {
 OBSERVED_AUDIT_CITIES = {
     "Ankara",
     "Atlanta",
+    "Austin",
     "Buenos Aires",
     "Chengdu",
     "Chicago",
@@ -11121,6 +11125,7 @@ CITY_TIMEZONES = {
     "Toronto":        "America/Toronto",
     "Atlanta":        "America/New_York",
     "Miami":          "America/New_York",
+    "Austin":         "America/Chicago",
     "Chicago":        "America/Chicago",
     "Dallas":         "America/Chicago",
     "Houston":        "America/Chicago",

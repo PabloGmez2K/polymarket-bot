@@ -4878,6 +4878,30 @@ def run_tests():
         os.path.exists(os.path.join(os.path.dirname(__file__), "tools", "condition_reopen_monitor.py")),
     )
 
+    # ---- v10.6.17: Austin canary onboarding ----
+    test(
+        "v10.6.17: Austin en RESOLUTION_ICAO con noaa_station_id y noaa_daily_station_id",
+        '"Austin"' in code
+        and '"noaa_station_id": "72254013904"' in code
+        and '"noaa_daily_station_id": "USW00013904"' in code,
+    )
+    test(
+        "v10.6.17: Austin en CITY_TIMEZONES con America/Chicago",
+        '"Austin":         "America/Chicago"' in code or '"Austin": "America/Chicago"' in code,
+    )
+    test(
+        "v10.6.17: Austin en OBSERVED_AUDIT_CITIES",
+        '"Austin"' in code and "OBSERVED_AUDIT_CITIES" in code,
+    )
+    test(
+        "v10.6.17: MIN_PRICE y MAX_PRICE sin cambios (0.20 / 0.80)",
+        "MIN_PRICE = 0.20" in code and "MAX_PRICE = 0.80" in code,
+    )
+    test(
+        "v10.6.17: ACTIVE_TRADING_CITIES sigue en NONE en env (guardrail)",
+        os.environ.get("ACTIVE_TRADING_CITIES", "NONE") in ("", "NONE"),
+    )
+
     # ---- Resultado ----
     print(f"\n{'='*50}")
     total = passed + failed

@@ -2802,3 +2802,33 @@ Regla recomendada:
 - **`_build_condition_checkpoint_message`**: templates para OK, ALERT, CLOSE, PROMOTE, EXTEND, KILL_SWITCH — todos incluyen bloque `<code>` con instrucción lista para sesión Sonnet/Codex.
 - **9 tests nuevos** en `verify_before_deploy.py`. `verify_before_deploy.py` → 680/680.
 - **No tocado:** criterios trading, Kelly, NOAA, thresholds canary→active, Railway, env vars.
+
+
+### Sesión 177 — Austin canary onboarding + análisis throughput (v10.6.17) (14 abr 2026)
+
+**Modelo:** Opus (análisis/diseño) + Sonnet (implementación).
+
+**Análisis Opus — throughput scan loop:**
+- `price_out_of_range` (51% de skips): filtro `[MIN_PRICE=0.20, MAX_PRICE=0.80]` correctamente calibrado. Evidencia: 82.8% de los skips son markets YES<5% (long-shots). Trades históricos con `avg_entry_price<0.25`: 31 registros, 4W/18L, −$23.50 neto. Zona ganadora: 0.50–0.80 (10W/3L, +$4.39). Veredicto: no tocar.
+- `timezone_filter` (6.3%): estructural Asia, sin solapamiento con candidatos TRADER_ONLY. Diferido.
+- TRADER_ONLY 27 ciudades: todas en shadow (`fuera_allowlist`). Atacar lista de ciudades, no filtros.
+- Palanca recomendada: **Austin →canary** (cross-check 2026-04-13: n_consensus=2, trader_wr=65.5%, mkt_price=0.48).
+
+**Bloqueador detectado pre-implementación:** Austin ausente de `RESOLUTION_ICAO`, `CITY_TIMEZONES` y `OBSERVED_AUDIT_CITIES` — sin infraestructura NOAA no puede tradear aunque sea canary.
+
+**Verificación NOAA Austin (KAUS):**
+- ISD history: USAF=722540, WBAN=13904, activo hasta 2025-08-27 → `noaa_station_id="72254013904"` (gate-pass; bot usa daily como prioridad 1).
+- GHCND confirmado via CDO: `USW00013904` = "AUSTIN BERGSTROM INTERNATIONAL AIRPORT, TX US", 30.18°N 97.68°W, 146.5m.
+- NOAA daily-summaries verificado: **182 registros TMAX oct2025–mar2026**, rango −1.7°C a 36.7°C (plausible para Austin).
+
+**Cambios implementados:**
+- `bot.py`: Austin en `RESOLUTION_ICAO` (`noaa_station_id`, `noaa_daily_station_id`), `CITY_TIMEZONES` (`America/Chicago`), `OBSERVED_AUDIT_CITIES`.
+- `data/runtime_import/city_policy_state.json`: Austin en `auto_canary_cities` + `transition_history` (2026-04-14).
+- `verify_before_deploy.py`: 5 tests nuevos (Austin infra, bounds guardados, ACTIVE_TRADING_CITIES guardrail) → **685/685**.
+
+**Criterios de evaluación canary Austin:**
+- GO: WR≥55% o PnL≥+$0.50 sobre ≥3 trades cerrados.
+- NO-GO: PnL≤−$2.00 o 3 losses consecutivos → degradar a shadow.
+- Inconcluso: <3 trades en 14 días → evaluar si Austin tiene mercados suficientes.
+
+**No tocado:** filtros, MIN_PRICE, MAX_PRICE, thresholds, Kelly, sigma, exits, ACTIVE_TRADING_CITIES (sigue NONE).
