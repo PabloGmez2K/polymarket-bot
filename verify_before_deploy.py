@@ -4026,8 +4026,8 @@ def run_tests():
 
     # ---- Test v10.6: Revert trading logic + fixes ----
     print("\n v10.6: Revert trading logic + fixes")
-    test("MIN_EDGE_EXACT eliminado", "MIN_EDGE_EXACT" not in code or "sin MIN_EDGE_EXACT" in code)
-    test("Edge check usa MIN_EDGE directo", "edge_pct < MIN_EDGE" in code)
+    test("MIN_EDGE_EXACT eliminado", "MIN_EDGE_EXACT =" not in code)  # v10.6.15: MIN_EDGE_EXACT_RANGE_BUFFER_PP es distinto
+    test("Edge check usa min edge efectivo", "edge_pct < _effective_min_edge" in code or "edge_pct < MIN_EDGE" in code)
     test("LOGIC_SERIES es 10.6", 'LOGIC_SERIES = "10.6"' in code)
     test("LOW_BANKROLL_THRESHOLD definido", "LOW_BANKROLL_THRESHOLD" in code)
     test("LOW_BANKROLL_RESET_MARGIN definido", "LOW_BANKROLL_RESET_MARGIN" in code)
@@ -4799,7 +4799,46 @@ def run_tests():
         except Exception:
             pass
 
-    test("Version v10.6.14", 'BOT_VERSION = "v10.6.14"' in code)
+    test("Version v10.6.15", 'BOT_VERSION = "v10.6.15"' in code)
+
+    # ---- v10.6.15: Quality-trader canary exact/range ----
+    test(
+        "v10.6.15: QUALITY_TRADER_CONDITIONS definido",
+        "QUALITY_TRADER_CONDITIONS" in code,
+    )
+    test(
+        "v10.6.15: QUALITY_TRADER_CITIES_WHITELIST definido",
+        "QUALITY_TRADER_CITIES_WHITELIST" in code,
+    )
+    test(
+        "v10.6.15: MIN_EDGE_EXACT_RANGE_BUFFER_PP definido",
+        "MIN_EDGE_EXACT_RANGE_BUFFER_PP" in code,
+    )
+    test(
+        "v10.6.15: EXACT_RANGE_SIZE_SCALE definido",
+        "EXACT_RANGE_SIZE_SCALE" in code,
+    )
+    test(
+        "v10.6.15: London no en QUALITY_TRADER_CITIES_WHITELIST default",
+        (
+            "QUALITY_TRADER_CITIES_WHITELIST" in code
+            and "Seattle,Tokyo,Hong Kong,Seoul,Toronto,Chengdu,Shenzhen,Shanghai,Milan" in code
+            and "London" not in "Seattle,Tokyo,Hong Kong,Seoul,Toronto,Chengdu,Shenzhen,Shanghai,Milan"
+        ),
+        "London debe estar excluida de la whitelist por defecto",
+    )
+    test(
+        "v10.6.15: exact_range_canary flag se setea en pipeline",
+        'c["exact_range_canary"] = True' in code,
+    )
+    test(
+        "v10.6.15: edge buffer aplicado para exact_range_canary",
+        "MIN_EDGE_EXACT_RANGE_BUFFER_PP if c.get(\"exact_range_canary\")" in code,
+    )
+    test(
+        "v10.6.15: size scale aplicado para exact_range_canary",
+        'c.get("exact_range_canary") and isinstance(position, dict)' in code,
+    )
 
     # ---- Resultado ----
     print(f"\n{'='*50}")

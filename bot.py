@@ -101,7 +101,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.14"
+BOT_VERSION = "v10.6.15"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -227,6 +227,24 @@ ALLOWED_CONDITIONS = {
     ).split(",")
     if condition.strip()
 }
+
+# v10.6.15: Quality-trader-gated canary para exact/range
+# Solo opera exact/range si: trader ∈ quality_traders AND ciudad ∈ whitelist AND edge ≥ MIN_EDGE+buffer
+QUALITY_TRADER_CONDITIONS = {
+    c.strip().lower()
+    for c in os.getenv("QUALITY_TRADER_CONDITIONS", "exact,range").split(",")
+    if c.strip()
+}
+QUALITY_TRADER_CITIES_WHITELIST = {
+    c.strip()
+    for c in os.getenv(
+        "QUALITY_TRADER_CITIES_WHITELIST",
+        "Seattle,Tokyo,Hong Kong,Seoul,Toronto,Chengdu,Shenzhen,Shanghai,Milan",
+    ).split(",")
+    if c.strip()
+}
+MIN_EDGE_EXACT_RANGE_BUFFER_PP = float(os.getenv("MIN_EDGE_EXACT_RANGE_BUFFER_PP", "5.0"))
+EXACT_RANGE_SIZE_SCALE = float(os.getenv("EXACT_RANGE_SIZE_SCALE", "0.50"))
 
 
 def get_min_days_ahead():
@@ -14326,39 +14344,54 @@ def main(client):
 
         condition_name = str(c.get("condition", "") or "").strip().lower()
         if condition_name not in ALLOWED_CONDITIONS:
-            condition_filtered_skip += 1
-            condition_filtered_shadow.append({
-                "question": c["question"],
-                "city": city,
-                "date": c["date_iso"],
-                "side": "FILTERED",
-                "edge_pct": 0.0,
-                "expected_value": 0.0,
-                "mkt_price": round(max(c["mkt_prob_yes"], c["mkt_prob_no"]) * 100, 1),
-                "our_prob": 0.0,
-                "forecast_max": forecast_max,
-                "condition": condition_name,
-            })
-            if condition_name not in condition_filtered_seen:
-                dl.append(
-                    f"SKIP condicion '{condition_name}': fuera de ALLOWED_CONDITIONS "
-                    f"(se mueve a shadow tracking, no se compra)"
+            # v10.6.15: Quality-trader-gated canary para exact/range
+            # Si la condición está en QUALITY_TRADER_CONDITIONS, ciudad en whitelist,
+            # y hay al menos un quality trader con señal → pasa al pipeline con flag canary.
+            _qt_canary = False
+            if condition_name in QUALITY_TRADER_CONDITIONS and city in QUALITY_TRADER_CITIES_WHITELIST:
+                if threshold_high is not None:
+                    _early_key = f"{city}|{c['date_iso']}|{c['condition']}|{threshold}-{threshold_high}|{c['unit']}"
+                else:
+                    _early_key = f"{city}|{c['date_iso']}|{c['condition']}|{threshold}|{c['unit']}"
+                if trader_signals.get(_early_key):
+                    _qt_canary = True
+
+            if not _qt_canary:
+                condition_filtered_skip += 1
+                condition_filtered_shadow.append({
+                    "question": c["question"],
+                    "city": city,
+                    "date": c["date_iso"],
+                    "side": "FILTERED",
+                    "edge_pct": 0.0,
+                    "expected_value": 0.0,
+                    "mkt_price": round(max(c["mkt_prob_yes"], c["mkt_prob_no"]) * 100, 1),
+                    "our_prob": 0.0,
+                    "forecast_max": forecast_max,
+                    "condition": condition_name,
+                })
+                if condition_name not in condition_filtered_seen:
+                    dl.append(
+                        f"SKIP condicion '{condition_name}': fuera de ALLOWED_CONDITIONS "
+                        f"(se mueve a shadow tracking, no se compra)"
+                    )
+                    condition_filtered_seen.add(condition_name)
+                edge_analysis.append(
+                    f"  SHADOW-FILTER {city} {temp_label} {c['date_iso']} | "
+                    f"condicion={condition_name} fuera de ALLOWED_CONDITIONS"
                 )
-                condition_filtered_seen.add(condition_name)
-            edge_analysis.append(
-                f"  SHADOW-FILTER {city} {temp_label} {c['date_iso']} | "
-                f"condicion={condition_name} fuera de ALLOWED_CONDITIONS"
-            )
-            skip_log_entries.append(_make_skip_entry(
-                "condition_filtered", cycle_id=cycle_id,
-                city=city, date_iso=c["date_iso"], days_ahead=c["days_ahead"],
-                city_mode=c.get("city_mode"), allowlisted=c.get("allowlisted"),
-                forecast_max=forecast_max, threshold=threshold, threshold_high=threshold_high,
-                unit=c["unit"], condition=condition_name, sigma_used=sigma_used_val,
-                question=c["question"],
-                extras={"allowed_conditions": sorted(ALLOWED_CONDITIONS)},
-            ))
-            continue
+                skip_log_entries.append(_make_skip_entry(
+                    "condition_filtered", cycle_id=cycle_id,
+                    city=city, date_iso=c["date_iso"], days_ahead=c["days_ahead"],
+                    city_mode=c.get("city_mode"), allowlisted=c.get("allowlisted"),
+                    forecast_max=forecast_max, threshold=threshold, threshold_high=threshold_high,
+                    unit=c["unit"], condition=condition_name, sigma_used=sigma_used_val,
+                    question=c["question"],
+                    extras={"allowed_conditions": sorted(ALLOWED_CONDITIONS)},
+                ))
+                continue
+            # Quality-trader canary: marcar para edge buffer + size scale aguas abajo
+            c["exact_range_canary"] = True
 
         our_prob_yes = estimate_prob_with_city(
             forecast_max,
@@ -14394,15 +14427,17 @@ def main(client):
 
         edge_pct = edge * 100
 
-        if edge_pct < MIN_EDGE:
-            edge_analysis.append(f"  ✗ {city} {side} {temp_label} {c['date_iso']} | forecast={forecast_max:.1f}°C | nuestro={our_prob*100:.1f}% mercado={mkt_price*100:.1f}% | edge={edge_pct:.1f}% → BAJO (min {MIN_EDGE}%)")
+        # v10.6.15: edge mínimo diferenciado para exact/range canary
+        _effective_min_edge = MIN_EDGE + MIN_EDGE_EXACT_RANGE_BUFFER_PP if c.get("exact_range_canary") else MIN_EDGE
+        if edge_pct < _effective_min_edge:
+            edge_analysis.append(f"  ✗ {city} {side} {temp_label} {c['date_iso']} | forecast={forecast_max:.1f}°C | nuestro={our_prob*100:.1f}% mercado={mkt_price*100:.1f}% | edge={edge_pct:.1f}% → BAJO (min {_effective_min_edge}%)")
             skip_log_entries.append(_make_skip_entry(
                 "below_min_edge", cycle_id=cycle_id,
                 city=city, date_iso=c["date_iso"], side=side, days_ahead=c["days_ahead"],
                 city_mode=c.get("city_mode"), allowlisted=c.get("allowlisted"),
                 edge_pct=round(edge_pct, 2),
                 our_prob=round(our_prob * 100, 2), mkt_prob=round(mkt_price * 100, 2),
-                min_edge=MIN_EDGE,
+                min_edge=_effective_min_edge,
                 forecast_max=forecast_max, threshold=threshold, threshold_high=threshold_high,
                 unit=c["unit"], condition=condition_name, sigma_used=sigma_used_val,
                 question=c["question"],
@@ -14426,6 +14461,23 @@ def main(client):
             ))
             continue
         position = _scaled_position(position, our_prob, c.get("city_mode"))
+        # v10.6.15: sizing adicional para exact/range canary (25% del normal: canary×exact_range)
+        if c.get("exact_range_canary") and isinstance(position, dict) and position.get("amount"):
+            _er_amount = max(MIN_BET, round(float(position["amount"]) * EXACT_RANGE_SIZE_SCALE, 2))
+            _er_price = float(position.get("aggressive_price", position.get("market_price", 0)) or 0)
+            if _er_price > 0:
+                _er_shares = round(_er_amount / _er_price, 2)
+                _er_profit = round(_er_shares * (1.0 - _er_price), 2)
+                _er_ev = round(our_prob * _er_profit - (1 - our_prob) * _er_amount, 2)
+                position = dict(position)
+                position.update({
+                    "amount": _er_amount,
+                    "shares": _er_shares,
+                    "profit_if_win": _er_profit,
+                    "loss_if_lose": _er_amount,
+                    "expected_value": _er_ev,
+                    "fraction_pct": round(float(position.get("fraction_pct", 0) or 0) * EXACT_RANGE_SIZE_SCALE, 2),
+                })
 
         if not c.get("allowlisted", True):
             shadow_trades.append({
