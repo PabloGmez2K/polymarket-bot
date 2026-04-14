@@ -2759,3 +2759,21 @@ Regla recomendada:
 - **`verify_before_deploy.py`:** 643→663/663 (+20 tests: 10 estáticos + 8 funcionales + 2 idempotencia/one-shot).
 - **No tocado:** `sync_city_policy_state()`, thresholds `SHADOW_CANARY_MIN_*`, `ALLOWLIST_REMOVE_*`, `MIN_EDGE`, `MIN_DAYS_AHEAD`, trading core, NOAA client, scheduler, `signals.json`, `trader_analyzer.py`.
 - **Nota operativa recurrente:** volumen bajo del scan loop sigue siendo backlog paralelo no resuelto (condition_filtered, scheduler, filtros temporales). Este módulo ayuda indirectamente al sizing Active pero no resuelve throughput de fondo.
+
+### Sesión 174 — Blocked signals WR baseline n=59 + Opus handoff condition_filtered (14 abr 2026)
+
+**Modelo:** Sonnet. **Handoff:** `docs/next-session-handoff-2026-04-13-B-blocked-settlement.md` (Opus, Sesión 168).
+
+- **Tool `blocked_signals_settlement_tracker.py` corrida localmente:** data fresca de Polymarket API → 59 resolutions (18 preexistentes + 41 nuevas).
+- **WR overall: 76.3% (45/59)** — cumple ampliamente threshold WR≥55% con n≥50 robusto. Veredicto oficial: **REOPEN CANDIDATE**.
+- **Por condition:** exact 72.5% (37/51), range 100% (8/8).
+- **Por ciudad (n≥3):** Seattle/Tokyo/Hong Kong 100%, Seoul/Toronto 75%, Chengdu/Shenzhen/Shanghai/Milan 66.7%, London 33.3% (outlier, n=3).
+- **Consenso vs solo:** consenso 66.7% (6/9), solo 78.0% (39/50).
+- **Hallazgo clave:** `ALLOWED_CONDITIONS` ya es env var en `bot.py:222` — añadir `exact,range` en Railway es el cambio mínimo. Cero código nuevo necesario para reapertura global.
+- **Decisión de diseño diferida a Opus:** preguntas abiertas — global vs quality-trader-gated, manejo de London (outlier 33.3%), edge mínimo diferenciado, scope de ciudades, fecha de revisión post-apertura.
+- **Entregables:**
+  - `data/runtime_import_derived/blocked_signals_resolutions.jsonl` actualizado a 59 records (gitignored)
+  - `docs/blocked-signals-wr-baseline-2026-04-13.md` actualizado con WR=76.3%/n=59
+  - `docs/handoffs/condition-filtered-reopen-handoff-2026-04-14.md` — spec completo para Opus
+  - `CONTEXTO.md` y `HISTORIAL_SESIONES.md` alineados
+- **No tocado:** `bot.py`, trading core, Railway, env vars, `ALLOWED_CONDITIONS`.
