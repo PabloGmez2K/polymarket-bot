@@ -7024,48 +7024,60 @@ def maybe_run_blocked_signals_check(state, now=None):
             except Exception:
                 pass
 
-        resolved_recs = [r for r in all_records if r.get("resolved")]
+        all_resolved = [r for r in all_records if r.get("resolved")]
+        # v10.6.18: excluir ciudades ya abiertas por canary — esas señales ya no están bloqueadas
+        # y cuentan en condition_reopen_monitor, no en este baseline
+        canary_excluded_recs = [r for r in all_resolved if r.get("city") in QUALITY_TRADER_CITIES_WHITELIST]
+        resolved_recs = [r for r in all_resolved if r.get("city") not in QUALITY_TRADER_CITIES_WHITELIST]
         n_resolved = len(resolved_recs)
         n_win = sum(1 for r in resolved_recs if r.get("win_for_trader"))
         wr_pct = round(n_win / n_resolved * 100, 1) if n_resolved > 0 else 0.0
 
         # --- Telegram diario ---
+        canary_excl_note = (
+            f" | Canary excluidas: {len(canary_excluded_recs)}" if canary_excluded_recs else ""
+        )
         send_telegram(
-            f"\U0001f4ca <b>Blocked signals (exact/range) — WR diaria</b>\n"
-            f"Resueltas: {n_resolved} | Wins: {n_win} | WR: {wr_pct}%\n"
-            f"<i>Necesita n\u226530 para primer corte, n\u226550 para decision robusta</i>"
+            f"\U0001f4ca <b>Blocked signals (no-canary) — WR diaria</b>\n"
+            f"Resueltas: {n_resolved} | Wins: {n_win} | WR: {wr_pct}%{canary_excl_note}\n"
+            f"<i>Solo ciudades a\u00fan bloqueadas (canary excluido)</i>"
         )
 
-        # --- Aviso one-shot n>=30: instruccion para Sonnet ---
-        if n_resolved >= 30 and not state.get("blocked_signals_30_notified"):
-            send_telegram(
-                f"\U0001f514 <b>Blocked signals — primera muestra lista (n={n_resolved})</b>\n"
-                f"WR actual: {wr_pct}% ({n_win}/{n_resolved} wins)\n\n"
-                f"<b>Instruccion para Sonnet:</b>\n"
-                f"<code>Analizar blocked_signals_resolutions.jsonl ({n_resolved} resoluciones). "
-                f"Calcular WR total, por condition (exact/range) y por ciudad (n\u22653). "
-                f"Comparar con threshold 55% para reabrir condition_filtered. "
-                f"Contexto: docs/next-session-handoff-2026-04-13-B-blocked-settlement.md "
-                f"y docs/blocked-signals-wr-baseline-2026-04-13.md</code>"
-            )
+        # --- One-shot n>=30/n>=50: suprimir si canary ya abierto (decision tomada en Sesion 175) ---
+        if now.date() >= date(2026, 4, 14):
             state["blocked_signals_30_notified"] = True
-
-        # --- Aviso one-shot n>=50: instruccion para Opus ---
-        if n_resolved >= 50 and not state.get("blocked_signals_50_notified"):
-            verdict = "REOPEN CANDIDATE" if wr_pct >= 55 else ("GRAY ZONE" if wr_pct >= 50 else "FILTER VALIDATED")
-            send_telegram(
-                f"\U0001f52c <b>Blocked signals — muestra robusta (n={n_resolved})</b>\n"
-                f"WR: {wr_pct}% ({n_win}/{n_resolved}) — {verdict}\n\n"
-                f"<b>Instruccion para Opus:</b>\n"
-                f"<code>Decision condition_filtered: WR={wr_pct}% en n={n_resolved} señales "
-                f"exact/range de quality traders. "
-                f"Si WR\u226555%: disenar experimento canary minimo "
-                f"(1 condicion, 1 ciudad, edge\u226520%, sizing minimo). "
-                f"Archivos: blocked_signals_resolutions.jsonl, "
-                f"docs/blocked-signals-wr-baseline-2026-04-13.md, "
-                f"docs/next-session-handoff-2026-04-13-B-blocked-settlement.md</code>"
-            )
             state["blocked_signals_50_notified"] = True
+        else:
+            # --- Aviso one-shot n>=30: instruccion para Sonnet ---
+            if n_resolved >= 30 and not state.get("blocked_signals_30_notified"):
+                send_telegram(
+                    f"\U0001f514 <b>Blocked signals — primera muestra lista (n={n_resolved})</b>\n"
+                    f"WR actual: {wr_pct}% ({n_win}/{n_resolved} wins)\n\n"
+                    f"<b>Instruccion para Sonnet:</b>\n"
+                    f"<code>Analizar blocked_signals_resolutions.jsonl ({n_resolved} resoluciones). "
+                    f"Calcular WR total, por condition (exact/range) y por ciudad (n\u22653). "
+                    f"Comparar con threshold 55% para reabrir condition_filtered. "
+                    f"Contexto: docs/next-session-handoff-2026-04-13-B-blocked-settlement.md "
+                    f"y docs/blocked-signals-wr-baseline-2026-04-13.md</code>"
+                )
+                state["blocked_signals_30_notified"] = True
+
+            # --- Aviso one-shot n>=50: instruccion para Opus ---
+            if n_resolved >= 50 and not state.get("blocked_signals_50_notified"):
+                verdict = "REOPEN CANDIDATE" if wr_pct >= 55 else ("GRAY ZONE" if wr_pct >= 50 else "FILTER VALIDATED")
+                send_telegram(
+                    f"\U0001f52c <b>Blocked signals — muestra robusta (n={n_resolved})</b>\n"
+                    f"WR: {wr_pct}% ({n_win}/{n_resolved}) — {verdict}\n\n"
+                    f"<b>Instruccion para Opus:</b>\n"
+                    f"<code>Decision condition_filtered: WR={wr_pct}% en n={n_resolved} señales "
+                    f"exact/range de quality traders. "
+                    f"Si WR\u226555%: disenar experimento canary minimo "
+                    f"(1 condicion, 1 ciudad, edge\u226520%, sizing minimo). "
+                    f"Archivos: blocked_signals_resolutions.jsonl, "
+                    f"docs/blocked-signals-wr-baseline-2026-04-13.md, "
+                    f"docs/next-session-handoff-2026-04-13-B-blocked-settlement.md</code>"
+                )
+                state["blocked_signals_50_notified"] = True
 
     except Exception as e:
         logger = globals().get("log")
