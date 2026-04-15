@@ -56,6 +56,7 @@ def compute_gate(row):
     drift_flags = row.get("drift_flags") or []
     visibility_score = row.get("visibility_evidence", {}).get("score", 0)
     edge_score = row.get("edge_evidence", {}).get("score", 0)
+    structural_block_guardrail = row.get("structural_block_guardrail") or {}
 
     if (
         any(flag in drift_flags for flag in {"policy_divergence", "runtime_policy_collision"})
@@ -91,6 +92,19 @@ def compute_gate(row):
             "codex_prompt": build_codex_prompt(
                 row,
                 "confirmar que el bloqueo runtime responde a fuente rota y no a pausa operativa",
+            ),
+        }
+    if policy_mode == "blocked" and structural_block_guardrail:
+        return {
+            "gate_status": "blocked_with_signal",
+            "review_priority": "soon" if (edge_score > 0 or visibility_score > 0) else "watch",
+            "codex_instruction": (
+                f"Revisar si {row['city']} sigue bloqueada por mismatch settlement/source documentado "
+                f"o si el aviso analitico necesita refresh."
+            ),
+            "codex_prompt": build_codex_prompt(
+                row,
+                "auditar si el bloqueo estructural sigue bien modelado en city intelligence y separar fuente rota real de policy heredada",
             ),
         }
     if recommendation == "candidate_for_canary_validation":

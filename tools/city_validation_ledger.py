@@ -34,6 +34,13 @@ RUNTIME_POLICY_TO_EFFECTIVE = {
     "auto_shadow": "shadow",
 }
 
+STRUCTURAL_BLOCK_GUARDRAILS = {
+    "London": {
+        "reason": "weather_underground_openmeteo_mismatch",
+        "detail": "Explicit documented settlement/source mismatch with repeated losses; keep blocked until revalidated.",
+    }
+}
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -417,13 +424,28 @@ def normalize_runtime_policy(runtime_policy_mode):
     return RUNTIME_POLICY_TO_EFFECTIVE.get(runtime_policy_mode)
 
 
+def resolve_effective_policy_mode(cross_policy_mode, effective_runtime_policy):
+    if "blocked" in {cross_policy_mode, effective_runtime_policy}:
+        return "blocked"
+    if cross_policy_mode == "active":
+        return "active"
+    if "canary" in {cross_policy_mode, effective_runtime_policy}:
+        return "canary"
+    if "shadow" in {cross_policy_mode, effective_runtime_policy}:
+        return "shadow"
+    return effective_runtime_policy or cross_policy_mode
+
+
 def build_policy_context(city_row, runtime_policy_lookup):
     city = city_row.get("city", "")
     cross_policy_mode = city_row.get("policy_mode", "unknown")
     runtime_policy = runtime_policy_lookup.get(city, {})
     runtime_policy_mode = runtime_policy.get("runtime_policy_mode", "runtime_unknown")
     effective_runtime_policy = normalize_runtime_policy(runtime_policy_mode)
-    effective_policy_mode = effective_runtime_policy or cross_policy_mode
+    effective_policy_mode = resolve_effective_policy_mode(
+        cross_policy_mode=cross_policy_mode,
+        effective_runtime_policy=effective_runtime_policy,
+    )
 
     drift_flags = []
     if (
@@ -568,7 +590,14 @@ def compute_settlement_fidelity(city, resolution_meta, probe_markets, audit_summ
     }
 
 
+def get_structural_block_guardrail(city, policy_mode):
+    if policy_mode != "blocked":
+        return None
+    return STRUCTURAL_BLOCK_GUARDRAILS.get(city)
+
+
 def classify_bottleneck(
+    structural_block_guardrail,
     n_reference_traders,
     visible_snapshots,
     settlement_fidelity,
@@ -579,6 +608,8 @@ def classify_bottleneck(
 ):
     if enrichment_health.get("likely_input_degraded"):
         return "trader_input_degraded"
+    if structural_block_guardrail:
+        return "source_fidelity"
     if n_reference_traders < 3:
         return "trader_discovery"
     if quality_reference_count == 0 and active_signal_reference_count == 0:
@@ -683,6 +714,7 @@ def build_city_row(
     audit_summary = summarize_audit(city, audit)
     resolution_meta = bot.RESOLUTION_ICAO.get(city, {})
     settlement_fidelity = compute_settlement_fidelity(city, resolution_meta, probe_markets, audit_summary)
+    structural_block_guardrail = get_structural_block_guardrail(city, policy_mode)
 
     current_probe_markets = int(city_row.get("current_probe_markets", 0) or 0)
     visible_snapshots = int(tracker_state.get("n_visible_snapshots", 0) or 0)
@@ -725,6 +757,7 @@ def build_city_row(
     if cross_policy_mode == "runtime_only":
         evidence_status = "runtime_only"
     bottleneck = classify_bottleneck(
+        structural_block_guardrail=structural_block_guardrail,
         n_reference_traders=n_reference_traders,
         visible_snapshots=visible_snapshots,
         settlement_fidelity=settlement_fidelity,
@@ -763,6 +796,8 @@ def build_city_row(
         rationale.append(f"{shadow_summary['edge_hits']} shadow edge hits")
     if audit_summary["noaa_rows"]:
         rationale.append(f"{audit_summary['noaa_rows']} NOAA rows")
+    if structural_block_guardrail:
+        rationale.append(f"blocked guardrail {structural_block_guardrail['reason']}")
     rationale.append(f"source risk {settlement_fidelity['risk']}")
 
     reference_examples = []
@@ -809,6 +844,7 @@ def build_city_row(
             "latest_noaa_date": audit_summary["latest_date"],
         },
         "settlement_fidelity": settlement_fidelity,
+        "structural_block_guardrail": structural_block_guardrail,
         "bottleneck": bottleneck,
         "base_evidence_status": base_evidence_status,
         "evidence_status": evidence_status,

@@ -2792,6 +2792,19 @@ Regla recomendada:
 - **Pendiente:** `tools/condition_reopen_monitor.py` + integración Telegram automática → Sesión 176.
 - `verify_before_deploy.py` → 671/671.
 
+### Sesión 178 — London city-intelligence audit + policy priority fix (15 abr 2026)
+
+**Modelo:** Codex.
+
+- **Refresh runtime read-only:** `tools/railway_runtime_snapshot_pull.ps1` se ejecuta con bypass de `ExecutionPolicy` para traer snapshot fresco y eliminar el `manifest_drift` local que estaba distorsionando el ledger.
+- **Diagnóstico London reanclado:** la ciudad deja de leerse como simple `background_watch`/`trader_discovery`; el problema real pasa a ser `blocked` con `policy_divergence` (`cross=blocked`, `runtime=auto_canary`) y cuello `source_fidelity`.
+- **Fix analítico en `tools/city_validation_ledger.py`:** se añade `STRUCTURAL_BLOCK_GUARDRAILS` para London y se corrige la prioridad de modos para respetar la regla canónica de `AGENTS.md` (`blocked > canary > shadow`). Con eso London vuelve a `policy_mode=blocked`, carga `structural_block_guardrail`, y su bottleneck se clasifica como `source_fidelity`.
+- **Ajuste en `tools/city_promotion_gate.py`:** se mejora el tratamiento de ciudades con bloqueo estructural explícito para que la cola de revisión no las cuente como simple falta de discovery.
+- **Auditoría settlement/source fresca de London:** `tools/settlement_fidelity_probe.py --city London --limit 20` encuentra 10 mercados con Open-Meteo, 0/10 con NOAA observado y `WU` todavía `pending_not_automated`; `shadow_city_tracking` muestra `markets_seen=128`, `edge_hits=2`, `cycles_seen=41`, `best_edge_pct=28.4`. `docs/blocked-signals-wr-baseline-2026-04-13.md` sigue dejando London en 33.3% (1/3) para exact/range.
+- **Veredicto operativo:** mantener London en `blocked`; no usarla como candidata de monetización mientras no exista una revalidación WU-backed o una comparación manual robusta de settlement.
+- **Artefactos nuevos:** `docs/london-city-intelligence-warning-review-2026-04-15.md` y `docs/london-settlement-source-audit-2026-04-15.md`.
+- **Verificación:** `python -m py_compile tools/city_validation_ledger.py tools/city_promotion_gate.py` OK; `python verify_before_deploy.py` se ejecuta al cierre antes de commit/push.
+
 ### Sesión 176 — condition_reopen_monitor + integración bot (v10.6.16) (14 abr 2026)
 
 **Modelo:** Sonnet. **Handoff:** `docs/handoffs/condition-filtered-monitor-handoff-2026-04-14.md` (Sonnet, Sesión 175).
