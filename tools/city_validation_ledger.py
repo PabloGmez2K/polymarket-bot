@@ -23,6 +23,7 @@ DEFAULT_TRACKER_PATH = REPO_ROOT / "data" / "city_probe_visibility_tracker.json"
 DEFAULT_SHADOW_TRACKING_PATH = REPO_ROOT / "data" / "runtime_import" / "shadow_city_tracking.json"
 DEFAULT_AUDIT_PATH = REPO_ROOT / "data" / "runtime_import" / "audit.json"
 DEFAULT_CITY_POLICY_STATE_PATH = REPO_ROOT / "data" / "runtime_import" / "city_policy_state.json"
+DEFAULT_SKIP_LOG_PATH = REPO_ROOT / "data" / "runtime_import" / "skip_log.jsonl"
 DEFAULT_RUNTIME_MANIFEST_PATH = REPO_ROOT / "data" / "runtime_import" / "runtime_import_manifest.json"
 DEFAULT_JSON_OUTPUT = REPO_ROOT / "data" / "city_validation_ledger.json"
 DEFAULT_MD_OUTPUT = REPO_ROOT / "docs" / "city_validation_ledger_latest.md"
@@ -55,10 +56,13 @@ def parse_args():
     parser.add_argument("--shadow-tracking", default=str(DEFAULT_SHADOW_TRACKING_PATH))
     parser.add_argument("--audit", default=str(DEFAULT_AUDIT_PATH))
     parser.add_argument("--city-policy-state", default=str(DEFAULT_CITY_POLICY_STATE_PATH))
+    parser.add_argument("--skip-log", default=str(DEFAULT_SKIP_LOG_PATH))
     parser.add_argument("--runtime-manifest", default=str(DEFAULT_RUNTIME_MANIFEST_PATH))
     parser.add_argument("--max-runtime-snapshot-age-hours", type=float, default=24.0)
     parser.add_argument("--min-reference-traders", type=int, default=3)
     parser.add_argument("--min-visible-snapshots", type=int, default=2)
+    parser.add_argument("--recent-skip-cycles", type=int, default=2)
+    parser.add_argument("--recent-skip-min-edge", type=float, default=15.0)
     parser.add_argument("--json-output", default=str(DEFAULT_JSON_OUTPUT))
     parser.add_argument("--md-output", default=str(DEFAULT_MD_OUTPUT))
     return parser.parse_args()
@@ -77,6 +81,24 @@ def ensure_parent(path_str):
     path = Path(path_str)
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def load_jsonl(path_str):
+    path = Path(path_str)
+    if not path.exists():
+        return []
+    rows = []
+    for raw_line in path.read_text(encoding="utf-8-sig").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+    return rows
 
 
 def parse_utc_datetime(value):
@@ -547,6 +569,84 @@ def summarize_audit(city, audit):
     }
 
 
+def summarize_recent_skip_log(city, skip_rows, recent_skip_cycles, recent_skip_min_edge):
+    if not isinstance(skip_rows, list) or not skip_rows:
+        return {
+            "available": False,
+            "recent_cycles": [],
+            "total_recent_skips": 0,
+            "reason_counts": {},
+            "useful_skip_count": 0,
+            "useful_reason_counts": {},
+            "useful_policy_gate_count": 0,
+            "useful_examples": [],
+        }
+
+    cycle_ids = sorted(
+        {
+            str(row.get("cycle_id", "")).strip()
+            for row in skip_rows
+            if isinstance(row, dict) and str(row.get("cycle_id", "")).strip()
+        }
+    )
+    if not cycle_ids:
+        return {
+            "available": True,
+            "recent_cycles": [],
+            "total_recent_skips": 0,
+            "reason_counts": {},
+            "useful_skip_count": 0,
+            "useful_reason_counts": {},
+            "useful_policy_gate_count": 0,
+            "useful_examples": [],
+        }
+
+    recent_cycles = cycle_ids[-max(1, int(recent_skip_cycles)):]
+    recent_rows = [
+        row for row in skip_rows
+        if isinstance(row, dict)
+        and row.get("city") == city
+        and row.get("cycle_id") in recent_cycles
+    ]
+    useful_rows = []
+    for row in recent_rows:
+        edge_pct = row.get("edge_pct")
+        if edge_pct is None:
+            continue
+        try:
+            if float(edge_pct) >= float(recent_skip_min_edge):
+                useful_rows.append(row)
+        except (TypeError, ValueError):
+            continue
+
+    useful_policy_gate_count = sum(
+        1 for row in useful_rows
+        if row.get("skip_reason") in {"shadow_only_override", "fuera_allowlist"}
+    )
+
+    useful_examples = []
+    for row in useful_rows[:3]:
+        useful_examples.append({
+            "cycle_id": row.get("cycle_id"),
+            "skip_reason": row.get("skip_reason"),
+            "condition": row.get("condition"),
+            "edge_pct": row.get("edge_pct"),
+            "question": row.get("question"),
+            "city_mode": row.get("city_mode"),
+        })
+
+    return {
+        "available": True,
+        "recent_cycles": recent_cycles,
+        "total_recent_skips": len(recent_rows),
+        "reason_counts": dict(Counter(row.get("skip_reason") for row in recent_rows)),
+        "useful_skip_count": len(useful_rows),
+        "useful_reason_counts": dict(Counter(row.get("skip_reason") for row in useful_rows)),
+        "useful_policy_gate_count": useful_policy_gate_count,
+        "useful_examples": useful_examples,
+    }
+
+
 def compute_settlement_fidelity(city, resolution_meta, probe_markets, audit_summary):
     score = 0
     rationale = []
@@ -602,6 +702,7 @@ def classify_bottleneck(
     visible_snapshots,
     settlement_fidelity,
     shadow_summary,
+    recent_skip_summary,
     quality_reference_count,
     active_signal_reference_count,
     enrichment_health,
@@ -610,6 +711,8 @@ def classify_bottleneck(
         return "trader_input_degraded"
     if structural_block_guardrail:
         return "source_fidelity"
+    if recent_skip_summary.get("useful_policy_gate_count", 0) > 0:
+        return "policy_execution_gate"
     if n_reference_traders < 3:
         return "trader_discovery"
     if quality_reference_count == 0 and active_signal_reference_count == 0:
@@ -659,6 +762,8 @@ def compute_evidence_status(
 def compute_recommendation(policy_mode, evidence_status, shadow_summary, settlement_fidelity, bottleneck):
     if bottleneck in {"trader_input_degraded", "trader_input_quality"}:
         return "audit_trader_input"
+    if bottleneck == "policy_execution_gate":
+        return "review_runtime_policy_gate"
     if evidence_status == "insufficient":
         return "insufficient_evidence"
     if evidence_status == "actionable":
@@ -679,6 +784,8 @@ def compute_recommendation(policy_mode, evidence_status, shadow_summary, settlem
 
 
 def reconcile_runtime_recommendation(recommendation, runtime_policy_mode, drift_flags):
+    if recommendation == "review_runtime_policy_gate":
+        return recommendation
     if any(flag in drift_flags for flag in {"policy_divergence", "runtime_policy_collision"}):
         return "audit_runtime_drift"
     if runtime_policy_mode == "auto_canary":
@@ -695,8 +802,11 @@ def build_city_row(
     tracker_lookup,
     shadow_tracking,
     audit,
+    skip_rows,
     min_reference_traders,
     min_visible_snapshots,
+    recent_skip_cycles,
+    recent_skip_min_edge,
     enrichment_health,
     runtime_policy_lookup,
 ):
@@ -712,6 +822,12 @@ def build_city_row(
     probe_markets = probe_by_city.get(city, [])
     shadow_summary = summarize_shadow_tracking(city, shadow_tracking)
     audit_summary = summarize_audit(city, audit)
+    recent_skip_summary = summarize_recent_skip_log(
+        city=city,
+        skip_rows=skip_rows,
+        recent_skip_cycles=recent_skip_cycles,
+        recent_skip_min_edge=recent_skip_min_edge,
+    )
     resolution_meta = bot.RESOLUTION_ICAO.get(city, {})
     settlement_fidelity = compute_settlement_fidelity(city, resolution_meta, probe_markets, audit_summary)
     structural_block_guardrail = get_structural_block_guardrail(city, policy_mode)
@@ -762,6 +878,7 @@ def build_city_row(
         visible_snapshots=visible_snapshots,
         settlement_fidelity=settlement_fidelity,
         shadow_summary=shadow_summary,
+        recent_skip_summary=recent_skip_summary,
         quality_reference_count=quality_reference_count,
         active_signal_reference_count=active_unproven_refs,
         enrichment_health=enrichment_health,
@@ -844,6 +961,7 @@ def build_city_row(
             "latest_noaa_date": audit_summary["latest_date"],
         },
         "settlement_fidelity": settlement_fidelity,
+        "recent_skip_evidence": recent_skip_summary,
         "structural_block_guardrail": structural_block_guardrail,
         "bottleneck": bottleneck,
         "base_evidence_status": base_evidence_status,
@@ -895,11 +1013,12 @@ def render_markdown(payload):
         f"- Evidence status counts: `{payload['summary']['evidence_status_counts']}`",
         f"- Recommendation counts: `{payload['summary']['recommendation_counts']}`",
         f"- Bottleneck counts: `{payload['summary']['bottleneck_counts']}`",
+        f"- Recent useful skips: `{payload['summary']['recent_useful_skip_reason_counts']}`",
         "",
         "## Top Cities",
         "",
-        "| City | Policy | Runtime policy | Cross policy | Drift | Evidence | Recommendation | Visibility | Edge | Source risk | Bottleneck |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| City | Policy | Runtime policy | Cross policy | Drift | Evidence | Recommendation | Visibility | Edge | Useful skips | Source risk | Bottleneck |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in payload["cities"][:15]:
         lines.append(
@@ -907,6 +1026,7 @@ def render_markdown(payload):
             f"{row.get('cross_policy_mode')} | {','.join(row.get('drift_flags', [])) or '-'} | "
             f"{row['evidence_status']} | {row['recommendation']} | "
             f"{row['visibility_evidence']['score']} | {row['edge_evidence']['score']} | "
+            f"{row.get('recent_skip_evidence', {}).get('useful_reason_counts', {})} | "
             f"{row['settlement_fidelity']['risk']} | {row['bottleneck']} |"
         )
 
@@ -960,6 +1080,7 @@ def main():
     shadow_tracking = load_json(args.shadow_tracking, required=False)
     audit = load_json(args.audit, required=False)
     city_policy_state = load_json(args.city_policy_state, required=False)
+    skip_rows = load_jsonl(args.skip_log)
 
     enrichment_lookup = build_enrichment_lookup(enrichment)
     enrichment_health = summarize_enrichment_health(enrichment)
@@ -982,8 +1103,11 @@ def main():
                 tracker_lookup=tracker_lookup,
                 shadow_tracking=shadow_tracking,
                 audit=audit,
+                skip_rows=skip_rows,
                 min_reference_traders=args.min_reference_traders,
                 min_visible_snapshots=args.min_visible_snapshots,
+                recent_skip_cycles=args.recent_skip_cycles,
+                recent_skip_min_edge=args.recent_skip_min_edge,
                 enrichment_health=enrichment_health,
                 runtime_policy_lookup=runtime_policy_lookup,
             )
@@ -1009,6 +1133,7 @@ def main():
             "shadow_tracking": args.shadow_tracking,
             "audit": args.audit,
             "city_policy_state": args.city_policy_state,
+            "skip_log": args.skip_log,
             "runtime_manifest": args.runtime_manifest,
         },
         "summary": {
@@ -1021,6 +1146,14 @@ def main():
             "evidence_status_counts": dict(Counter(row["evidence_status"] for row in rows)),
             "recommendation_counts": dict(Counter(row["recommendation"] for row in rows)),
             "bottleneck_counts": dict(Counter(row["bottleneck"] for row in rows)),
+            "recent_useful_skip_reason_counts": dict(
+                Counter(
+                    reason
+                    for row in rows
+                    for reason, count in (row.get("recent_skip_evidence", {}).get("useful_reason_counts", {}) or {}).items()
+                    for _ in range(int(count))
+                )
+            ),
             "drift_flag_counts": dict(Counter(flag for row in rows for flag in row.get("drift_flags", []))),
             "runtime_policy_mode_counts": dict(Counter(row["runtime_policy_mode"] for row in rows)),
             "enrichment_health": enrichment_health,

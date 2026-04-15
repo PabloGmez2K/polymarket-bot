@@ -157,6 +157,20 @@ def compute_gate(row):
                 "auditar por que el input de traders se degrado, confirmar si la fuente externa sigue viva y decidir si esta ciudad debe seguir en review o pasar a pausa analitica",
             ),
         }
+    if recommendation == "review_runtime_policy_gate" or bottleneck == "policy_execution_gate":
+        useful_skips = row.get("recent_skip_evidence", {}).get("useful_reason_counts", {}) or {}
+        return {
+            "gate_status": "review_runtime_policy_gate",
+            "review_priority": "now",
+            "codex_instruction": (
+                f"Revisar gate operativo en {row['city']}: runtime ya genero edge util reciente "
+                f"pero la ejecucion quedo frenada por {useful_skips or 'policy gate'}."
+            ),
+            "codex_prompt": build_codex_prompt(
+                row,
+                "determinar si el cuello actual es policy shadow-only/allowlist, confirmar si eso explica la falta de throughput util y dejar la siguiente accion concreta sin tocar trading core",
+            ),
+        }
     if bottleneck == "shadow_validation":
         return {
             "gate_status": "needs_shadow_validation",
@@ -229,6 +243,13 @@ def compute_gate(row):
 
 
 def compute_system_bottleneck(rows):
+    policy_gate_hits = sum(
+        int((row.get("recent_skip_evidence", {}).get("useful_policy_gate_count", 0) or 0))
+        for row in rows
+        if isinstance(row, dict)
+    )
+    if policy_gate_hits > 0:
+        return "policy_execution_gate"
     counts = Counter(row.get("bottleneck") for row in rows)
     if not counts:
         return "unknown"
