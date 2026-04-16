@@ -10528,9 +10528,25 @@ def load_cycle_summary_data():
 
 
 def _is_shadow_only():
-    """True when ACTIVE_TRADING_CITIES is effectively empty (e.g. 'NONE' or blank)."""
-    real_cities = {c for c in ACTIVE_TRADING_CITIES if c.upper() not in {"NONE", ""}}
-    return len(real_cities) == 0
+    """True when system is in global observation-only mode (no real trades).
+
+    Checks SHADOW_ONLY_MODE env var first (explicit control).
+    Legacy fallback: shadow-only when ACTIVE_TRADING_CITIES is empty/NONE and no
+    explicit canary cities are configured. This preserves backward compatibility
+    but decouples the pause toggle from the city hierarchy level.
+
+    Design intent: ACTIVE_TRADING_CITIES=NONE means "no city has earned active status
+    yet", NOT "system is paused". Use SHADOW_ONLY_MODE=true for an explicit pause.
+    """
+    val = os.getenv("SHADOW_ONLY_MODE", "").strip().lower()
+    if val in {"true", "1", "yes"}:
+        return True
+    if val in {"false", "0", "no"}:
+        return False
+    # Legacy fallback: no active cities AND no explicit canary cities → shadow-only
+    real_active = {c for c in ACTIVE_TRADING_CITIES if c.upper() not in {"NONE", ""}}
+    real_canary = {c for c in CANARY_TRADING_CITIES if c.strip()}
+    return len(real_active) == 0 and len(real_canary) == 0
 
 
 def _dashboard_mode_label():
