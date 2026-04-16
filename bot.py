@@ -6574,6 +6574,8 @@ def build_daily_summary_payload(now=None):
     """Construye payload del resumen diario (datos crudos sin formateo)."""
     if now is None:
         now = datetime.now(timezone.utc)
+    shadow_only_helper = globals().get("_is_shadow_only")
+    shadow_only = shadow_only_helper() if callable(shadow_only_helper) else (len(ACTIVE_TRADING_CITIES) == 0)
     operable_counts_helper = globals().get("_get_live_operable_city_counts")
     operable_counts = (
         operable_counts_helper()
@@ -6591,7 +6593,7 @@ def build_daily_summary_payload(now=None):
         "version": BOT_VERSION,
         "logic_series": LOGIC_SERIES,
         "active_cities_count": len(ACTIVE_TRADING_CITIES),
-        "shadow_only": len(ACTIVE_TRADING_CITIES) == 0,
+        "shadow_only": shadow_only,
         "operable_active_count": operable_counts["active"],
         "operable_canary_count": operable_counts["canary"],
     }
