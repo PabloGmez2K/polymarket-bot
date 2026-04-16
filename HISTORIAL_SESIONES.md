@@ -2862,3 +2862,11 @@ Regla recomendada:
 - **Deploy Railway verificado:** deployment `af3c82b8-7f4b-4a55-bd3f-14ecb40f8edc`, arranque `2026-04-16 07:36:23 UTC`, logs con `Modo: REAL`.
 - **Prueba live post-deploy cerrada:** tras esperar al ciclo `2026-04-16T08:00`, `tools/railway_runtime_snapshot_pull.ps1` refresca `data/runtime_import/`. Resultado: `shadow_only_override` nuevo = **0** desde el deploy; las ciudades `canary` pasan con `allowlisted=true`; `Seoul` ya no cae por override y sus skips pasan a `price_out_of_range`, `condition_filtered` y `existing_position`. El único `fuera_allowlist` nuevo del ciclo corresponde a `Hong Kong` en `shadow`.
 - **Veredicto final:** **bug residual corregido**.
+### Sesión 183 — shadow→NOAA funnel hardening (16 abr 2026)
+
+- Se audita el embudo `shadow -> NOAA -> WR observado` con `data/runtime_import/shadow_city_tracking.json` y `audit.json`: `30` `edge_hit=true` recientes, pero casi toda la muestra se perdía antes del join NOAA por parser legacy y por depender de una ventana corta de ciclos.
+- `bot.py` endurece la semántica shadow: `_shadow_condition_code()` reutiliza `parse_temperature_question()`, se añade `_extract_threshold_canonical()`, y `_shadow_signal_signature()` / `_build_shadow_signal_record()` dejan de persistir señales válidas con `threshold=None` cuando la pregunta es `or higher` / `or below`.
+- `_get_noaa_candidate_dates()` pasa a priorizar una base durable desde `directional_history` antes de caer al fallback de `scanned_markets` recientes, para que una señal shadow elegible por lag NOAA no desaparezca solo porque pasaron suficientes ciclos.
+- `build_dashboard_road_to_real()` y `get_dashboard_alert_summary()` dejan de usar `shadow.summary.edge_hits` como proxy mezclado y pasan a leer `total_signals`, `matched`, `resolved` y `win_rate` desde `_build_shadow_noaa_resolution_stats()`.
+- Se corrige además una referencia latente a `shadow_summary` sin inicializar en `build_dashboard_city_decisions()`.
+- Verificación: `python -m py_compile bot.py` OK. `verify_before_deploy.py` ya no falla por la lógica del funnel, pero el harness sigue cayendo en Windows por `Access denied` al tocar `%TEMP%`, así que ese gate queda pendiente de limpieza externa o aislamiento del bug del verificador.

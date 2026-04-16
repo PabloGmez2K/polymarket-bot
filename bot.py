@@ -5279,8 +5279,15 @@ def build_dashboard_city_observation(audit=None, city_accuracy=None, city_policy
 
 def _shadow_condition_code(question):
     """Extract directional condition code from question text."""
+    parsed = parse_temperature_question(str(question or ""))
+    if isinstance(parsed, dict):
+        condition = str(parsed.get("condition", "") or "")
+        if condition in {"at_or_above", "at_or_below"}:
+            return condition
+        if condition in {"range", "exact"}:
+            return "range/exact"
     q = str(question or "").lower()
-    if "above" in q:
+    if "above" in q or "higher" in q:
         return "at_or_above"
     if "below" in q:
         return "at_or_below"
@@ -5558,6 +5565,7 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
     policy_state = load_city_policy_state()
 
     shadow_cities = shadow_tracking.get("cities", {}) if isinstance(shadow_tracking, dict) else {}
+    shadow_summary = shadow_tracking.get("summary", {}) if isinstance(shadow_tracking, dict) else {}
     auto_canary = policy_state.get("auto_canary_cities", {}) if isinstance(policy_state, dict) else {}
     auto_shadow = policy_state.get("auto_shadow_cities", {}) if isinstance(policy_state, dict) else {}
     auto_blocked = policy_state.get("auto_blocked_cities", {}) if isinstance(policy_state, dict) else {}
@@ -6073,8 +6081,13 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
             )
         )
 
-    shadow_summary = shadow_tracking.get("summary", {}) if isinstance(shadow_tracking, dict) else {}
-    recent_opps = shadow_tracking.get("directional_history", []) if isinstance(shadow_tracking, dict) else []
+    audit_loader = globals().get("load_audit_data")
+    audit = audit_loader() if callable(audit_loader) else {}
+    shadow_resolution_builder = globals().get("_build_shadow_noaa_resolution_stats")
+    if callable(shadow_resolution_builder):
+        shadow_resolution = shadow_resolution_builder(shadow_tracking, audit=audit)
+    else:
+        shadow_resolution = {"total_signals": 0, "matched": 0, "resolved": 0, "win_rate": 0.0}
     promotable = len(buckets["promote"])
     top_candidate_rows = [
         item for item in rows
@@ -7952,7 +7965,7 @@ def _shadow_signal_signature(row):
     side = str(row.get("side", "") or "").strip().upper()
     question = str(row.get("question", "") or "").strip()
     condition = _shadow_condition_code(question)
-    threshold = _extract_threshold_from_question(question)
+    threshold = _extract_threshold_canonical(question)
     threshold_key = "na"
     if threshold is not None:
         threshold_key = f"{threshold:.3f}".rstrip("0").rstrip(".")
@@ -7977,7 +7990,7 @@ def _build_shadow_signal_record(row):
     if not city or not market_date or not side or not signal_key:
         return None
     seen_at = str(row.get("seen_at") or datetime.now(timezone.utc).isoformat())
-    threshold = _extract_threshold_from_question(question)
+    threshold = _extract_threshold_canonical(question)
     return {
         "signal_key": signal_key,
         "city": city,
@@ -8080,6 +8093,7 @@ def _build_shadow_noaa_resolution_stats(shadow_tracking, audit=None):
         noaa_lookup[(city, market_date)] = float(obs_temp)
 
     total_signals = 0
+    matched = 0
     resolved = 0
     wins = 0
     threshold_missing = 0
@@ -8095,6 +8109,7 @@ def _build_shadow_noaa_resolution_stats(shadow_tracking, audit=None):
         observed_temp = noaa_lookup.get((city, market_date))
         if observed_temp is None:
             continue
+        matched += 1
         if threshold is None:
             threshold_missing += 1
             continue
@@ -8107,6 +8122,7 @@ def _build_shadow_noaa_resolution_stats(shadow_tracking, audit=None):
     win_rate = round((wins / resolved * 100), 1) if resolved > 0 else 0.0
     return {
         "total_signals": total_signals,
+        "matched": matched,
         "resolved": resolved,
         "wins": wins,
         "win_rate": win_rate,
@@ -8131,12 +8147,19 @@ def build_dashboard_road_to_real(
         city_accuracy = get_city_accuracy()
     if alerts is None:
         alerts = get_dashboard_alert_summary()
+    audit_loader = globals().get("load_audit_data")
+    audit = audit_loader() if callable(audit_loader) else {}
+    shadow_resolution_builder = globals().get("_build_shadow_noaa_resolution_stats")
+    if callable(shadow_resolution_builder):
+        shadow_resolution = shadow_resolution_builder(shadow_tracking, audit=audit)
+    else:
+        shadow_resolution = {"total_signals": 0, "matched": 0, "resolved": 0, "win_rate": 0.0}
 
     shadow_summary = shadow_tracking.get("summary", {}) if isinstance(shadow_tracking, dict) else {}
     recent_opps = shadow_tracking.get("directional_history", []) if isinstance(shadow_tracking, dict) else []
 
     # R1: >= 30 shadow directional signals (edge_hit=True means passed condition + edge)
-    directional_signals = shadow_summary.get("edge_hits", 0) or 0
+    directional_signals = int(shadow_resolution.get("total_signals", 0) or 0)
     r1_target = 30
     r1_current = min(directional_signals, r1_target)
     r1_done = r1_current >= r1_target
@@ -8148,7 +8171,7 @@ def build_dashboard_road_to_real(
     r2_done = r2_current >= r2_target
 
     # R3: Simulated WR >= 45% — join shadow directional signals with NOAA observed by city+date
-    audit = load_audit_data()
+    audit = audit if isinstance(audit, dict) else {}
     # Build lookup: (city, date) → observed_temp_c from NOAA
     noaa_lookup = {}
     if isinstance(audit, dict):
@@ -8186,6 +8209,9 @@ def build_dashboard_road_to_real(
         elif side == "NO" and observed_temp < threshold:
             directional_wins += 1
     sim_wr = round((directional_wins / directional_resolved * 100), 1) if directional_resolved > 0 else 0.0
+    matched_with_noaa = int(shadow_resolution.get("matched", 0) or 0)
+    directional_resolved = int(shadow_resolution.get("resolved", 0) or 0)
+    sim_wr = float(shadow_resolution.get("win_rate", 0.0) or 0.0)
     r3_target = 45.0
     r3_current = sim_wr
     r3_done = sim_wr >= r3_target and directional_resolved >= 5
@@ -10198,6 +10224,11 @@ def get_dashboard_alert_summary():
     else:
         city_observation = {"active_rows": []}
     shadow_tracking = load_shadow_city_tracking() if "load_shadow_city_tracking" in globals() else {}
+    shadow_resolution_builder = globals().get("_build_shadow_noaa_resolution_stats")
+    if callable(shadow_resolution_builder):
+        shadow_resolution = shadow_resolution_builder(shadow_tracking, audit=audit)
+    else:
+        shadow_resolution = {"total_signals": 0, "matched": 0, "resolved": 0, "win_rate": 0.0}
     pending = audit.get("pending_sells", [])
     now = datetime.now(timezone.utc)
 
@@ -10257,7 +10288,7 @@ def get_dashboard_alert_summary():
     ]
 
     shadow_summary = shadow_tracking.get("summary", {}) if isinstance(shadow_tracking, dict) else {}
-    directional_signals = int(shadow_summary.get("edge_hits", 0) or 0)
+    directional_signals = int(shadow_resolution.get("total_signals", 0) or 0)
     recent_opps = shadow_tracking.get("directional_history", []) if isinstance(shadow_tracking, dict) else []
     noaa_lookup = {}
     observed_audit_key = globals().get("OBSERVED_AUDIT_KEY", "observed_vs_forecast")
@@ -10292,6 +10323,8 @@ def get_dashboard_alert_summary():
         elif side == "NO" and observed_temp < threshold:
             directional_wins += 1
     directional_wr = round((directional_wins / directional_resolved * 100), 1) if directional_resolved > 0 else 0.0
+    directional_resolved = int(shadow_resolution.get("resolved", 0) or 0)
+    directional_wr = float(shadow_resolution.get("win_rate", 0.0) or 0.0)
 
     active_items = []
     if issue != "ok":
@@ -13761,7 +13794,7 @@ def _iter_recent_noaa_cycle_markets(limit_cycles=12):
 
 def _get_noaa_candidate_dates(city, already_checked=None, limit=3):
     """
-    Devuelve fechas NOAA pendientes usando mercados escaneados sin BUY asociado.
+    Devuelve fechas NOAA pendientes usando una base durable de señales shadow.
     """
     city = str(city or "").strip()
     already_checked = already_checked or set()
@@ -13775,6 +13808,73 @@ def _get_noaa_candidate_dates(city, already_checked=None, limit=3):
     today_utc = datetime.now(timezone.utc).date()
     candidates = []
     seen_dates = set()
+
+    seed_rows = []
+    shadow_loader = globals().get("load_shadow_city_tracking")
+    if callable(shadow_loader):
+        try:
+            shadow_tracking = shadow_loader()
+        except Exception:
+            shadow_tracking = {}
+        if isinstance(shadow_tracking, dict):
+            for row in shadow_tracking.get("directional_history", []):
+                if isinstance(row, dict):
+                    seed_rows.append(row)
+            if not seed_rows:
+                for row in shadow_tracking.get("recent_opportunities", []):
+                    if isinstance(row, dict):
+                        seed_rows.append(row)
+
+    durable_rows = _merge_shadow_signal_history([], seed_rows) if seed_rows else []
+    if durable_rows:
+        durable_rows = sorted(
+            durable_rows,
+            key=lambda item: (
+                _normalize_shadow_market_date(item.get("date", "")),
+                str(item.get("last_seen_at", "") or item.get("first_seen_at", "")),
+            ),
+            reverse=True,
+        )
+
+    for item in durable_rows:
+        if str(item.get("city", "") or "").strip() != city:
+            continue
+
+        market_date = _normalize_shadow_market_date(item.get("date", "") or item.get("date_iso", ""))
+        if not market_date:
+            continue
+
+        key = f"{city}|{market_date}"
+        if key in already_checked or market_date in seen_dates:
+            continue
+
+        try:
+            days_ago = (today_utc - date.fromisoformat(market_date)).days
+        except ValueError:
+            continue
+
+        if days_ago < NOAA_OBSERVED_LAG_DAYS:
+            continue
+
+        try:
+            forecast_temp = round(float(item.get("forecast_max")), 1)
+        except (TypeError, ValueError):
+            continue
+
+        candidates.append({
+            "city": city,
+            "date": market_date,
+            "forecast_max": forecast_temp,
+            "side": item.get("side"),
+            "edge_pct": item.get("best_edge_pct", item.get("edge_pct")),
+        })
+        seen_dates.add(market_date)
+        already_checked.add(key)
+        if len(candidates) >= limit:
+            break
+
+    if candidates:
+        return candidates
 
     for item in _iter_recent_noaa_cycle_markets():
         if str(item.get("city", "") or "").strip() != city:
@@ -14127,6 +14227,47 @@ def date_text_to_iso(date_text, year=2026):
     if len(parts) != 2 or parts[0].lower() not in months:
         return None
     return f"{year}-{months[parts[0].lower()]}-{parts[1].zfill(2)}"
+
+
+def _extract_threshold_canonical(question):
+    """Normaliza el umbral de una pregunta de temperatura a Celsius."""
+    parsed = parse_temperature_question(str(question or ""))
+    if isinstance(parsed, dict):
+        threshold = parsed.get("temp_threshold")
+        if threshold is not None:
+            try:
+                value = float(threshold)
+            except (TypeError, ValueError):
+                value = None
+            if value is not None:
+                unit = str(parsed.get("unit", "C") or "C").upper()
+                if unit == "F":
+                    value = round((value - 32) * 5 / 9, 1)
+                else:
+                    value = round(value, 1)
+                return value
+
+    q = str(question or "")
+    match = re.search(
+        r"(-?\d+(?:\.\d+)?)\s*[^0-9A-Za-z]{0,3}\s*([FCfc])\s+or\s+(below|higher|above)",
+        q,
+        re.IGNORECASE,
+    )
+    if not match:
+        match = re.search(
+            r"(?:above|below)\s+(-?\d+(?:\.\d+)?)\s*[^0-9A-Za-z]{0,3}\s*([FCfc])",
+            q,
+            re.IGNORECASE,
+        )
+    if not match:
+        return None
+    value = float(match.group(1))
+    unit = match.group(2).upper()
+    if unit == "F":
+        value = round((value - 32) * 5 / 9, 1)
+    else:
+        value = round(value, 1)
+    return value
 
 
 # =============================================================
