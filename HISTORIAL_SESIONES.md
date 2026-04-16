@@ -2848,3 +2848,17 @@ Regla recomendada:
 - Inconcluso: <3 trades en 14 días → evaluar si Austin tiene mercados suficientes.
 
 **No tocado:** filtros, MIN_PRICE, MAX_PRICE, thresholds, Kelly, sigma, exits, ACTIVE_TRADING_CITIES (sigue NONE).
+
+### Sesión 182 — residual canary shadow-only gate fix + live verification (16 abr 2026)
+
+**Modelo:** Codex.
+
+- **Diagnóstico cerrado con evidencia mínima:** se leen `AGENTS.md`, bloque reciente de `CONTEXTO.md`, `OPERATIONS_PLAYBOOK.md`, `data/runtime_import/skip_log.jsonl`, `cycle_summary.json` y `city_policy_state.json` para aislar el gating residual sin mezclar refactor amplio ni tocar trading core.
+- **Patrón runtime exacto:** todas las filas históricas de `skip_log` con `skip_reason="shadow_only_override"` resultan ser `city_mode="canary"` y `allowlisted=false`; no aparece ningún caso `shadow` con ese motivo. Ejemplos previos al fix: `Shanghai` (`2026-04-15T04:00`), `Chicago` (`2026-04-15T07:14`, `08:00`, `15:24`) y `Seoul` (`2026-04-16T07:07`, `edge_pct=68.47`).
+- **Causa raíz precisa en `bot.py`:** el scan loop ya resolvía bien `city_mode="canary"` vía `get_effective_city_mode()`, así que el bug no venía del orden de reconocimiento `auto_canary` ni de que la allowlist de ejecución siguiera atada directamente a `ACTIVE_TRADING_CITIES`. El problema real estaba en `_is_shadow_only()`: su fallback legacy seguía mirando solo `ACTIVE_TRADING_CITIES` y `CANARY_TRADING_CITIES` explícitas. Con `ACTIVE_TRADING_CITIES=NONE`, una ciudad podía ser `canary` efectiva por `city_policy_state.json` y aun así quedar degradada a `shadow_override_flag=True`.
+- **Fix mínimo aplicado:** `_is_shadow_only()` ahora mantiene `SHADOW_ONLY_MODE` como toggle explícito, pero en el fallback legacy también cuenta `auto_canary_cities` y `auto_canary_from_active` cargadas desde `city_policy_state.json` antes de declarar pausa global.
+- **Guardrail nuevo:** `verify_before_deploy.py` añade checks estáticos + funcionales para el caso exacto de `ACTIVE_TRADING_CITIES=NONE` con `auto_canary` persistida; la suite sube a **691/691**.
+- **Commit y push:** `2ac2bb1` — `Fix shadow-only fallback for auto-canary cities` → `origin/main`.
+- **Deploy Railway verificado:** deployment `af3c82b8-7f4b-4a55-bd3f-14ecb40f8edc`, arranque `2026-04-16 07:36:23 UTC`, logs con `Modo: REAL`.
+- **Prueba live post-deploy cerrada:** tras esperar al ciclo `2026-04-16T08:00`, `tools/railway_runtime_snapshot_pull.ps1` refresca `data/runtime_import/`. Resultado: `shadow_only_override` nuevo = **0** desde el deploy; las ciudades `canary` pasan con `allowlisted=true`; `Seoul` ya no cae por override y sus skips pasan a `price_out_of_range`, `condition_filtered` y `existing_position`. El único `fuera_allowlist` nuevo del ciclo corresponde a `Hong Kong` en `shadow`.
+- **Veredicto final:** **bug residual corregido**.
