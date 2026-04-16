@@ -49,7 +49,6 @@ def build_codex_prompt(row, objective):
 def compute_gate(row):
     recommendation = row.get("recommendation")
     bottleneck = row.get("bottleneck")
-    evidence_status = row.get("evidence_status")
     policy_mode = row.get("policy_mode")
     runtime_policy_mode = row.get("runtime_policy_mode")
     cross_policy_mode = row.get("cross_policy_mode")
@@ -57,6 +56,26 @@ def compute_gate(row):
     visibility_score = row.get("visibility_evidence", {}).get("score", 0)
     edge_score = row.get("edge_evidence", {}).get("score", 0)
     structural_block_guardrail = row.get("structural_block_guardrail") or {}
+    recent_skip_summary = row.get("recent_skip_evidence", {}) or {}
+    useful_policy_gate_count = int(recent_skip_summary.get("useful_policy_gate_count", 0) or 0)
+
+    if (
+        runtime_policy_mode == "auto_canary"
+        and useful_policy_gate_count == 0
+        and "runtime_policy_collision" not in drift_flags
+    ):
+        return {
+            "gate_status": "observe_runtime_canary",
+            "review_priority": "watch",
+            "codex_instruction": (
+                f"Observar {row['city']} como canary runtime ya activo; el siguiente paso es medir "
+                "si convierte edge/NOAA en evidencia operativa, no reabrir drift viejo."
+            ),
+            "codex_prompt": build_codex_prompt(
+                row,
+                "observar la ciudad como canary runtime ya activo y decidir como medir mejor su validacion operativa sin reabrir drift analitico viejo",
+            ),
+        }
 
     if (
         any(flag in drift_flags for flag in {"policy_divergence", "runtime_policy_collision"})

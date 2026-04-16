@@ -2870,3 +2870,14 @@ Regla recomendada:
 - `build_dashboard_road_to_real()` y `get_dashboard_alert_summary()` dejan de usar `shadow.summary.edge_hits` como proxy mezclado y pasan a leer `total_signals`, `matched`, `resolved` y `win_rate` desde `_build_shadow_noaa_resolution_stats()`.
 - Se corrige además una referencia latente a `shadow_summary` sin inicializar en `build_dashboard_city_decisions()`.
 - Verificación: `python -m py_compile bot.py` OK. `verify_before_deploy.py` ya no falla por la lógica del funnel, pero el harness sigue cayendo en Windows por `Access denied` al tocar `%TEMP%`, así que ese gate queda pendiente de limpieza externa o aislamiento del bug del verificador.
+
+### Sesión 184 — city-intelligence alarm realigned to runtime canary reality (16 abr 2026)
+
+**Modelo:** Codex.
+
+- **Diagnóstico reanclado a runtime:** la alarma de `city intelligence` seguía leyendo `Chicago` como `needs_shadow_validation` / `policy_execution_gate` aunque el snapshot fresco ya la muestra en `runtime_policy_mode=auto_canary`, `allowlisted=true` y sin `shadow_only_override` nuevo tras la sesión 182.
+- **Fix analítico en `tools/city_validation_ledger.py`:** se añade un estado explícito `canary_measurement` cuando la ciudad ya está en `auto_canary` y no hay `useful_policy_gate_count` reciente; la recomendación pasa a `observe_runtime_canary`.
+- **Fix analítico en `tools/city_promotion_gate.py`:** se evita que una ciudad `auto_canary` sin bloqueos reales recientes vuelva a caer en `audit_runtime_drift`; el gate pasa a `observe_runtime_canary` con prioridad `watch`.
+- **Artefactos regenerados:** se rerunean `tools/city_validation_ledger.py`, `tools/city_promotion_gate.py`, `tools/city_intelligence_telegram_alert.py --dry-run` y `tools/city_intelligence_pipeline.py --telegram-dry-run`, dejando `city_validation_ledger.json`, `city_promotion_gate.json` y `docs/city_intelligence_pipeline_latest.md` alineados con la realidad del bot.
+- **Guardrail adicional en `verify_before_deploy.py`:** el harness funcional ahora carga `parse_temperature_question`, `_extract_threshold_canonical`, `re` y `normalize_city` dentro del bloque shadow/persistencia. Con eso desaparece el falso rojo donde `directional_history` y `road_to_real` fallaban por dependencias ausentes del test en vez de por lógica rota.
+- **Verificación final:** `python verify_before_deploy.py` vuelve a verde completo en **691/691**.

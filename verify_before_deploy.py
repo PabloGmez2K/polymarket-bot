@@ -19,6 +19,7 @@ import sys
 import os
 import ast
 import re
+import builtins
 import types
 import json
 import base64
@@ -777,7 +778,16 @@ def run_tests():
     # ---- Test 19: Tests funcionales reales ----
     print("\n Tests funcionales")
     try:
+        builtins.parse_temperature_question = lambda question: {
+            "city": "Test City",
+            "temp_threshold": 10,
+            "temp_threshold_high": None,
+            "condition": "exact",
+            "date_str": "March 30",
+            "unit": "C",
+        }
         ns = {"re": re, "datetime": datetime, "timezone": timezone}
+        exec(get_function_source(module_ast, code_lines, "parse_temperature_question"), ns)
         exec(get_function_source(module_ast, code_lines, "parse_city_from_title"), ns)
         exec(get_function_source(module_ast, code_lines, "_parse_position_label"), ns)
         exec(get_function_source(module_ast, code_lines, "parse_market_date_iso"), ns)
@@ -1501,17 +1511,21 @@ def run_tests():
         print("\n Shadow observado persistente")
         shadow_ns = {
             "os": os,
+            "re": re,
             "json": json,
             "datetime": datetime,
             "timezone": timezone,
             "LOGIC_SERIES": "10.6",
             "MIN_EDGE": 15.0,
             "SHADOW_DIRECTIONAL_HISTORY_LIMIT": 500,
+            "normalize_city": lambda city: str(city or "").strip(),
         }
         for fn in (
             "_shadow_condition_code",
             "_extract_threshold_from_question",
             "_normalize_shadow_market_date",
+            "parse_temperature_question",
+            "_extract_threshold_canonical",
             "_shadow_signal_signature",
             "_build_shadow_signal_record",
             "_merge_shadow_signal_history",

@@ -706,6 +706,7 @@ def classify_bottleneck(
     quality_reference_count,
     active_signal_reference_count,
     enrichment_health,
+    runtime_policy_mode,
 ):
     if enrichment_health.get("likely_input_degraded"):
         return "trader_input_degraded"
@@ -713,6 +714,8 @@ def classify_bottleneck(
         return "source_fidelity"
     if recent_skip_summary.get("useful_policy_gate_count", 0) > 0:
         return "policy_execution_gate"
+    if runtime_policy_mode == "auto_canary":
+        return "canary_measurement"
     if n_reference_traders < 3:
         return "trader_discovery"
     if quality_reference_count == 0 and active_signal_reference_count == 0:
@@ -764,6 +767,8 @@ def compute_recommendation(policy_mode, evidence_status, shadow_summary, settlem
         return "audit_trader_input"
     if bottleneck == "policy_execution_gate":
         return "review_runtime_policy_gate"
+    if bottleneck == "canary_measurement":
+        return "observe_runtime_canary"
     if evidence_status == "insufficient":
         return "insufficient_evidence"
     if evidence_status == "actionable":
@@ -882,6 +887,7 @@ def build_city_row(
         quality_reference_count=quality_reference_count,
         active_signal_reference_count=active_unproven_refs,
         enrichment_health=enrichment_health,
+        runtime_policy_mode=runtime_policy_mode,
     )
     base_recommendation = compute_recommendation(
         policy_mode=policy_mode,
@@ -1013,7 +1019,7 @@ def render_markdown(payload):
         f"- Evidence status counts: `{payload['summary']['evidence_status_counts']}`",
         f"- Recommendation counts: `{payload['summary']['recommendation_counts']}`",
         f"- Bottleneck counts: `{payload['summary']['bottleneck_counts']}`",
-        f"- Recent useful skips: `{payload['summary']['recent_useful_skip_reason_counts']}`",
+        f"- Recent useful skips: `{payload['summary'].get('recent_useful_skip_reason_counts', {})}`",
         "",
         "## Top Cities",
         "",
