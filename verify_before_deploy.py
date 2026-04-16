@@ -4593,6 +4593,8 @@ def run_tests():
          '"shadow_override_flag": shadow_override' in code)
     test("R3: Loop B distingue fuera_allowlist vs shadow_only_override por flag",
          '"shadow_only_override" if c.get("shadow_override_flag") else "fuera_allowlist"' in code)
+    test("shadow-only fallback considera canary persistida",
+         '"auto_canary_cities"' in code and '"auto_canary_from_active"' in code and "real_auto_canary" in code)
 
     # Cada razón debe aparecer al menos una vez en una llamada a _make_skip_entry
     for reason in R3_REASONS:
@@ -4618,6 +4620,75 @@ def run_tests():
         if not found and reason in ("fuera_allowlist", "shadow_only_override"):
             found = f'"{reason}"' in code
         test(f"R3: scan loop emite skip_reason='{reason}'", found)
+
+    shadow_only_ns = {
+        "os": os,
+        "ACTIVE_TRADING_CITIES": {"NONE"},
+        "CANARY_TRADING_CITIES": set(),
+        "load_city_policy_state": lambda: {"auto_canary_cities": {}, "auto_canary_from_active": {}},
+        "_normalize_city_policy_state": lambda state: state,
+    }
+    exec(get_function_source(module_ast, code_lines, "_is_shadow_only"), shadow_only_ns)
+    prev_shadow_only_env = os.environ.get("SHADOW_ONLY_MODE")
+    try:
+        os.environ["SHADOW_ONLY_MODE"] = "true"
+        test("shadow-only helper: respeta env true",
+             shadow_only_ns["_is_shadow_only"]() is True)
+        os.environ["SHADOW_ONLY_MODE"] = "false"
+        test("shadow-only helper: respeta env false",
+             shadow_only_ns["_is_shadow_only"]() is False)
+        os.environ.pop("SHADOW_ONLY_MODE", None)
+        test("shadow-only helper: fallback legacy sin active/canary -> true",
+             shadow_only_ns["_is_shadow_only"]() is True)
+    finally:
+        if prev_shadow_only_env is None:
+            os.environ.pop("SHADOW_ONLY_MODE", None)
+        else:
+            os.environ["SHADOW_ONLY_MODE"] = prev_shadow_only_env
+
+    shadow_only_auto_canary_ns = {
+        "os": os,
+        "ACTIVE_TRADING_CITIES": {"NONE"},
+        "CANARY_TRADING_CITIES": set(),
+        "load_city_policy_state": lambda: {
+            "auto_canary_cities": {"Seoul": {"promoted_at": "2026-04-16T00:00:00Z"}},
+            "auto_canary_from_active": {},
+        },
+        "_normalize_city_policy_state": lambda state: state,
+    }
+    exec(get_function_source(module_ast, code_lines, "_is_shadow_only"), shadow_only_auto_canary_ns)
+    prev_shadow_only_env = os.environ.get("SHADOW_ONLY_MODE")
+    try:
+        os.environ.pop("SHADOW_ONLY_MODE", None)
+        test("shadow-only helper: auto_canary persistida desactiva fallback legacy",
+             shadow_only_auto_canary_ns["_is_shadow_only"]() is False)
+    finally:
+        if prev_shadow_only_env is None:
+            os.environ.pop("SHADOW_ONLY_MODE", None)
+        else:
+            os.environ["SHADOW_ONLY_MODE"] = prev_shadow_only_env
+
+    shadow_only_auto_canary_from_active_ns = {
+        "os": os,
+        "ACTIVE_TRADING_CITIES": {"NONE"},
+        "CANARY_TRADING_CITIES": set(),
+        "load_city_policy_state": lambda: {
+            "auto_canary_cities": {},
+            "auto_canary_from_active": {"Chicago": {"degraded_at": "2026-04-16T00:00:00Z"}},
+        },
+        "_normalize_city_policy_state": lambda state: state,
+    }
+    exec(get_function_source(module_ast, code_lines, "_is_shadow_only"), shadow_only_auto_canary_from_active_ns)
+    prev_shadow_only_env = os.environ.get("SHADOW_ONLY_MODE")
+    try:
+        os.environ.pop("SHADOW_ONLY_MODE", None)
+        test("shadow-only helper: auto_canary_from_active desactiva fallback legacy",
+             shadow_only_auto_canary_from_active_ns["_is_shadow_only"]() is False)
+    finally:
+        if prev_shadow_only_env is None:
+            os.environ.pop("SHADOW_ONLY_MODE", None)
+        else:
+            os.environ["SHADOW_ONLY_MODE"] = prev_shadow_only_env
 
     # --- Functional tests: exec helpers en namespace limpio ---
     import tempfile as _tf_r3

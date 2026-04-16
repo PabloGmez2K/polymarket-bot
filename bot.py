@@ -10534,8 +10534,9 @@ def _is_shadow_only():
 
     Checks SHADOW_ONLY_MODE env var first (explicit control).
     Legacy fallback: shadow-only when ACTIVE_TRADING_CITIES is empty/NONE and no
-    explicit canary cities are configured. This preserves backward compatibility
-    but decouples the pause toggle from the city hierarchy level.
+    canary cities are configured, whether explicit or persisted in policy_state.
+    This preserves backward compatibility but decouples the pause toggle from
+    the city hierarchy level.
 
     Design intent: ACTIVE_TRADING_CITIES=NONE means "no city has earned active status
     yet", NOT "system is paused". Use SHADOW_ONLY_MODE=true for an explicit pause.
@@ -10545,10 +10546,27 @@ def _is_shadow_only():
         return True
     if val in {"false", "0", "no"}:
         return False
-    # Legacy fallback: no active cities AND no explicit canary cities → shadow-only
+    # Legacy fallback: no active cities AND no canary cities (env/persisted) → shadow-only
     real_active = {c for c in ACTIVE_TRADING_CITIES if c.upper() not in {"NONE", ""}}
     real_canary = {c for c in CANARY_TRADING_CITIES if c.strip()}
-    return len(real_active) == 0 and len(real_canary) == 0
+    policy_state = {}
+    policy_loader = globals().get("load_city_policy_state")
+    policy_normalizer = globals().get("_normalize_city_policy_state")
+    if callable(policy_loader):
+        try:
+            policy_state = policy_loader() or {}
+            if callable(policy_normalizer):
+                policy_state = policy_normalizer(policy_state)
+        except Exception:
+            policy_state = {}
+    auto_canary = policy_state.get("auto_canary_cities", {}) if isinstance(policy_state, dict) else {}
+    auto_canary_from_active = policy_state.get("auto_canary_from_active", {}) if isinstance(policy_state, dict) else {}
+    real_auto_canary = {
+        str(city).strip()
+        for city in (set(auto_canary.keys()) | set(auto_canary_from_active.keys()))
+        if str(city).strip()
+    }
+    return len(real_active) == 0 and len(real_canary) == 0 and len(real_auto_canary) == 0
 
 
 def _dashboard_mode_label():
