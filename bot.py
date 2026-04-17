@@ -4037,6 +4037,15 @@ def run_observability_alerts():
         if logger:
             logger.warning(f"condition monitor: fallo ({e})")
 
+    # v10.6.18: alerta one-shot observacion W17 (dispara el 2026-04-20).
+    try:
+        if maybe_run_w17_observation_alert(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"w17 observation alert: fallo ({e})")
+
     try:
         if maybe_evaluate_slot_monetization(state):
             changed = True
@@ -7138,6 +7147,124 @@ def maybe_run_blocked_signals_check(state, now=None):
         return False
 
     state["blocked_signals_last_date"] = today
+    return True
+
+
+# =============================================================
+# v10.6.18 — W17 observation alert (one-shot, 2026-04-20)
+# =============================================================
+
+def maybe_run_w17_observation_alert(state, now=None):
+    """
+    v10.6.18: alerta one-shot de observacion W17.
+
+    Dispara una sola vez el 2026-04-20 o posterior (primer ciclo del dia).
+    Resume los cambios de config de la semana y entrega el prompt exacto
+    para la sesion Sonnet/Codex de revision.
+
+    Cambios que mide:
+    - QUALITY_TRADER_CITIES_WHITELIST ampliada (Atlanta, London, NYC, Munich)
+    - Slot 23h desactivado
+    - Fix v10.6.18: YES exact/range canary requiere our_prob >= 65%
+
+    Retorna True si state fue mutado.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    FIRE_DATE = "2026-04-20"
+    STATE_KEY = "w17_observation_alert_sent"
+
+    if state.get(STATE_KEY):
+        return False
+    if now.date().isoformat() < FIRE_DATE:
+        return False
+
+    # Anti-spam: solo primer ciclo del dia
+    today_str = now.date().isoformat()
+    last_daily = state.get("w17_observation_alert_last_daily", "")
+    if last_daily == today_str:
+        return False
+
+    # Recoger metricas recientes de cycles_history si esta disponible
+    cycles_after_deploy = 0
+    buys_after_deploy = 0
+    edges_after_deploy = 0
+    avg_eval = 0.0
+    try:
+        ch_path = os.path.join(DATA_DIR, "cycles_history.jsonl")
+        rows = []
+        if os.path.exists(ch_path):
+            with open(ch_path, encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    obj = json.loads(line)
+                    ts = obj.get("timestamp_utc", "")
+                    if ts >= "2026-04-17T18:00":
+                        rows.append(obj)
+            if rows:
+                cycles_after_deploy = len(rows)
+                buys_after_deploy = sum(len(r.get("buys", [])) for r in rows)
+                edges_after_deploy = sum(r.get("scan", {}).get("with_edge", 0) for r in rows)
+                evals = [r.get("scan", {}).get("markets_evaluated", 0) for r in rows]
+                avg_eval = sum(evals) / len(evals) if evals else 0
+    except Exception:
+        pass
+
+    prompt_codex = (
+        "Lee AGENTS.md y el bloque reciente de CONTEXTO.md.\n\n"
+        "Tarea: Sesion de observacion W17 — revisar si los cambios del 17 de abril funcionaron.\n\n"
+        "Cambios aplicados el 2026-04-17:\n"
+        "- QUALITY_TRADER_CITIES_WHITELIST ampliada: +Atlanta, London, New York City, Munich\n"
+        "- Slot 23h desactivado (SCHEDULE_DISABLED_HOURS_UTC=23)\n"
+        "- Fix v10.6.18: YES exact/range canary bloqueado si our_prob < 65%\n\n"
+        "Archivos a leer:\n"
+        "- data/runtime_import/cycles_history.jsonl (ciclos desde 2026-04-17T18:00)\n"
+        "- data/runtime_import/skip_log.jsonl (ultimas 1000 entradas)\n"
+        "- data/runtime_import/cycle_summary.json (ultimo ciclo)\n"
+        "- docs/strategic-review-opus-2026-04-17.md (contexto estrategico)\n"
+        "- docs/execution-plan-w17-2026-04-17.md (plan + criterios de exito)\n"
+        "- docs/c1-autopsy-exact-range-2026-04-17.md (hallazgos autopsia)\n\n"
+        "Preguntas a responder:\n"
+        "1. markets_evaluated promedio post-deploy vs pre-deploy (target >= 25)\n"
+        "2. with_edge promedio post-deploy (target >= 0.5/ciclo)\n"
+        "3. buys/ciclo post-deploy (target >= 0.3)\n"
+        "4. Hay exact/range NO-side con quality trader? Cuales ciudades?\n"
+        "5. El fix YES our_prob<65% esta bloqueando correctamente? (ver skip_log 'exact_range_yes_low_confidence')\n"
+        "6. El slot 23h desaparecio de cycles_history?\n\n"
+        "Salida esperada:\n"
+        "- Veredicto por gate (cumple / no cumple / parcial)\n"
+        "- Si targets no se cumplen: hipotesis de por que y siguiente accion\n"
+        "- Actualizar CONTEXTO.md con estado post-deploy\n"
+        "- Preparar handoff para la revision Opus del 24 de abril"
+    )
+
+    msg = (
+        f"\U0001f4ca <b>Alerta W17 — Sesion de observacion lista</b>\n\n"
+        f"Han pasado 3 dias desde los cambios del 17 de abril. "
+        f"Es momento de revisar si el throughput mejoro.\n\n"
+        f"<b>Datos disponibles (post-deploy):</b>\n"
+        f"  Ciclos: {cycles_after_deploy}\n"
+        f"  Buys: {buys_after_deploy}\n"
+        f"  Edges: {edges_after_deploy}\n"
+        f"  Eval/ciclo: {avg_eval:.1f}\n\n"
+        f"<b>Targets W17:</b>\n"
+        f"  markets_evaluated: &gt;= 25/ciclo\n"
+        f"  with_edge: &gt;= 0.5/ciclo\n"
+        f"  buys/ciclo: &gt;= 0.3\n\n"
+        f"<b>Prompt para Sonnet/Codex</b> (copiar y pegar):\n"
+        f"<code>{prompt_codex}</code>"
+    )
+
+    try:
+        send_telegram(msg)
+    except Exception:
+        pass
+
+    state[STATE_KEY] = True
+    state["w17_observation_alert_last_daily"] = today_str
     return True
 
 
