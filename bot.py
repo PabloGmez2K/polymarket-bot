@@ -6900,7 +6900,11 @@ def maybe_run_daily_crosscheck(state, now=None):
             f"MATCH {len(match_cities)} | BOT_ONLY {len(bot_only_cities)} | TRADER_ONLY {len(trader_only_cities)}\n"
         )
         if actionable_trader_only:
-            daily_msg += f"Traders ven oportunidad (conds operables) sin edge bot:{action_lines}\n"
+            daily_msg += (
+                f"Traders ven oportunidad (conds operables) sin edge bot "
+                f"<i>(muestra top {min(len(actionable_trader_only), 4)} de {len(actionable_trader_only)})</i>:"
+                f"{action_lines}\n"
+            )
         daily_msg += f"<i>Corrida {n_records}/{SIGNALS_CROSSCHECK_NOTIFY_THRESHOLD}</i>"
         send_telegram(daily_msg)
 
@@ -7083,12 +7087,12 @@ def maybe_run_blocked_signals_check(state, now=None):
 
         # --- Telegram diario ---
         canary_excl_note = (
-            f" | Canary excluidas: {len(canary_excluded_recs)}" if canary_excluded_recs else ""
+            f" | Whitelist excluidas: {len(canary_excluded_recs)}" if canary_excluded_recs else ""
         )
         send_telegram(
-            f"\U0001f4ca <b>Blocked signals (no-canary) — WR diaria</b>\n"
+            f"📊 <b>Blocked signals (fuera de whitelist) - WR diaria</b>\n"
             f"Resueltas: {n_resolved} | Wins: {n_win} | WR: {wr_pct}%{canary_excl_note}\n"
-            f"<i>Solo ciudades a\u00fan bloqueadas (canary excluido)</i>"
+            f"<i>Baseline fuera de QUALITY_TRADER_CITIES_WHITELIST</i>"
         )
 
         # --- One-shot n>=30/n>=50: suprimir si canary ya abierto (decision tomada en Sesion 175) ---
