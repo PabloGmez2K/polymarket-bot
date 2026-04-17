@@ -15276,6 +15276,22 @@ def main(client):
 
         # v10.6.15: edge mínimo diferenciado para exact/range canary
         _effective_min_edge = MIN_EDGE + MIN_EDGE_EXACT_RANGE_BUFFER_PP if c.get("exact_range_canary") else MIN_EDGE
+        # v10.6.18: exact/range canary YES-side requiere our_prob >= 65% (autopsia C1: YES con our_prob<65% pierde sistemáticamente)
+        if c.get("exact_range_canary") and side == "YES" and our_prob < 0.65:
+            edge_analysis.append(f"  \u29b5 {city} {side} {temp_label} {c['date_iso']} | our_prob={our_prob*100:.1f}% < 65% (exact/range YES low-conf skip)")
+            skip_log_entries.append(_make_skip_entry(
+                "below_min_edge", cycle_id=cycle_id,
+                city=city, date_iso=c["date_iso"], side=side, days_ahead=c["days_ahead"],
+                city_mode=c.get("city_mode"), allowlisted=c.get("allowlisted"),
+                edge_pct=round(edge_pct, 2),
+                our_prob=round(our_prob * 100, 2), mkt_prob=round(mkt_price * 100, 2),
+                min_edge=_effective_min_edge,
+                forecast_max=forecast_max, threshold=threshold, threshold_high=threshold_high,
+                unit=c["unit"], condition=condition_name, sigma_used=sigma_used_val,
+                question=c["question"],
+                extras={"skip_reason_detail": "exact_range_yes_low_confidence"},
+            ))
+            continue
         if edge_pct < _effective_min_edge:
             edge_analysis.append(f"  ✗ {city} {side} {temp_label} {c['date_iso']} | forecast={forecast_max:.1f}°C | nuestro={our_prob*100:.1f}% mercado={mkt_price*100:.1f}% | edge={edge_pct:.1f}% → BAJO (min {_effective_min_edge}%)")
             skip_log_entries.append(_make_skip_entry(
