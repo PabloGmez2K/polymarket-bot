@@ -31,6 +31,7 @@ Comandos útiles:
 
 | Fecha | Tipo | Referencia | Commits clave | Resumen |
 |------|------|------------|---------------|---------|
+| 2026-04-17 | Explícita | Sesión W17-Opus | `669af20` + 3 commits anteriores + Railway vars | Revisión estratégica Opus + bloque W17 completo ejecutado en una sesión. Causa raíz del throughput bajo identificada: `condition_filtered` mata ~47% de candidatos, modelo sobreestima P(YES) en exact/range (bot 0% WR en YES side, traders 76% WR). 4 cambios en bot.py: whitelist canary +4 ciudades, YES exact/range floor `our_prob<65%`, Seoul promotion bug fix, W17 observation alert one-shot. Railway actualizado: whitelist live + `SCHEDULE_DISABLED_HOURS_UTC=23`. 3 docs estratégicos creados. `verify_before_deploy.py` 702/702. |
 | 2026-04-17 | Explícita | Sesión 191 | local Telegram wording correctness patch | Sesión corta de correctness en la capa humana de Telegram, sin tocar trading core, NOAA, scheduler, policy live ni métricas base. Se auditan dos avisos automáticos disparados a primera hora: `Cross-check diario traders vs bot` y `Blocked signals`. Hallazgo: el cálculo estaba bien, pero el wording inducía lecturas demasiado fuertes. En el cross-check, la lista visible de ciudades actionable no era una priorización sino solo las primeras `4` del conjunto; el mensaje se ajusta para declarar explícitamente `muestra top N de M`. En blocked-signals, el texto hablaba de `canary excluido` aunque la exclusión real usa `QUALITY_TRADER_CITIES_WHITELIST`; se renombra a `Blocked signals (fuera de whitelist)` y la nota pasa a `Baseline fuera de QUALITY_TRADER_CITIES_WHITELIST`. Validación local: `python -m py_compile bot.py` OK. |
 | 2026-04-17 | Explícita | Sesión 190 | `8ec4261` + Railway `SCHEDULE_DISABLED_HOURS_UTC=23` | Cierre live del loop de scheduler por slot. Se empuja a `main` el patch que ya instrumentaba `scan.slot_metrics`, evaluaba automáticamente `04h/23h`, añadía `SCHEDULE_DISABLED_HOURS_UTC` y corregía el cuello de ejecución por mínimo nocional; `verify_before_deploy.py` vuelve a pasar en `702/702`. En Railway se aplica `SCHEDULE_DISABLED_HOURS_UTC=23` y se elimina la env obsoleta `SLOT_04H_REVIEW_REMINDER_DATE`. Verificación final por logs del deploy `6d840105-4246-4c03-8658-18081492f5d7`: el bot arranca con `Schedule: [4, 8, 16] UTC` y `Schedule disabled hours: [23] UTC`, dejando `23h` apagado live de forma reversible y `04h` como slot útil a seguir midiendo. |
 | 2026-04-17 | Explícita | Sesión 189 | local slot monetization operational alert | Se añade la capa automática que faltaba encima de `scan.slot_metrics`. `bot.py` integra `maybe_evaluate_slot_monetization(state)` dentro de `run_observability_alerts()`, con estado persistente para idempotencia diaria y cambio de firma. La nueva alerta lee `cycles_history.jsonl`, agrega los últimos ciclos exactos de `04h` y `23h`, clasifica cada slot (`validated`, `not_validated_yet`, `disable_candidate`, etc.) y envía por Telegram una salida operativa con funnel, reject reasons dominantes y siguiente acción sugerida para Codex. El sistema aún no aplica automáticamente el cambio live; automatiza la revisión y la recomendación, no el deploy. `verify_before_deploy.py` cierra en `702/702`. |
@@ -2887,3 +2888,38 @@ Regla recomendada:
 - **Artefactos regenerados:** se rerunean `tools/city_validation_ledger.py`, `tools/city_promotion_gate.py`, `tools/city_intelligence_telegram_alert.py --dry-run` y `tools/city_intelligence_pipeline.py --telegram-dry-run`, dejando `city_validation_ledger.json`, `city_promotion_gate.json` y `docs/city_intelligence_pipeline_latest.md` alineados con la realidad del bot.
 - **Guardrail adicional en `verify_before_deploy.py`:** el harness funcional ahora carga `parse_temperature_question`, `_extract_threshold_canonical`, `re` y `normalize_city` dentro del bloque shadow/persistencia. Con eso desaparece el falso rojo donde `directional_history` y `road_to_real` fallaban por dependencias ausentes del test en vez de por lógica rota.
 - **Verificación final:** `python verify_before_deploy.py` vuelve a verde completo en **691/691**.
+
+### Sesión W17-Opus — revisión estratégica + bloque completo (17 abr 2026)
+
+**Modelos:** Opus (análisis) + Sonnet (implementación).
+
+**Contexto de entrada:** 71 ciclos (11 días) con solo 7 buys desde el 6 de abril. Sensación de "iterar en círculos" correcta y con causa estructural identificable.
+
+**Diagnóstico central:**
+- Throughput colapsó con v10.6: pre-Apr6 `4.6 edges/ciclo` / `0.98 buys/ciclo`; post-Apr6 `0.1 edges/ciclo` / `0.05 buys/ciclo`.
+- Causa raíz: `condition_filtered` mata `~47%` de candidatos cada ciclo. El modelo gaussiano sobreestima P(YES) para exact/range — bot ve `our_prob~40%`, mercado cotiza `18%`, genera edge ilusorio.
+- Evidencia: bot WR `0%` en YES exact/range (`26` trades, `−$27.09`). Traders en esos mismos mercados: `76% WR`, van `68% NO`. Todos los wins del bot son NO-side con `our_prob≥78%`.
+- PnL real: `at_or_above` +$0.97, `exact` −$9.26, `range` −$23.94.
+- `48%` de cierres son `micro_position_unsellable` (29/61 posiciones).
+
+**Cambios implementados en `bot.py` (4 commits push a `main`):**
+
+1. **S2 — Whitelist canary:** `QUALITY_TRADER_CITIES_WHITELIST` default ampliado con `Atlanta, London, New York City, Munich`. Railway actualizado con lista completa.
+2. **C1-fix — YES exact/range floor:** bloque `v10.6.18` antes de `_effective_min_edge`: si `exact_range_canary` y `side == "YES"` y `our_prob < 0.65` → skip con `skip_reason_detail="exact_range_yes_low_confidence"`. Habría bloqueado los 23 YES losses históricos (avg `our_prob=40.1%`) manteniendo todos los NO wins.
+3. **Seoul auto-canary promotion fix:** guardia `city not in auto_blocked` en `sync_city_policy_state()`. Bug original: `auto_blocked` con NOAA proxy retornaba `"shadow"` de `get_effective_city_mode()` → la guardia pasaba → Seoul entraba en `auto_canary_cities` erróneamente.
+4. **W17 observation alert:** `maybe_run_w17_observation_alert(state)` — one-shot el 2026-04-20. Lee `cycles_history.jsonl` desde `2026-04-17T18:00`, calcula métricas post-bloque y envía prompt Telegram completo para Codex/Sonnet.
+
+**Railway actualizado:**
+- `QUALITY_TRADER_CITIES_WHITELIST` → lista completa con 4 ciudades canary.
+- `SCHEDULE_DISABLED_HOURS_UTC=23` → slot 23h apagado live (ya existía desde Sesión 190).
+
+**Docs creados:**
+- `docs/strategic-review-opus-2026-04-17.md`
+- `docs/execution-plan-w17-2026-04-17.md` (bloque W17 completado íntegramente)
+- `docs/c1-autopsy-exact-range-2026-04-17.md`
+
+**Análisis adicional:** NYC NO TP +59% confirmado como correcto (forecast 77.7°F vs threshold 77°F, margen 0.7°F). No prematuro.
+
+**Verificación:** `verify_before_deploy.py` 702/702 antes del último push.
+
+**Próxima revisión Opus:** semana del 24 de abril de 2026. Criterios: `markets_evaluated≥25`, `with_edge≥0.5`, `buys≥0.3` por ciclo.

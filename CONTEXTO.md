@@ -1827,4 +1827,41 @@ git push
 - **NOAA para shadow deja de depender solo de 12 ciclos recientes:** `_get_noaa_candidate_dates()` ya no usa únicamente `_iter_recent_noaa_cycle_markets(limit_cycles=12)`. Primero intenta reconstruir candidatos durables desde `load_shadow_city_tracking().directional_history` y solo cae al fallback de `scanned_markets` recientes si no encuentra nada. Con eso, una señal shadow elegible por lag NOAA deja de desaparecer del radar solo porque pasaron suficientes ciclos.
 - **Dashboard y alertas alineados con base resoluble real:** `_build_shadow_noaa_resolution_stats()` expone también `matched`, y tanto `build_dashboard_road_to_real()` como `get_dashboard_alert_summary()` pasan a derivar `directional_signals`, `resolved` y `win_rate` desde esa capa en vez de usar `shadow.summary.edge_hits` como proxy mezclado. Se elimina así la lectura engañosa donde el numerador y el denominador del `WR observado direccional` salían de bases distintas.
 - **Higiene adicional detectada durante la implementación:** `build_dashboard_city_decisions()` tenía una referencia latente a `shadow_summary` sin inicializar; se corrige para no dejar un `NameError` oculto en contextos aislados.
+
+**Última actualización:** 17 de abril de 2026 (Sesión W17-Opus — revisión estratégica + bloque completo ejecutado)
+
+**Sesión W17-Opus (17 abr 2026, Opus + Sonnet):** revisión estratégica quincenal + ejecución completa del bloque W17 en una sola sesión. Causa raíz del throughput bajo identificada por primera vez con datos concretos. Bloque ejecutado sin pasos manuales para el usuario.
+
+### Diagnóstico ejecutivo (Opus)
+
+- **Colapso de throughput con v10.6:** pre-Apr6 `4.6 edges/ciclo` y `0.98 buys/ciclo`; post-Apr6 con canary gate `0.1 edges/ciclo` y `0.05 buys/ciclo`. `71` ciclos (`11` días) con solo `7` buys desde el 6 de abril.
+- **Causa raíz del colapso:** `condition_filtered` mata `~47%` de candidatos cada ciclo (exact/range bloqueados). El modelo gaussiano sobreestima P(YES) para exact/range: bot ve `our_prob~40%`, mercado cotiza `18%` → edge ilusorio → bot pierde. WR real del bot en exact YES: `0%` (`26` trades). Traders en esos mismos mercados: `76% WR`, van `68% NO`.
+- **PnL real por condición:** `at_or_above` +$0.97 (60% WR); `exact` -$9.26 (29% WR); `range` -$23.94 (9% WR).
+- **48% de cierres son `micro_position_unsellable`:** `29/61` posiciones sin poder venderse.
+- **Mapa de cuellos:** (1) modelo exact/range roto [CRÍTICO], (2) position management [ALTO], (3) whitelist canary estrecha [MEDIO], (4) slot 23h sin valor [BAJO].
+
+### Cambios implementados (bot.py)
+
+- **S2 — Whitelist canary ampliada:** `QUALITY_TRADER_CITIES_WHITELIST` default + `Atlanta, London, New York City, Munich`. Railway también actualizado con la lista completa.
+- **C1-fix — YES exact/range floor:** bloque nuevo antes de `_effective_min_edge`: si `exact_range_canary` y `side == "YES"` y `our_prob < 0.65` → skip con `skip_reason_detail="exact_range_yes_low_confidence"`. Habría bloqueado los `23` YES losses históricos (avg `our_prob=40.1%`) manteniendo los `6` NO wins (`our_prob≥78%`).
+- **Seoul auto-canary promotion bug fix:** guardia `city not in auto_blocked` añadida en `sync_city_policy_state()` línea `6334`. Bug: ciudades en `auto_blocked` con NOAA proxy devuelven `"shadow"` desde `get_effective_city_mode()` → la guardia de promoción pasaba → Seoul entraba incorrectamente en `auto_canary_cities`.
+- **W17 observation alert (`maybe_run_w17_observation_alert`):** one-shot que dispara el `2026-04-20` o después. Lee `cycles_history.jsonl` desde `2026-04-17T18:00`, calcula métricas post-bloque (`markets_evaluated`, `with_edge`, `buys`) y envía Telegram con prompt completo listo para pegar en Codex/Sonnet.
+
+### Railway actualizado
+
+- `QUALITY_TRADER_CITIES_WHITELIST` → lista completa con 4 ciudades canary añadidas.
+- `SCHEDULE_DISABLED_HOURS_UTC=23` → slot 23h apagado live.
+
+### Docs creados
+
+- `docs/strategic-review-opus-2026-04-17.md` — revisión estratégica completa.
+- `docs/execution-plan-w17-2026-04-17.md` — plan de ejecución W17, bloque completo marcado como completado.
+- `docs/c1-autopsy-exact-range-2026-04-17.md` — autopsia exact/range con causa raíz + fix propuesto.
+
+### Estado del sistema post-sesión W17
+
+- `bot.py` versión `v10.6.19` (aproximado; 4 commits push al `main`).
+- `verify_before_deploy.py` pasando en `702/702` antes del último push.
+- Observación activa: criterios de éxito a medir entre 17-24 de abril → `markets_evaluated≥25`, `with_edge≥0.5`, `buys≥0.3` por ciclo.
+- Próxima revisión Opus: semana del 24 de abril de 2026.
 - **Validación local:** `python -m py_compile bot.py` OK. `verify_before_deploy.py` deja de fallar por la lógica del funnel, pero el harness aún cae en Windows por `Access denied` al tocar un directorio temporal (`[WinError 5]` sobre `%TEMP%`), así que queda pendiente una pasada limpia del verificador o aislar ese bug del harness antes de usarlo como gate final de deploy.
