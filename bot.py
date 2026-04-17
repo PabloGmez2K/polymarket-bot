@@ -240,7 +240,7 @@ QUALITY_TRADER_CITIES_WHITELIST = {
     c.strip()
     for c in os.getenv(
         "QUALITY_TRADER_CITIES_WHITELIST",
-        "Seattle,Tokyo,Hong Kong,Seoul,Toronto,Chengdu,Shenzhen,Shanghai,Milan",
+        "Seattle,Tokyo,Hong Kong,Seoul,Toronto,Chengdu,Shenzhen,Shanghai,Milan,Atlanta,London,New York City,Munich",
     ).split(",")
     if c.strip()
 }
