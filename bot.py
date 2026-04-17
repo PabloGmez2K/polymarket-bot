@@ -6331,7 +6331,7 @@ def sync_city_policy_state(notify=True):
         current_mode = get_effective_city_mode(city, policy_state=policy_state)
         decision = row.get("decision")
 
-        if decision == "promote" and current_mode == "shadow" and city not in ACTIVE_TRADING_CITIES and city.lower() not in (globals().get("BLOCKED_CITIES") or set()):
+        if decision == "promote" and current_mode == "shadow" and city not in auto_blocked and city not in ACTIVE_TRADING_CITIES and city.lower() not in (globals().get("BLOCKED_CITIES") or set()):
             auto_canary[city] = {
                 "promoted_at": now_iso,
                 "reason": row.get("reason", ""),
