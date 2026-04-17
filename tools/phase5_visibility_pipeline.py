@@ -92,13 +92,16 @@ def render_markdown(payload):
             "",
             f"- Latest probe tracked: `{summary.get('latest_probe_generated_at')}`",
             f"- Visibility snapshots tracked: `{summary.get('visibility_snapshots')}`",
-            f"- Simultaneous visibility count: `{summary.get('simultaneous_visibility_count')}`",
-            f"- Shanghai next action: `{summary.get('shanghai_next_action')}`",
-            f"- Chicago benchmark next action: `{summary.get('chicago_next_action')}`",
-            f"- Dominant gap: `{summary.get('dominant_gap')}`",
-            f"- Comparator recommendation: `{summary.get('comparator_next_step')}`",
-            "",
-        ])
+        f"- Simultaneous visibility count: `{summary.get('simultaneous_visibility_count')}`",
+        f"- Shanghai next action: `{summary.get('shanghai_next_action')}`",
+        f"- Chicago benchmark next action: `{summary.get('chicago_next_action')}`",
+        f"- Dominant gap: `{summary.get('dominant_gap')}`",
+        f"- Comparator recommendation: `{summary.get('comparator_next_step')}`",
+        f"- Operational severity: `{summary.get('operational_severity')}`",
+        f"- Operational action state: `{summary.get('operational_action_state')}`",
+        f"- Operational next step: `{summary.get('operational_next_step')}`",
+        "",
+    ])
     return "\n".join(lines) + "\n"
 
 
@@ -141,6 +144,12 @@ def main():
     )
     steps.append(
         run_step(
+            "phase5_operational_action",
+            [python_exe, str(TOOLS_DIR / "phase5_operational_action.py")],
+        )
+    )
+    steps.append(
+        run_step(
             "phase5_visibility_telegram_alert",
             [python_exe, str(TOOLS_DIR / "phase5_visibility_telegram_alert.py")],
         )
@@ -153,6 +162,7 @@ def main():
         shanghai = load_json(REPO_ROOT / "data" / "shanghai_shadow_test.json")
         chicago = load_json(REPO_ROOT / "data" / "chicago_active_benchmark.json")
         comparator = load_json(REPO_ROOT / "data" / "shanghai_vs_chicago_comparator.json")
+        operational_action = load_json(REPO_ROOT / "data" / "phase5_operational_action.json")
         alert_state = load_json(REPO_ROOT / "data" / "phase5_visibility_alert_state.json")
         summary = {
             "latest_probe_generated_at": tracker.get("summary", {}).get("latest_probe_generated_at"),
@@ -162,6 +172,9 @@ def main():
             "chicago_next_action": chicago.get("benchmark_assessment", {}).get("next_action"),
             "dominant_gap": comparator.get("gap", {}).get("dominant_gap"),
             "comparator_next_step": comparator.get("recommendation", {}).get("next_step"),
+            "operational_severity": operational_action.get("action", {}).get("severity"),
+            "operational_action_state": operational_action.get("action", {}).get("action_state"),
+            "operational_next_step": operational_action.get("action", {}).get("next_operational_step"),
             "last_simultaneous_alert_probe_generated_at": alert_state.get("last_simultaneous_alert_probe_generated_at"),
         }
 

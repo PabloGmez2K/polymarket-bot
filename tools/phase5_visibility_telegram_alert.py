@@ -12,6 +12,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TRACKER_PATH = REPO_ROOT / "data" / "city_probe_visibility_tracker.json"
 DEFAULT_COMPARATOR_PATH = REPO_ROOT / "data" / "shanghai_vs_chicago_comparator.json"
+DEFAULT_OPERATIONAL_ACTION_PATH = REPO_ROOT / "data" / "phase5_operational_action.json"
 DEFAULT_STATE_PATH = REPO_ROOT / "data" / "phase5_visibility_alert_state.json"
 DEFAULT_MD_OUTPUT = REPO_ROOT / "docs" / "phase5_visibility_alert_latest.md"
 
@@ -22,6 +23,7 @@ def parse_args():
     )
     parser.add_argument("--tracker", default=str(DEFAULT_TRACKER_PATH))
     parser.add_argument("--comparator", default=str(DEFAULT_COMPARATOR_PATH))
+    parser.add_argument("--operational-action", default=str(DEFAULT_OPERATIONAL_ACTION_PATH))
     parser.add_argument("--state-output", default=str(DEFAULT_STATE_PATH))
     parser.add_argument("--md-output", default=str(DEFAULT_MD_OUTPUT))
     parser.add_argument("--dry-run", action="store_true")
@@ -80,12 +82,13 @@ def should_alert(latest_snapshot, state):
     return True, "new_simultaneous_visibility"
 
 
-def build_message(latest_snapshot, tracker, comparator):
+def build_message(latest_snapshot, tracker, comparator, operational_action):
     cities = latest_snapshot.get("cities", {})
     shanghai = cities.get("Shanghai", {})
     chicago = cities.get("Chicago", {})
     gap = comparator.get("gap", {}).get("dominant_gap")
     next_step = comparator.get("recommendation", {}).get("next_step")
+    action = operational_action.get("action", {})
     lines = [
         "🔔 <b>Phase 5 Visibility</b>",
         "",
@@ -97,8 +100,16 @@ def build_message(latest_snapshot, tracker, comparator):
         f"Coincidencias acumuladas: {tracker.get('summary', {}).get('simultaneous_visibility_count', 0)}",
         "",
         f"Gap dominante actual: <code>{gap}</code>",
-        f"Siguiente paso: <code>{next_step}</code>",
+        f"Siguiente paso comparador: <code>{next_step}</code>",
+        f"Severidad operativa: <code>{action.get('severity')}</code>",
+        f"Estado operativo: <code>{action.get('action_state')}</code>",
+        f"Accion siguiente: <code>{action.get('next_operational_step')}</code>",
     ]
+    if action.get("decision_note"):
+        lines.extend([
+            "",
+            f"Lectura operativa: {action.get('decision_note')}",
+        ])
     return "\n".join(lines)
 
 
@@ -128,6 +139,7 @@ def main():
     args = parse_args()
     tracker = load_json(args.tracker, required=True)
     comparator = load_json(args.comparator, required=True)
+    operational_action = load_json(args.operational_action, required=True)
     state = load_json(args.state_output, required=False) or {}
     latest_snapshot = get_latest_snapshot(tracker)
     should, reason = should_alert(latest_snapshot, state)
@@ -135,7 +147,7 @@ def main():
     message = ""
     telegram_result = {"sent": False, "reason": "not_attempted"}
     if should:
-        message = build_message(latest_snapshot, tracker, comparator)
+        message = build_message(latest_snapshot, tracker, comparator, operational_action)
         if args.dry_run:
             telegram_result = {"sent": False, "reason": "dry_run"}
         else:
