@@ -18,6 +18,7 @@ v5 añade tests para:
 import sys
 import os
 import ast
+import math
 import re
 import builtins
 import types
@@ -4144,6 +4145,12 @@ def run_tests():
     test("run_observability_alerts invoca notify_canary_candidates", "notify_canary_candidates(state)" in code)
     test("run_observability_alerts invoca maybe_send_daily_summary_telegram", "maybe_send_daily_summary_telegram(state)" in code)
     test("resumen diario gated en DAILY_SUMMARY_HOUR_UTC", "DAILY_SUMMARY_HOUR_UTC" in code)
+    test("feature flag schedule disabled hours definida", "SCHEDULE_DISABLED_HOURS_UTC" in code)
+    test("build_cycle_slot_metrics definida", "def build_cycle_slot_metrics(" in code)
+    test("recordatorio one-shot 04h removido", "def maybe_send_04h_slot_review_reminder(" not in code)
+    test("maybe_evaluate_slot_monetization definida", "def maybe_evaluate_slot_monetization(" in code)
+    test("slot_monetization_last_date en alerts default", '"slot_monetization_last_date"' in code)
+    test("run_observability_alerts invoca maybe_evaluate_slot_monetization", "maybe_evaluate_slot_monetization(state)" in code)
 
     # Functional: M4 daily summary gating (hora < target → no envía; hora >= target + sin flag → envía; idempotente).
     daily_messages = []
@@ -4229,6 +4236,98 @@ def run_tests():
     test("M4 daily payload: marca shadow_only cuando ACTIVE_TRADING_CITIES está vacío",
          payload["shadow_only"] is True,
          payload)
+
+    slot_ns = {
+        "datetime": datetime,
+        "math": math,
+        "ORDER_MIN_NOTIONAL": 1.0,
+    }
+    exec(get_function_source(module_ast, code_lines, "_bump_reason_counter"), slot_ns)
+    exec(get_function_source(module_ast, code_lines, "_classify_execution_failure_reason"), slot_ns)
+    exec(get_function_source(module_ast, code_lines, "_normalize_buy_order_size"), slot_ns)
+    exec(get_function_source(module_ast, code_lines, "build_cycle_slot_metrics"), slot_ns)
+
+    normalized_size = slot_ns["_normalize_buy_order_size"](0.81, 1.23)
+    test("slot metrics: normaliza size para cumplir mínimo notional",
+         abs(normalized_size - 1.24) < 1e-9,
+         {"normalized_size": normalized_size})
+
+    classified_reason = slot_ns["_classify_execution_failure_reason"](
+        "PolyApiException[status_code=400, error_message={'error': 'invalid amount for a marketable BUY order ($0.9976), min size: $1'}]"
+    )
+    test("slot metrics: clasifica fallo de buy por mínimo notional",
+         classified_reason == "buy_min_notional",
+         {"classified_reason": classified_reason})
+
+    sample_slot_metrics = slot_ns["build_cycle_slot_metrics"](
+        timestamp_utc=datetime(2026, 4, 17, 4, 0, tzinfo=timezone.utc),
+        candidates=[
+            {"city": "Tokyo", "days_ahead": 0},
+            {"city": "Shanghai", "days_ahead": 0},
+            {"city": "London", "days_ahead": 1},
+        ],
+        trades=[
+            {"city": "Tokyo", "days_ahead": 0},
+            {"city": "Shanghai", "days_ahead": 0},
+        ],
+        selected=[
+            {"city": "Tokyo", "days_ahead": 0},
+            {"city": "Shanghai", "days_ahead": 0},
+        ],
+        buys=[],
+        skip_log_entries=[
+            {"skip_reason": "price_out_of_range", "days_ahead": 0},
+            {"skip_reason": "condition_filtered", "days_ahead": 1},
+        ],
+        execution_failures=[
+            {"reason": "buy_min_notional", "days_ahead": 0, "city": "Tokyo"},
+        ],
+    )
+    test("slot metrics: agrega funnel y reject reasons por slot",
+         sample_slot_metrics["slot_hour_utc"] == 4
+         and sample_slot_metrics["same_day_candidates"] == 2
+         and sample_slot_metrics["edges"] == 2
+         and sample_slot_metrics["selected"] == 2
+         and sample_slot_metrics["buys"] == 0
+         and sample_slot_metrics["reject_reasons"].get("buy_min_notional") == 1
+         and sample_slot_metrics["same_day_reject_reasons"].get("price_out_of_range") == 1,
+         sample_slot_metrics)
+
+    slot_review_messages = []
+    slot_review_ns = {
+        "datetime": datetime,
+        "timezone": timezone,
+        "json": json,
+        "load_cycle_history": lambda: [
+            {"timestamp_utc": "2026-04-17T04:00:45+00:00", "scan": {"slot_metrics": {"slot_hour_utc": 4, "same_day_candidates": 10, "same_day_edges": 2, "same_day_selected": 2, "same_day_buys": 0, "edges": 2, "selected": 2, "buys": 0, "buy_rate": 0.0, "same_day_buy_rate": 0.0, "same_day_reject_reasons": {"price_out_of_range": 3}, "execution_reject_reasons": {"buy_min_notional": 1}}}},
+            {"timestamp_utc": "2026-04-16T04:00:45+00:00", "scan": {"slot_metrics": {"slot_hour_utc": 4, "same_day_candidates": 8, "same_day_edges": 1, "same_day_selected": 1, "same_day_buys": 0, "edges": 1, "selected": 1, "buys": 0, "buy_rate": 0.0, "same_day_buy_rate": 0.0, "same_day_reject_reasons": {"price_out_of_range": 2}, "execution_reject_reasons": {"buy_min_notional": 1}}}},
+            {"timestamp_utc": "2026-04-15T04:00:45+00:00", "scan": {"slot_metrics": {"slot_hour_utc": 4, "same_day_candidates": 9, "same_day_edges": 1, "same_day_selected": 1, "same_day_buys": 0, "edges": 1, "selected": 1, "buys": 0, "buy_rate": 0.0, "same_day_buy_rate": 0.0, "same_day_reject_reasons": {"condition_filtered": 1}, "execution_reject_reasons": {"buy_min_notional": 1}}}},
+            {"timestamp_utc": "2026-04-17T23:00:45+00:00", "scan": {"slot_metrics": {"slot_hour_utc": 23, "same_day_candidates": 0, "same_day_edges": 0, "same_day_selected": 0, "same_day_buys": 0, "edges": 0, "selected": 0, "buys": 0, "buy_rate": 0.0, "same_day_buy_rate": 0.0, "same_day_reject_reasons": {"date_out_of_range_past": 5}, "execution_reject_reasons": {}}}},
+            {"timestamp_utc": "2026-04-16T23:00:45+00:00", "scan": {"slot_metrics": {"slot_hour_utc": 23, "same_day_candidates": 0, "same_day_edges": 0, "same_day_selected": 0, "same_day_buys": 0, "edges": 0, "selected": 0, "buys": 0, "buy_rate": 0.0, "same_day_buy_rate": 0.0, "same_day_reject_reasons": {"date_out_of_range_past": 4}, "execution_reject_reasons": {}}}},
+            {"timestamp_utc": "2026-04-15T23:00:45+00:00", "scan": {"slot_metrics": {"slot_hour_utc": 23, "same_day_candidates": 0, "same_day_edges": 0, "same_day_selected": 0, "same_day_buys": 0, "edges": 0, "selected": 0, "buys": 0, "buy_rate": 0.0, "same_day_buy_rate": 0.0, "same_day_reject_reasons": {"blocked_city": 3}, "execution_reject_reasons": {}}}},
+        ],
+        "send_telegram": lambda text, with_menu=False, custom_keyboard=None: slot_review_messages.append(text),
+    }
+    exec(get_function_source(module_ast, code_lines, "_extract_slot_metrics_record"), slot_review_ns)
+    exec(get_function_source(module_ast, code_lines, "_merge_reason_counts"), slot_review_ns)
+    exec(get_function_source(module_ast, code_lines, "_top_reason"), slot_review_ns)
+    exec(get_function_source(module_ast, code_lines, "_format_reason_summary"), slot_review_ns)
+    exec(get_function_source(module_ast, code_lines, "evaluate_slot_monetization"), slot_review_ns)
+    exec(get_function_source(module_ast, code_lines, "maybe_evaluate_slot_monetization"), slot_review_ns)
+
+    slot_state = {"slot_monetization_last_date": None, "slot_monetization_last_signature": None}
+    slot_result = slot_review_ns["maybe_evaluate_slot_monetization"](slot_state, now=datetime(2026, 4, 17, 8, 5, tzinfo=timezone.utc))
+    test("slot monetization alert: envía alerta operativa con 04h keep y 23h disable_candidate",
+         slot_result is True
+         and len(slot_review_messages) == 1
+         and "disable_candidate" in slot_review_messages[0]
+         and "buy_min_notional" in slot_review_messages[0],
+         {"result": slot_result, "messages": slot_review_messages, "state": slot_state})
+
+    slot_result_idem = slot_review_ns["maybe_evaluate_slot_monetization"](slot_state, now=datetime(2026, 4, 17, 9, 0, tzinfo=timezone.utc))
+    test("slot monetization alert: idempotente en el mismo día UTC",
+         slot_result_idem is False and len(slot_review_messages) == 1,
+         {"result": slot_result_idem, "messages_count": len(slot_review_messages)})
 
     # Functional: M5 canary candidate notifier.
     candidate_messages = []

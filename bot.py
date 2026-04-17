@@ -139,7 +139,6 @@ ALERT_SHADOW_JOIN_MIN_NOAA_SAMPLE = int(os.getenv("ALERT_SHADOW_JOIN_MIN_NOAA_SA
 ALERT_SHADOW_WR_MIN_RESOLVED = int(os.getenv("ALERT_SHADOW_WR_MIN_RESOLVED", "8"))
 ALERT_SHADOW_WR_TARGET = float(os.getenv("ALERT_SHADOW_WR_TARGET", "45.0"))
 SHADOW_DIRECTIONAL_HISTORY_LIMIT = int(os.getenv("SHADOW_DIRECTIONAL_HISTORY_LIMIT", "500"))
-SLOT_04H_REVIEW_REMINDER_DATE = os.getenv("SLOT_04H_REVIEW_REMINDER_DATE", "").strip()
 # v10.6.12: daily cross-check señales traders vs edge bot
 # Número de corridas acumuladas antes de avisar "listo para análisis".
 SIGNALS_CROSSCHECK_NOTIFY_THRESHOLD = int(os.getenv("SIGNALS_CROSSCHECK_NOTIFY_THRESHOLD", "7"))
@@ -359,9 +358,30 @@ MIN_PRICE = 0.20
 MAX_PRICE = 0.80
 PRICE_AGGRESSION = 0.02
 ORDER_MAX_AGE_HOURS = 8
+ORDER_MIN_NOTIONAL = float(os.getenv("ORDER_MIN_NOTIONAL", "1.00"))
+
+
+def _parse_schedule_hours_utc(raw):
+    hours = []
+    seen = set()
+    for part in str(raw or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            hour = int(part)
+        except ValueError:
+            continue
+        if 0 <= hour <= 23 and hour not in seen:
+            seen.add(hour)
+            hours.append(hour)
+    return sorted(hours)
 
 SCHEDULE_HOURS_UTC_STR = os.getenv("SCHEDULE_HOURS_UTC", "8,16,23")
-SCHEDULE_HOURS_UTC = [int(h.strip()) for h in SCHEDULE_HOURS_UTC_STR.split(",")]
+SCHEDULE_DISABLED_HOURS_UTC_STR = os.getenv("SCHEDULE_DISABLED_HOURS_UTC", "").strip()
+_SCHEDULE_HOURS_BASE = _parse_schedule_hours_utc(SCHEDULE_HOURS_UTC_STR) or [8, 16, 23]
+_SCHEDULE_HOURS_DISABLED = set(_parse_schedule_hours_utc(SCHEDULE_DISABLED_HOURS_UTC_STR))
+SCHEDULE_HOURS_UTC = [hour for hour in _SCHEDULE_HOURS_BASE if hour not in _SCHEDULE_HOURS_DISABLED] or list(_SCHEDULE_HOURS_BASE)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
@@ -853,10 +873,10 @@ def load_alerts_state():
         "low_bankroll_alerted": False,
         # v10.6.11 (M4): resumen diario Telegram — fecha UTC del último envío (YYYY-MM-DD)
         "daily_summary_last_sent": None,
+        "slot_monetization_last_date": None,
+        "slot_monetization_last_signature": None,
         # v10.6.11 (M5): ciudades ya notificadas como candidatas a canary (one-shot por ciudad)
         "canary_candidate_notified": {},
-        # Recordatorios operativos one-shot programados por fecha objetivo.
-        "scheduled_review_reminders_sent": {},
     }
     if not os.path.exists(ALERTS_FILE):
         return default
@@ -881,8 +901,9 @@ def load_alerts_state():
         state.setdefault("city_accuracy_flagged", {})
         state.setdefault("low_bankroll_alerted", False)
         state.setdefault("daily_summary_last_sent", None)
+        state.setdefault("slot_monetization_last_date", None)
+        state.setdefault("slot_monetization_last_signature", None)
         state.setdefault("canary_candidate_notified", {})
-        state.setdefault("scheduled_review_reminders_sent", {})
         return state
     except Exception:
         return default
@@ -3982,15 +4003,6 @@ def run_observability_alerts():
             logger.warning(f"Error evaluando resumen diario: {e}")
 
     try:
-        if maybe_send_04h_slot_review_reminder(state):
-            changed = True
-    except Exception as e:
-        logger = globals().get("log")
-        if logger:
-            logger.warning(f"04h slot review reminder: fallo enviando recordatorio ({e})")
-
-    # v10.6.12: cross-check señales traders vs edge bot, una vez por día.
-    try:
         if maybe_run_daily_crosscheck(state):
             changed = True
     except Exception as e:
@@ -4024,6 +4036,14 @@ def run_observability_alerts():
         logger = globals().get("log")
         if logger:
             logger.warning(f"condition monitor: fallo ({e})")
+
+    try:
+        if maybe_evaluate_slot_monetization(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"slot monetization review: fallo ({e})")
 
     if changed:
         save_alerts_state(state)
@@ -6776,56 +6796,6 @@ def maybe_send_daily_summary_telegram(state, now=None):
     return True
 
 
-def maybe_send_04h_slot_review_reminder(state, now=None):
-    """
-    Envía un recordatorio one-shot para revisar el impacto del slot 04h UTC
-    cuando llegue la fecha objetivo configurada en Railway.
-    """
-    reminder_date_raw = str(SLOT_04H_REVIEW_REMINDER_DATE or "").strip()
-    if not reminder_date_raw:
-        return False
-
-    try:
-        target_date = date.fromisoformat(reminder_date_raw)
-    except ValueError:
-        logger = globals().get("log")
-        if logger:
-            logger.warning(f"SLOT_04H_REVIEW_REMINDER_DATE inválida: {reminder_date_raw!r}")
-        return False
-
-    if now is None:
-        now = datetime.now(timezone.utc)
-    if now.date() < target_date:
-        return False
-
-    sent = state.setdefault("scheduled_review_reminders_sent", {})
-    if not isinstance(sent, dict):
-        sent = {}
-        state["scheduled_review_reminders_sent"] = sent
-
-    reminder_key = f"slot_04h_review:{target_date.isoformat()}"
-    if reminder_key in sent:
-        return False
-
-    review_doc = f"docs/04h-slot-observation-{target_date.isoformat()}.md"
-    send_telegram(
-        f"🗓 <b>Revisión programada — slot 04h UTC</b>\n"
-        f"Ya pasaron <b>5 días</b> desde activar <code>SCHEDULE_HOURS_UTC=4,8,16,23</code>.\n\n"
-        f"Abrir sesión Codex con este objetivo:\n"
-        f"• Pull de <code>data/runtime_import/</code> tras los ciclos nuevos\n"
-        f"• Crear <code>{review_doc}</code>\n"
-        f"• Comparar pre vs post en buys/ciclo, edge/ciclo, markets_evaluated y city_window_skipped\n"
-        f"• Verificar si 04h abrió same-day real para Tokyo/Seoul/Shanghai\n"
-        f"• Evaluar si 23h UTC aporta valor neto o es candidato a salir\n"
-        f"• Auditar en paralelo universo real por ciudad y temporalidad de <code>price_out_of_range</code>"
-    )
-    sent[reminder_key] = {
-        "sent_at": now.isoformat(),
-        "target_date": target_date.isoformat(),
-    }
-    return True
-
-
 def maybe_run_daily_crosscheck(state, now=None):
     """
     v10.6.12: corre el cross-check señales traders vs edge bot una vez por día
@@ -7170,6 +7140,87 @@ def maybe_run_blocked_signals_check(state, now=None):
 # =============================================================
 # v10.6.14 — Canary → Active automation (Módulos 1, 2, 3)
 # =============================================================
+
+def maybe_evaluate_slot_monetization(state, now=None):
+    """
+    Evalúa automáticamente la monetización reciente de 04h y 23h usando scan.slot_metrics.
+    Envía una alerta operativa pensada para accionar en Codex, no solo para documentar.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    today = now.date().isoformat()
+    if state.get("slot_monetization_last_date") == today:
+        return False
+
+    try:
+        records = load_cycle_history()
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"slot monetization: no pude cargar cycles_history ({e})")
+        return False
+
+    slot_04 = evaluate_slot_monetization(records, 4, min_cycles=3)
+    slot_23 = evaluate_slot_monetization(records, 23, min_cycles=3)
+    signature = json.dumps(
+        {
+            "04": {
+                "decision": slot_04.get("decision"),
+                "same_day_selected": slot_04.get("same_day_selected"),
+                "same_day_buys": slot_04.get("same_day_buys"),
+                "top_execution": _top_reason(slot_04.get("execution_reject_reasons")),
+                "top_same_day": _top_reason(slot_04.get("same_day_reject_reasons")),
+            },
+            "23": {
+                "decision": slot_23.get("decision"),
+                "edges": slot_23.get("edges"),
+                "buys": slot_23.get("buys"),
+                "top_same_day": _top_reason(slot_23.get("same_day_reject_reasons")),
+            },
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+
+    if signature != state.get("slot_monetization_last_signature"):
+        lines = [
+            "🎯 <b>Slot monetization review</b>",
+            f"Ventana leída: 04h {slot_04.get('cycles', 0)} ciclos | 23h {slot_23.get('cycles', 0)} ciclos",
+            "",
+            f"<b>04h UTC</b> -> <code>{slot_04.get('decision')}</code> / <code>{slot_04.get('status')}</code>",
+            f"• same_day_candidates={slot_04.get('same_day_candidates', 0)} | same_day_edges={slot_04.get('same_day_edges', 0)} | same_day_selected={slot_04.get('same_day_selected', 0)} | same_day_buys={slot_04.get('same_day_buys', 0)}",
+            f"• buy_rate={slot_04.get('buy_rate', 0.0):.2%} | same_day_buy_rate={slot_04.get('same_day_buy_rate', 0.0):.2%}",
+            f"• resumen: {slot_04.get('summary', 'n/d')}",
+            f"• reject_reasons: {_format_reason_summary(slot_04.get('same_day_reject_reasons'))}",
+            f"• execution_reject_reasons: {_format_reason_summary(slot_04.get('execution_reject_reasons'))}",
+            "",
+            f"<b>23h UTC</b> -> <code>{slot_23.get('decision')}</code> / <code>{slot_23.get('status')}</code>",
+            f"• edges={slot_23.get('edges', 0)} | selected={slot_23.get('selected', 0)} | buys={slot_23.get('buys', 0)} | buy_rate={slot_23.get('buy_rate', 0.0):.2%}",
+            f"• resumen: {slot_23.get('summary', 'n/d')}",
+            f"• reject_reasons: {_format_reason_summary(slot_23.get('same_day_reject_reasons'))}",
+            "",
+            "<b>Acción sugerida para Codex</b>",
+        ]
+        if slot_04.get("decision") == "not_validated_yet":
+            dominant = _top_reason(slot_04.get("execution_reject_reasons")) or _top_reason(slot_04.get("same_day_reject_reasons")) or "unknown"
+            lines.append(f"• 04h sigue en <code>keep</code>; revisar si el cuello dominante <code>{dominant}</code> amerita patch operativo.")
+        elif slot_04.get("decision") == "validated":
+            lines.append("• 04h ya valida monetización; mantenerlo y vigilar estabilidad.")
+        else:
+            lines.append("• 04h todavía no valida monetización; revisar si falta muestra o si discovery sigue débil.")
+
+        if slot_23.get("decision") == "disable_candidate":
+            lines.append("• 23h es candidato a apagado reversible: <code>SCHEDULE_DISABLED_HOURS_UTC=23</code>.")
+        else:
+            lines.append("• 23h todavía no se apaga automáticamente; seguir observando con slot_metrics.")
+
+        lines.append("• Esta alerta está diseñada para abrir sesión Codex con salida accionable, no solo documental.")
+        send_telegram("\n".join(lines))
+
+    state["slot_monetization_last_date"] = today
+    state["slot_monetization_last_signature"] = signature
+    return True
+
 
 def _detect_atlanta_inconsistency(record):
     """True si el record tiene el patrón inconsistente Atlanta (LOSS_TOTAL + RESOLVED_WIN positivo en
@@ -14471,6 +14522,229 @@ def calculate_position(bankroll, estimated_prob, market_price):
 # =============================================================
 # EJECUCIÓN
 # =============================================================
+def _bump_reason_counter(counter, reason):
+    if not reason:
+        return
+    counter[reason] = int(counter.get(reason, 0) or 0) + 1
+
+
+def _classify_execution_failure_reason(message):
+    text = str(message or "").lower()
+    if not text:
+        return "buy_order_error"
+    if "invalid amount for a marketable buy order" in text:
+        return "buy_min_notional"
+    if "min size" in text or "lower than the minimum" in text:
+        return "buy_min_size"
+    if "insufficient" in text and "balance" in text:
+        return "buy_insufficient_balance"
+    return "buy_order_error"
+
+
+def _normalize_buy_order_size(price, size):
+    try:
+        price = round(float(price or 0), 2)
+        size = round(float(size or 0), 2)
+    except Exception:
+        return size
+    if price <= 0 or size <= 0:
+        return size
+    notional = price * size
+    if notional + 1e-9 >= ORDER_MIN_NOTIONAL:
+        return size
+    min_size = math.ceil((ORDER_MIN_NOTIONAL / price) * 100) / 100.0
+    return round(max(size, min_size), 2)
+
+
+def build_cycle_slot_metrics(*, timestamp_utc, candidates, trades, selected, buys, skip_log_entries, execution_failures):
+    slot_hour = timestamp_utc.hour if isinstance(timestamp_utc, datetime) else None
+    same_day_candidates = sum(1 for c in (candidates or []) if isinstance(c, dict) and c.get("days_ahead") == 0)
+    same_day_edges = sum(1 for t in (trades or []) if isinstance(t, dict) and t.get("days_ahead") == 0)
+    same_day_selected = sum(1 for t in (selected or []) if isinstance(t, dict) and t.get("days_ahead") == 0)
+    same_day_buys = sum(1 for b in (buys or []) if isinstance(b, dict) and b.get("days_ahead") == 0)
+    reject_reasons = {}
+    same_day_reject_reasons = {}
+    execution_reject_reasons = {}
+    for entry in (skip_log_entries or []):
+        if not isinstance(entry, dict):
+            continue
+        reason = str(entry.get("skip_reason", "") or "").strip()
+        _bump_reason_counter(reject_reasons, reason)
+        if entry.get("days_ahead") == 0:
+            _bump_reason_counter(same_day_reject_reasons, reason)
+    for failure in (execution_failures or []):
+        if not isinstance(failure, dict):
+            continue
+        reason = str(failure.get("reason", "") or "").strip()
+        _bump_reason_counter(reject_reasons, reason)
+        _bump_reason_counter(execution_reject_reasons, reason)
+        if failure.get("days_ahead") == 0:
+            _bump_reason_counter(same_day_reject_reasons, reason)
+    selected_n = len(selected or [])
+    buys_n = len(buys or [])
+    return {
+        "slot_hour_utc": slot_hour,
+        "same_day_candidates": same_day_candidates,
+        "same_day_edges": same_day_edges,
+        "same_day_selected": same_day_selected,
+        "same_day_buys": same_day_buys,
+        "edges": len(trades or []),
+        "selected": selected_n,
+        "buys": buys_n,
+        "buy_rate": round(buys_n / selected_n, 4) if selected_n > 0 else 0.0,
+        "same_day_buy_rate": round(same_day_buys / same_day_selected, 4) if same_day_selected > 0 else 0.0,
+        "reject_reasons": reject_reasons,
+        "same_day_reject_reasons": same_day_reject_reasons,
+        "execution_reject_reasons": execution_reject_reasons,
+    }
+
+
+def _extract_slot_metrics_record(rec):
+    if not isinstance(rec, dict):
+        return None
+    scan = rec.get("scan")
+    if not isinstance(scan, dict):
+        return None
+    slot_metrics = scan.get("slot_metrics")
+    if not isinstance(slot_metrics, dict):
+        return None
+    ts_raw = rec.get("timestamp_utc", "")
+    try:
+        ts = datetime.fromisoformat(ts_raw)
+    except Exception:
+        return None
+    item = dict(slot_metrics)
+    item["_ts"] = ts
+    item["_ts_raw"] = ts_raw
+    return item
+
+
+def _merge_reason_counts(records, key):
+    merged = {}
+    for rec in records:
+        counts = rec.get(key) if isinstance(rec, dict) else None
+        if not isinstance(counts, dict):
+            continue
+        for reason, count in counts.items():
+            try:
+                merged[reason] = int(merged.get(reason, 0) or 0) + int(count or 0)
+            except Exception:
+                continue
+    return merged
+
+
+def _top_reason(reason_counts):
+    if not isinstance(reason_counts, dict) or not reason_counts:
+        return None
+    return max(reason_counts.items(), key=lambda kv: kv[1])[0]
+
+
+def _format_reason_summary(reason_counts, max_items=3):
+    if not isinstance(reason_counts, dict) or not reason_counts:
+        return "sin rechazos relevantes"
+    ordered = sorted(reason_counts.items(), key=lambda kv: (-int(kv[1] or 0), kv[0]))
+    parts = [f"{reason}={count}" for reason, count in ordered[:max_items]]
+    return ", ".join(parts)
+
+
+def evaluate_slot_monetization(records, target_hour, min_cycles=3):
+    slot_records = []
+    for rec in records or []:
+        item = _extract_slot_metrics_record(rec)
+        if not item:
+            continue
+        if item.get("slot_hour_utc") != target_hour:
+            continue
+        slot_records.append(item)
+    slot_records = sorted(slot_records, key=lambda x: x["_ts"])
+    if len(slot_records) > 5:
+        slot_records = slot_records[-5:]
+    if len(slot_records) < min_cycles:
+        return {
+            "slot_hour_utc": target_hour,
+            "cycles": len(slot_records),
+            "decision": "insufficient_data",
+            "status": "observe",
+            "summary": "muestra insuficiente",
+            "same_day_selected": sum(int(r.get("same_day_selected", 0) or 0) for r in slot_records),
+            "same_day_buys": sum(int(r.get("same_day_buys", 0) or 0) for r in slot_records),
+            "execution_reject_reasons": _merge_reason_counts(slot_records, "execution_reject_reasons"),
+            "same_day_reject_reasons": _merge_reason_counts(slot_records, "same_day_reject_reasons"),
+            "range": {
+                "from": slot_records[0]["_ts_raw"] if slot_records else None,
+                "to": slot_records[-1]["_ts_raw"] if slot_records else None,
+            },
+        }
+
+    totals = {
+        "same_day_candidates": sum(int(r.get("same_day_candidates", 0) or 0) for r in slot_records),
+        "same_day_edges": sum(int(r.get("same_day_edges", 0) or 0) for r in slot_records),
+        "same_day_selected": sum(int(r.get("same_day_selected", 0) or 0) for r in slot_records),
+        "same_day_buys": sum(int(r.get("same_day_buys", 0) or 0) for r in slot_records),
+        "edges": sum(int(r.get("edges", 0) or 0) for r in slot_records),
+        "selected": sum(int(r.get("selected", 0) or 0) for r in slot_records),
+        "buys": sum(int(r.get("buys", 0) or 0) for r in slot_records),
+    }
+    execution_reasons = _merge_reason_counts(slot_records, "execution_reject_reasons")
+    same_day_reasons = _merge_reason_counts(slot_records, "same_day_reject_reasons")
+    buy_rate = round(totals["buys"] / totals["selected"], 4) if totals["selected"] > 0 else 0.0
+    same_day_buy_rate = round(totals["same_day_buys"] / totals["same_day_selected"], 4) if totals["same_day_selected"] > 0 else 0.0
+
+    if target_hour == 4:
+        if totals["same_day_buys"] > 0:
+            decision = "validated"
+            status = "keep"
+            summary = "04h ya monetiza"
+        elif totals["same_day_selected"] > 0:
+            dominant = _top_reason(execution_reasons) or _top_reason(same_day_reasons) or "unknown"
+            decision = "not_validated_yet"
+            status = "keep"
+            summary = f"04h produce selección same-day pero no convierte; cuello dominante={dominant}"
+        elif totals["same_day_edges"] > 0:
+            dominant = _top_reason(same_day_reasons) or "unknown"
+            decision = "observe_post_edge"
+            status = "keep"
+            summary = f"04h produce edge same-day pero no selección; freno dominante={dominant}"
+        else:
+            dominant = _top_reason(same_day_reasons) or "no_same_day_signal"
+            decision = "weak_signal"
+            status = "observe"
+            summary = f"04h aún no valida monetización; señal same-day débil ({dominant})"
+    elif target_hour == 23:
+        if totals["edges"] == 0 and totals["buys"] == 0:
+            decision = "disable_candidate"
+            status = "feature_flag"
+            summary = "23h no aporta edge ni buys; candidato a desactivar"
+        elif buy_rate == 0.0 and totals["same_day_edges"] == 0:
+            decision = "low_value"
+            status = "feature_flag"
+            summary = "23h mantiene valor monetizable débil"
+        else:
+            decision = "keep"
+            status = "observe"
+            summary = "23h aún muestra alguna señal; no desactivar automáticamente"
+    else:
+        decision = "observe"
+        status = "observe"
+        summary = "slot no clasificado"
+
+    return {
+        "slot_hour_utc": target_hour,
+        "cycles": len(slot_records),
+        "decision": decision,
+        "status": status,
+        "summary": summary,
+        "buy_rate": buy_rate,
+        "same_day_buy_rate": same_day_buy_rate,
+        "execution_reject_reasons": execution_reasons,
+        "same_day_reject_reasons": same_day_reasons,
+        "range": {
+            "from": slot_records[0]["_ts_raw"],
+            "to": slot_records[-1]["_ts_raw"],
+        },
+        **totals,
+    }
+
 
 def execute_trade(client, trade, dry_run=True):
     token_id = trade["token_id"]
@@ -15239,6 +15513,7 @@ def main(client):
 
     # ---- PASO 6: Ejecución ----
     buy_summaries = []  # v10.2: para resumen de Telegram
+    execution_failures = []
 
     if not selected:
         dl.append(f"\nSin operaciones este ciclo.")
@@ -15247,6 +15522,21 @@ def main(client):
     else:
         results = []
         for i, trade in enumerate(selected):
+            if not DRY_RUN:
+                execution_price = round(trade["position"].get("aggressive_price", trade["mkt_price"] / 100.0), 2)
+                original_size = round(trade["position"]["shares"], 2)
+                normalized_size = _normalize_buy_order_size(execution_price, original_size)
+                if normalized_size > original_size:
+                    adjusted_position = dict(trade.get("position", {}))
+                    adjusted_position["shares"] = normalized_size
+                    adjusted_position["amount"] = round(execution_price * normalized_size, 2)
+                    adjusted_position["loss_if_lose"] = adjusted_position["amount"]
+                    trade["position"] = adjusted_position
+                    dl.append(
+                        f"  AJUSTE BUY MIN NOTIONAL: {trade['city']} {trade['side']} "
+                        f"{original_size:.2f}sh -> {normalized_size:.2f}sh @ ${execution_price:.2f}"
+                    )
+
             # Guardar en known_tokens para que /ordenes lo encuentre
             known_tokens[trade["token_id"]] = {
                 "question": trade["question"],
@@ -15261,6 +15551,7 @@ def main(client):
             if not DRY_RUN and result["ok"]:
                 buy_summaries.append({
                     "city": trade["city"],
+                    "days_ahead": trade.get("days_ahead"),
                     "side": trade["side"],
                     "amount": trade["position"]["amount"],
                     "edge": trade["edge_pct"],
@@ -15288,6 +15579,12 @@ def main(client):
                     cycle_number=bot_state["cycle_count"] + 1,
                     logic_cycle_number=bot_state.get("cycle_count_series", 0) + 1,
                 )
+            elif not result["ok"]:
+                execution_failures.append({
+                    "reason": _classify_execution_failure_reason(result.get("msg")),
+                    "days_ahead": trade.get("days_ahead"),
+                    "city": trade.get("city"),
+                })
 
         ok = sum(1 for r in results if r["ok"])
         bot_state["last_orders_placed"] = ok
@@ -15391,12 +15688,22 @@ def main(client):
 
     # --- v10.4.1: Guardar resumen de ciclo para historial ---
     try:
+        cycle_timestamp = datetime.now(timezone.utc)
+        slot_metrics = build_cycle_slot_metrics(
+            timestamp_utc=cycle_timestamp,
+            candidates=candidates if 'candidates' in locals() else [],
+            trades=trades if 'trades' in locals() else [],
+            selected=selected if 'selected' in locals() else [],
+            buys=buy_summaries if 'buy_summaries' in locals() else [],
+            skip_log_entries=skip_log_entries if 'skip_log_entries' in locals() else [],
+            execution_failures=execution_failures if 'execution_failures' in locals() else [],
+        )
         cycle_data = {
             "version": BOT_VERSION,
             "logic_series": LOGIC_SERIES,
             "cycle_number": bot_state["cycle_count"] + 1,
             "logic_cycle_number": bot_state.get("cycle_count_series", 0) + 1,
-            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "timestamp_utc": cycle_timestamp.isoformat(),
             "mode": "DRY_RUN" if DRY_RUN else "REAL",
             "management": {
                 "n_kept": mgmt.get("n_kept", 0),
@@ -15412,10 +15719,12 @@ def main(client):
                 "condition_filtered": condition_filtered_skip if 'condition_filtered_skip' in locals() else 0,
                 "city_window_skipped": city_window_skipped if 'city_window_skipped' in locals() else 0,
                 "city_window_cities": sorted(city_window_cities) if 'city_window_cities' in locals() else [],
+                "slot_metrics": slot_metrics,
             },
             "buys": [
                 {
                     "city": b.get("city", "?"),
+                    "days_ahead": b.get("days_ahead"),
                     "side": b.get("side", "?"),
                     "amount": round(b.get("amount", 0), 2),
                     "edge": round(b.get("edge", 0), 1),
@@ -15595,6 +15904,8 @@ def run_trader_tasks():
 if __name__ == "__main__":
     log.info("=" * 65)
     log.info(f"POLYMARKET BOT {BOT_VERSION} | Schedule: {sorted(SCHEDULE_HOURS_UTC)} UTC")
+    if _SCHEDULE_HOURS_DISABLED:
+        log.info(f"Schedule disabled hours: {sorted(_SCHEDULE_HOURS_DISABLED)} UTC")
     log.info(f"Modo: {'DRY RUN' if DRY_RUN else 'REAL'}")
     log.info("=" * 65)
 
