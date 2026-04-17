@@ -1293,6 +1293,8 @@ def run_tests():
              nyc_watch_row)
 
         city_decisions_ns = {
+            "datetime": datetime,
+            "timezone": timezone,
             "CITY_MIN_TRADES_FOR_BLOCK": 3,
             "CITY_BLOCK_WIN_RATE": 25.0,
             "MIN_EDGE": 7.0,
@@ -1301,6 +1303,7 @@ def run_tests():
             "SHADOW_CANARY_MIN_CYCLES": 2,
             "SHADOW_CANARY_MIN_BEST_EDGE": 7.0,
             "SHADOW_CANARY_MIN_SUPPORT": 2,
+            "SHADOW_CANARY_MIN_DAYS": 14,
             "ALLOWLIST_REMOVE_MIN_TRADES": 3,
             "ALLOWLIST_REMOVE_MAX_WIN_RATE": 25.0,
             "ALLOWLIST_REMOVE_MAX_PNL": 0.0,
@@ -1371,8 +1374,8 @@ def run_tests():
             },
             shadow_tracking={
                 "cities": {
-                    "New York City": {"markets_seen": 3, "edge_hits": 2, "best_edge_pct": 11.4, "cycles_seen": 2},
-                    "Dallas": {"markets_seen": 4, "edge_hits": 3, "best_edge_pct": 9.2, "cycles_seen": 3},
+                    "New York City": {"markets_seen": 3, "edge_hits": 2, "best_edge_pct": 11.4, "cycles_seen": 2, "first_seen_at": "2026-03-01T00:00:00+00:00"},
+                    "Dallas": {"markets_seen": 4, "edge_hits": 3, "best_edge_pct": 9.2, "cycles_seen": 3, "first_seen_at": "2026-03-01T00:00:00+00:00"},
                 },
                 "recent_opportunities": [{"city": "New York City", "date": "2026-03-30", "side": "YES", "edge_pct": 11.4, "expected_value": 0.52, "market_price": 42.0, "our_prob": 53.4}],
                 "summary": {"cycles_with_shadow": 2, "opportunities_seen": 3, "edge_hits": 2},

@@ -122,10 +122,12 @@ FORECAST_RATE_LIMIT_COOLDOWN_SECONDS = int(os.getenv("FORECAST_RATE_LIMIT_COOLDO
 # v10.5.2: City accuracy tracker
 CITY_MIN_TRADES_FOR_BLOCK = int(os.getenv("CITY_MIN_TRADES_FOR_BLOCK", "3"))
 CITY_BLOCK_WIN_RATE = float(os.getenv("CITY_BLOCK_WIN_RATE", "25.0"))
-SHADOW_CANARY_MIN_EDGE_HITS = int(os.getenv("SHADOW_CANARY_MIN_EDGE_HITS", "2"))
-SHADOW_CANARY_MIN_CYCLES = int(os.getenv("SHADOW_CANARY_MIN_CYCLES", "2"))
+SHADOW_CANARY_MIN_EDGE_HITS = int(os.getenv("SHADOW_CANARY_MIN_EDGE_HITS", "5"))
+SHADOW_CANARY_MIN_CYCLES = int(os.getenv("SHADOW_CANARY_MIN_CYCLES", "10"))
 SHADOW_CANARY_MIN_BEST_EDGE = float(os.getenv("SHADOW_CANARY_MIN_BEST_EDGE", str(MIN_EDGE)))
-SHADOW_CANARY_MIN_SUPPORT = int(os.getenv("SHADOW_CANARY_MIN_SUPPORT", "2"))
+SHADOW_CANARY_MIN_SUPPORT = int(os.getenv("SHADOW_CANARY_MIN_SUPPORT", "5"))
+# v10.6.17: días mínimos en shadow antes de poder promocionar a canary
+SHADOW_CANARY_MIN_DAYS = int(os.getenv("SHADOW_CANARY_MIN_DAYS", "14"))
 ALLOWLIST_REMOVE_MIN_TRADES = int(os.getenv("ALLOWLIST_REMOVE_MIN_TRADES", str(CITY_MIN_TRADES_FOR_BLOCK)))
 ALLOWLIST_REMOVE_MAX_WIN_RATE = float(os.getenv("ALLOWLIST_REMOVE_MAX_WIN_RATE", str(CITY_BLOCK_WIN_RATE)))
 ALLOWLIST_REMOVE_MAX_PNL = float(os.getenv("ALLOWLIST_REMOVE_MAX_PNL", "0.0"))
@@ -350,6 +352,8 @@ STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", "-25.0"))     # vender si PnL% 
 TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", "40.0"))  # vender si PnL% > +40%
 SELL_AGGRESSION = 0.02  # cuánto bajar el precio para asegurar venta rápida
 INTRA_SL_INTERVAL = int(os.getenv("INTRA_SL_INTERVAL", "0"))  # v10.6: desactivado — cada 8h es suficiente para mercados diarios
+# v10.6.17: city-level SL cooldown — bloquea re-entrada en la misma ciudad tras stop-loss
+SL_CITY_COOLDOWN_HOURS = int(os.getenv("SL_CITY_COOLDOWN_HOURS", "48"))
 
 MIN_PRICE = 0.20
 MAX_PRICE = 0.80
@@ -519,6 +523,7 @@ SHADOW_TRACKING_FILE = _data_path("shadow_city_tracking.json")
 CITY_POLICY_FILE = _data_path("city_policy_state.json")
 SKIP_LOG_FILE = _data_path("skip_log.jsonl")
 SKIP_LOG_MAX_SIZE_BYTES = 20 * 1024 * 1024  # 20 MB — rotación del contrato R3
+SL_COOLDOWN_FILE = _data_path("sl_city_cooldown.json")
 AGENT_EVENTS_FILE = _sync_agent_events_seed()
 SIGNALS_FILE = _seed_data_file("signals.json")
 SIGNALS_CROSSCHECK_FILE = _data_path("signals_crosscheck.jsonl")
@@ -554,6 +559,7 @@ SKIP_REASONS_VALID = frozenset({
     "fuera_allowlist",
     "existing_order",
     "sold_this_cycle",
+    "sl_city_cooldown",
     "existing_position",
     # Grupo B — datos parciales (Loop A, pre-edge)
     "blocked_city",
@@ -623,6 +629,49 @@ def _make_skip_entry(
         "question": question,
         "extras": extras if extras is not None else {},
     }
+
+
+def _sl_cooldown_register(city: str, hours: int = None) -> None:
+    """Registra city en cooldown post-SL. Bloquea re-entrada por SL_CITY_COOLDOWN_HOURS."""
+    if not city:
+        return
+    h = hours if hours is not None else int(globals().get("SL_CITY_COOLDOWN_HOURS", 48) or 48)
+    now = datetime.now(timezone.utc)
+    expires = now + timedelta(hours=h)
+    try:
+        try:
+            with open(SL_COOLDOWN_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            data = {}
+        data[city] = {
+            "triggered_at": now.isoformat(),
+            "expires_at": expires.isoformat(),
+            "cooldown_hours": h,
+        }
+        with open(SL_COOLDOWN_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except Exception as e:
+        log.warning(f"sl_cooldown_register error ({city}): {e}")
+
+
+def _sl_cooldown_check(city: str) -> bool:
+    """Devuelve True si la ciudad está en cooldown post-SL (no debe comprar)."""
+    if not city:
+        return False
+    try:
+        with open(SL_COOLDOWN_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        entry = data.get(city)
+        if not entry:
+            return False
+        expires = datetime.fromisoformat(entry["expires_at"])
+        return datetime.now(timezone.utc) < expires
+    except (FileNotFoundError, json.JSONDecodeError):
+        return False
+    except Exception as e:
+        log.warning(f"sl_cooldown_check error ({city}): {e}")
+        return False
 
 
 def _skip_log_rotate_if_needed(path=None, max_size=None):
@@ -5578,7 +5627,8 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
             "support": SHADOW_CANARY_MIN_SUPPORT,
             "label": (
                 f"canary si shadow >= {SHADOW_CANARY_MIN_EDGE_HITS} edges, >= {SHADOW_CANARY_MIN_CYCLES} ciclos, "
-                f"mejor edge >= {SHADOW_CANARY_MIN_BEST_EDGE:.1f}% y soporte >= {SHADOW_CANARY_MIN_SUPPORT}"
+                f"mejor edge >= {SHADOW_CANARY_MIN_BEST_EDGE:.1f}%, soporte >= {SHADOW_CANARY_MIN_SUPPORT} "
+                f"y >= {SHADOW_CANARY_MIN_DAYS} dias en shadow"
             ),
         },
         "remove": {
@@ -5675,11 +5725,21 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
         observed_count = int(row.get("observed_count", 0) or 0)
         observed_goal = int(row.get("observed_goal", OBSERVED_FORECAST_MIN_SAMPLE) or OBSERVED_FORECAST_MIN_SAMPLE)
         support_count = max(observed_count, trades, shadow_cycles)
+        # v10.6.17: calcular días en shadow desde first_seen_at
+        _shadow_first_seen = shadow.get("first_seen_at", "")
+        _shadow_days = 0
+        if _shadow_first_seen:
+            try:
+                _dt = datetime.fromisoformat(_shadow_first_seen)
+                _shadow_days = (datetime.now(timezone.utc) - _dt).days
+            except Exception:
+                _shadow_days = 0
         promotable_shadow = (
             shadow_edges >= SHADOW_CANARY_MIN_EDGE_HITS
             and shadow_cycles >= SHADOW_CANARY_MIN_CYCLES
             and shadow_best_edge >= SHADOW_CANARY_MIN_BEST_EDGE
             and support_count >= SHADOW_CANARY_MIN_SUPPORT
+            and _shadow_days >= SHADOW_CANARY_MIN_DAYS
         )
         verified_history_bad = (
             row_policy_source == "noaa_verified"
@@ -5812,6 +5872,9 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
         if support_count < SHADOW_CANARY_MIN_SUPPORT:
             missing_support = SHADOW_CANARY_MIN_SUPPORT - support_count
             canary_gaps.append(f"{missing_support} soporte")
+        if _shadow_days < SHADOW_CANARY_MIN_DAYS:
+            missing_days = SHADOW_CANARY_MIN_DAYS - _shadow_days
+            canary_gaps.append(f"{missing_days} día{'s' if missing_days != 1 else ''} en shadow")
 
         if active:
             distance_label = "Ya operativa"
@@ -11054,7 +11117,7 @@ DATA_API_URL = "https://data-api.polymarket.com"
 DAILY_TEMP_TAG_ID = "103040"
 
 RESOLUTION_STATIONS = {
-    "Seoul":          {"lat": 37.4602, "lon": 126.4407, "name": "Incheon Intl"},
+    "Seoul":          {"lat": 37.5665, "lon": 126.9780, "name": "Seoul City (KMA)"},
     "London":         {"lat": 51.5048, "lon": 0.0495,   "name": "London City"},
     "Tel Aviv":       {"lat": 32.0114, "lon": 34.8867,  "name": "Ben Gurion"},
     "Shanghai":       {"lat": 31.1443, "lon": 121.8083, "name": "Pudong"},
@@ -13165,6 +13228,11 @@ def manage_positions(client, dl):
             pct = float(p.get("percentPnl", 0))
             sell_summaries.append({"type": sell_type, "city": city, "side": outcome, "pnl_pct": pct})
 
+            # v10.6.17: registrar cooldown post-SL para bloquear re-entrada en la misma ciudad
+            if sell_type in ("stop_loss", "stop_loss_intra") and city:
+                _sl_cooldown_register(city)
+                dl.append(f"    🔒 SL cooldown activado: {city} bloqueada {SL_CITY_COOLDOWN_HOURS}h")
+
             # Notificar por Telegram
             if sell_type == "stop_loss":
                 icon, type_label = "🔻", "Stop-loss"
@@ -15040,6 +15108,24 @@ def main(client):
                 unit=c["unit"], condition=condition_name, sigma_used=sigma_used_val,
                 question=c["question"],
                 extras={"token_id": token_id},
+            ))
+            continue
+
+        # v10.6.17: no re-comprar ciudad en cooldown post-SL
+        if _sl_cooldown_check(city):
+            skipped_dup += 1
+            edge_analysis.append(f"   {city} {side} | edge={edge_pct:.1f}% → SL COOLDOWN activo ({SL_CITY_COOLDOWN_HOURS}h)")
+            skip_log_entries.append(_make_skip_entry(
+                "sl_city_cooldown", cycle_id=cycle_id,
+                city=city, date_iso=c["date_iso"], side=side, days_ahead=c["days_ahead"],
+                city_mode=c.get("city_mode"), allowlisted=c.get("allowlisted"),
+                edge_pct=round(edge_pct, 2),
+                our_prob=round(our_prob * 100, 2), mkt_prob=round(mkt_price * 100, 2),
+                min_edge=MIN_EDGE,
+                forecast_max=forecast_max, threshold=threshold, threshold_high=threshold_high,
+                unit=c["unit"], condition=condition_name, sigma_used=sigma_used_val,
+                question=c["question"],
+                extras={"cooldown_hours": SL_CITY_COOLDOWN_HOURS},
             ))
             continue
 
