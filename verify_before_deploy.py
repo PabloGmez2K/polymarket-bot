@@ -2716,6 +2716,7 @@ def run_tests():
         with open(tmp_perf_noaa, "w", encoding="utf-8") as f:
             json.dump([
                 {"action": "BUY", "city": "Dallas", "date": noaa_date, "forecast_max": 18.0, "side": "YES", "edge_pct": 12.5},
+                {"action": "BUY", "city": "Dallas", "date": noaa_date, "forecast_max": 18.4, "side": "YES", "edge_pct": 13.1},
                 {"action": "BUY", "city": "London", "date": noaa_date, "forecast_max": 11.0, "side": "NO", "edge_pct": 9.0},
                 {"action": "BUY", "city": "Atlanta", "date": lagged_date, "forecast_max": 20.0, "side": "YES", "edge_pct": 8.2},
             ], f, ensure_ascii=False)
@@ -2726,6 +2727,7 @@ def run_tests():
             "date": date,
             "datetime": datetime,
             "timezone": timezone,
+            "timedelta": timedelta,
             "PERFORMANCE_FILE": tmp_perf_noaa,
             "OBSERVED_AUDIT_KEY": "observed_vs_forecast",
             "OBSERVED_AUDIT_CITIES": {"Chicago", "Atlanta", "Buenos Aires", "Dallas"},
@@ -2763,6 +2765,9 @@ def run_tests():
              bool(observed_records) and observed_records[0]["source"] == "noaa_ncei", observed_records[:1])
         test("audit NOAA: deja trazabilidad del dataset observado",
              bool(observed_records) and observed_records[0]["observed_dataset"] == "daily-summaries_tmax", observed_records[:1])
+        test("audit NOAA: dedupe city-date evita repetir llamadas del mismo dia",
+             sum(1 for call in observed_calls if call[1] == noaa_date and call[0] == "72258303927") == 1,
+             observed_calls)
         test("audit NOAA: colecta fecha sin BUY context",
              chicago_record is not None and chicago_record.get("date") == noaa_shadow_date and chicago_record.get("side") is None and chicago_record.get("edge_pct") is None,
              chicago_record)

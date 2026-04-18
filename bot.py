@@ -7228,7 +7228,7 @@ def maybe_run_w17_observation_alert(state, now=None):
         "Cambios aplicados el 2026-04-17:\n"
         "- QUALITY_TRADER_CITIES_WHITELIST ampliada: +Atlanta, London, New York City, Munich\n"
         "- Slot 23h desactivado (SCHEDULE_DISABLED_HOURS_UTC=23)\n"
-        "- Fix v10.6.18: YES exact/range canary bloqueado si our_prob < 65%\n\n"
+        "- Fix v10.6.18/19: YES exact/range canary bloqueado si our_prob < 65% (exact) / 72% (range)\n\n"
         "Archivos a leer:\n"
         "- data/runtime_import/cycles_history.jsonl (ciclos desde 2026-04-17T18:00)\n"
         "- data/runtime_import/skip_log.jsonl (ultimas 1000 entradas)\n"
@@ -13715,6 +13715,9 @@ NOAA_NCEI_ACCESS_URL = "https://www.ncei.noaa.gov/access/services/data/v1"
 NOAA_OBSERVED_LAG_DAYS = 2
 OBSERVED_FORECAST_MIN_SAMPLE = 3
 OBSERVED_FORECAST_GLOBAL_TARGET = 10
+OBSERVED_AUDIT_MAX_SUCCESSES_PER_RUN = 10
+OBSERVED_AUDIT_MAX_ATTEMPTS_PER_RUN = 40
+OBSERVED_AUDIT_FAIL_COOLDOWN_HOURS = 12
 
 def load_audit_data():
     """Carga datos de auditoría acumulativos."""
@@ -14243,12 +14246,74 @@ def audit_check_resolution_truth(dl):
         return
 
     audit = load_audit_data()
+    observed_rows = [row for row in audit.get(OBSERVED_AUDIT_KEY, []) if isinstance(row, dict)]
     already_checked = set(
         f"{v.get('city')}|{v.get('date')}"
-        for v in audit.get(OBSERVED_AUDIT_KEY, [])
+        for v in observed_rows
     )
+    city_sample_counts = {}
+    for row in observed_rows:
+        city = str(row.get("city", "") or "").strip()
+        if not city:
+            continue
+        city_sample_counts[city] = city_sample_counts.get(city, 0) + 1
 
-    to_check = []
+    now_utc = datetime.now(timezone.utc)
+    fail_cooldown_until = {}
+    for raw_error in audit.get("errors", []):
+        if not isinstance(raw_error, dict):
+            continue
+        if raw_error.get("source") != "noaa_ncei":
+            continue
+        if raw_error.get("kind") != "observed_vs_forecast_fetch_failed":
+            continue
+        city = str(raw_error.get("city", "") or "").strip()
+        market_date = str(raw_error.get("date", "") or "").strip()
+        if not city or not market_date:
+            continue
+        attempted_at = str(raw_error.get("attempted_at", "") or "").strip()
+        if not attempted_at:
+            continue
+        try:
+            attempted_dt = datetime.fromisoformat(attempted_at)
+        except ValueError:
+            continue
+        if attempted_dt.tzinfo is None:
+            attempted_dt = attempted_dt.replace(tzinfo=timezone.utc)
+        cooldown_until = attempted_dt + timedelta(hours=OBSERVED_AUDIT_FAIL_COOLDOWN_HOURS)
+        key = f"{city}|{market_date}"
+        previous_until = fail_cooldown_until.get(key)
+        if previous_until is None or cooldown_until > previous_until:
+            fail_cooldown_until[key] = cooldown_until
+
+    def _candidate_sort_key(item):
+        city = str(item.get("city", "") or "").strip()
+        market_date = str(item.get("date", "") or "").strip()
+        return (
+            city_sample_counts.get(city, 0),
+            0 if item.get("_source_kind") == "perf_buy" else 1,
+            market_date,
+        )
+
+    def _merge_candidate(existing, candidate):
+        if existing is None:
+            return dict(candidate)
+
+        merged = dict(existing)
+        existing_source = 0 if existing.get("_source_kind") == "perf_buy" else 1
+        candidate_source = 0 if candidate.get("_source_kind") == "perf_buy" else 1
+        if candidate_source < existing_source:
+            merged.update(candidate)
+        else:
+            if merged.get("side") is None and candidate.get("side") is not None:
+                merged["side"] = candidate.get("side")
+            if merged.get("edge_pct") is None and candidate.get("edge_pct") is not None:
+                merged["edge_pct"] = candidate.get("edge_pct")
+            if merged.get("forecast_max") is None and candidate.get("forecast_max") is not None:
+                merged["forecast_max"] = candidate.get("forecast_max")
+        return merged
+
+    raw_candidates = []
     for entry in perf:
         if entry.get("action") != "BUY":
             continue
@@ -14271,28 +14336,69 @@ def audit_check_resolution_truth(dl):
             continue
 
         if days_ago >= NOAA_OBSERVED_LAG_DAYS:
-            to_check.append(entry)
-            already_checked.add(key)
+            candidate = {
+                "city": city,
+                "date": market_date,
+                "forecast_max": entry.get("forecast_max"),
+                "side": entry.get("side"),
+                "edge_pct": entry.get("edge_pct"),
+                "_source_kind": "perf_buy",
+            }
+            raw_candidates.append(candidate)
 
     for city in sorted(OBSERVED_AUDIT_CITIES):
-        to_check.extend(_get_noaa_candidate_dates(city, already_checked=already_checked))
+        for candidate in _get_noaa_candidate_dates(city, already_checked=already_checked):
+            candidate["_source_kind"] = "shadow_fallback"
+            raw_candidates.append(candidate)
+
+    deduped_candidates = {}
+    for candidate in raw_candidates:
+        city = str(candidate.get("city", "") or "").strip()
+        market_date = str(candidate.get("date", "") or "").strip()
+        if not city or not market_date:
+            continue
+        key = f"{city}|{market_date}"
+        if key in already_checked:
+            continue
+        cooldown_until = fail_cooldown_until.get(key)
+        if cooldown_until is not None and cooldown_until > now_utc:
+            continue
+        deduped_candidates[key] = _merge_candidate(deduped_candidates.get(key), candidate)
+
+    to_check = sorted(deduped_candidates.values(), key=_candidate_sort_key)
 
     if not to_check:
         return
 
     n_checked = 0
-    for entry in to_check[:10]:
+    n_attempted = 0
+    max_successes = int(globals().get("OBSERVED_AUDIT_MAX_SUCCESSES_PER_RUN", 10) or 10)
+    max_attempts = int(globals().get("OBSERVED_AUDIT_MAX_ATTEMPTS_PER_RUN", 40) or 40)
+    for entry in to_check:
+        if n_checked >= max_successes or n_attempted >= max_attempts:
+            break
         city = entry["city"]
         market_date = entry["date"]
         resolution_meta = RESOLUTION_ICAO.get(city, {})
         noaa_station_id = resolution_meta.get("noaa_station_id", "")
         noaa_daily_station_id = resolution_meta.get("noaa_daily_station_id", "")
+        n_attempted += 1
         observed_temp_c, observed_dataset = fetch_noaa_observed_max(
             noaa_station_id,
             market_date,
             daily_station_id=noaa_daily_station_id,
         )
         if observed_temp_c is None:
+            audit.setdefault("errors", []).append({
+                "source": "noaa_ncei",
+                "kind": "observed_vs_forecast_fetch_failed",
+                "city": city,
+                "date": market_date,
+                "noaa_station_id": noaa_station_id,
+                "noaa_daily_station_id": noaa_daily_station_id,
+                "attempted_at": datetime.now(timezone.utc).isoformat(),
+                "reason": "observed_temp_unavailable",
+            })
             continue
 
         forecast_temp_c = entry.get("forecast_max", 0)
@@ -14322,7 +14428,7 @@ def audit_check_resolution_truth(dl):
             f"observado NOAA NCEI={observed_temp_c:.1f}°C | "
             f"prevision={forecast_temp_c:.1f}°C | "
             f"error={error:+.1f}°C"
-        )
+            )
 
     if n_checked > 0:
         all_errors = [v["abs_error_c"] for v in audit.get(OBSERVED_AUDIT_KEY, []) if v.get("source") == "noaa_ncei"]
@@ -14332,6 +14438,10 @@ def audit_check_resolution_truth(dl):
                 f"  📊 Error medio observed proxy NOAA vs forecast: "
                 f"{avg_error:.1f}°C ({len(all_errors)} mercados)"
             )
+    elif n_attempted > 0:
+        dl.append(
+            f"  NOAA observed proxy sin casos nuevos: 0/{n_attempted} intentos útiles"
+        )
 
     save_audit_data(audit)
 
@@ -15462,9 +15572,11 @@ def main(client):
 
         # v10.6.15: edge mínimo diferenciado para exact/range canary
         _effective_min_edge = MIN_EDGE + MIN_EDGE_EXACT_RANGE_BUFFER_PP if c.get("exact_range_canary") else MIN_EDGE
-        # v10.6.18: exact/range canary YES-side requiere our_prob >= 65% (autopsia C1: YES con our_prob<65% pierde sistemáticamente)
-        if c.get("exact_range_canary") and side == "YES" and our_prob < 0.65:
-            edge_analysis.append(f"  \u29b5 {city} {side} {temp_label} {c['date_iso']} | our_prob={our_prob*100:.1f}% < 65% (exact/range YES low-conf skip)")
+        # v10.6.18: exact/range canary YES-side requiere our_prob >= 65% exact / 72% range
+        # (autopsia C1: YES range WR=9% vs exact WR=29% → range necesita floor más exigente)
+        _yes_floor = 0.72 if condition_name == "range" else 0.65
+        if c.get("exact_range_canary") and side == "YES" and our_prob < _yes_floor:
+            edge_analysis.append(f"  \u29b5 {city} {side} {temp_label} {c['date_iso']} | our_prob={our_prob*100:.1f}% < {_yes_floor*100:.0f}% (exact/range YES low-conf skip)")
             skip_log_entries.append(_make_skip_entry(
                 "below_min_edge", cycle_id=cycle_id,
                 city=city, date_iso=c["date_iso"], side=side, days_ahead=c["days_ahead"],
