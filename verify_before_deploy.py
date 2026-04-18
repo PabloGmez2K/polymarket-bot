@@ -5031,7 +5031,7 @@ def run_tests():
                 except Exception:
                     pass
 
-    test("Version v10.6.15", 'BOT_VERSION = "v10.6.15"' in code)
+    test("Version v10.6.20", 'BOT_VERSION = "v10.6.20"' in code)
 
     # ---- v10.6.15: Quality-trader canary exact/range ----
     test(
@@ -5132,6 +5132,54 @@ def run_tests():
     test(
         "v10.6.17: ACTIVE_TRADING_CITIES sigue en NONE en env (guardrail)",
         os.environ.get("ACTIVE_TRADING_CITIES", "NONE") in ("", "NONE"),
+    )
+
+    # ---- v10.6.20: P1 - ciudades invisibles al pipeline + alertas P4-P7 ----
+    test(
+        "v10.6.20: Lucknow en OBSERVED_AUDIT_CITIES (fix handoff C sesion 169)",
+        '"Lucknow"' in code and "OBSERVED_AUDIT_CITIES" in code,
+    )
+    test(
+        "v10.6.20: Sao Paulo en OBSERVED_AUDIT_CITIES (fix handoff C sesion 169)",
+        '"Sao Paulo"' in code and "OBSERVED_AUDIT_CITIES" in code,
+    )
+    test(
+        "v10.6.20: Lucknow tiene RESOLUTION_STATIONS",
+        '"Lucknow":        {"lat": 26.7606' in code
+        or '"Lucknow": {"lat": 26.7606' in code,
+    )
+    test(
+        "v10.6.20: Sao Paulo tiene RESOLUTION_STATIONS",
+        '"Sao Paulo":      {"lat": -23.4355' in code
+        or '"Sao Paulo": {"lat": -23.4355' in code,
+    )
+    test(
+        "v10.6.20: maybe_alert_p4_p5_expansion definida",
+        "def maybe_alert_p4_p5_expansion(" in code,
+    )
+    test(
+        "v10.6.20: maybe_alert_p6_p7_post_v2_cleanup definida",
+        "def maybe_alert_p6_p7_post_v2_cleanup(" in code,
+    )
+    test(
+        "v10.6.20: maybe_alert_p4_p5_expansion integrada en run_observability_alerts",
+        "maybe_alert_p4_p5_expansion(state)" in code,
+    )
+    test(
+        "v10.6.20: maybe_alert_p6_p7_post_v2_cleanup integrada en run_observability_alerts",
+        "maybe_alert_p6_p7_post_v2_cleanup(state)" in code,
+    )
+    test(
+        "v10.6.20: P4-P5 alert FIRE_DATE es 2026-04-22",
+        'FIRE_DATE = "2026-04-22"' in code,
+    )
+    test(
+        "v10.6.20: P6-P7 alert FIRE_DATE es 2026-04-25",
+        'FIRE_DATE = "2026-04-25"' in code,
+    )
+    test(
+        "v10.6.20: BOT_VERSION bumped a v10.6.20",
+        'BOT_VERSION = "v10.6.20"' in code,
     )
 
     # ---- Resultado ----

@@ -101,7 +101,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.15"
+BOT_VERSION = "v10.6.20"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -4048,6 +4048,24 @@ def run_observability_alerts():
         if logger:
             logger.warning(f"w17 observation alert: fallo ({e})")
 
+    # v10.6.20: alerta one-shot expansion post-checkpoint condition_filtered (dispara 2026-04-22).
+    try:
+        if maybe_alert_p4_p5_expansion(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"p4_p5 expansion alert: fallo ({e})")
+
+    # v10.6.20: alerta one-shot limpieza post-V2 cutover (dispara 2026-04-25).
+    try:
+        if maybe_alert_p6_p7_post_v2_cleanup(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"p6_p7 post v2 alert: fallo ({e})")
+
     try:
         if maybe_evaluate_slot_monetization(state):
             changed = True
@@ -7274,6 +7292,219 @@ def maybe_run_w17_observation_alert(state, now=None):
 
     state[STATE_KEY] = True
     state["w17_observation_alert_last_daily"] = today_str
+    return True
+
+
+def maybe_alert_p4_p5_expansion(state, now=None):
+    """
+    v10.6.20: alerta one-shot de expansion post-checkpoint condition_filtered (P4+P5).
+
+    Dispara el 2026-04-22 o posterior (dia posterior al checkpoint dia 7 del
+    canary exact/range abierto el 2026-04-14). Entrega prompt explicito para
+    que Codex evalue expansion whitelist exact/range (P4) + universo ciudades
+    (P5) usando evidencia acumulada.
+
+    Retorna True si state fue mutado.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    FIRE_DATE = "2026-04-22"
+    STATE_KEY = "p4_p5_expansion_alert_sent"
+
+    if state.get(STATE_KEY):
+        return False
+    if now.date().isoformat() < FIRE_DATE:
+        return False
+
+    today_str = now.date().isoformat()
+    last_daily = state.get("p4_p5_expansion_alert_last_daily", "")
+    if last_daily == today_str:
+        return False
+
+    prompt_codex = (
+        "Lee AGENTS.md, CONTEXTO.md ultimo bloque y OPERATIONS_PLAYBOOK.md.\n\n"
+        "Tarea: Expansion post-checkpoint condition_filtered (P4+P5).\n\n"
+        "Precondicion critica: verificar que el checkpoint dia 7 del "
+        "2026-04-21 cerro con verdict=OK o PROMOTE (WR bot exact/range >=55% "
+        "n>=30). Si verdict fue CLOSE o ALERT (WR<50%), ABORTAR y avisar a "
+        "Pablo; no expandir sobre muestra mala.\n\n"
+        "Archivos a leer:\n"
+        "- data/runtime_import/trade_lifecycle.json (filtrar opened_at>=2026-04-14, "
+        "condition in {exact,range})\n"
+        "- data/runtime_import_derived/blocked_signals_resolutions.jsonl\n"
+        "- data/runtime_import_derived/signals_crosscheck.jsonl (ultimas 7 corridas)\n"
+        "- data/directional_trader_census.json\n"
+        "- data/reference_trader_city_market_cross.json\n"
+        "- docs/blocked-signals-wr-baseline-2026-04-13.md\n"
+        "- docs/handoffs/condition-filtered-canary-implement-2026-04-14.md\n\n"
+        "P4 - Expandir whitelist exact/range:\n"
+        "1. Correr tools/blocked_signals_settlement_tracker.py fresh.\n"
+        "2. Identificar ciudades con WR>=55% n>=30 que NO esten en "
+        "QUALITY_TRADER_CITIES_WHITELIST actual.\n"
+        "3. Candidatas iniciales (verificar n actual): Chengdu, Shenzhen, "
+        "Shanghai, Milan (ya en whitelist sesion 175). Buscar nuevas.\n"
+        "4. Proponer adicion a whitelist con evidencia cuantitativa por ciudad.\n\n"
+        "P5 - Ampliar universo de ciudades:\n"
+        "1. Leer signals_crosscheck.jsonl - bloque TRADER_ONLY.\n"
+        "2. De las ~21 ciudades TRADER_ONLY, filtrar las que:\n"
+        "   a) Tengan consensus>=2 traders quality\n"
+        "   b) Tengan RESOLUTION_STATIONS disponibles en NOAA (verificar ICAO + "
+        "stationid ISD historico)\n"
+        "   c) NO sean blocked_cities ni legacy blocked\n"
+        "3. Proponer 3-5 candidatas top con:\n"
+        "   - Coords NOAA (lat/lon)\n"
+        "   - ICAO + noaa_station_id + noaa_daily_station_id\n"
+        "   - Timezone correcta\n"
+        "   - Muestra historica que justifique (consensus, WR traders)\n"
+        "4. Preparar patch bot.py con RESOLUTION_STATIONS, RESOLUTION_ICAO, "
+        "CITY_TIMEZONES, OBSERVED_AUDIT_CITIES.\n\n"
+        "Guardrails:\n"
+        "- NO tocar filtros de precio, MIN_EDGE global, Kelly, sigma, exits.\n"
+        "- NO anadir ciudad sin RESOLUTION_STATIONS verificado (evitar Seoul "
+        "mismatch repetido - sesion 185).\n"
+        "- verify_before_deploy.py debe cerrar verde antes de commit.\n\n"
+        "Salida esperada:\n"
+        "- Patch en bot.py (si P5 aplica).\n"
+        "- Lista de env vars Railway a actualizar (P4).\n"
+        "- docs/p4-p5-expansion-2026-04-22.md con evidencia y decision.\n"
+        "- Commit + push + deploy Railway.\n"
+        "- Actualizar CONTEXTO.md y engram."
+    )
+
+    msg = (
+        f"\U0001f680 <b>Alerta P4+P5 \u2014 Expansion post-checkpoint</b>\n\n"
+        f"Han pasado &gt;=1 dia desde el checkpoint dia 7 del canary "
+        f"condition_filtered exact/range (2026-04-21).\n\n"
+        f"<b>Precondicion critica:</b>\n"
+        f"  Verificar que el checkpoint cerro en OK o PROMOTE.\n"
+        f"  Si fue CLOSE/ALERT: abortar expansion y notificar.\n\n"
+        f"<b>Tareas</b>:\n"
+        f"  P4 = expandir QUALITY_TRADER_CITIES_WHITELIST.\n"
+        f"  P5 = ampliar universo 3-5 ciudades del set TRADER_ONLY.\n\n"
+        f"<b>Prompt para Codex</b> (copiar y pegar):\n"
+        f"<code>{prompt_codex}</code>"
+    )
+
+    try:
+        send_telegram(msg)
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"p4_p5 expansion alert: fallo al enviar Telegram ({e})")
+        state["p4_p5_expansion_alert_last_daily"] = today_str
+        return True
+
+    state[STATE_KEY] = True
+    state["p4_p5_expansion_alert_last_daily"] = today_str
+    return True
+
+
+def maybe_alert_p6_p7_post_v2_cleanup(state, now=None):
+    """
+    v10.6.20: alerta one-shot de limpieza post-V2 cutover (P6+P7).
+
+    Dispara el 2026-04-25 o posterior (3 dias despues del cutover V1->V2 del
+    2026-04-22). Entrega prompt explicito para Codex sobre dos tareas de
+    limpieza pendientes que quedaron bloqueadas durante la ventana V2:
+    P6 - Reset shadow_city_tracking Seoul legacy (post Seoul station mismatch
+    fix sesion 185).
+    P7 - Investigar MIN_EDGE por ciudad para WR>70% historico.
+
+    Retorna True si state fue mutado.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    FIRE_DATE = "2026-04-25"
+    STATE_KEY = "p6_p7_post_v2_alert_sent"
+
+    if state.get(STATE_KEY):
+        return False
+    if now.date().isoformat() < FIRE_DATE:
+        return False
+
+    today_str = now.date().isoformat()
+    last_daily = state.get("p6_p7_post_v2_alert_last_daily", "")
+    if last_daily == today_str:
+        return False
+
+    prompt_codex = (
+        "Lee AGENTS.md, CONTEXTO.md ultimo bloque y OPERATIONS_PLAYBOOK.md.\n\n"
+        "Tarea: Limpieza post-V2 cutover (P6+P7). Ambas tareas asumen que el "
+        "cutover V1->V2 del 2026-04-22 cerro limpio y el bot lleva >=3 dias "
+        "estable en V2 SDK (sin errores CLOB repetidos).\n\n"
+        "Precondicion critica: verificar en Railway logs que no hay errores "
+        "recurrentes en create_or_derive_api_key, get_open_orders ni auth "
+        "endpoints. Si hay inestabilidad V2, ABORTAR P6+P7 y escalar a Opus.\n\n"
+        "P6 - Reset shadow_city_tracking Seoul legacy:\n"
+        "Contexto: sesion 185 (2026-04-17) arreglo Seoul station mismatch "
+        "(Incheon -> KMA Seoul City). El shadow_city_tracking acumulo datos "
+        "previos al fix con forecasts erroneos (~65 ciclos con fuente "
+        "Incheon). La promotion logic podria mezclar muestra contaminada con "
+        "post-fix.\n"
+        "Pasos:\n"
+        "1. Backup: cp data/runtime_import/shadow_city_tracking.json "
+        "data/runtime_import/shadow_city_tracking.json.bak-pre-p6\n"
+        "2. Filtrar entradas Seoul anteriores a 2026-04-17 (fecha fix "
+        "RESOLUTION_STATIONS). Conservar solo Seoul post-fix.\n"
+        "3. Reescribir el JSON con Seoul aislado; otras ciudades intactas.\n"
+        "4. Verificar que city_promotion_gate y notify_active_candidates "
+        "ahora leen solo evidencia post-fix para Seoul.\n"
+        "5. Actualizar el archivo en Railway via railway_safe.ps1 ssh.\n\n"
+        "P7 - Investigar MIN_EDGE por ciudad:\n"
+        "Contexto: MIN_EDGE_PCT global obliga a todas las ciudades al mismo "
+        "umbral. Ciudades con WR historico >70% podrian operar con MIN_EDGE "
+        "mas bajo sin incrementar riesgo. Esto aumentaria throughput.\n"
+        "Pasos:\n"
+        "1. Leer trade_lifecycle.json, agrupar por city.\n"
+        "2. Para cada ciudad con n_closed>=10 calcular: WR, PnL neto, avg "
+        "edge entrada, EV realizado.\n"
+        "3. Identificar ciudades con WR>=70% n>=10 y PnL>0.\n"
+        "4. Calcular MIN_EDGE propuesto por ciudad: target edge minimo tal "
+        "que el peor trade historico hubiera sido marginalmente rentable.\n"
+        "5. ANALISIS SOLAMENTE, no aplicar. Output:\n"
+        "   docs/min-edge-per-city-analysis-2026-04-25.md con:\n"
+        "   - Tabla por ciudad (WR, PnL, n, edge historico, MIN_EDGE propuesto)\n"
+        "   - Propuesta Railway env var MIN_EDGE_PER_CITY (JSON o CSV)\n"
+        "   - Implementacion sugerida (sin tocar aun)\n"
+        "6. Opus decidira en sesion siguiente si aplicar y como implementar.\n\n"
+        "Guardrails:\n"
+        "- P6 toca data (no codigo). P7 es analisis puro (no toca nada).\n"
+        "- NO modificar trading core, filtros, Kelly, sigma en esta sesion.\n"
+        "- verify_before_deploy.py debe cerrar verde si se tocase codigo "
+        "(solo aplicable a P6 si modifica script de sync).\n"
+        "- Si P6 y P7 resultan en cambios de codigo: commit separados.\n\n"
+        "Salida esperada:\n"
+        "- P6: shadow_city_tracking.json actualizado en Railway + backup local.\n"
+        "- P7: docs/min-edge-per-city-analysis-2026-04-25.md con propuesta.\n"
+        "- Actualizar CONTEXTO.md y engram con ambos resultados."
+    )
+
+    msg = (
+        f"\U0001f9f9 <b>Alerta P6+P7 \u2014 Limpieza post-V2 cutover</b>\n\n"
+        f"Han pasado &gt;=3 dias desde el V2 cutover del 2026-04-22.\n\n"
+        f"<b>Precondicion critica:</b>\n"
+        f"  Verificar en Railway logs que V2 SDK esta estable.\n"
+        f"  Si hay errores recurrentes V2: abortar y escalar a Opus.\n\n"
+        f"<b>Tareas</b>:\n"
+        f"  P6 = reset shadow_city_tracking Seoul legacy (post sesion 185).\n"
+        f"  P7 = investigar MIN_EDGE por ciudad (analisis, no aplicar).\n\n"
+        f"<b>Prompt para Codex</b> (copiar y pegar):\n"
+        f"<code>{prompt_codex}</code>"
+    )
+
+    try:
+        send_telegram(msg)
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"p6_p7 post v2 alert: fallo al enviar Telegram ({e})")
+        state["p6_p7_post_v2_alert_last_daily"] = today_str
+        return True
+
+    state[STATE_KEY] = True
+    state["p6_p7_post_v2_alert_last_daily"] = today_str
     return True
 
 
@@ -11424,12 +11655,14 @@ OBSERVED_AUDIT_CITIES = {
     "Chicago",
     "Dallas",
     "London",
+    "Lucknow",
     "Madrid",
     "Miami",
     "Milan",
     "Munich",
     "New York City",
     "Paris",
+    "Sao Paulo",
     "Seattle",
     "Seoul",
     "Shanghai",
