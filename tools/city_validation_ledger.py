@@ -722,6 +722,12 @@ def classify_bottleneck(
         return "trader_input_quality"
     if settlement_fidelity["risk"] == "high":
         return "source_fidelity"
+    if (
+        shadow_summary["edge_hits"] == 0
+        and shadow_summary["cycles_seen"] >= 5
+        and shadow_summary["markets_seen"] >= 8
+    ):
+        return "weak_city_hypothesis"
     if visible_snapshots < 2:
         return "market_visibility"
     if shadow_summary["edge_hits"] < bot.SHADOW_CANARY_MIN_EDGE_HITS or shadow_summary["cycles_seen"] < bot.SHADOW_CANARY_MIN_CYCLES:
@@ -769,6 +775,8 @@ def compute_recommendation(policy_mode, evidence_status, shadow_summary, settlem
         return "review_runtime_policy_gate"
     if bottleneck == "canary_measurement":
         return "observe_runtime_canary"
+    if bottleneck == "weak_city_hypothesis":
+        return "background_watch"
     if evidence_status == "insufficient":
         return "insufficient_evidence"
     if evidence_status == "actionable":

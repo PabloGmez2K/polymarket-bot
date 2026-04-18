@@ -25,6 +25,7 @@ import types
 import json
 import base64
 import tempfile
+import shutil
 import urllib.error
 from datetime import date, datetime, timezone, timedelta
 
@@ -1557,8 +1558,12 @@ def run_tests():
         ):
             exec(get_function_source(module_ast, code_lines, fn), shadow_ns)
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            shadow_ns["SHADOW_TRACKING_FILE"] = os.path.join(tmpdir, "shadow_city_tracking.json")
+        tmp_shadow_tracking = os.path.join(
+            os.getcwd(),
+            f"_tmp_shadow_tracking_test_{next(tempfile._get_candidate_names())}.json",
+        )
+        try:
+            shadow_ns["SHADOW_TRACKING_FILE"] = tmp_shadow_tracking
             shadow_ns["load_audit_data"] = lambda: {
                 "observed_vs_forecast": [
                     {
@@ -1614,6 +1619,12 @@ def run_tests():
             test("road_to_real: usa directional_history sin NameError",
                  road_sim_wr["display"] == "100.0% (n=1)",
                  road_sim_wr)
+        finally:
+            if os.path.exists(tmp_shadow_tracking):
+                try:
+                    os.remove(tmp_shadow_tracking)
+                except PermissionError:
+                    pass
         g = _gates_call(noaa_configured=True, observed_count=2, observed_goal=5)
         test("R1 gate_c: partial con NOAA configurado pero muestra corta",
              g["gate_c"]["state"] == "partial" and g["gate_c"]["badge"] == "warn", g["gate_c"])
@@ -4315,6 +4326,7 @@ def run_tests():
         "datetime": datetime,
         "timezone": timezone,
         "json": json,
+        "SCHEDULE_HOURS_UTC": [4, 8, 16],
         "load_cycle_history": lambda: [
             {"timestamp_utc": "2026-04-17T04:00:45+00:00", "scan": {"slot_metrics": {"slot_hour_utc": 4, "same_day_candidates": 10, "same_day_edges": 2, "same_day_selected": 2, "same_day_buys": 0, "edges": 2, "selected": 2, "buys": 0, "buy_rate": 0.0, "same_day_buy_rate": 0.0, "same_day_reject_reasons": {"price_out_of_range": 3}, "execution_reject_reasons": {"buy_min_notional": 1}}}},
             {"timestamp_utc": "2026-04-16T04:00:45+00:00", "scan": {"slot_metrics": {"slot_hour_utc": 4, "same_day_candidates": 8, "same_day_edges": 1, "same_day_selected": 1, "same_day_buys": 0, "edges": 1, "selected": 1, "buys": 0, "buy_rate": 0.0, "same_day_buy_rate": 0.0, "same_day_reject_reasons": {"price_out_of_range": 2}, "execution_reject_reasons": {"buy_min_notional": 1}}}},
@@ -4334,11 +4346,12 @@ def run_tests():
 
     slot_state = {"slot_monetization_last_date": None, "slot_monetization_last_signature": None}
     slot_result = slot_review_ns["maybe_evaluate_slot_monetization"](slot_state, now=datetime(2026, 4, 17, 8, 5, tzinfo=timezone.utc))
-    test("slot monetization alert: envía alerta operativa con 04h keep y 23h disable_candidate",
+    test("slot monetization alert: envía alerta operativa con 04h keep y omite 23h si está deshabilitado",
          slot_result is True
          and len(slot_review_messages) == 1
-         and "disable_candidate" in slot_review_messages[0]
-         and "buy_min_notional" in slot_review_messages[0],
+         and "<code>keep</code>" in slot_review_messages[0]
+         and "buy_min_notional" in slot_review_messages[0]
+         and "23h UTC" not in slot_review_messages[0],
          {"result": slot_result, "messages": slot_review_messages, "state": slot_state})
 
     slot_result_idem = slot_review_ns["maybe_evaluate_slot_monetization"](slot_state, now=datetime(2026, 4, 17, 9, 0, tzinfo=timezone.utc))
@@ -4873,12 +4886,11 @@ def run_tests():
 
     # Test 2: append_skip_log_entries([]) es no-op (no crea archivo)
     ns2 = _build_skip_ns()
-    tmp_dir_r3 = os.path.join(os.getcwd(), "_tmp_skip_log_test")
-    if os.path.exists(tmp_dir_r3):
-        _sh_r3.rmtree(tmp_dir_r3, ignore_errors=True)
-    os.makedirs(tmp_dir_r3, exist_ok=True)
+    tmp_path = os.path.join(
+        os.getcwd(),
+        f"_tmp_skip_log_test_{next(_tf_r3._get_candidate_names())}.jsonl",
+    )
     try:
-        tmp_path = os.path.join(tmp_dir_r3, "skip_log.jsonl")
         ns2["append_skip_log_entries"]([], path=tmp_path)
         test("R3: append_skip_log_entries([]) no crea archivo",
              not os.path.exists(tmp_path))
@@ -4943,7 +4955,7 @@ def run_tests():
              tolerated and len(result_tol) == 5)
 
         # Test 8: rotación dispara cuando size >= max_size
-        rot_tmp = os.path.join(tmp_dir_r3, "skip_log_rot.jsonl")
+        rot_tmp = tmp_path[:-len(".jsonl")] + "_rot.jsonl"
         big_entry = ns2["_make_skip_entry"]("no_edge", cycle_id="2026-04-05T16:00",
                                              city="Tokyo", question="x" * 2000)
         original_replace = ns2["os"].replace
@@ -4956,8 +4968,10 @@ def run_tests():
         ns2["append_skip_log_entries"]([big_entry], path=rot_tmp, max_size=1024)
         ns2["os"].replace = original_replace
         rotated_files = [
-            n for n in os.listdir(tmp_dir_r3)
-            if n.startswith("skip_log_rot.") and n.endswith(".jsonl") and n != "skip_log_rot.jsonl"
+            n for n in os.listdir(os.getcwd())
+            if n.startswith(os.path.basename(rot_tmp)[:-len(".jsonl")] + ".")
+            and n.endswith(".jsonl")
+            and n != os.path.basename(rot_tmp)
         ]
         test("R3: rotación crea archivo rotado cuando supera max_size",
              len(rotated_files) >= 1)
@@ -4969,7 +4983,7 @@ def run_tests():
              len(combined) >= 5)
 
         # Test 10: writer NO lanza si disco falla (path inválido en Windows / directorio inexistente sin permiso)
-        invalid_path = os.path.join(tmp_dir_r3, "nonexistent_dir", "skip.jsonl")
+        invalid_path = tmp_path[:-len(".jsonl")] + "_invalid.jsonl"
         # Crear el parent dir está permitido, así que esto crea y escribe → no falla.
         # Mejor: simular write a path con caracter inválido en Windows.
         fake_log = _FakeLog()
@@ -4982,7 +4996,7 @@ def run_tests():
         ns_fail["open"] = _failing_open
         # Re-exec append con el open fallado
         exec(get_function_source(module_ast, code_lines, "append_skip_log_entries"), ns_fail)
-        fail_path = os.path.join(tmp_dir_r3, "skip_fail.jsonl")
+        fail_path = tmp_path[:-len(".jsonl")] + "_fail.jsonl"
         raised_fail = False
         try:
             ns_fail["append_skip_log_entries"](
@@ -4998,10 +5012,19 @@ def run_tests():
              not raised_fail)
 
     finally:
-        try:
-            _sh_r3.rmtree(tmp_dir_r3, ignore_errors=True)
-        except Exception:
-            pass
+        for cleanup_path in [tmp_path, tmp_path[:-len(".jsonl")] + "_rot.jsonl", tmp_path[:-len(".jsonl")] + "_invalid.jsonl", tmp_path[:-len(".jsonl")] + "_fail.jsonl"]:
+            if os.path.exists(cleanup_path):
+                try:
+                    os.remove(cleanup_path)
+                except Exception:
+                    pass
+        for rotated_name in os.listdir(os.getcwd()):
+            prefix = os.path.basename(tmp_path)[:-len(".jsonl")] + "_rot."
+            if rotated_name.startswith(prefix) and rotated_name.endswith(".jsonl"):
+                try:
+                    os.remove(os.path.join(os.getcwd(), rotated_name))
+                except Exception:
+                    pass
 
     test("Version v10.6.15", 'BOT_VERSION = "v10.6.15"' in code)
 

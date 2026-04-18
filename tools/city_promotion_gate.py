@@ -200,6 +200,19 @@ def compute_gate(row):
                 "decidir como convertir discovery prometedor en validacion shadow medible y util para monetizar",
             ),
         }
+    if bottleneck == "weak_city_hypothesis":
+        return {
+            "gate_status": "background_watch",
+            "review_priority": "later",
+            "codex_instruction": (
+                f"{row['city']} ya tuvo visibilidad shadow repetida, pero sigue sin edge propio util; "
+                "no priorizar monetizacion hasta que aparezca evidencia nueva."
+            ),
+            "codex_prompt": build_codex_prompt(
+                row,
+                "confirmar si la ciudad ya debe pasar a background watch por hipotesis debil en vez de seguir en review activa",
+            ),
+        }
     if bottleneck == "source_fidelity":
         return {
             "gate_status": "observe_with_source_caution",

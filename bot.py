@@ -6864,6 +6864,10 @@ def maybe_run_daily_crosscheck(state, now=None):
         bot_only_cities = sorted(bot_edge_set - signal_city_set)
         trader_only_cities = sorted(signal_city_set - bot_edge_set)
         actionable_trader_only = [c for c in trader_only_cities if city_stats[c]["allowed"] > 0]
+        operational_trader_only = [
+            c for c in actionable_trader_only
+            if city_stats[c]["consensus"] > 0 and not is_city_blocked(c)
+        ]
 
         # Append record to JSONL
         record = {
@@ -6883,6 +6887,7 @@ def maybe_run_daily_crosscheck(state, now=None):
                 1 for c in trader_only_cities if city_stats.get(c, {}).get("consensus", 0) > 0
             ),
             "actionable_trader_only_count": len(actionable_trader_only),
+            "operational_trader_only_count": len(operational_trader_only),
         }
         crosscheck_dir = os.path.dirname(SIGNALS_CROSSCHECK_FILE)
         if crosscheck_dir:
@@ -6899,7 +6904,7 @@ def maybe_run_daily_crosscheck(state, now=None):
 
         # Daily Telegram message
         action_lines = ""
-        for c in actionable_trader_only[:4]:
+        for c in operational_trader_only[:4]:
             st = city_stats[c]
             cons_tag = " (consenso)" if st["consensus"] > 0 else ""
             action_lines += f"\n  • {c}: {st['allowed']} señal(es){cons_tag}"
@@ -6908,12 +6913,14 @@ def maybe_run_daily_crosscheck(state, now=None):
             f"📊 <b>Cross-check diario traders vs bot</b>\n"
             f"MATCH {len(match_cities)} | BOT_ONLY {len(bot_only_cities)} | TRADER_ONLY {len(trader_only_cities)}\n"
         )
-        if actionable_trader_only:
+        if operational_trader_only:
             daily_msg += (
-                f"Traders ven oportunidad (conds operables) sin edge bot "
-                f"<i>(muestra top {min(len(actionable_trader_only), 4)} de {len(actionable_trader_only)})</i>:"
+                f"Gap operativo real (conds operables, consenso, fuera de blocked) "
+                f"<i>(muestra top {min(len(operational_trader_only), 4)} de {len(operational_trader_only)})</i>:"
                 f"{action_lines}\n"
             )
+        else:
+            daily_msg += "Sin gap operativo real hoy <i>(TRADER_ONLY blocked o sin consenso no alertan)</i>\n"
         daily_msg += f"<i>Corrida {n_records}/{SIGNALS_CROSSCHECK_NOTIFY_THRESHOLD}</i>"
         send_telegram(daily_msg)
 
@@ -7292,26 +7299,25 @@ def maybe_evaluate_slot_monetization(state, now=None):
         return False
 
     slot_04 = evaluate_slot_monetization(records, 4, min_cycles=3)
+    slot_23_enabled = 23 in SCHEDULE_HOURS_UTC
     slot_23 = evaluate_slot_monetization(records, 23, min_cycles=3)
-    signature = json.dumps(
-        {
-            "04": {
-                "decision": slot_04.get("decision"),
-                "same_day_selected": slot_04.get("same_day_selected"),
-                "same_day_buys": slot_04.get("same_day_buys"),
-                "top_execution": _top_reason(slot_04.get("execution_reject_reasons")),
-                "top_same_day": _top_reason(slot_04.get("same_day_reject_reasons")),
-            },
-            "23": {
-                "decision": slot_23.get("decision"),
-                "edges": slot_23.get("edges"),
-                "buys": slot_23.get("buys"),
-                "top_same_day": _top_reason(slot_23.get("same_day_reject_reasons")),
-            },
+    signature_payload = {
+        "04": {
+            "decision": slot_04.get("decision"),
+            "same_day_selected": slot_04.get("same_day_selected"),
+            "same_day_buys": slot_04.get("same_day_buys"),
+            "top_execution": _top_reason(slot_04.get("execution_reject_reasons")),
+            "top_same_day": _top_reason(slot_04.get("same_day_reject_reasons")),
         },
-        sort_keys=True,
-        ensure_ascii=False,
-    )
+    }
+    if slot_23_enabled and isinstance(slot_23, dict):
+        signature_payload["23"] = {
+            "decision": slot_23.get("decision"),
+            "edges": slot_23.get("edges"),
+            "buys": slot_23.get("buys"),
+            "top_same_day": _top_reason(slot_23.get("same_day_reject_reasons")),
+        }
+    signature = json.dumps(signature_payload, sort_keys=True, ensure_ascii=False)
 
     if signature != state.get("slot_monetization_last_signature"):
         lines = [
@@ -7332,6 +7338,15 @@ def maybe_evaluate_slot_monetization(state, now=None):
             "",
             "<b>Acción sugerida para Codex</b>",
         ]
+        if not slot_23_enabled:
+            lines = [
+                line for line in lines
+                if "23h UTC" not in line
+                and "SCHEDULE_DISABLED_HOURS_UTC=23" not in line
+                and "slot_metrics." not in line
+            ]
+            if len(lines) > 1:
+                lines[1] = f"Ventana leÃ­da: 04h {slot_04.get('cycles', 0)} ciclos"
         if slot_04.get("decision") == "not_validated_yet":
             dominant = _top_reason(slot_04.get("execution_reject_reasons")) or _top_reason(slot_04.get("same_day_reject_reasons")) or "unknown"
             lines.append(f"• 04h sigue en <code>keep</code>; revisar si el cuello dominante <code>{dominant}</code> amerita patch operativo.")
@@ -7340,10 +7355,11 @@ def maybe_evaluate_slot_monetization(state, now=None):
         else:
             lines.append("• 04h todavía no valida monetización; revisar si falta muestra o si discovery sigue débil.")
 
-        if slot_23.get("decision") == "disable_candidate":
-            lines.append("• 23h es candidato a apagado reversible: <code>SCHEDULE_DISABLED_HOURS_UTC=23</code>.")
-        else:
-            lines.append("• 23h todavía no se apaga automáticamente; seguir observando con slot_metrics.")
+        if slot_23_enabled:
+            if slot_23.get("decision") == "disable_candidate":
+                lines.append("• 23h es candidato a apagado reversible: <code>SCHEDULE_DISABLED_HOURS_UTC=23</code>.")
+            else:
+                lines.append("• 23h todavía no se apaga automáticamente; seguir observando con slot_metrics.")
 
         lines.append("• Esta alerta está diseñada para abrir sesión Codex con salida accionable, no solo documental.")
         send_telegram("\n".join(lines))
