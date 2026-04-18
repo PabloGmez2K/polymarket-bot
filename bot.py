@@ -12904,7 +12904,7 @@ def get_forecast(lat, lon, retries=3, delay=5):
 
 def get_open_orders(client):
     try:
-        orders = client.get_orders()
+        orders = client.get_open_orders()
         return [o for o in orders if o.get("status", "").upper() in ("LIVE", "ACTIVE", "OPEN")]
     except Exception as e:
         log.warning(f"Error órdenes: {e}")
