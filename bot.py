@@ -12759,7 +12759,7 @@ def setup_client():
     try:
         client = ClobClient(
             "https://clob.polymarket.com", key=pk,
-            chain=137, signature_type=1, funder=funder,
+            chain_id=137, signature_type=1, funder=funder,
         )
         client.set_api_creds(client.create_or_derive_api_creds())
         log.info("Autenticación OK")
