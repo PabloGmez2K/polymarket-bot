@@ -5181,6 +5181,18 @@ def run_tests():
         "v10.6.20: BOT_VERSION bumped a v10.6.20",
         'BOT_VERSION = "v10.6.20"' in code,
     )
+    test(
+        "v10.6.20: anti-flapping guard — promotable_shadow incluye 'and not verified_history_bad'",
+        "and not verified_history_bad" in code,
+    )
+    test(
+        "v10.6.20: verified_history_bad se calcula antes que promotable_shadow",
+        code.find("verified_history_bad = (") < code.find("promotable_shadow = (\n            shadow_edges"),
+    )
+    test(
+        "v10.6.20: reason observe explica bloqueo por historial NOAA malo",
+        "promoción a canary bloqueada hasta reunir evidencia nueva mejor" in code,
+    )
 
     # ---- Resultado ----
     print(f"\n{'='*50}")

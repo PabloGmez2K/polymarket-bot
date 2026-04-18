@@ -5783,13 +5783,6 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
                 _shadow_days = (datetime.now(timezone.utc) - _dt).days
             except Exception:
                 _shadow_days = 0
-        promotable_shadow = (
-            shadow_edges >= SHADOW_CANARY_MIN_EDGE_HITS
-            and shadow_cycles >= SHADOW_CANARY_MIN_CYCLES
-            and shadow_best_edge >= SHADOW_CANARY_MIN_BEST_EDGE
-            and support_count >= SHADOW_CANARY_MIN_SUPPORT
-            and _shadow_days >= SHADOW_CANARY_MIN_DAYS
-        )
         verified_history_bad = (
             row_policy_source == "noaa_verified"
             and policy_trades >= ALLOWLIST_REMOVE_MIN_TRADES
@@ -5798,6 +5791,17 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
         )
         removable_active = active and verified_history_bad
         history_bad = verified_history_bad
+        # v10.6.20: anti-flapping — bloquea promoción shadow→canary si el historial
+        # NOAA-verificado es malo. Sin este guard, una ciudad degradada por regla de
+        # salida se re-promociona en el siguiente ciclo por sus edges shadow acumulados.
+        promotable_shadow = (
+            shadow_edges >= SHADOW_CANARY_MIN_EDGE_HITS
+            and shadow_cycles >= SHADOW_CANARY_MIN_CYCLES
+            and shadow_best_edge >= SHADOW_CANARY_MIN_BEST_EDGE
+            and support_count >= SHADOW_CANARY_MIN_SUPPORT
+            and _shadow_days >= SHADOW_CANARY_MIN_DAYS
+            and not verified_history_bad
+        )
         provisional_review = (
             active
             and policy_is_provisional
@@ -5887,7 +5891,13 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
             decision = "observe"
             decision_label = "Shadow observada"
             badge = "warn" if shadow_seen > 0 else "muted"
-            if shadow_seen > 0:
+            if verified_history_bad:
+                reason = (
+                    f"historial NOAA-verificado malo ({policy_wins}/{policy_trades}, "
+                    f"WR {policy_win_rate:.1f}%, PnL ${policy_pnl:+.2f}); "
+                    "promoción a canary bloqueada hasta reunir evidencia nueva mejor"
+                )
+            elif shadow_seen > 0:
                 reason = (
                     f"shadow ya vio {shadow_seen} mercados y {shadow_edges} edges; "
                     "falta decidir si merece canary"
