@@ -349,6 +349,8 @@ def compute_city_windows():
 # Usamos umbrales un poco más amplios para nuestro bankroll pequeño
 STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", "-25.0"))     # vender si PnL% < -25%
 TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", "40.0"))  # vender si PnL% > +40%
+HIGH_CONVICTION_TP_PCT        = float(os.getenv("HIGH_CONVICTION_TP_PCT", "80.0"))         # TP elevado si our_prob >= umbral
+HIGH_CONVICTION_PROB_THRESHOLD = float(os.getenv("HIGH_CONVICTION_PROB_THRESHOLD", "0.80")) # umbral de alta convicción
 SELL_AGGRESSION = 0.02  # cuánto bajar el precio para asegurar venta rápida
 INTRA_SL_INTERVAL = int(os.getenv("INTRA_SL_INTERVAL", "0"))  # v10.6: desactivado — cada 8h es suficiente para mercados diarios
 # v10.6.17: city-level SL cooldown — bloquea re-entrada en la misma ciudad tras stop-loss
@@ -13201,6 +13203,20 @@ def manage_positions(client, dl):
     # ---- Cache de previsiones para re-evaluación ----
     forecast_cache = {}
 
+    # ---- Cache de our_prob por token_id para TP dinámico (alta convicción) ----
+    try:
+        _lc_data = load_trade_lifecycle_data()
+        _lc_by_token = {
+            str(r.get("token_id", "") or "").strip(): float(
+                (r.get("entry_context") or {}).get("our_prob")
+            )
+            for r in _lc_data.get("records", [])
+            if str(r.get("token_id", "") or "").strip()
+            and (r.get("entry_context") or {}).get("our_prob") is not None
+        }
+    except Exception:
+        _lc_by_token = {}
+
     # ---- Evaluar cada posición ----
     to_sell = []        # lista de (posición, tipo, razón)
     keeping = []        # info de las que mantenemos
@@ -13262,9 +13278,16 @@ def manage_positions(client, dl):
             dl.append(f"  {reason} | {label} | ${cash_pnl:+.2f}")
             continue
 
-        # ---- CHECK 2: Take-profit ----
-        if pct_pnl >= TAKE_PROFIT_PCT:
-            reason = f"💰 TAKE-PROFIT ({pct_pnl:+.1f}% > +{TAKE_PROFIT_PCT}%)"
+        # ---- CHECK 2: Take-profit (dinámico por convicción) ----
+        _entry_prob = _lc_by_token.get(asset_id)
+        effective_tp = (
+            HIGH_CONVICTION_TP_PCT
+            if _entry_prob is not None and _entry_prob >= HIGH_CONVICTION_PROB_THRESHOLD
+            else TAKE_PROFIT_PCT
+        )
+        if pct_pnl >= effective_tp:
+            _prob_tag = f" [conv={_entry_prob:.0%}]" if _entry_prob is not None else ""
+            reason = f"💰 TAKE-PROFIT ({pct_pnl:+.1f}% > +{effective_tp:.0f}%{_prob_tag})"
             to_sell.append((p, "take_profit", reason))
             dl.append(f"  {reason} | {label} | ${cash_pnl:+.2f}")
             continue
@@ -13550,6 +13573,20 @@ def intra_cycle_sl_check(client):
                 stage="sl_tp_check",
             )
 
+        # TP dinámico: lookup our_prob de entrada por token_id
+        try:
+            _lc_data_intra = load_trade_lifecycle_data()
+            _lc_by_token_intra = {
+                str(r.get("token_id", "") or "").strip(): float(
+                    (r.get("entry_context") or {}).get("our_prob")
+                )
+                for r in _lc_data_intra.get("records", [])
+                if str(r.get("token_id", "") or "").strip()
+                and (r.get("entry_context") or {}).get("our_prob") is not None
+            }
+        except Exception:
+            _lc_by_token_intra = {}
+
         n_checked = 0
         n_sold = 0
 
@@ -13560,12 +13597,18 @@ def intra_cycle_sl_check(client):
             pct_pnl = float(p.get("percentPnl", 0))
             n_checked += 1
 
-            # Determinar si hay que vender
+            # Determinar si hay que vender (TP dinámico por convicción)
+            _entry_prob_intra = _lc_by_token_intra.get(asset_id)
+            effective_tp_intra = (
+                HIGH_CONVICTION_TP_PCT
+                if _entry_prob_intra is not None and _entry_prob_intra >= HIGH_CONVICTION_PROB_THRESHOLD
+                else TAKE_PROFIT_PCT
+            )
             sell_type = None
             if pct_pnl <= STOP_LOSS_PCT:
                 sell_type = "stop_loss_intra"
                 icon, type_label = "🔻", "Stop-loss"
-            elif pct_pnl >= TAKE_PROFIT_PCT:
+            elif pct_pnl >= effective_tp_intra:
                 sell_type = "take_profit_intra"
                 icon, type_label = "💰", "Take-profit"
 

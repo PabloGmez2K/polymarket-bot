@@ -1,6 +1,9 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
 
+**Última actualización:** 18 de abril de 2026 (Sesión 196 — TP dinámico alta convicción)
+**Sesión 196 (18 abr 2026, Sonnet):** se implementa TP dinámico en `bot.py` sin tocar trading core, NOAA, scheduler ni policy live. Motivación: el NYC NO del 17-abr compró a $1.19 con `our_prob=85%`; el TP fijo `+40%` habría cerrado prematuramente una posición que con el forecast ≥3°C del umbral podría haber llegado a resolución (+172%). Cambios: dos env vars nuevas `HIGH_CONVICTION_TP_PCT` (default 80%) y `HIGH_CONVICTION_PROB_THRESHOLD` (default 0.80); en `manage_positions` se construye un dict `_lc_by_token` cruzando `trade_lifecycle.json` via `entry_context.our_prob` keyed por `token_id`, y el CHECK 2 pasa a usar `effective_tp` dinámico con tag `[conv=XX%]` en el mensaje; la misma lógica se replica en `intra_cycle_sl_check`. Gotcha clave: `our_prob` no está en el dict de posición de la API de Polymarket, hay que cruzar con lifecycle. `verify_before_deploy.py` cierra en **702/702**.
+
 **Última actualización:** 18 de abril de 2026 (Sesión 195 — cierre de revisión total de alarmas)
 **Sesión 195 (18 abr 2026, Codex):** se cierra la revisión completa del lote actual de alarmas con criterio operativo estricto, sin tocar `bot.py`, trading core, NOAA core, scheduler ni policy live. Primero se auditan una a una las alarmas activas y se fuerza su cierre útil: las dos lecturas legacy de `Phase 5 Visibility` (`gap + siguiente paso` sobre `Shanghai + Chicago`) quedan explícitamente tratadas como formato ya superado por la sesión 194 y, por tanto, pasan a considerarse `alarma reescrita/eliminada` sin volver a abrir sesión por sí solas; la alarma de `Slot monetization review` deja de arrastrar `23h UTC` cuando ese slot ya está deshabilitado por `SCHEDULE_DISABLED_HOURS_UTC=23`; y la alarma diaria `Cross-check traders vs bot` deja de elevar como oportunidades casos estructurales o débiles (`Toronto` blocked conocido, `Guangzhou` sin consenso) porque la capa humana ya se reescribió para mostrar solo gap operativo real. Segundo, la revisión de `City Intelligence` aterriza en un cambio read-only concreto: se introduce en `tools/city_validation_ledger.py` el bottleneck `weak_city_hypothesis` para ciudades con observación shadow repetida pero sin edge propio útil (`edge_hits=0`, `cycles_seen>=5`, `markets_seen>=8`), y `tools/city_promotion_gate.py` lo traduce a `background_watch` con prioridad `later` en vez de seguir tratándolo como review activa cercana a monetización. Se regeneran `data/city_validation_ledger.json`, `docs/city_validation_ledger_latest.md`, `data/city_promotion_gate.json` y `docs/city_promotion_gate_latest.md`; la foto nueva reduce ruido de revisión y deja el queue centrado en canaries runtime reales (`Shanghai`, `Seoul`, `Tokyo`, `NYC`, `Atlanta`, `Munich`) y en source fidelity genuino (`Wuhan`, `Hong Kong`). La compilación de los tools no se pudo cerrar por un lock de `__pycache__` en Windows, pero la ejecución real de ambos scripts pasó y escribió artefactos nuevos, así que la salida operativa de la sesión queda cerrada como `gate definido + alarmas legacy eliminadas/reescritas`.
 
@@ -904,6 +907,8 @@ MAX_PRICE = 0.80      # sesión 82: bajado desde 0.92 — simétrico con MIN_PRI
 ALLOWED_CONDITIONS = at_or_above,at_or_below
 STOP_LOSS_PCT = -25.0%
 TAKE_PROFIT_PCT = +40.0%
+HIGH_CONVICTION_TP_PCT = +80.0%          # sesión 196: TP elevado si our_prob >= 0.80 en entrada
+HIGH_CONVICTION_PROB_THRESHOLD = 0.80    # sesión 196: umbral para activar TP dinámico
 MAX_EXPOSURE_PCT = 40%
 MIN_BET = $1.00
 BLOCKED_CITIES = ["London","Miami","Seattle","Paris","Tel Aviv","Wellington","Toronto","Madrid","Singapore","Ankara"]
