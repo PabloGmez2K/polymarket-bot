@@ -12761,7 +12761,7 @@ def setup_client():
             "https://clob.polymarket.com", key=pk,
             chain_id=137, signature_type=1, funder=funder,
         )
-        client.set_api_creds(client.create_or_derive_api_creds())
+        client.set_api_creds(client.create_or_derive_api_key())
         log.info("Autenticación OK")
         return client
     except Exception as e:
