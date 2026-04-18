@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-04-17T09:50:54+00:00",
+  "generated_at": "2026-04-18T09:18:01+00:00",
   "inputs": {
     "tracker": "C:\\Projects\\polymarket-bot\\data\\city_probe_visibility_tracker.json",
     "comparator": "C:\\Projects\\polymarket-bot\\data\\shanghai_vs_chicago_comparator.json",
@@ -7,17 +7,20 @@
     "chicago": "C:\\Projects\\polymarket-bot\\data\\chicago_active_benchmark.json"
   },
   "action": {
-    "trigger_probe_generated_at": "2026-04-10T11:11:38+00:00",
-    "coincidence_count": 0,
+    "trigger_probe_generated_at": "2026-04-18T01:58:33+00:00",
+    "coincidence_count": 11,
     "candidate_city": "Shanghai",
     "benchmark_city": "Chicago",
     "dominant_gap": "insufficient_live_evidence",
     "comparator_next_step": "wait_for_live_shadow_and_audit_data",
-    "gap_trend": "new",
+    "gap_trend": "reinforced",
     "severity": "info",
-    "action_state": "no_progress",
-    "next_operational_step": "deprioritize_case",
-    "decision_note": "No hay coincidencias simultáneas acumuladas para justificar prioridad operativa.",
+    "action_state": "observe",
+    "next_operational_step": "keep_accumulating_shadow_evidence",
+    "closure_type": "gate_defined",
+    "closure_label": "gate definido",
+    "decision_note": "La coincidencia existe, pero la lectura sigue siendo de observación read-only sin base suficiente para abrir revisión de policy o test controlado.",
+    "operational_change": "El caso queda dentro del gate de observación y no debe cerrar solo como documentación; la siguiente coincidencia útil debe reevaluar si pasa a review prioritaria, test controlado o revisión de policy.",
     "promotion_readiness": "not_ready",
     "policy_review_priority": "low",
     "evidence_snapshot": {

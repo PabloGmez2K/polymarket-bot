@@ -104,11 +104,17 @@ def build_message(latest_snapshot, tracker, comparator, operational_action):
         f"Severidad operativa: <code>{action.get('severity')}</code>",
         f"Estado operativo: <code>{action.get('action_state')}</code>",
         f"Accion siguiente: <code>{action.get('next_operational_step')}</code>",
+        f"Cierre obligatorio: <code>{action.get('closure_label')}</code>",
     ]
     if action.get("decision_note"):
         lines.extend([
             "",
             f"Lectura operativa: {action.get('decision_note')}",
+        ])
+    if action.get("operational_change"):
+        lines.extend([
+            "",
+            f"Cambio operativo: {action.get('operational_change')}",
         ])
     return "\n".join(lines)
 

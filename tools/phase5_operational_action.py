@@ -92,16 +92,29 @@ def classify_action(tracker, comparator, shanghai, chicago):
     severity = "info"
     action_state = "observe"
     next_operational_step = "keep_accumulating_shadow_evidence"
+    closure_type = "gate_defined"
+    closure_label = "gate definido"
     decision_note = (
         "La coincidencia existe, pero la lectura sigue siendo de observación read-only sin "
         "base suficiente para abrir revisión de policy o test controlado."
+    )
+    operational_change = (
+        "El caso queda dentro del gate de observación y no debe cerrar solo como documentación; "
+        "la siguiente coincidencia útil debe reevaluar si pasa a review prioritaria, test controlado "
+        "o revisión de policy."
     )
 
     if coincidence_count == 0:
         severity = "info"
         action_state = "no_progress"
         next_operational_step = "deprioritize_case"
+        closure_type = "alarm_rewritten"
+        closure_label = "alarma reescrita"
         decision_note = "No hay coincidencias simultáneas acumuladas para justificar prioridad operativa."
+        operational_change = (
+            "La alarma deja de aportar valor operativo mientras no exista coincidencia simultánea; "
+            "debe permanecer silenciosa hasta que vuelva a abrir un gate real."
+        )
     elif dominant_gap == "evidence_asymmetry_between_shadow_and_active":
         if coincidence_count >= 8 and shanghai_markets > 0 and chicago_markets > 0:
             severity = "watch"
@@ -112,6 +125,11 @@ def classify_action(tracker, comparator, shanghai, chicago):
                 "revisión activa como caso de comparación hacia monetización, todavía sin abrir "
                 "trading ni policy."
             )
+            operational_change = (
+                "El caso sube a la cola de review prioritaria: Shanghai deja de ser solo una ciudad "
+                "a observar y pasa a compararse explícitamente contra Chicago como benchmark active "
+                "en cualquier revisión de monetización."
+            )
         elif coincidence_count >= 3:
             severity = "info"
             action_state = "observe"
@@ -119,6 +137,10 @@ def classify_action(tracker, comparator, shanghai, chicago):
             decision_note = (
                 "La asimetría de evidencia ya existe, pero aún no llega a un nivel que obligue "
                 "a una revisión operativa prioritaria."
+            )
+            operational_change = (
+                "Se mantiene el gate de acumulación: la operativa no cambia todavía, pero el caso "
+                "queda vivo y no debe cerrarse solo con documentación."
             )
     elif dominant_gap == "market_visibility_and_selection":
         if coincidence_count >= 3 and shanghai_signal == "building":
@@ -128,6 +150,10 @@ def classify_action(tracker, comparator, shanghai, chicago):
             decision_note = (
                 "El patrón repetido sugiere que conviene revisar visibilidad/selección como "
                 "paso previo antes de inferir edge o policy."
+            )
+            operational_change = (
+                "El foco operativo cambia de observación pasiva a revisión del filtro de visibilidad "
+                "y selección antes de discutir edge o policy."
             )
 
     if (
@@ -141,9 +167,15 @@ def classify_action(tracker, comparator, shanghai, chicago):
         severity = "actionable_review"
         action_state = "controlled_test_candidate"
         next_operational_step = "open_controlled_test_review"
+        closure_type = "gate_defined"
+        closure_label = "gate definido"
         decision_note = (
             "La coincidencia repetida y la comparabilidad suficiente justifican abrir una "
             "revisión humana acotada sobre test controlado, todavía en modo read-only."
+        )
+        operational_change = (
+            "Se abre el gate formal para revisión de test controlado: la siguiente sesión debe "
+            "salir con patch listo, cambio ejecutado o rechazo explícito del test."
         )
 
     if (
@@ -155,9 +187,15 @@ def classify_action(tracker, comparator, shanghai, chicago):
         severity = "policy_candidate"
         action_state = "policy_candidate"
         next_operational_step = "open_policy_gate_review"
+        closure_type = "gate_defined"
+        closure_label = "gate definido"
         decision_note = (
             "La repetición ya no sugiere solo falta de evidencia; empieza a parecer un caso "
             "honesto para revisar gating/policy."
+        )
+        operational_change = (
+            "Se abre el gate formal de policy: la siguiente intervención debe decidir un cambio "
+            "ejecutado, dejar un patch listo o cerrar el caso con rechazo explícito."
         )
 
     promotion_readiness = "not_ready"
@@ -183,7 +221,10 @@ def classify_action(tracker, comparator, shanghai, chicago):
         "severity": severity,
         "action_state": action_state,
         "next_operational_step": next_operational_step,
+        "closure_type": closure_type,
+        "closure_label": closure_label,
         "decision_note": decision_note,
+        "operational_change": operational_change,
         "promotion_readiness": promotion_readiness,
         "policy_review_priority": policy_review_priority,
         "evidence_snapshot": {
@@ -208,12 +249,17 @@ def render_markdown(payload):
         f"- Severity: `{action['severity']}`",
         f"- Action state: `{action['action_state']}`",
         f"- Next operational step: `{action['next_operational_step']}`",
+        f"- Closure type: `{action['closure_type']}`",
         f"- Promotion readiness: `{action['promotion_readiness']}`",
         f"- Policy review priority: `{action['policy_review_priority']}`",
         "",
         "## Decision",
         "",
         action["decision_note"],
+        "",
+        "## Operational Change",
+        "",
+        action["operational_change"],
         "",
         "## Evidence Snapshot",
         "",

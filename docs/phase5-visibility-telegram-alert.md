@@ -2,7 +2,7 @@
 
 Alerta one-shot para la fase 5.
 
-Su objetivo es avisar por Telegram cuando aparezca una coincidencia nueva `Shanghai + Chicago` en el tracker de visibilidad.
+Su objetivo es avisar por Telegram cuando aparezca una coincidencia nueva `Shanghai + Chicago` en el tracker de visibilidad y cerrar el caso con una salida operativa util para monetización.
 
 ---
 
@@ -60,3 +60,5 @@ Variables de entorno ya usadas por el repo:
 - no toca `bot.py`
 - no toca trading
 - solo envia una alerta cuando hay evidencia nueva y util
+- la alerta debe cerrar en una de estas salidas: `cambio ejecutado`, `patch listo`, `gate definido` o `alarma reescrita`
+- si no abre ninguna de esas salidas, la alarma debe eliminarse o rediseñarse

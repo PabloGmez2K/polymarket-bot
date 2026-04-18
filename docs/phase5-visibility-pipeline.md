@@ -20,6 +20,7 @@ Evitar correr manualmente cada pieza de la fase 5 y dejar una salida consistente
 - benchmark actualizado de Chicago;
 - y comparador final del gap dominante.
 - ademas de una alerta Telegram one-shot cuando aparezca una coincidencia nueva `Shanghai + Chicago`.
+- y una clasificacion operativa que fuerce un cierre util: `cambio ejecutado`, `patch listo`, `gate definido` o `alarma reescrita`.
 
 ---
 

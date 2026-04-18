@@ -110,6 +110,23 @@ def get_function_source(module_ast, code_lines, name):
     raise ValueError(f"Función no encontrada: {name}")
 
 
+def _normalize_session_value(value):
+    """Normaliza ids de sesión mixtos como 194, session_194 o W17-Opus a un entero comparable."""
+    if value is None:
+        return 0
+    if isinstance(value, int):
+        return value
+    text = str(value).strip()
+    if not text:
+        return 0
+    if text.isdigit():
+        return int(text)
+    session_match = re.search(r"(?:session[_\s-]*)?(\d+)", text, re.IGNORECASE)
+    if session_match:
+        return int(session_match.group(1))
+    return 0
+
+
 def run_tests():
     global passed, failed
 
@@ -653,7 +670,7 @@ def run_tests():
                 default=0,
             )
             latest_event_session = max(
-                [int(row.get("session", 0) or 0) for row in agent_event_rows],
+                [_normalize_session_value(row.get("session")) for row in agent_event_rows],
                 default=0,
             )
             test("agent_events cubre la sesión documentada más reciente",
