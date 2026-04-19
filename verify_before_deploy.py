@@ -5082,7 +5082,7 @@ def run_tests():
                 except Exception:
                     pass
 
-    test("Version v10.6.24", 'BOT_VERSION = "v10.6.24"' in code)
+    test("Version v10.6.25", 'BOT_VERSION = "v10.6.25"' in code)
 
     # ---- v10.6.15: Quality-trader canary exact/range ----
     test(
@@ -5237,8 +5237,8 @@ def run_tests():
         'FIRE_DATE = "2026-04-25"' in code,
     )
     test(
-        "v10.6.24: BOT_VERSION bumped a v10.6.24",
-        'BOT_VERSION = "v10.6.24"' in code,
+        "v10.6.25: BOT_VERSION bumped a v10.6.25",
+        'BOT_VERSION = "v10.6.25"' in code,
     )
     test(
         "v10.6.20: anti-flapping guard — promotable_shadow incluye 'and not verified_history_bad'",
@@ -5328,6 +5328,20 @@ def run_tests():
     test(
         "v10.6.24: intra_cycle_sl_check solo SL+TP sin re-eval",
         "def intra_cycle_sl_check(" in code and "stop_loss_intra" in code and "take_profit_intra" in code,
+    )
+
+    # ---- v10.6.25: low-price MIN_EDGE buffer ----
+    test(
+        "v10.6.25: MIN_EDGE_LOW_PRICE_BUFFER_PP definido",
+        "MIN_EDGE_LOW_PRICE_BUFFER_PP" in code,
+    )
+    test(
+        "v10.6.25: LOW_PRICE_THRESHOLD definido",
+        "LOW_PRICE_THRESHOLD" in code,
+    )
+    test(
+        "v10.6.25: buffer aplicado cuando mkt_price < LOW_PRICE_THRESHOLD",
+        "if mkt_price < LOW_PRICE_THRESHOLD:" in code and "_effective_min_edge += MIN_EDGE_LOW_PRICE_BUFFER_PP" in code,
     )
 
     # ---- Resultado ----

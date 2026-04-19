@@ -102,7 +102,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.24"
+BOT_VERSION = "v10.6.25"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -248,6 +248,10 @@ QUALITY_TRADER_CITIES_WHITELIST = {
 MIN_EDGE_EXACT_RANGE_BUFFER_PP = float(os.getenv("MIN_EDGE_EXACT_RANGE_BUFFER_PP", "5.0"))
 EXACT_RANGE_SIZE_SCALE = float(os.getenv("EXACT_RANGE_SIZE_SCALE", "0.50"))
 EXACT_RANGE_MIN_AMOUNT = float(os.getenv("EXACT_RANGE_MIN_AMOUNT", "2.50"))
+# v10.6.24: low-price buffer — posiciones especulativas (<LOW_PRICE_THRESHOLD) exigen más edge
+# porque el ratio riesgo/recompensa es peor y el modelo es más sensible a errores en our_prob
+MIN_EDGE_LOW_PRICE_BUFFER_PP = float(os.getenv("MIN_EDGE_LOW_PRICE_BUFFER_PP", "5.0"))
+LOW_PRICE_THRESHOLD = float(os.getenv("LOW_PRICE_THRESHOLD", "0.35"))
 
 
 def get_min_days_ahead():
@@ -15957,6 +15961,9 @@ def main(client):
 
         # v10.6.15: edge mínimo diferenciado para exact/range canary
         _effective_min_edge = MIN_EDGE + MIN_EDGE_EXACT_RANGE_BUFFER_PP if c.get("exact_range_canary") else MIN_EDGE
+        # v10.6.24: buffer adicional en posiciones baratas (<LOW_PRICE_THRESHOLD)
+        if mkt_price < LOW_PRICE_THRESHOLD:
+            _effective_min_edge += MIN_EDGE_LOW_PRICE_BUFFER_PP
         # v10.6.18: exact/range canary YES-side requiere our_prob >= 65% exact / 72% range
         # (autopsia C1: YES range WR=9% vs exact WR=29% → range necesita floor más exigente)
         _yes_floor = 0.72 if condition_name == "range" else 0.65
