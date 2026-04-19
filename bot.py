@@ -25,7 +25,8 @@ from waitress import serve
 load_dotenv()
 
 # =============================================================
-# bot.py v10.6.10 — mission HUD discovery / stabilization
+# bot.py v10.6.24 — reactivar intra-cycle SL/TP monitor
+# v10.6.10 — mission HUD discovery / stabilization
 # Sesión 36: fallback BANKROLL sincronizado a $25 tras recarga manual
 # =============================================================
 #
@@ -101,7 +102,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.23"
+BOT_VERSION = "v10.6.24"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -353,7 +354,7 @@ TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", "40.0"))  # vender si PnL% 
 HIGH_CONVICTION_TP_PCT        = float(os.getenv("HIGH_CONVICTION_TP_PCT", "80.0"))         # TP elevado si our_prob >= umbral
 HIGH_CONVICTION_PROB_THRESHOLD = float(os.getenv("HIGH_CONVICTION_PROB_THRESHOLD", "0.80")) # umbral de alta convicción
 SELL_AGGRESSION = 0.02  # cuánto bajar el precio para asegurar venta rápida
-INTRA_SL_INTERVAL = int(os.getenv("INTRA_SL_INTERVAL", "0"))  # v10.6: desactivado — cada 8h es suficiente para mercados diarios
+INTRA_SL_INTERVAL = int(os.getenv("INTRA_SL_INTERVAL", "60"))  # v10.6.24: reactivado solo SL+TP (sin re-eval) — evita perder TPs entre ciclos
 # v10.6.17: city-level SL cooldown — bloquea re-entrada en la misma ciudad tras stop-loss
 SL_CITY_COOLDOWN_HOURS = int(os.getenv("SL_CITY_COOLDOWN_HOURS", "48"))
 

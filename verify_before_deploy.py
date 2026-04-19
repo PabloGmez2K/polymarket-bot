@@ -4145,7 +4145,7 @@ def run_tests():
     # ---- Test v10.5.1: Intra-cycle SL monitor ----
     print("\n v10.5.1: Intra-cycle SL monitor")
     test("INTRA_SL_INTERVAL definido", "INTRA_SL_INTERVAL" in code)
-    test("INTRA_SL_INTERVAL default 0", '"INTRA_SL_INTERVAL", "0"' in code)
+    test("INTRA_SL_INTERVAL default 60", '"INTRA_SL_INTERVAL", "60"' in code)
     test("sell_lock definido", "sell_lock" in code and "threading.Lock()" in code)
     test("intra_cycle_sl_check definida", "def intra_cycle_sl_check(" in code)
     test("intra_sl_loop definida", "def intra_sl_loop(" in code)
@@ -5082,7 +5082,7 @@ def run_tests():
                 except Exception:
                     pass
 
-    test("Version v10.6.23", 'BOT_VERSION = "v10.6.23"' in code)
+    test("Version v10.6.24", 'BOT_VERSION = "v10.6.24"' in code)
 
     # ---- v10.6.15: Quality-trader canary exact/range ----
     test(
@@ -5237,8 +5237,8 @@ def run_tests():
         'FIRE_DATE = "2026-04-25"' in code,
     )
     test(
-        "v10.6.23: BOT_VERSION bumped a v10.6.23",
-        'BOT_VERSION = "v10.6.23"' in code,
+        "v10.6.24: BOT_VERSION bumped a v10.6.24",
+        'BOT_VERSION = "v10.6.24"' in code,
     )
     test(
         "v10.6.20: anti-flapping guard — promotable_shadow incluye 'and not verified_history_bad'",
@@ -5318,6 +5318,16 @@ def run_tests():
     test(
         "v10.6.23: retry buy_min_size solo en DRY_RUN=False",
         "if not DRY_RUN and not result" in code,
+    )
+
+    # ---- v10.6.24: intra-cycle SL/TP reactivado ----
+    test(
+        "v10.6.24: INTRA_SL_INTERVAL default 60",
+        '"INTRA_SL_INTERVAL", "60"' in code,
+    )
+    test(
+        "v10.6.24: intra_cycle_sl_check solo SL+TP sin re-eval",
+        "def intra_cycle_sl_check(" in code and "stop_loss_intra" in code and "take_profit_intra" in code,
     )
 
     # ---- Resultado ----
