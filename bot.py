@@ -101,7 +101,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.20"
+BOT_VERSION = "v10.6.23"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -15195,6 +15195,18 @@ def _normalize_buy_order_size(price, size):
     return round(max(size, min_size), 2)
 
 
+def _parse_min_shares_from_error(message):
+    """Extract required minimum shares from Polymarket 'lower than the minimum: N' error."""
+    import re
+    m = re.search(r'lower than the minimum:\s*(\d+(?:\.\d+)?)', str(message or ""), re.IGNORECASE)
+    if m:
+        try:
+            return float(m.group(1))
+        except Exception:
+            pass
+    return None
+
+
 def build_cycle_slot_metrics(*, timestamp_utc, candidates, trades, selected, buys, skip_log_entries, execution_failures):
     slot_hour = timestamp_utc.hour if isinstance(timestamp_utc, datetime) else None
     same_day_candidates = sum(1 for c in (candidates or []) if isinstance(c, dict) and c.get("days_ahead") == 0)
@@ -16228,6 +16240,33 @@ def main(client):
             }
 
             result = execute_trade(client, trade, dry_run=DRY_RUN)
+
+            # v10.6.23: retry once when Polymarket rejects due to share-count minimum.
+            # The canary scale can reduce shares below per-market minimums (e.g. 2 < 5).
+            # Hard cap: min_shares × price must stay within MAX_BET_PCT × bankroll.
+            if not DRY_RUN and not result["ok"]:
+                if _classify_execution_failure_reason(result.get("msg")) == "buy_min_size":
+                    _min_sh = _parse_min_shares_from_error(result.get("msg"))
+                    if _min_sh:
+                        _req_notional = round(_min_sh * execution_price, 2)
+                        _kelly_cap = round(effective_bankroll * MAX_BET_PCT, 2)
+                        if _req_notional <= _kelly_cap:
+                            _retry_pos = dict(trade["position"])
+                            _retry_pos["shares"] = _min_sh
+                            _retry_pos["amount"] = _req_notional
+                            _retry_pos["loss_if_lose"] = _req_notional
+                            trade["position"] = _retry_pos
+                            dl.append(
+                                f"  RETRY BUY MIN SHARES: {trade['city']} {trade['side']} "
+                                f"{original_size:.2f}sh → {_min_sh:.0f}sh @ ${execution_price:.2f} = ${_req_notional:.2f}"
+                            )
+                            result = execute_trade(client, trade, dry_run=DRY_RUN)
+                        else:
+                            dl.append(
+                                f"  SKIP RETRY MIN SHARES: {trade['city']} {trade['side']} "
+                                f"min {_min_sh:.0f}sh = ${_req_notional:.2f} > Kelly cap ${_kelly_cap:.2f}"
+                            )
+
             results.append(result)
 
             dl.append(f"\n  {'OK' if result['ok'] else 'FAIL'} #{i+1}: {trade['city']} {trade['side']} ${trade['position']['amount']:.2f} → {result['msg']}")

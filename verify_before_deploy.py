@@ -5082,7 +5082,7 @@ def run_tests():
                 except Exception:
                     pass
 
-    test("Version v10.6.20", 'BOT_VERSION = "v10.6.20"' in code)
+    test("Version v10.6.23", 'BOT_VERSION = "v10.6.23"' in code)
 
     # ---- v10.6.15: Quality-trader canary exact/range ----
     test(
@@ -5237,8 +5237,8 @@ def run_tests():
         'FIRE_DATE = "2026-04-25"' in code,
     )
     test(
-        "v10.6.20: BOT_VERSION bumped a v10.6.20",
-        'BOT_VERSION = "v10.6.20"' in code,
+        "v10.6.23: BOT_VERSION bumped a v10.6.23",
+        'BOT_VERSION = "v10.6.23"' in code,
     )
     test(
         "v10.6.20: anti-flapping guard — promotable_shadow incluye 'and not verified_history_bad'",
@@ -5296,6 +5296,28 @@ def run_tests():
     test(
         "v10.6.22: Jakarta y Kuala Lumpur en QUALITY_TRADER_CITIES_WHITELIST default",
         "Jakarta,Kuala Lumpur" in code,
+    )
+
+    # ---- v10.6.23: buy_min_size retry (sesion 203) ----
+    test(
+        "v10.6.23: _parse_min_shares_from_error definida",
+        "def _parse_min_shares_from_error(" in code,
+    )
+    test(
+        "v10.6.23: _parse_min_shares_from_error parsea 'lower than the minimum'",
+        "lower than the minimum" in code and "_parse_min_shares_from_error" in code,
+    )
+    test(
+        "v10.6.23: retry buy_min_size usa kelly cap",
+        "RETRY BUY MIN SHARES" in code and "Kelly cap" in code,
+    )
+    test(
+        "v10.6.23: retry buy_min_size respeta MAX_BET_PCT",
+        "_req_notional <= _kelly_cap" in code,
+    )
+    test(
+        "v10.6.23: retry buy_min_size solo en DRY_RUN=False",
+        "if not DRY_RUN and not result" in code,
     )
 
     # ---- Resultado ----
