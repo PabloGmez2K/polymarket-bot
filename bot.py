@@ -240,7 +240,7 @@ QUALITY_TRADER_CITIES_WHITELIST = {
     c.strip()
     for c in os.getenv(
         "QUALITY_TRADER_CITIES_WHITELIST",
-        "Seattle,Tokyo,Hong Kong,Seoul,Toronto,Chengdu,Shenzhen,Shanghai,Milan,Atlanta,London,New York City,Munich",
+        "Seattle,Tokyo,Hong Kong,Seoul,Toronto,Chengdu,Shenzhen,Shanghai,Milan,Atlanta,London,New York City,Munich,Ankara,Madrid,Miami,Paris,Wellington,Houston",
     ).split(",")
     if c.strip()
 }
@@ -11590,6 +11590,8 @@ RESOLUTION_STATIONS = {
     "Chongqing":      {"lat": 29.7123,  "lon": 106.6519, "name": "Jiangbei"},
     "Chengdu":        {"lat": 30.5737,  "lon": 103.9415, "name": "Shuangliu"},
     "Wuhan":          {"lat": 30.7748,  "lon": 114.2137, "name": "Tianhe"},
+    # Añadidas en v10.6.21 — expansion QUALITY_TRADER_CITIES_WHITELIST (sesion 200)
+    "Houston":        {"lat": 29.9902,  "lon": -95.3368,  "name": "George Bush Intercontinental"},
 }
 
 
@@ -11641,6 +11643,8 @@ RESOLUTION_ICAO = {
     "Chongqing":      {"icao": "ZUCK", "wu_url": _wu_history_url("ZUCK")},
     "Chengdu":        {"icao": "ZUUU", "wu_url": _wu_history_url("ZUUU"), "noaa_station_id": "56294099999", "noaa_daily_station_id": "CHM00056187"},
     "Wuhan":          {"icao": "ZHHH", "wu_url": _wu_history_url("ZHHH")},
+    # Añadidas en v10.6.21 — ICAO pendiente verificación Polymarket resolution source
+    "Houston":        {"icao": "KIAH", "wu_url": _wu_history_url("KIAH")},
     # Ciudades sin cobertura NOAA verificada (2026-04-06) — pendiente alternativa
     # Toronto: CYYZ — ISD 71624099999 confirmado; GHCND local sin TMAX en 2025-10-01..2026-03-31
     # Beijing: ZBAA — ISD 54511099999 confirmado; GHCND local sin TMAX en 2025-10-01..2026-03-31
@@ -15202,21 +15206,41 @@ def evaluate_slot_monetization(records, target_hour, min_cycles=3):
     slot_records = sorted(slot_records, key=lambda x: x["_ts"])
     if len(slot_records) > 5:
         slot_records = slot_records[-5:]
+    partial_totals = {
+        "same_day_candidates": sum(int(r.get("same_day_candidates", 0) or 0) for r in slot_records),
+        "same_day_edges": sum(int(r.get("same_day_edges", 0) or 0) for r in slot_records),
+        "same_day_selected": sum(int(r.get("same_day_selected", 0) or 0) for r in slot_records),
+        "same_day_buys": sum(int(r.get("same_day_buys", 0) or 0) for r in slot_records),
+        "edges": sum(int(r.get("edges", 0) or 0) for r in slot_records),
+        "selected": sum(int(r.get("selected", 0) or 0) for r in slot_records),
+        "buys": sum(int(r.get("buys", 0) or 0) for r in slot_records),
+    }
+    partial_execution_reasons = _merge_reason_counts(slot_records, "execution_reject_reasons")
+    partial_same_day_reasons = _merge_reason_counts(slot_records, "same_day_reject_reasons")
     if len(slot_records) < min_cycles:
+        summary = "muestra insuficiente"
+        if target_hour == 4:
+            if partial_totals["same_day_buys"] > 0:
+                summary = "muestra insuficiente; ya hubo buy same-day"
+            elif partial_totals["same_day_selected"] > 0:
+                summary = "muestra insuficiente; ya hubo selección same-day"
+            elif partial_totals["same_day_edges"] > 0:
+                summary = "muestra insuficiente; ya hubo edge same-day"
         return {
             "slot_hour_utc": target_hour,
             "cycles": len(slot_records),
             "decision": "insufficient_data",
             "status": "observe",
-            "summary": "muestra insuficiente",
-            "same_day_selected": sum(int(r.get("same_day_selected", 0) or 0) for r in slot_records),
-            "same_day_buys": sum(int(r.get("same_day_buys", 0) or 0) for r in slot_records),
-            "execution_reject_reasons": _merge_reason_counts(slot_records, "execution_reject_reasons"),
-            "same_day_reject_reasons": _merge_reason_counts(slot_records, "same_day_reject_reasons"),
+            "summary": summary,
+            "buy_rate": round(partial_totals["buys"] / partial_totals["selected"], 4) if partial_totals["selected"] > 0 else 0.0,
+            "same_day_buy_rate": round(partial_totals["same_day_buys"] / partial_totals["same_day_selected"], 4) if partial_totals["same_day_selected"] > 0 else 0.0,
+            "execution_reject_reasons": partial_execution_reasons,
+            "same_day_reject_reasons": partial_same_day_reasons,
             "range": {
                 "from": slot_records[0]["_ts_raw"] if slot_records else None,
                 "to": slot_records[-1]["_ts_raw"] if slot_records else None,
             },
+            **partial_totals,
         }
 
     totals = {
