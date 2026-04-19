@@ -5330,7 +5330,7 @@ def run_tests():
         "def intra_cycle_sl_check(" in code and "stop_loss_intra" in code and "take_profit_intra" in code,
     )
 
-    # ---- v10.6.25: low-price MIN_EDGE buffer ----
+    # ---- v10.6.25: low-price MIN_EDGE buffer + alarma Steps 2+3 ----
     test(
         "v10.6.25: MIN_EDGE_LOW_PRICE_BUFFER_PP definido",
         "MIN_EDGE_LOW_PRICE_BUFFER_PP" in code,
@@ -5342,6 +5342,18 @@ def run_tests():
     test(
         "v10.6.25: buffer aplicado cuando mkt_price < LOW_PRICE_THRESHOLD",
         "if mkt_price < LOW_PRICE_THRESHOLD:" in code and "_effective_min_edge += MIN_EDGE_LOW_PRICE_BUFFER_PP" in code,
+    )
+    test(
+        "v10.6.25: maybe_alert_tp_sl_price_steps definida",
+        "def maybe_alert_tp_sl_price_steps(" in code,
+    )
+    test(
+        "v10.6.25: alarma Steps 2+3 registrada en check_smart_alerts",
+        "maybe_alert_tp_sl_price_steps(state)" in code,
+    )
+    test(
+        "v10.6.25: alarma Steps 2+3 dispara 2026-05-10",
+        '"2026-05-10"' in code and "tp_sl_price_steps_alert_sent" in code,
     )
 
     # ---- Resultado ----

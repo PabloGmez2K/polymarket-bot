@@ -4106,6 +4106,15 @@ def run_observability_alerts():
         if logger:
             logger.warning(f"p6_p7 post v2 alert: fallo ({e})")
 
+    # v10.6.25: alerta one-shot Steps 2+3 TP/SL dinamico por precio (dispara 2026-05-10).
+    try:
+        if maybe_alert_tp_sl_price_steps(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"tp_sl_price_steps alert: fallo ({e})")
+
     try:
         if maybe_evaluate_slot_monetization(state):
             changed = True
@@ -7599,6 +7608,113 @@ def maybe_alert_p6_p7_post_v2_cleanup(state, now=None):
 
     state[STATE_KEY] = True
     state["p6_p7_post_v2_alert_last_daily"] = today_str
+    return True
+
+
+def maybe_alert_tp_sl_price_steps(state, now=None):
+    """
+    v10.6.25: alerta one-shot para implementar Steps 2+3 del plan TP/SL dinamico por precio.
+
+    Dispara el 2026-05-10 o posterior (3 semanas tras el deploy de v10.6.25 el 2026-04-19).
+    Da tiempo para acumular datos con el nuevo MIN_EDGE low-price buffer antes de afinar exits.
+
+    Step 2: TP escalonado por precio de entrada (requiere entry_price en lifecycle).
+    Step 3: SL absoluto en centavos en vez de %, para evitar cortes por ruido en posiciones baratas.
+
+    Retorna True si state fue mutado.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    FIRE_DATE = "2026-05-10"
+    STATE_KEY = "tp_sl_price_steps_alert_sent"
+
+    if state.get(STATE_KEY):
+        return False
+    if now.date().isoformat() < FIRE_DATE:
+        return False
+
+    today_str = now.date().isoformat()
+    last_daily = state.get("tp_sl_price_steps_alert_last_daily", "")
+    if last_daily == today_str:
+        return False
+
+    prompt_codex = (
+        "Lee AGENTS.md, CONTEXTO.md ultimo bloque y OPERATIONS_PLAYBOOK.md.\n\n"
+        "Tarea: Implementar Steps 2+3 del plan TP/SL dinamico por precio de entrada.\n"
+        "Contexto: En sesion 210 (2026-04-19) Opus analizo la asimetria TP/SL en "
+        "posiciones baratas. Step 1 (MIN_EDGE low-price buffer) se implemento en v10.6.25. "
+        "Han pasado ~3 semanas: ahora hay datos para evaluar si Step 2 y 3 son necesarios.\n\n"
+        "PRECONDICION CRITICA antes de implementar:\n"
+        "1. Leer trade_lifecycle.json, filtrar trades opened_at >= 2026-04-19.\n"
+        "2. Separar por bucket de precio entrada: [0.20-0.35], [0.35-0.65], [0.65-0.80].\n"
+        "3. Calcular WR y PnL neto por bucket.\n"
+        "4. Si el bucket [0.20-0.35] tiene WR>=50% y PnL>=0: Step 2 y 3 probablemente "
+        "NO son necesarios. Reportar a Pablo y NO implementar.\n"
+        "5. Si el bucket [0.20-0.35] sigue con WR<45% o PnL<-$0.50: implementar Steps 2+3.\n\n"
+        "STEP 2 — TP escalonado por precio de entrada:\n"
+        "- Anadir ENV vars: TP_LOW_PRICE_PCT=60, TP_MID_PRICE_PCT=40, TP_HIGH_PRICE_PCT=80.\n"
+        "- Nota: LOW_PRICE_THRESHOLD (0.35) y HIGH_PRICE_THRESHOLD (0.65) ya existen o "
+        "anadir HIGH_PRICE_THRESHOLD = float(os.getenv('HIGH_PRICE_THRESHOLD', '0.65')).\n"
+        "- Logica: en manage_positions y en intra_cycle_sl_check, reemplazar la lookup "
+        "actual de HIGH_CONVICTION_TP_PCT por una funcion effective_tp_pct(entry_price).\n"
+        "- Para saber el entry_price hay que leerlo del lifecycle: "
+        "entry_context.price (ya existe en track_trade BUY). Verificar que se guarda.\n"
+        "- Si entry_price no esta en lifecycle: anadir 'entry_price' al track_trade BUY "
+        "call en el path de compra (buscar track_trade(\"BUY\", ...)).\n"
+        "- Funcion a anadir en bot.py (cerca de HIGH_CONVICTION_TP_PCT):\n"
+        "  def effective_tp_pct(entry_price):\n"
+        "      if entry_price is not None and entry_price < LOW_PRICE_THRESHOLD:\n"
+        "          return TP_LOW_PRICE_PCT\n"
+        "      if entry_price is not None and entry_price >= HIGH_PRICE_THRESHOLD:\n"
+        "          return TP_HIGH_PRICE_PCT\n"
+        "      return TP_MID_PRICE_PCT\n\n"
+        "STEP 3 — SL absoluto en centavos (solo si Step 2 no basta o datos lo justifican):\n"
+        "- ENV vars: SL_ABS_CENTS_LOW=0.08 (entry<0.35), SL_ABS_CENTS_HIGH=0.15 (entry>=0.35).\n"
+        "- Funcion should_stop_loss_abs(entry_price, cur_price) -> bool.\n"
+        "- Reemplazar 'if pct_pnl <= STOP_LOSS_PCT' en manage_positions e intra_cycle_sl_check.\n"
+        "- Tambien requiere entry_price en lifecycle (igual que Step 2).\n"
+        "- ADVERTENCIA: cambio mas grande. Implementar solo si Step 2 muestra datos positivos.\n\n"
+        "GUARDRAILS:\n"
+        "- NO tocar sigma, Kelly, MIN_EDGE global, NOAA, scheduler ni arquitectura core.\n"
+        "- verify_before_deploy.py debe cerrar verde.\n"
+        "- Commit separado por Step (v10.6.26 para Step 2, v10.6.27 para Step 3 si aplica).\n"
+        "- Actualizar CONTEXTO.md, HISTORIAL_SESIONES.md y engram con resultado.\n"
+        "- Si la precondicion dice NO implementar: igualmente actualizar CONTEXTO.md con "
+        "el veredicto de los datos y marcar el plan como cerrado.\n\n"
+        "Archivos clave:\n"
+        "- bot.py:248-255 (LOW_PRICE_THRESHOLD, MIN_EDGE_LOW_PRICE_BUFFER_PP)\n"
+        "- bot.py:352-355 (STOP_LOSS_PCT, TAKE_PROFIT_PCT, HIGH_CONVICTION_TP_PCT)\n"
+        "- bot.py:13613-13633 (check SL/TP ciclo principal)\n"
+        "- bot.py:13939-13955 (check SL/TP intra-cycle)\n"
+        "- Engram: buscar 'Plan Steps 2+3 TP/SL dinamico' para contexto completo."
+    )
+
+    msg = (
+        "\U0001f551 <b>Alerta Steps 2+3 \u2014 TP/SL din\u00e1mico por precio de entrada</b>\n\n"
+        "Han pasado ~3 semanas desde el deploy de v10.6.25 (2026-04-19).\n"
+        "Ya hay datos suficientes para evaluar si implementar TP/SL escalados por precio.\n\n"
+        "<b>Precondici\u00f3n cr\u00edtica:</b>\n"
+        "  Analizar WR+PnL por bucket de precio antes de tocar nada.\n"
+        "  Si bucket [0.20-0.35] WR>=50% y PnL>=0: NO implementar, cerrar plan.\n\n"
+        "<b>Tareas</b>:\n"
+        "  Step 2 = TP escalonado (60%/40%/80%) por precio de entrada.\n"
+        "  Step 3 = SL absoluto en centavos (solo si Step 2 no basta).\n\n"
+        "<b>Prompt para Codex/Sonnet</b> (copiar y pegar):\n"
+        f"<code>{prompt_codex}</code>"
+    )
+
+    try:
+        send_telegram(msg)
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"tp_sl_price_steps alert: fallo al enviar Telegram ({e})")
+        state["tp_sl_price_steps_alert_last_daily"] = today_str
+        return True
+
+    state[STATE_KEY] = True
+    state["tp_sl_price_steps_alert_last_daily"] = today_str
     return True
 
 
