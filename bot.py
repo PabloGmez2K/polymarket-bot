@@ -246,6 +246,7 @@ QUALITY_TRADER_CITIES_WHITELIST = {
 }
 MIN_EDGE_EXACT_RANGE_BUFFER_PP = float(os.getenv("MIN_EDGE_EXACT_RANGE_BUFFER_PP", "5.0"))
 EXACT_RANGE_SIZE_SCALE = float(os.getenv("EXACT_RANGE_SIZE_SCALE", "0.50"))
+EXACT_RANGE_MIN_AMOUNT = float(os.getenv("EXACT_RANGE_MIN_AMOUNT", "2.50"))
 
 
 def get_min_days_ahead():
@@ -549,6 +550,11 @@ SL_COOLDOWN_FILE = _data_path("sl_city_cooldown.json")
 AGENT_EVENTS_FILE = _sync_agent_events_seed()
 SIGNALS_FILE = _seed_data_file("signals.json")
 SIGNALS_CROSSCHECK_FILE = _data_path("signals_crosscheck.jsonl")
+SIGNALS_CROSSCHECK_DAILY_SUMMARY_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "tools",
+    "signals_crosscheck_daily_summary.py",
+)
 BLOCKED_SIGNALS_FILE = _data_path("blocked_signals_resolutions.jsonl")
 TRADERS_DB_FILE = _seed_data_file("traders_db.json")
 
@@ -1271,6 +1277,34 @@ def _scaled_position(position, estimated_prob, city_mode):
         "market_price": market_price,
     })
     return scaled
+
+
+def _resize_position_amount(position, target_amount, estimated_prob):
+    """Recalcula una posicion manteniendo precio/EV cuando sube o baja amount."""
+    if not isinstance(position, dict):
+        return position
+    aggressive_price = float(position.get("aggressive_price", position.get("market_price", 0)) or 0)
+    market_price = float(position.get("market_price", aggressive_price) or aggressive_price)
+    if aggressive_price <= 0:
+        return position
+    amount = round(float(target_amount or 0), 2)
+    if amount <= 0:
+        return position
+    shares = round(amount / aggressive_price, 2)
+    profit = round(shares * (1.0 - aggressive_price), 2)
+    loss = round(amount, 2)
+    ev = round(estimated_prob * profit - (1 - estimated_prob) * loss, 2)
+    resized = dict(position)
+    resized.update({
+        "amount": amount,
+        "shares": shares,
+        "profit_if_win": profit,
+        "loss_if_lose": loss,
+        "expected_value": ev,
+        "aggressive_price": aggressive_price,
+        "market_price": market_price,
+    })
+    return resized
 
 
 def record_shadow_city_opportunities(opportunities, cycle_context=None):
@@ -4007,6 +4041,7 @@ def run_observability_alerts():
     try:
         if maybe_run_daily_crosscheck(state):
             changed = True
+            maybe_run_daily_crosscheck_temporal_summary()
     except Exception as e:
         logger = globals().get("log")
         if logger:
@@ -6979,6 +7014,50 @@ def maybe_run_daily_crosscheck(state, now=None):
 
     state["crosscheck_last_date"] = today
     return True
+
+
+def maybe_run_daily_crosscheck_temporal_summary(now=None):
+    """
+    Ejecuta el resumen temporal del cross-check usando el mismo JSONL live del bot.
+    No toca trading ni policy; solo dispara la capa humana diaria sobre la serie acumulada.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    if not os.path.exists(SIGNALS_CROSSCHECK_FILE):
+        return False
+    if not os.path.exists(SIGNALS_CROSSCHECK_DAILY_SUMMARY_SCRIPT):
+        return False
+
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                SIGNALS_CROSSCHECK_DAILY_SUMMARY_SCRIPT,
+                "--crosscheck-file",
+                SIGNALS_CROSSCHECK_FILE,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        logger = globals().get("log")
+        if result.returncode != 0:
+            if logger:
+                stderr = (result.stderr or "").strip()
+                stdout = (result.stdout or "").strip()
+                detail = stderr or stdout or "sin detalle"
+                logger.warning(f"crosscheck temporal summary: fallo ({detail[:500]})")
+            return False
+        if logger:
+            logger.info("crosscheck temporal summary: OK")
+        return True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"crosscheck temporal summary: fallo ({e})")
+        return False
 
 
 def maybe_run_blocked_signals_check(state, now=None):
@@ -15919,6 +15998,13 @@ def main(client):
                     "expected_value": _er_ev,
                     "fraction_pct": round(float(position.get("fraction_pct", 0) or 0) * EXACT_RANGE_SIZE_SCALE, 2),
                 })
+        # v10.6.23: evitar exact/range canary demasiado pequenos para una salida util.
+        if c.get("exact_range_canary") and isinstance(position, dict) and position.get("amount"):
+            _er_cap = round(max(MIN_BET, effective_bankroll * MAX_BET_PCT), 2)
+            _er_floor = round(max(MIN_BET, min(EXACT_RANGE_MIN_AMOUNT, _er_cap)), 2)
+            if float(position.get("amount", 0) or 0) < _er_floor:
+                position = _resize_position_amount(position, _er_floor, our_prob)
+                position["min_amount_floor_applied"] = _er_floor
 
         if not c.get("allowlisted", True):
             shadow_trades.append({

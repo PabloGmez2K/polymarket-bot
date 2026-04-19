@@ -1,5 +1,5 @@
 """
-signals_vs_edge_crosscheck.py — Cross-check bot edge (shadow_city_tracking) vs trader signals.
+signals_vs_edge_crosscheck.py - Cross-check bot edge (shadow_city_tracking) vs trader signals.
 
 Standalone read-only tool. Run without args:
     python tools/signals_vs_edge_crosscheck.py
@@ -9,6 +9,7 @@ Outputs:
   - Appends one JSON line to data/runtime_import_derived/signals_crosscheck.jsonl
 """
 
+import argparse
 import json
 import os
 import sys
@@ -27,6 +28,18 @@ EDGE_HIT_THRESHOLD = 1  # min edge_hits to count as "bot sees edge"
 ALLOWED_CONDITIONS = {"at_or_above", "at_or_below"}
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Cruza edge del bot vs senales de traders y escribe una corrida JSONL."
+    )
+    parser.add_argument("--signals", default=SIGNALS_FILE)
+    parser.add_argument("--shadow", default=SHADOW_FILE)
+    parser.add_argument("--policy", default=POLICY_FILE)
+    parser.add_argument("--output", default=OUT_FILE)
+    parser.add_argument("--no-append", action="store_true")
+    return parser.parse_args()
+
+
 def load_json(path):
     with open(path, encoding="utf-8-sig") as f:
         return json.load(f)
@@ -41,45 +54,51 @@ def build_city_signal_stats(signals):
         allowed_signals: [signals with allowed conditions],
     }
     """
-    stats = defaultdict(lambda: {
-        "n_signals": 0,
-        "n_consensus": 0,
-        "dates": set(),
-        "conditions": set(),
-        "max_wr": 0.0,
-        "traders": set(),
-        "has_consensus_market": False,
-        "signals_by_date": defaultdict(list),
-        "allowed_signals": [],
-        "best_example": None,
-    })
+    stats = defaultdict(
+        lambda: {
+            "n_signals": 0,
+            "n_consensus": 0,
+            "dates": set(),
+            "conditions": set(),
+            "max_wr": 0.0,
+            "traders": set(),
+            "has_consensus_market": False,
+            "signals_by_date": defaultdict(list),
+            "allowed_signals": [],
+            "best_example": None,
+        }
+    )
 
-    for s in signals:
-        city = s["city"]
+    for signal in signals:
+        city = signal["city"]
         st = stats[city]
         st["n_signals"] += 1
-        if s["has_consensus"]:
+        if signal["has_consensus"]:
             st["n_consensus"] += 1
             st["has_consensus_market"] = True
-        st["dates"].add(s["date"])
-        st["conditions"].add(s["condition"])
-        st["traders"].add(s["trader"])
-        if s["trader_win_rate"] > st["max_wr"]:
-            st["max_wr"] = s["trader_win_rate"]
-            st["best_example"] = s
-        st["signals_by_date"][s["date"]].append(s)
-        if s["condition"] in ALLOWED_CONDITIONS:
-            st["allowed_signals"].append(s)
+        st["dates"].add(signal["date"])
+        st["conditions"].add(signal["condition"])
+        st["traders"].add(signal["trader"])
+        if signal["trader_win_rate"] > st["max_wr"]:
+            st["max_wr"] = signal["trader_win_rate"]
+            st["best_example"] = signal
+        st["signals_by_date"][signal["date"]].append(signal)
+        if signal["condition"] in ALLOWED_CONDITIONS:
+            st["allowed_signals"].append(signal)
 
     return stats
 
 
-def run_crosscheck():
-    # --- Load data ---
-    sig_data = load_json(SIGNALS_FILE)
-    shadow_data = load_json(SHADOW_FILE)
+def build_crosscheck_record(
+    signals_path=SIGNALS_FILE,
+    shadow_path=SHADOW_FILE,
+    policy_path=POLICY_FILE,
+    run_at=None,
+):
+    sig_data = load_json(signals_path)
+    shadow_data = load_json(shadow_path)
     try:
-        policy_data = load_json(POLICY_FILE)
+        policy_data = load_json(policy_path)
     except Exception:
         policy_data = {}
 
@@ -87,27 +106,22 @@ def run_crosscheck():
     shadow_cities = shadow_data["cities"]
     signals_generated_at = sig_data.get("generated", "")
     shadow_updated_at = shadow_data.get("updated_at", "")
-    run_at = datetime.now(timezone.utc).isoformat()
+    effective_run_at = run_at or datetime.now(timezone.utc).isoformat()
 
-    # Canary / mode info for enrichment
     canary_cities = set(policy_data.get("auto_canary_cities", {}).keys())
-
-    # --- Build signal stats per city ---
     city_signal_stats = build_city_signal_stats(signals)
     signal_city_names = set(city_signal_stats.keys())
 
-    # --- Cities with bot edge ---
     bot_edge_cities = {
-        city for city, data in shadow_cities.items()
+        city
+        for city, data in shadow_cities.items()
         if data.get("edge_hits", 0) >= EDGE_HIT_THRESHOLD
     }
 
-    # --- Buckets ---
     match_cities = sorted(signal_city_names & bot_edge_cities)
     bot_only_cities = sorted(bot_edge_cities - signal_city_names)
     trader_only_cities = sorted(signal_city_names - bot_edge_cities)
 
-    # --- Build detail rows ---
     def make_city_row(city, bucket):
         sig_st = city_signal_stats.get(city, {})
         shadow_st = shadow_cities.get(city, {})
@@ -142,35 +156,25 @@ def run_crosscheck():
             }
         return row
 
-    match_rows = [make_city_row(c, "MATCH") for c in match_cities]
-    bot_only_rows = [make_city_row(c, "BOT_ONLY") for c in bot_only_cities]
-    trader_only_rows = [make_city_row(c, "TRADER_ONLY") for c in trader_only_cities]
+    match_rows = [make_city_row(city, "MATCH") for city in match_cities]
+    bot_only_rows = [make_city_row(city, "BOT_ONLY") for city in bot_only_cities]
+    trader_only_rows = [make_city_row(city, "TRADER_ONLY") for city in trader_only_cities]
 
-    # --- Counts ---
-    match_count = len(match_cities)
-    bot_only_count = len(bot_only_cities)
-    trader_only_count = len(trader_only_cities)
+    consensus_match = sum(1 for row in match_rows if row["has_consensus_market"])
+    consensus_trader_only = sum(1 for row in trader_only_rows if row["has_consensus_market"])
+    actionable_trader_only = [row for row in trader_only_rows if row["n_allowed_conditions"] > 0]
+    match_with_allowed = [row for row in match_rows if row["n_allowed_conditions"] > 0]
 
-    consensus_match = sum(1 for r in match_rows if r["has_consensus_market"])
-    consensus_trader_only = sum(1 for r in trader_only_rows if r["has_consensus_market"])
-
-    # Actionable: TRADER_ONLY with allowed conditions (bot could theoretically trade)
-    actionable_trader_only = [r for r in trader_only_rows if r["n_allowed_conditions"] > 0]
-    # MATCH with allowed conditions (confirmation overlap)
-    match_with_allowed = [r for r in match_rows if r["n_allowed_conditions"] > 0]
-
-    # --- JSONL output ---
-    os.makedirs(OUT_DIR, exist_ok=True)
     jsonl_record = {
-        "run_at": run_at,
+        "run_at": effective_run_at,
         "signals_generated_at": signals_generated_at,
         "shadow_updated_at": shadow_updated_at,
-        "match_cities": [r["city"] for r in match_rows],
-        "bot_only_cities": [r["city"] for r in bot_only_rows],
-        "trader_only_cities": [r["city"] for r in trader_only_rows],
-        "match_count": match_count,
-        "bot_only_count": bot_only_count,
-        "trader_only_count": trader_only_count,
+        "match_cities": [row["city"] for row in match_rows],
+        "bot_only_cities": [row["city"] for row in bot_only_rows],
+        "trader_only_cities": [row["city"] for row in trader_only_rows],
+        "match_count": len(match_cities),
+        "bot_only_count": len(bot_only_cities),
+        "trader_only_count": len(trader_only_cities),
         "consensus_match_count": consensus_match,
         "consensus_trader_only_count": consensus_trader_only,
         "actionable_trader_only_count": len(actionable_trader_only),
@@ -179,15 +183,31 @@ def run_crosscheck():
         "bot_only_details": bot_only_rows,
         "trader_only_details": trader_only_rows,
     }
+    return jsonl_record, sig_data
 
-    with open(OUT_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(jsonl_record, ensure_ascii=False, default=str) + "\n")
 
-    # --- Stdout table ---
-    print(f"# signals_vs_edge_crosscheck — {run_at[:19]} UTC")
-    print(f"signals.json: {signals_generated_at[:19]}")
-    print(f"shadow_city_tracking: {shadow_updated_at[:19]}")
+def append_record(record, output_path=OUT_FILE):
+    out_dir = os.path.dirname(output_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    with open(output_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+
+
+def print_crosscheck_report(jsonl_record, sig_data, output_path):
+    print(f"# signals_vs_edge_crosscheck - {jsonl_record['run_at'][:19]} UTC")
+    print(f"signals.json: {jsonl_record['signals_generated_at'][:19]}")
+    print(f"shadow_city_tracking: {jsonl_record['shadow_updated_at'][:19]}")
     print()
+
+    match_rows = jsonl_record["match_details"]
+    bot_only_rows = jsonl_record["bot_only_details"]
+    trader_only_rows = jsonl_record["trader_only_details"]
+    match_cities = jsonl_record["match_cities"]
+    trader_only_cities = jsonl_record["trader_only_cities"]
+    actionable_trader_only = [row for row in trader_only_rows if row["n_allowed_conditions"] > 0]
+    match_with_allowed = [row for row in match_rows if row["n_allowed_conditions"] > 0]
+    signals = sig_data.get("signals", [])
 
     def print_table(title, rows, cols):
         print(f"## {title} ({len(rows)} cities)")
@@ -195,76 +215,122 @@ def run_crosscheck():
             print("  (none)")
             print()
             return
-        # Header
         header = "| " + " | ".join(cols) + " |"
         sep = "| " + " | ".join(["---"] * len(cols)) + " |"
         print(header)
         print(sep)
-        for r in rows:
+        for row in rows:
             def fmt(key):
-                v = r.get(key, "")
-                if isinstance(v, list):
-                    return ",".join(str(x) for x in v)
-                if isinstance(v, float):
-                    return f"{v:.1f}"
-                if isinstance(v, bool):
-                    return "Y" if v else ""
-                return str(v) if v is not None else ""
-            print("| " + " | ".join(fmt(c) for c in cols) + " |")
+                value = row.get(key, "")
+                if isinstance(value, list):
+                    return ",".join(str(item) for item in value)
+                if isinstance(value, float):
+                    return f"{value:.1f}"
+                if isinstance(value, bool):
+                    return "Y" if value else ""
+                return str(value) if value is not None else ""
+
+            print("| " + " | ".join(fmt(col) for col in cols) + " |")
         print()
 
-    # MATCH table
-    match_cols = ["city", "edge_hits", "bot_best_edge_pct", "n_signals",
-                  "n_consensus", "n_allowed_conditions", "is_canary", "conditions"]
-    print_table("MATCH — bot edge AND trader signals", match_rows, match_cols)
-
-    # BOT_ONLY table
+    match_cols = [
+        "city",
+        "edge_hits",
+        "bot_best_edge_pct",
+        "n_signals",
+        "n_consensus",
+        "n_allowed_conditions",
+        "is_canary",
+        "conditions",
+    ]
     bot_cols = ["city", "edge_hits", "cycles_seen", "bot_best_edge_pct"]
-    print_table("BOT_ONLY — bot edge, NO trader signals", bot_only_rows, bot_cols)
+    trader_cols = [
+        "city",
+        "n_signals",
+        "n_consensus",
+        "n_allowed_conditions",
+        "max_trader_wr",
+        "has_consensus_market",
+        "conditions",
+    ]
 
-    # TRADER_ONLY table
-    trader_cols = ["city", "n_signals", "n_consensus", "n_allowed_conditions",
-                   "max_trader_wr", "has_consensus_market", "conditions"]
-    print_table("TRADER_ONLY — trader signals, bot edge_hits=0", trader_only_rows, trader_cols)
+    print_table("MATCH - bot edge AND trader signals", match_rows, match_cols)
+    print_table("BOT_ONLY - bot edge, NO trader signals", bot_only_rows, bot_cols)
+    print_table("TRADER_ONLY - trader signals, bot edge_hits=0", trader_only_rows, trader_cols)
 
-    # Summary
     print("## Summary")
-    print(f"- Total signals: {len(signals)} ({sig_data.get('n_quality_traders',0)} quality traders)")
-    print(f"- MATCH:        {match_count} cities ({consensus_match} with consensus, {len(match_with_allowed)} with allowed conds)")
-    print(f"- BOT_ONLY:     {bot_only_count} cities (bot sees edge, traders ignore)")
-    print(f"- TRADER_ONLY:  {trader_only_count} cities ({consensus_trader_only} with consensus, {len(actionable_trader_only)} with allowed conds)")
+    print(f"- Total signals: {len(signals)} ({sig_data.get('n_quality_traders', 0)} quality traders)")
+    print(
+        f"- MATCH:        {jsonl_record['match_count']} cities "
+        f"({jsonl_record['consensus_match_count']} with consensus, {len(match_with_allowed)} with allowed conds)"
+    )
+    print(f"- BOT_ONLY:     {jsonl_record['bot_only_count']} cities (bot sees edge, traders ignore)")
+    print(
+        f"- TRADER_ONLY:  {jsonl_record['trader_only_count']} cities "
+        f"({jsonl_record['consensus_trader_only_count']} with consensus, {len(actionable_trader_only)} with allowed conds)"
+    )
     print()
 
-    # Validation checks
     print("## Validation checks")
-    austin_ok = "Austin" in trader_only_cities
+    signal_cities = {str(signal.get("city", "")) for signal in signals if isinstance(signal, dict)}
+    if "Austin" in signal_cities:
+        austin_ok = "Austin" in trader_only_cities
+        print(
+            f"- Austin in TRADER_ONLY: {'PASS' if austin_ok else 'FAIL'} "
+            "(expected when Austin is present in signals)"
+        )
+        if not austin_ok:
+            print("  ERROR: Austin should be TRADER_ONLY - check city name matching")
+            sys.exit(1)
+    else:
+        print("- Austin in TRADER_ONLY: SKIP (Austin not present in current signals snapshot)")
+
     seoul_ok = "Seoul" in match_cities
-    print(f"- Austin in TRADER_ONLY: {'PASS' if austin_ok else 'FAIL'} (expected: edge_hits=0, consensus=2)")
     print(f"- Seoul in MATCH:        {'PASS' if seoul_ok else 'FAIL'} (expected: canary with edge_hits>=1)")
-    if not austin_ok:
-        print("  ERROR: Austin should be TRADER_ONLY — check city name matching")
-        sys.exit(1)
     if not seoul_ok:
-        print("  ERROR: Seoul should be MATCH — check shadow_city_tracking edge_hits")
+        print("  ERROR: Seoul should be MATCH - check shadow_city_tracking edge_hits")
         sys.exit(1)
     print()
 
-    # Actionable highlights
     if actionable_trader_only:
-        print("## Actionable TRADER_ONLY (allowed conditions — bot could trade these)")
-        for r in sorted(actionable_trader_only, key=lambda x: -x["n_consensus"]):
-            ex = r.get("best_signal_example", {})
-            mk = ex.get("match_key", "")
-            mkt = ex.get("mkt_price", "?")
-            print(f"  - {r['city']}: {r['n_allowed_conditions']} allowed signals, "
-                  f"n_consensus={r['n_consensus']}, max_wr={r['max_trader_wr']:.0f}%"
-                  f"{' | example: ' + mk if mk else ''}")
+        print("## Actionable TRADER_ONLY (allowed conditions - bot could trade these)")
+        for row in sorted(actionable_trader_only, key=lambda item: -item["n_consensus"]):
+            example = row.get("best_signal_example", {})
+            match_key = example.get("match_key", "")
+            print(
+                f"  - {row['city']}: {row['n_allowed_conditions']} allowed signals, "
+                f"n_consensus={row['n_consensus']}, max_wr={row['max_trader_wr']:.0f}%"
+                f"{' | example: ' + match_key if match_key else ''}"
+            )
 
     print()
-    print(f"Output appended to: {OUT_FILE}")
+    print(f"Output appended to: {output_path}")
 
+
+def run_crosscheck(
+    signals_path=SIGNALS_FILE,
+    shadow_path=SHADOW_FILE,
+    policy_path=POLICY_FILE,
+    output_path=OUT_FILE,
+    append=True,
+):
+    jsonl_record, sig_data = build_crosscheck_record(
+        signals_path=signals_path,
+        shadow_path=shadow_path,
+        policy_path=policy_path,
+    )
+    if append:
+        append_record(jsonl_record, output_path=output_path)
+    print_crosscheck_report(jsonl_record, sig_data, output_path)
     return jsonl_record
 
 
 if __name__ == "__main__":
-    run_crosscheck()
+    args = parse_args()
+    run_crosscheck(
+        signals_path=args.signals,
+        shadow_path=args.shadow,
+        policy_path=args.policy,
+        output_path=args.output,
+        append=not args.no_append,
+    )

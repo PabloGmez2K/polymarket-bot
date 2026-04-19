@@ -4292,6 +4292,28 @@ def run_tests():
          classified_reason == "buy_min_notional",
          {"classified_reason": classified_reason})
 
+    exact_range_ns = {}
+    exec(get_function_source(module_ast, code_lines, "_resize_position_amount"), exact_range_ns)
+    resized_position = exact_range_ns["_resize_position_amount"](
+        {
+            "amount": 1.0,
+            "shares": 4.55,
+            "profit_if_win": 3.55,
+            "loss_if_lose": 1.0,
+            "expected_value": 0.12,
+            "aggressive_price": 0.22,
+            "market_price": 0.2,
+        },
+        2.5,
+        0.78,
+    )
+    test("exact/range min amount: resize sube amount sin perder precio",
+         abs(resized_position["amount"] - 2.5) < 1e-9
+         and abs(resized_position["shares"] - 11.36) < 1e-9
+         and abs(resized_position["loss_if_lose"] - 2.5) < 1e-9
+         and abs(resized_position["aggressive_price"] - 0.22) < 1e-9,
+         resized_position)
+
     sample_slot_metrics = slot_ns["build_cycle_slot_metrics"](
         timestamp_utc=datetime(2026, 4, 17, 4, 0, tzinfo=timezone.utc),
         candidates=[
@@ -5099,6 +5121,14 @@ def run_tests():
     test(
         "v10.6.15: size scale aplicado para exact_range_canary",
         'c.get("exact_range_canary") and isinstance(position, dict)' in code,
+    )
+    test(
+        "v10.6.23: EXACT_RANGE_MIN_AMOUNT definido",
+        "EXACT_RANGE_MIN_AMOUNT" in code,
+    )
+    test(
+        "v10.6.23: exact/range canary aplica floor minimo de amount",
+        'position["min_amount_floor_applied"] = _er_floor' in code,
     )
 
     # ---- v10.6.16: condition_reopen_monitor ----
