@@ -15862,15 +15862,23 @@ def main(client):
             # Si la condición está en QUALITY_TRADER_CONDITIONS, ciudad en whitelist,
             # y hay al menos un quality trader con señal → pasa al pipeline con flag canary.
             _qt_canary = False
-            if condition_name in QUALITY_TRADER_CONDITIONS and city in QUALITY_TRADER_CITIES_WHITELIST:
-                if threshold_high is not None:
-                    _early_key = f"{city}|{c['date_iso']}|{c['condition']}|{threshold}-{threshold_high}|{c['unit']}"
-                else:
-                    _early_key = f"{city}|{c['date_iso']}|{c['condition']}|{threshold}|{c['unit']}"
-                if trader_signals.get(_early_key):
-                    _qt_canary = True
+            _early_key = None
+            _qt_gate_reason = "condition_not_in_quality_trader_gate"
+            if condition_name in QUALITY_TRADER_CONDITIONS:
+                _qt_gate_reason = "city_not_in_quality_trader_whitelist"
+                if city in QUALITY_TRADER_CITIES_WHITELIST:
+                    if threshold_high is not None:
+                        _early_key = f"{city}|{c['date_iso']}|{c['condition']}|{threshold}-{threshold_high}|{c['unit']}"
+                    else:
+                        _early_key = f"{city}|{c['date_iso']}|{c['condition']}|{threshold}|{c['unit']}"
+                    if trader_signals.get(_early_key):
+                        _qt_canary = True
+                        _qt_gate_reason = "quality_trader_signal_match"
+                    else:
+                        _qt_gate_reason = "no_quality_trader_signal_match"
 
             if not _qt_canary:
+                _filter_label = "CANARY-FILTER" if c.get("city_mode") in {"active", "canary"} else "SHADOW-FILTER"
                 condition_filtered_skip += 1
                 condition_filtered_shadow.append({
                     "question": c["question"],
@@ -15891,8 +15899,8 @@ def main(client):
                     )
                     condition_filtered_seen.add(condition_name)
                 edge_analysis.append(
-                    f"  SHADOW-FILTER {city} {temp_label} {c['date_iso']} | "
-                    f"condicion={condition_name} fuera de ALLOWED_CONDITIONS"
+                    f"  {_filter_label} {city} {temp_label} {c['date_iso']} | "
+                    f"condicion={condition_name} fuera de ALLOWED_CONDITIONS | motivo={_qt_gate_reason}"
                 )
                 skip_log_entries.append(_make_skip_entry(
                     "condition_filtered", cycle_id=cycle_id,
@@ -15901,7 +15909,12 @@ def main(client):
                     forecast_max=forecast_max, threshold=threshold, threshold_high=threshold_high,
                     unit=c["unit"], condition=condition_name, sigma_used=sigma_used_val,
                     question=c["question"],
-                    extras={"allowed_conditions": sorted(ALLOWED_CONDITIONS)},
+                    extras={
+                        "allowed_conditions": sorted(ALLOWED_CONDITIONS),
+                        "filter_label": _filter_label,
+                        "exact_range_gate_reason": _qt_gate_reason,
+                        "qt_match_key": _early_key,
+                    },
                 ))
                 continue
             # Quality-trader canary: marcar para edge buffer + size scale aguas abajo
