@@ -4364,6 +4364,35 @@ def run_tests():
          slot_result_idem is False and len(slot_review_messages) == 1,
          {"result": slot_result_idem, "messages_count": len(slot_review_messages)})
 
+    insufficient_slot_ns = {
+        "datetime": datetime,
+        "timezone": timezone,
+        "json": json,
+        "SCHEDULE_HOURS_UTC": [4],
+        "load_cycle_history": lambda: [
+            {"timestamp_utc": "2026-04-18T04:00:45+00:00", "scan": {"slot_metrics": {"slot_hour_utc": 4, "same_day_candidates": 26, "same_day_edges": 2, "same_day_selected": 2, "same_day_buys": 1, "edges": 2, "selected": 2, "buys": 1, "buy_rate": 0.5, "same_day_buy_rate": 0.5, "same_day_reject_reasons": {"price_out_of_range": 226, "condition_filtered": 42, "blocked_city": 22}, "execution_reject_reasons": {"buy_min_size": 1}}}},
+            {"timestamp_utc": "2026-04-17T04:00:45+00:00", "scan": {"slot_metrics": {"slot_hour_utc": 4, "same_day_candidates": 0, "same_day_edges": 0, "same_day_selected": 0, "same_day_buys": 0, "edges": 0, "selected": 0, "buys": 0, "buy_rate": 0.0, "same_day_buy_rate": 0.0, "same_day_reject_reasons": {}, "execution_reject_reasons": {}}}},
+        ],
+        "send_telegram": lambda text, with_menu=False, custom_keyboard=None: None,
+    }
+    exec(get_function_source(module_ast, code_lines, "_extract_slot_metrics_record"), insufficient_slot_ns)
+    exec(get_function_source(module_ast, code_lines, "_merge_reason_counts"), insufficient_slot_ns)
+    exec(get_function_source(module_ast, code_lines, "_top_reason"), insufficient_slot_ns)
+    exec(get_function_source(module_ast, code_lines, "_format_reason_summary"), insufficient_slot_ns)
+    exec(get_function_source(module_ast, code_lines, "evaluate_slot_monetization"), insufficient_slot_ns)
+    insufficient_result = insufficient_slot_ns["evaluate_slot_monetization"](insufficient_slot_ns["load_cycle_history"](), 4, min_cycles=3)
+    test("slot monetization insufficient_data conserva funnel parcial de 04h",
+         insufficient_result["decision"] == "insufficient_data"
+         and insufficient_result["summary"] == "muestra insuficiente; ya hubo buy same-day"
+         and insufficient_result["same_day_candidates"] == 26
+         and insufficient_result["same_day_edges"] == 2
+         and insufficient_result["same_day_selected"] == 2
+         and insufficient_result["same_day_buys"] == 1
+         and insufficient_result["same_day_buy_rate"] == 0.5
+         and insufficient_result["buy_rate"] == 0.5
+         and insufficient_result["execution_reject_reasons"].get("buy_min_size") == 1,
+         insufficient_result)
+
     # Functional: M5 canary candidate notifier.
     candidate_messages = []
     candidate_ns = {
@@ -5192,6 +5221,51 @@ def run_tests():
     test(
         "v10.6.20: reason observe explica bloqueo por historial NOAA malo",
         "promoción a canary bloqueada hasta reunir evidencia nueva mejor" in code,
+    )
+
+    # ---- v10.6.22: Jakarta + Kuala Lumpur (sesion 201) ----
+    test(
+        "v10.6.22: Jakarta en RESOLUTION_STATIONS (Halim Perdanakusuma)",
+        '"Jakarta":        {"lat": -6.2666, "lon": 106.8906' in code
+        or '"Jakarta": {"lat": -6.2666, "lon": 106.8906' in code,
+    )
+    test(
+        "v10.6.22: Kuala Lumpur en RESOLUTION_STATIONS (KLIA)",
+        '"Kuala Lumpur":   {"lat":  2.7456, "lon": 101.7099' in code
+        or '"Kuala Lumpur": {"lat":  2.7456, "lon": 101.7099' in code
+        or '"Kuala Lumpur": {"lat": 2.7456, "lon": 101.7099' in code,
+    )
+    test(
+        "v10.6.22: Jakarta en RESOLUTION_ICAO (WIHH) sin noaa_station_id",
+        '"Jakarta":        {"icao": "WIHH"' in code
+        or '"Jakarta": {"icao": "WIHH"' in code,
+    )
+    test(
+        "v10.6.22: Kuala Lumpur en RESOLUTION_ICAO (WMKK) sin noaa_station_id",
+        '"Kuala Lumpur":   {"icao": "WMKK"' in code
+        or '"Kuala Lumpur": {"icao": "WMKK"' in code,
+    )
+    test(
+        "v10.6.22: Jakarta en CITY_TIMEZONES (Asia/Jakarta)",
+        '"Jakarta":        "Asia/Jakarta"' in code
+        or '"Jakarta": "Asia/Jakarta"' in code,
+    )
+    test(
+        "v10.6.22: Kuala Lumpur en CITY_TIMEZONES (Asia/Kuala_Lumpur)",
+        '"Kuala Lumpur":   "Asia/Kuala_Lumpur"' in code
+        or '"Kuala Lumpur": "Asia/Kuala_Lumpur"' in code,
+    )
+    test(
+        "v10.6.22: Jakarta en OBSERVED_AUDIT_CITIES",
+        '"Jakarta"' in code and "OBSERVED_AUDIT_CITIES" in code,
+    )
+    test(
+        "v10.6.22: Kuala Lumpur en OBSERVED_AUDIT_CITIES",
+        '"Kuala Lumpur"' in code and "OBSERVED_AUDIT_CITIES" in code,
+    )
+    test(
+        "v10.6.22: Jakarta y Kuala Lumpur en QUALITY_TRADER_CITIES_WHITELIST default",
+        "Jakarta,Kuala Lumpur" in code,
     )
 
     # ---- Resultado ----

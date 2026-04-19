@@ -240,7 +240,7 @@ QUALITY_TRADER_CITIES_WHITELIST = {
     c.strip()
     for c in os.getenv(
         "QUALITY_TRADER_CITIES_WHITELIST",
-        "Seattle,Tokyo,Hong Kong,Seoul,Toronto,Chengdu,Shenzhen,Shanghai,Milan,Atlanta,London,New York City,Munich,Ankara,Madrid,Miami,Paris,Wellington,Houston",
+        "Seattle,Tokyo,Hong Kong,Seoul,Toronto,Chengdu,Shenzhen,Shanghai,Milan,Atlanta,London,New York City,Munich,Ankara,Madrid,Miami,Paris,Wellington,Houston,Jakarta,Kuala Lumpur",
     ).split(",")
     if c.strip()
 }
@@ -11592,6 +11592,10 @@ RESOLUTION_STATIONS = {
     "Wuhan":          {"lat": 30.7748,  "lon": 114.2137, "name": "Tianhe"},
     # Añadidas en v10.6.21 — expansion QUALITY_TRADER_CITIES_WHITELIST (sesion 200)
     "Houston":        {"lat": 29.9902,  "lon": -95.3368,  "name": "George Bush Intercontinental"},
+    # Añadidas en v10.6.22 — expansion QUALITY_TRADER_CITIES_WHITELIST (sesion 201)
+    # Jakarta: WIHH (Halim Perdanakusuma) — Polymarket resuelve contra esa estación vía WU, NO WIII/Soekarno-Hatta
+    "Jakarta":        {"lat": -6.2666, "lon": 106.8906, "name": "Halim Perdanakusuma"},
+    "Kuala Lumpur":   {"lat":  2.7456, "lon": 101.7099, "name": "KLIA"},
 }
 
 
@@ -11645,6 +11649,11 @@ RESOLUTION_ICAO = {
     "Wuhan":          {"icao": "ZHHH", "wu_url": _wu_history_url("ZHHH")},
     # Añadidas en v10.6.21 — ICAO pendiente verificación Polymarket resolution source
     "Houston":        {"icao": "KIAH", "wu_url": _wu_history_url("KIAH")},
+    # Añadidas en v10.6.22 — Polymarket resuelve contra WU; sin NOAA diario reciente
+    # Jakarta: WIHH (Halim Perdanakusuma) — ISD 96749599999 confirmado sin CSV global-hourly 2026; GHCND ID000096745/IDM00096741 sin TMAX reportado en 2026 (yearly file)
+    # Kuala Lumpur: WMKK (KLIA) — ISD 48650099999 confirmado sin CSV global-hourly 2026; GHCND MYM00048650 sin TMAX reportado en 2026
+    "Jakarta":        {"icao": "WIHH", "wu_url": _wu_history_url("WIHH")},
+    "Kuala Lumpur":   {"icao": "WMKK", "wu_url": _wu_history_url("WMKK")},
     # Ciudades sin cobertura NOAA verificada (2026-04-06) — pendiente alternativa
     # Toronto: CYYZ — ISD 71624099999 confirmado; GHCND local sin TMAX en 2025-10-01..2026-03-31
     # Beijing: ZBAA — ISD 54511099999 confirmado; GHCND local sin TMAX en 2025-10-01..2026-03-31
@@ -11668,6 +11677,8 @@ OBSERVED_AUDIT_CITIES = {
     "Chengdu",
     "Chicago",
     "Dallas",
+    "Jakarta",
+    "Kuala Lumpur",
     "London",
     "Lucknow",
     "Madrid",
@@ -11699,6 +11710,8 @@ CITY_TIMEZONES = {
     "Wuhan":          "Asia/Shanghai",
     "Hong Kong":      "Asia/Hong_Kong",
     "Singapore":      "Asia/Singapore",
+    "Jakarta":        "Asia/Jakarta",
+    "Kuala Lumpur":   "Asia/Kuala_Lumpur",
     "Bangkok":        "Asia/Bangkok",
     "Lucknow":        "Asia/Kolkata",
     "Wellington":     "Pacific/Auckland",
