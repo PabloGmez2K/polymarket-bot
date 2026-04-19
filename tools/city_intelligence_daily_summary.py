@@ -17,6 +17,16 @@ DEFAULT_EFFECTIVE_VIEW_PATH = REPO_ROOT / "data" / "runtime_policy_effective_vie
 DEFAULT_ALIGNMENT_PATH = REPO_ROOT / "data" / "system_alignment_check_operational.json"
 DEFAULT_STATE_PATH = REPO_ROOT / "data" / "city_intelligence_daily_summary_state.json"
 DEFAULT_MD_OUTPUT = REPO_ROOT / "docs" / "city_intelligence_daily_summary_latest.md"
+ACTIONABLE_GATE_STATUSES = {
+    "audit_runtime_drift",
+    "review_for_canary",
+    "review_block_reason",
+    "promote_to_shadow_validation",
+    "review_runtime_policy_gate",
+    "needs_shadow_validation",
+    "audit_trader_input",
+    "blocked_with_signal",
+}
 
 
 def parse_args():
@@ -66,6 +76,33 @@ def send_telegram(message):
     )
     urllib.request.urlopen(req, timeout=10)
     return {"sent": True, "reason": "sent"}
+
+
+def is_actionable_review_row(row):
+    if not isinstance(row, dict):
+        return False
+    if row.get("review_priority") not in {"now", "soon"}:
+        return False
+    return row.get("gate_status") in ACTIONABLE_GATE_STATUSES
+
+
+def pick_summary_rows(gate, ledger, limit=3):
+    review_queue = gate.get("review_queue", []) or []
+    actionable_rows = [row for row in review_queue if is_actionable_review_row(row)]
+    if actionable_rows:
+        return actionable_rows[:limit]
+    watch_rows = [row for row in review_queue if row.get("review_priority") == "watch"]
+    if watch_rows:
+        return watch_rows[:limit]
+    return (ledger.get("cities", []) or [])[:limit]
+
+
+def pick_instruction_row(gate):
+    review_queue = gate.get("review_queue", []) or []
+    actionable_rows = [row for row in review_queue if is_actionable_review_row(row)]
+    if actionable_rows:
+        return actionable_rows[0]
+    return None
 
 
 def runtime_inputs_status(pipeline_summary, ledger_summary, gate_summary):
@@ -220,9 +257,8 @@ def build_message(pipeline, ledger, gate, effective_view, alignment, progress_st
     if effective_view and alignment:
         return build_canonical_story(pipeline, ledger, gate, effective_view, alignment, progress_state)
 
-    review_queue = gate.get("review_queue", [])
-    top_review = review_queue[0] if review_queue else None
-    ledger_rows = ledger.get("cities", [])[:3]
+    summary_rows = pick_summary_rows(gate, ledger, limit=3)
+    instruction_row = pick_instruction_row(gate)
     generated_at = pipeline.get("generated_at", "")
     actionable = pipeline_summary.get("actionable_cities")
     building = pipeline_summary.get("building_cities")
@@ -258,22 +294,22 @@ def build_message(pipeline, ledger, gate, effective_view, alignment, progress_st
     ]
     if trader_input_warning:
         lines.append(f"- <b>Warning</b>: {trader_input_warning}")
-    for row in ledger_rows:
+    for row in summary_rows:
         lines.append(
             f"- <b>{row['city']}</b>: {row['recommendation']} | cuello <code>{row['bottleneck']}</code> | {row['rationale']}"
         )
 
-    if top_review:
+    if instruction_row:
         lines.extend([
             "",
             "<b>Instruccion para Codex</b>",
-            top_review.get("codex_prompt", ""),
+            instruction_row.get("codex_prompt", ""),
         ])
     else:
         lines.extend([
             "",
             "<b>Instruccion para Codex</b>",
-            "No hace falta abrir una revision nueva hoy salvo que quieras auditar si el sistema esta produciendo senal util o solo ruido. Lee AGENTS.md, el bloque reciente de CONTEXTO.md, data/city_validation_ledger.json, data/city_promotion_gate.json y docs/city_intelligence_pipeline_latest.md.",
+            "No hace falta abrir una revision nueva hoy salvo que quieras auditar si el sistema esta produciendo senal util o solo ruido. Si revisas algo, usa la review queue vigente y no reabras ciudades que ya cayeron a background watch. Lee AGENTS.md, el bloque reciente de CONTEXTO.md, data/city_validation_ledger.json, data/city_promotion_gate.json y docs/city_intelligence_pipeline_latest.md.",
         ])
     return "\n".join(lines)
 
@@ -312,8 +348,11 @@ def main():
         state,
     )
     message = build_message(pipeline, ledger, gate, effective_view, alignment, progress_state)
+    today_utc = datetime.now(timezone.utc).date().isoformat()
 
-    if args.dry_run:
+    if not args.dry_run and state.get("last_sent_date") == today_utc:
+        telegram_result = {"sent": False, "reason": "already_sent_today"}
+    elif args.dry_run:
         telegram_result = {"sent": False, "reason": "dry_run"}
     else:
         telegram_result = send_telegram(message)
@@ -327,6 +366,8 @@ def main():
         "last_building_cities": pipeline_summary.get("building_cities", 0),
         "last_insufficient_cities": pipeline_summary.get("insufficient_cities", 0),
     })
+    if telegram_result.get("reason") in {"sent", "missing_telegram_env"}:
+        state["last_sent_date"] = today_utc
 
     state_path = ensure_parent(args.state_output)
     md_path = ensure_parent(args.md_output)

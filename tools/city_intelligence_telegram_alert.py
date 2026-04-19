@@ -13,6 +13,16 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_GATE_PATH = REPO_ROOT / "data" / "city_promotion_gate.json"
 DEFAULT_STATE_PATH = REPO_ROOT / "data" / "city_intelligence_alert_state.json"
 DEFAULT_MD_OUTPUT = REPO_ROOT / "docs" / "city_intelligence_alert_latest.md"
+ACTIONABLE_GATE_STATUSES = {
+    "audit_runtime_drift",
+    "review_for_canary",
+    "review_block_reason",
+    "promote_to_shadow_validation",
+    "review_runtime_policy_gate",
+    "needs_shadow_validation",
+    "audit_trader_input",
+    "blocked_with_signal",
+}
 
 
 def parse_args():
@@ -74,11 +84,19 @@ def build_signature(row):
     return f"{row.get('city')}|{row.get('gate_status')}|{row.get('review_priority')}|{runtime_names}"
 
 
+def is_actionable_alert_row(row):
+    if not isinstance(row, dict):
+        return False
+    if row.get("review_priority") not in {"now", "soon"}:
+        return False
+    return row.get("gate_status") in ACTIONABLE_GATE_STATUSES
+
+
 def select_new_alert_rows(gate, state):
     seen = set(state.get("seen_review_signatures", []))
     rows = []
     for row in gate.get("review_queue", []):
-        if row.get("review_priority") not in {"now", "soon"}:
+        if not is_actionable_alert_row(row):
             continue
         signature = build_signature(row)
         if signature in seen:
@@ -138,12 +156,12 @@ def build_message(gate, rows):
         "Base operativa disponible; la novedad es de seguimiento y lectura operativa, no de wiring ni de policy.",
         "",
         "<b>Que paso</b>",
-        f"Hay {len(rows)} ciudad(es) con novedad relevante para seguimiento.",
+        f"Hay {len(rows)} ciudad(es) con revision accionable nueva en el gate vigente.",
         f"La principal ahora es <b>{top['city']}</b> con gate <code>{top['gate_status']}</code>.",
         "",
         "<b>Por que importa</b>",
         f"El cuello dominante del sistema es <code>{dominant_bottleneck}</code>.",
-        "Eso significa que el siguiente paso util debe atacar ese bloqueo y no mandar repetir trabajo ya cerrado.",
+        "Eso significa que el siguiente paso util debe atacar ese bloqueo y no reabrir lineas que el gate ya bajo a background watch.",
         "",
     ]
     for row in rows[:4]:
