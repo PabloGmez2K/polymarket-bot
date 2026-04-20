@@ -34,6 +34,18 @@ failed = 0
 errors = []
 
 
+_VERIFY_TMP_ROOT = os.path.join(os.path.dirname(__file__), ".tmp_verify")
+
+
+def _verify_tmp_dir():
+    os.makedirs(_VERIFY_TMP_ROOT, exist_ok=True)
+    return _VERIFY_TMP_ROOT
+
+
+def _verify_tmp_path(filename):
+    return os.path.join(_verify_tmp_dir(), filename)
+
+
 def test(name, condition, detail=""):
     global passed, failed
     if condition:
@@ -835,7 +847,7 @@ def run_tests():
              not helper_ns["is_city_blocked"]("Chicago"))
 
         fd, tmp_cycles = tempfile.mkstemp(
-            dir=tempfile.gettempdir(),
+            dir=_verify_tmp_dir(),
             prefix="_tmp_cycles_history_test_",
             suffix=".jsonl",
         )
@@ -1789,7 +1801,7 @@ def run_tests():
              })
 
         missing_cycle_summary = os.path.join(
-            tempfile.gettempdir(),
+            _verify_tmp_dir(),
             "_tmp_cycle_summary_missing_focus_center_test.json",
         )
         if os.path.exists(missing_cycle_summary):
@@ -2271,7 +2283,7 @@ def run_tests():
              dashboard_alert_api_summary)
 
         fd, tmp_agent_events = tempfile.mkstemp(
-            dir=tempfile.gettempdir(),
+            dir=_verify_tmp_dir(),
             prefix="_tmp_agent_events_test_",
             suffix=".jsonl",
         )
@@ -2423,7 +2435,7 @@ def run_tests():
 
         info_messages = []
         fd, tmp_cycle_summary = tempfile.mkstemp(
-            dir=tempfile.gettempdir(),
+            dir=_verify_tmp_dir(),
             prefix="_tmp_cycle_summary_test_",
             suffix=".json",
         )
@@ -2587,7 +2599,7 @@ def run_tests():
              focus_msg[:420])
 
         fd, tmp_signals = tempfile.mkstemp(
-            dir=tempfile.gettempdir(),
+            dir=_verify_tmp_dir(),
             prefix="_tmp_signals_test_",
             suffix=".json",
         )
@@ -2704,7 +2716,7 @@ def run_tests():
              {"value": noaa_daily_recent, "requests_before": requests_before_lag, "requests_after": len(noaa_request_urls)})
 
         fd, tmp_perf_noaa = tempfile.mkstemp(
-            dir=tempfile.gettempdir(),
+            dir=_verify_tmp_dir(),
             prefix="_tmp_perf_noaa_test_",
             suffix=".json",
         )
@@ -2786,7 +2798,7 @@ def run_tests():
 
         pm_empty_messages = []
         fd, tmp_perf_summary = tempfile.mkstemp(
-            dir=tempfile.gettempdir(),
+            dir=_verify_tmp_dir(),
             prefix="_tmp_postmortem_perf_test_",
             suffix=".json",
         )
@@ -2839,7 +2851,7 @@ def run_tests():
 
     try:
         fd, tmp_postmortem = tempfile.mkstemp(
-            dir=tempfile.gettempdir(),
+            dir=_verify_tmp_dir(),
             prefix="_tmp_postmortem_test_",
             suffix=".json",
         )
@@ -2948,19 +2960,19 @@ def run_tests():
 
     try:
         fd, tmp_perf_lifecycle = tempfile.mkstemp(
-            dir=tempfile.gettempdir(),
+            dir=_verify_tmp_dir(),
             prefix="_tmp_trade_lifecycle_perf_",
             suffix=".json",
         )
         os.close(fd)
         fd, tmp_pm_lifecycle = tempfile.mkstemp(
-            dir=tempfile.gettempdir(),
+            dir=_verify_tmp_dir(),
             prefix="_tmp_trade_lifecycle_pm_",
             suffix=".json",
         )
         os.close(fd)
         fd, tmp_trade_lifecycle = tempfile.mkstemp(
-            dir=tempfile.gettempdir(),
+            dir=_verify_tmp_dir(),
             prefix="_tmp_trade_lifecycle_",
             suffix=".json",
         )
@@ -3440,13 +3452,13 @@ def run_tests():
 
     try:
         fd, tmp_perf = tempfile.mkstemp(
-            dir=tempfile.gettempdir(),
+            dir=_verify_tmp_dir(),
             prefix="_tmp_perf_backfill_test_",
             suffix=".json",
         )
         os.close(fd)
         fd, tmp_pm = tempfile.mkstemp(
-            dir=tempfile.gettempdir(),
+            dir=_verify_tmp_dir(),
             prefix="_tmp_pm_backfill_test_",
             suffix=".json",
         )
@@ -4114,7 +4126,12 @@ def run_tests():
         exec(get_function_source(module_ast, code_lines, "load_postmortem_data"), grc_ns)
         exec(get_function_source(module_ast, code_lines, "_get_recent_closed_trades"), grc_ns)
 
-        mock_pm_file = os.path.join(tempfile.gettempdir(), "test_pm_recent.json")
+        fd, mock_pm_file = tempfile.mkstemp(
+            dir=_verify_tmp_dir(),
+            prefix="_tmp_pm_recent_",
+            suffix=".json",
+        )
+        os.close(fd)
         mock_records = [
             {"status": "closed", "close_action": "SELL", "pnl_cash": -1.5, "closed_at": "2026-03-28T10:00:00"},
             {"status": "closed", "close_action": "LOSS_TOTAL", "pnl_cash": -2.0, "closed_at": "2026-03-28T08:00:00"},
@@ -4138,7 +4155,11 @@ def run_tests():
         result_all = grc_ns["_get_recent_closed_trades"]()
         test("recent_closed sin N: devuelve todos", len(result_all) == 4)
 
-        os.remove(mock_pm_file)
+        if os.path.exists(mock_pm_file):
+            try:
+                os.remove(mock_pm_file)
+            except PermissionError:
+                pass
     except Exception as e:
         test("_get_recent_closed_trades funcional ejecuta", False, str(e))
 
