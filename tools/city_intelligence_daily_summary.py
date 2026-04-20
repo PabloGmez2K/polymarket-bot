@@ -7,6 +7,7 @@ import os
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+from time import sleep
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -17,6 +18,7 @@ DEFAULT_EFFECTIVE_VIEW_PATH = REPO_ROOT / "data" / "runtime_policy_effective_vie
 DEFAULT_ALIGNMENT_PATH = REPO_ROOT / "data" / "system_alignment_check_operational.json"
 DEFAULT_STATE_PATH = REPO_ROOT / "data" / "city_intelligence_daily_summary_state.json"
 DEFAULT_MD_OUTPUT = REPO_ROOT / "docs" / "city_intelligence_daily_summary_latest.md"
+LOCK_STALE_SECONDS = 15 * 60
 ACTIONABLE_GATE_STATUSES = {
     "audit_runtime_drift",
     "review_for_canary",
@@ -57,6 +59,53 @@ def ensure_parent(path_str):
     path = Path(path_str)
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def lock_path_for(state_path_str):
+    state_path = Path(state_path_str)
+    return state_path.with_name(f"{state_path.name}.lock")
+
+
+def acquire_lock(lock_path, stale_seconds=LOCK_STALE_SECONDS, wait_seconds=3):
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    for _ in range(max(1, wait_seconds * 10)):
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            payload = {
+                "pid": os.getpid(),
+                "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            }
+            os.write(fd, json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+            return fd
+        except FileExistsError:
+            try:
+                mtime = lock_path.stat().st_mtime
+            except FileNotFoundError:
+                continue
+            age = datetime.now(timezone.utc).timestamp() - mtime
+            if age > stale_seconds:
+                try:
+                    lock_path.unlink()
+                except FileNotFoundError:
+                    pass
+                continue
+            sleep(0.1)
+    return None
+
+
+def release_lock(lock_fd, lock_path):
+    try:
+        if lock_fd is not None:
+            os.close(lock_fd)
+    finally:
+        for _ in range(5):
+            try:
+                lock_path.unlink()
+                return
+            except FileNotFoundError:
+                return
+            except PermissionError:
+                sleep(0.1)
 
 
 def send_telegram(message):
@@ -339,47 +388,62 @@ def main():
     gate = load_json(args.gate, required=True)
     effective_view = load_json(args.effective_view, required=False) or {}
     alignment = load_json(args.alignment_operational, required=False) or {}
-    state = load_json(args.state_output, required=False) or {}
-
-    progress_state = compute_progress_state(
-        pipeline.get("summary", {}),
-        ledger.get("summary", {}),
-        gate.get("summary", {}),
-        state,
-    )
-    message = build_message(pipeline, ledger, gate, effective_view, alignment, progress_state)
-    today_utc = datetime.now(timezone.utc).date().isoformat()
-
-    if not args.dry_run and state.get("last_sent_date") == today_utc:
-        telegram_result = {"sent": False, "reason": "already_sent_today"}
-    elif args.dry_run:
-        telegram_result = {"sent": False, "reason": "dry_run"}
-    else:
-        telegram_result = send_telegram(message)
-
-    pipeline_summary = pipeline.get("summary", {})
-    state.update({
-        "updated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
-        "last_progress_state": progress_state,
-        "last_dominant_bottleneck": pipeline_summary.get("dominant_bottleneck"),
-        "last_actionable_cities": pipeline_summary.get("actionable_cities", 0),
-        "last_building_cities": pipeline_summary.get("building_cities", 0),
-        "last_insufficient_cities": pipeline_summary.get("insufficient_cities", 0),
-    })
-    if telegram_result.get("reason") in {"sent", "missing_telegram_env"}:
-        state["last_sent_date"] = today_utc
-
     state_path = ensure_parent(args.state_output)
     md_path = ensure_parent(args.md_output)
-    state_path.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+    lock_path = lock_path_for(args.state_output)
+    lock_fd = acquire_lock(lock_path, wait_seconds=3)
+    if lock_fd is None:
+        payload = {
+            "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            "progress_state": "skipped",
+            "telegram_result": {"sent": False, "reason": "already_running"},
+            "message": "",
+        }
+        md_path.write_text(render_markdown(payload), encoding="utf-8")
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
 
-    payload = {
-        "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
-        "progress_state": progress_state,
-        "telegram_result": telegram_result,
-        "message": message,
-    }
-    md_path.write_text(render_markdown(payload), encoding="utf-8")
+    try:
+        state = load_json(args.state_output, required=False) or {}
+        progress_state = compute_progress_state(
+            pipeline.get("summary", {}),
+            ledger.get("summary", {}),
+            gate.get("summary", {}),
+            state,
+        )
+        message = build_message(pipeline, ledger, gate, effective_view, alignment, progress_state)
+        today_utc = datetime.now(timezone.utc).date().isoformat()
+
+        if not args.dry_run and state.get("last_sent_date") == today_utc:
+            telegram_result = {"sent": False, "reason": "already_sent_today"}
+        elif args.dry_run:
+            telegram_result = {"sent": False, "reason": "dry_run"}
+        else:
+            telegram_result = send_telegram(message)
+
+        pipeline_summary = pipeline.get("summary", {})
+        state.update({
+            "updated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            "last_progress_state": progress_state,
+            "last_dominant_bottleneck": pipeline_summary.get("dominant_bottleneck"),
+            "last_actionable_cities": pipeline_summary.get("actionable_cities", 0),
+            "last_building_cities": pipeline_summary.get("building_cities", 0),
+            "last_insufficient_cities": pipeline_summary.get("insufficient_cities", 0),
+        })
+        if telegram_result.get("reason") in {"sent", "missing_telegram_env"}:
+            state["last_sent_date"] = today_utc
+
+        state_path.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+
+        payload = {
+            "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            "progress_state": progress_state,
+            "telegram_result": telegram_result,
+            "message": message,
+        }
+        md_path.write_text(render_markdown(payload), encoding="utf-8")
+    finally:
+        release_lock(lock_fd, lock_path)
 
     print(f"Daily summary state written to {state_path}")
     print(f"Markdown summary written to {md_path}")
