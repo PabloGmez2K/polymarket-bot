@@ -4378,7 +4378,8 @@ def run_tests():
          and len(slot_review_messages) == 1
          and "<code>keep</code>" in slot_review_messages[0]
          and "buy_min_notional" in slot_review_messages[0]
-         and "23h UTC" not in slot_review_messages[0],
+         and "23h UTC" not in slot_review_messages[0]
+         and "• edges=" not in slot_review_messages[0],
          {"result": slot_result, "messages": slot_review_messages, "state": slot_state})
 
     slot_result_idem = slot_review_ns["maybe_evaluate_slot_monetization"](slot_state, now=datetime(2026, 4, 17, 9, 0, tzinfo=timezone.utc))
@@ -5082,7 +5083,7 @@ def run_tests():
                 except Exception:
                     pass
 
-    test("Version v10.6.25", 'BOT_VERSION = "v10.6.25"' in code)
+    test("Version v10.6.26", 'BOT_VERSION = "v10.6.26"' in code)
 
     # ---- v10.6.15: Quality-trader canary exact/range ----
     test(
@@ -5237,8 +5238,20 @@ def run_tests():
         'FIRE_DATE = "2026-04-25"' in code,
     )
     test(
-        "v10.6.25: BOT_VERSION bumped a v10.6.25",
-        'BOT_VERSION = "v10.6.25"' in code,
+        "v10.6.26: BOT_VERSION bumped a v10.6.26",
+        'BOT_VERSION = "v10.6.26"' in code,
+    )
+    test(
+        "v10.6.26: maybe_alert_busan_expansion definida",
+        "def maybe_alert_busan_expansion(" in code,
+    )
+    test(
+        "v10.6.26: alarma Busan registrada en run_observability_alerts",
+        "maybe_alert_busan_expansion(state)" in code,
+    )
+    test(
+        "v10.6.26: alarma Busan dispara 2026-04-24",
+        'FIRE_DATE = "2026-04-24"' in code,
     )
     test(
         "v10.6.20: anti-flapping guard — promotable_shadow incluye 'and not verified_history_bad'",

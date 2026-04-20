@@ -102,7 +102,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.25"
+BOT_VERSION = "v10.6.26"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -4115,6 +4115,15 @@ def run_observability_alerts():
         if logger:
             logger.warning(f"tp_sl_price_steps alert: fallo ({e})")
 
+    # v10.6.26: alerta one-shot expansion Busan (dispara 2026-04-24).
+    try:
+        if maybe_alert_busan_expansion(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"busan expansion alert: fallo ({e})")
+
     try:
         if maybe_evaluate_slot_monetization(state):
             changed = True
@@ -7718,6 +7727,102 @@ def maybe_alert_tp_sl_price_steps(state, now=None):
     return True
 
 
+def maybe_alert_busan_expansion(state, now=None):
+    """
+    v10.6.26: alerta one-shot para incorporar Busan al universo del bot.
+
+    Dispara el 2026-04-24 o posterior. Busan aparecio como TRADER_ONLY en
+    7/7 corridas del cross-check (detectado 2026-04-20, corrida 8 de la serie
+    reciente). Patron identico al batch Ankara/Madrid/Miami/Wellington (Sesion 200)
+    y Jakarta/KL (Sesion 201).
+
+    Retorna True si state fue mutado.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    FIRE_DATE = "2026-04-24"
+    STATE_KEY = "busan_expansion_alert_sent"
+
+    if state.get(STATE_KEY):
+        return False
+    if now.date().isoformat() < FIRE_DATE:
+        return False
+
+    today_str = now.date().isoformat()
+    last_daily = state.get("busan_expansion_alert_last_daily", "")
+    if last_daily == today_str:
+        return False
+
+    prompt_codex = (
+        "Lee AGENTS.md, CONTEXTO.md ultimo bloque y OPERATIONS_PLAYBOOK.md.\n\n"
+        "Tarea: Incorporar Busan al universo del bot (NOAA + whitelist).\n\n"
+        "Contexto: Busan aparecio como TRADER_ONLY en 7/7 corridas del cross-check "
+        "traders vs bot (detectado 2026-04-20). Mismo patron que el batch "
+        "Ankara/Madrid/Miami/Wellington (Sesion 200) y Jakarta/KL (Sesion 201). "
+        "El flujo validado es el mismo: verificar fuente Polymarket, verificar NOAA, "
+        "patch bot.py, update Railway.\n\n"
+        "PASO 1 — Verificar fuente de resolucion Polymarket:\n"
+        "1. Buscar en Wunderground que estacion usa Polymarket para Busan.\n"
+        "   Candidato probable: Gimhae International (ICAO=RKPK, lat=35.1795, lon=128.9380).\n"
+        "   URL de referencia: https://www.wunderground.com/history/daily/kr/gimhae/RKPK\n"
+        "2. Confirmar que la estacion WU coincide con la que Polymarket cita "
+        "en el detalle del mercado (mismo ciudad/aeropuerto).\n\n"
+        "PASO 2 — Verificar NOAA:\n"
+        "1. Buscar RKPK en isd-history.csv (campo ICAO -> USAF -> ISD station id).\n"
+        "2. Verificar si el feed 2026 tiene datos: "
+        "https://www.ncei.noaa.gov/data/global-hourly/access/2026/<ISD_ID>.csv\n"
+        "3. Si el CSV devuelve 404 o esta vacio -> ciudad entra como ICAO-only "
+        "(mismo patron que Singapore, Jakarta, KL). No bloquea el patch.\n"
+        "4. Buscar tambien GHCND station para Busan en ghcnd-inventory.txt si aplica.\n\n"
+        "PASO 3 — Patch bot.py:\n"
+        "Anadir Busan a los siguientes diccionarios (con coordenadas verificadas en paso 1):\n"
+        "- RESOLUTION_STATIONS: {lat, lon, name}\n"
+        "- RESOLUTION_ICAO: {icao, noaa_station_id (si hay), noaa_daily_station_id (si hay)}\n"
+        "- CITY_TIMEZONES: 'Asia/Seoul'\n"
+        "- OBSERVED_AUDIT_CITIES: incluir en la lista\n"
+        "- default de QUALITY_TRADER_CITIES_WHITELIST: agregar ',Busan' al final\n"
+        "Ampliar verify_before_deploy.py con tests de Busan en cada estructura.\n\n"
+        "PASO 4 — Railway:\n"
+        "Actualizar env var QUALITY_TRADER_CITIES_WHITELIST agregando ',Busan' al final.\n\n"
+        "GUARDRAILS:\n"
+        "- NO tocar filtros de precio, MIN_EDGE global, Kelly, sigma, exits, NOAA fetcher.\n"
+        "- NO anadir ciudad sin RESOLUTION_STATIONS verificado (evitar Seoul mismatch - Sesion 185).\n"
+        "- Si NOAA feed no disponible: ICAO-only esta bien, no bloquea el patch.\n"
+        "- verify_before_deploy.py debe cerrar verde antes de commit.\n\n"
+        "Salida esperada:\n"
+        "- Patch en bot.py (v10.6.27 o siguiente disponible).\n"
+        "- Railway env actualizada.\n"
+        "- Actualizar CONTEXTO.md, HISTORIAL_SESIONES.md y engram."
+    )
+
+    msg = (
+        "\U0001f1f0\U0001f1f7 <b>Alerta Busan \u2014 Incorporar al universo del bot</b>\n\n"
+        "Busan apareci\u00f3 como TRADER_ONLY en 7/7 corridas del cross-check "
+        "(detectado 2026-04-20). Han pasado 4 d\u00edas de observaci\u00f3n.\n\n"
+        "<b>Patr\u00f3n</b>: id\u00e9ntico a Ankara/Madrid/Jakarta/KL (batches previos).\n\n"
+        "<b>Tareas</b>:\n"
+        "  1. Verificar fuente Polymarket (Wunderground RKPK).\n"
+        "  2. Verificar NOAA ISD station.\n"
+        "  3. Patch bot.py + Railway whitelist.\n\n"
+        "<b>Prompt para Codex</b> (copiar y pegar):\n"
+        f"<code>{prompt_codex}</code>"
+    )
+
+    try:
+        send_telegram(msg)
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"busan expansion alert: fallo al enviar Telegram ({e})")
+        state["busan_expansion_alert_last_daily"] = today_str
+        return True
+
+    state[STATE_KEY] = True
+    state["busan_expansion_alert_last_daily"] = today_str
+    return True
+
+
 # =============================================================
 # v10.6.14 — Canary → Active automation (Módulos 1, 2, 3)
 # =============================================================
@@ -7782,12 +7887,7 @@ def maybe_evaluate_slot_monetization(state, now=None):
             "<b>Acción sugerida para Codex</b>",
         ]
         if not slot_23_enabled:
-            lines = [
-                line for line in lines
-                if "23h UTC" not in line
-                and "SCHEDULE_DISABLED_HOURS_UTC=23" not in line
-                and "slot_metrics." not in line
-            ]
+            lines = lines[:10] + lines[-1:]
             if len(lines) > 1:
                 lines[1] = f"Ventana leÃ­da: 04h {slot_04.get('cycles', 0)} ciclos"
         if slot_04.get("decision") == "not_validated_yet":
