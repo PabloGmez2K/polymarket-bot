@@ -25,6 +25,7 @@ from waitress import serve
 load_dotenv()
 
 # =============================================================
+# bot.py v10.6.30 — Dallas al whitelist: degradacion inflada por ghost-position bug (v10.5.12)
 # bot.py v10.6.29 — Busan (RKPK) ICAO-only: WU/RKPK resolution confirmado, NOAA 2026 dead
 # bot.py v10.6.28 — P5 new cities: Moscow, Amsterdam, Jeddah, Istanbul, Helsinki (ICAO-only)
 # bot.py v10.6.27 — P4 whitelist expansion: Tel Aviv, Taipei, Singapore, Wuhan
@@ -105,7 +106,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.29"
+BOT_VERSION = "v10.6.30"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -244,7 +245,7 @@ QUALITY_TRADER_CITIES_WHITELIST = {
     c.strip()
     for c in os.getenv(
         "QUALITY_TRADER_CITIES_WHITELIST",
-        "Seattle,Tokyo,Hong Kong,Seoul,Toronto,Chengdu,Shenzhen,Shanghai,Milan,Atlanta,London,New York City,Munich,Ankara,Madrid,Miami,Paris,Wellington,Houston,Jakarta,Kuala Lumpur,Tel Aviv,Taipei,Singapore,Wuhan,Moscow,Amsterdam,Jeddah,Istanbul,Helsinki,Busan",
+        "Seattle,Tokyo,Hong Kong,Seoul,Toronto,Chengdu,Shenzhen,Shanghai,Milan,Atlanta,London,New York City,Munich,Ankara,Madrid,Miami,Paris,Wellington,Houston,Jakarta,Kuala Lumpur,Tel Aviv,Taipei,Singapore,Wuhan,Moscow,Amsterdam,Jeddah,Istanbul,Helsinki,Busan,Dallas",
     ).split(",")
     if c.strip()
 }

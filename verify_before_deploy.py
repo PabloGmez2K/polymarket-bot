@@ -5104,7 +5104,7 @@ def run_tests():
                 except Exception:
                     pass
 
-    test("Version v10.6.29", 'BOT_VERSION = "v10.6.29"' in code)
+    test("Version v10.6.30", 'BOT_VERSION = "v10.6.30"' in code)
 
     # ---- v10.6.15: Quality-trader canary exact/range ----
     test(
@@ -5259,13 +5259,13 @@ def run_tests():
         'FIRE_DATE = "2026-04-25"' in code,
     )
     test(
-        "v10.6.26: BOT_VERSION bumped a v10.6.26",
-        'BOT_VERSION = "v10.6.2' in code,
+        "v10.6.26: alertas Busan/Steps registradas",
+        'maybe_alert_busan_expansion' in code,
     )
     # ---- v10.6.27: P4 whitelist expansion ----
     test(
-        "v10.6.27: BOT_VERSION bumped a v10.6.27",
-        'BOT_VERSION = "v10.6.2' in code,
+        "v10.6.27: P4 whitelist expansion presente",
+        '"Tel Aviv"' in code and '"Taipei"' in code,
     )
     test(
         "v10.6.27: Tel Aviv en QUALITY_TRADER_CITIES_WHITELIST default",
@@ -5302,8 +5302,8 @@ def run_tests():
     )
     # ---- v10.6.29: Busan ICAO-only ----
     test(
-        "v10.6.29: BOT_VERSION bumped a v10.6.29",
-        'BOT_VERSION = "v10.6.29"' in code,
+        "v10.6.29: Busan RKPK presente en RESOLUTION_ICAO",
+        '"RKPK"' in code,
     )
     test(
         "v10.6.29: Busan en RESOLUTION_STATIONS con Gimhae",
@@ -5324,6 +5324,15 @@ def run_tests():
     test(
         "v10.6.29: whitelist default incluye Busan",
         "Helsinki,Busan" in code,
+    )
+    # ---- v10.6.30: Dallas al whitelist ----
+    test(
+        "v10.6.30: BOT_VERSION bumped a v10.6.30",
+        'BOT_VERSION = "v10.6.30"' in code,
+    )
+    test(
+        "v10.6.30: whitelist default incluye Dallas",
+        "Busan,Dallas" in code,
     )
     test(
         "v10.6.26: maybe_alert_busan_expansion definida",
