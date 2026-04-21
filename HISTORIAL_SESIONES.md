@@ -31,6 +31,7 @@ Comandos útiles:
 
 | Fecha | Tipo | Referencia | Commits clave | Resumen |
 |------|------|------------|---------------|---------|
+| 2026-04-21 | Explícita | Sesión 218 | Busan + Dallas al whitelist + schedule 6 ciclos/día | Sesión pre-mañana con tiempo disponible. (1) Railway env `QUALITY_TRADER_CITIES_WHITELIST` verificada — ya tenía las 32 ciudades del pendiente Sesión 215, sin cambios necesarios. (2) **v10.6.29 — Busan ICAO-only:** investigación NOAA/WU/Polymarket completa: NOAA global-hourly 2026 dead (404 estación 47158099999), WU/RKPK confirmado como fuente Polymarket resolution (obtenido de descripción real del mercado Apr-22), WU real-time vivo aunque archivo histórico muestra "No data recorded" (artefacto JS WebFetch), $85.8K volumen en mercado Apr-21 resuelto YES. Busan agregado a `RESOLUTION_STATIONS` (lat 35.18, lon 128.95), `RESOLUTION_ICAO` (RKPK), `OBSERVED_AUDIT_CITIES`, `CITY_TIMEZONES` (Asia/Seoul) y whitelist default. (3) Auditoría City Intelligence: 8 canary, 16 background_watch, Dallas con `review_runtime_policy_gate` priority `now`. (4) **Auditoría Dallas:** WR=11.8% (17 trades) que disparó la degradación Apr-6 era falso — los "17" incluían 66 `LOSS_TOTAL` fantasma del bug ghost-positions corregido en v10.5.12. Trades reales: 4 (2 SL, 2 wins). Shadow actual: `best_edge=68.9%`, 12 hits en 9 ciclos, NOAA 4/5. **v10.6.30:** Dallas agregado al whitelist. (5) **Schedule:** `SCHEDULE_HOURS_UTC=4,8,12,16` → `0,4,8,12,16,20` (6 ciclos/día cada 4h). Motivación: cycles_history muestra 16:00 y 08:00 como horas más productivas; ciclo post-deploy a las 20:10 UTC produjo 3 compras. Railway env actualizada sin redeploy. `verify_before_deploy.py` 763/763. |
 | 2026-04-21 | Explícita | Sesión 217 | London runtime overlay neutralizado | Se ejecuta el cierre operativo mínimo de London sin tocar `bot.py`, reglas de entrada/salida, NOAA, scheduler, thresholds, whitelist ni trading core. Con `tools/railway_safe.ps1 ssh` se confirma que `London` seguía en `/app/data/city_policy_state.json` bajo `auto_canary_cities` desde `2026-04-12T15:03:51Z`; se crea backup remoto `/app/data/city_policy_state.json.bak_london_auto_canary_1776788976` y se elimina solo esa entrada, conservando `BLOCKED_CITIES=London` como guardrail estructural por el mismatch `Weather Underground vs Open-Meteo`. Tras `tools/railway_runtime_snapshot_pull.ps1`, se regeneran effective view, cross, ledger, gate, pipeline y `system_alignment_check --decision-mode operational`: London queda `env=blocked`, `runtime=runtime_unknown`, `cross=blocked`, `effective=blocked`, `collision_flag=false`; `blocking_operational_collision_count=0`; el preflight operacional queda en `error=0` (`ok=5`, `warning=3`). |
 | 2026-04-21 | Explícita | Sesión 216 | City Intelligence runtime transport repaired + summary wording | Se repara el bloqueo abierto en la Sesión 214. Tras limpiar tokens caducados, Pablo completa `railway login` interactivo y Codex valida desde los wrappers repo-locales: `railway_safe.ps1 whoami` devuelve `pablogomez.eu@gmail.com` y `railway_safe.ps1 status` confirma `enchanting-respect / production / polymarket-bot`. `tools/railway_runtime_snapshot_pull.ps1` vuelve a funcionar y deja `data/runtime_import/` fresco con manifest `pulled_at=2026-04-21T14:54:02Z`, `12/12` archivos y sin drift. Se instala la dependencia local faltante `py-clob-client-v2==1.0.0` para que `city_validation_ledger.py` pueda lazy-importar `bot.py`; después `city_validation_ledger.py` y `city_promotion_gate.py` quedan en `runtime_inputs_status=available`, y `city_intelligence_pipeline.py` cierra `overall_status=ok` con `dominant_bottleneck=policy_execution_gate`, `top_now_city=Dallas` y `signal_health=usable_signal`. Queda un blocker distinto, no de transporte: `system_alignment_check.py --decision-mode operational` sigue en `error=1` por `London` (`BLOCKED_CITIES` + `auto_canary_cities`), sin tocar `city_policy_state.json` por el guardrail original. Además se corrige `tools/city_intelligence_daily_summary.py` para no decir “preflight operacional sin errores” cuando `alignment_summary.error > 0`; dry-run muestra `preflight operacional con error=1`. Handoff creado: `docs/handoffs/london-blocked-policy-review-2026-04-21.md` para analizar en otra sesión si London debe seguir `blocked`, pasar a `shadow` o requerir revalidación externa. |
 | 2026-04-21 | Explícita | Sesión 214 | City Intelligence runtime transport auth-blocked | Auditoría operativa del aviso diario `City Intelligence` sin tocar `bot.py`, `city_policy_state.json` runtime, NOAA, scheduler ni policy live. Se valida que el fail-closed es correcto: mientras no haya runtime fresco, no se puede interpretar `edge_evidence=0` como ausencia real de edge ni emitir recomendaciones por ciudad. El snapshot local `data/runtime_import/` está completo y bijectivo con `runtime_import_manifest.json` (`12/12`, sin missing/extra/byte mismatch), pero stale: `pulled_at=2026-04-18T09:28:57Z`, ~75.3h frente al SLO 24h. El pull read-only con `tools/railway_runtime_snapshot_pull.ps1` no llega a leer live porque Railway CLI falla con `invalid_grant`; `railway_auth_repair.ps1 doctor` confirma CLI 4.35.0, sin proxies, config writable, 1 proyecto linkeado, access/refresh tokens presentes pero expirados/invalidos (`tokenExpiresAtUtc=2026-04-20T21:54:37Z`). `city_validation_ledger.py` marca `runtime_inputs_status=stale`; `system_alignment_check.py --decision-mode operational` falla por `runtime_manifest` stale y `runtime_policy_effective_view` stale. Siguiente acción: re-login Railway y repetir pull read-only, luego regenerar effective view, ledger/gate y alignment check antes de volver a permitir recomendaciones por ciudad. |
@@ -2974,3 +2975,44 @@ Opus verificó Polymarket resolution sources vía WebFetch y confirmó NOAA glob
 **Railway:** `BLOCKED_CITIES` actualizado a solo `London` (Singapore y Toronto removidas — bloqueaban el canary gate). `QUALITY_TRADER_CITIES_WHITELIST` a 32 ciudades.
 
 **Verificación:** `verify_before_deploy.py` 755/755 (9 tests nuevos).
+
+## Sesión 218 — Busan + Dallas + schedule 6 ciclos/día (21 abr 2026)
+
+**Tipo:** Explícita | **Agente:** Sonnet
+
+### Contexto
+Sesión pre-mañana con tiempo disponible tras las sesiones 211-217 del mismo día. Objetivo: avanzar en throughput antes del checkpoint Apr-28.
+
+### Acciones
+
+**Verificación Railway whitelist:** La env var `QUALITY_TRADER_CITIES_WHITELIST` ya tenía las 32 ciudades del pendiente de Sesión 215. Sin cambios necesarios.
+
+**v10.6.29 — Busan (RKPK) ICAO-only:**
+- NOAA global-hourly 2026: 404 para estación 47158099999 → patrón ICAO-only
+- WU/RKPK: real-time vivo (56°F observado), archivo histórico muestra "No data recorded" = artefacto de JavaScript no renderizado por WebFetch
+- Polymarket resolution source: **WU/RKPK confirmado** — descripción real del mercado Apr-22 dice explícitamente "Gimhae Intl Airport Station (RKPK)"
+- $85.8K volumen en mercado Apr-21, resuelto YES → fuente funcionando
+- Agregado a `RESOLUTION_STATIONS` (lat 35.18, lon 128.95 / "Gimhae Intl"), `RESOLUTION_ICAO` (RKPK), `OBSERVED_AUDIT_CITIES`, `CITY_TIMEZONES` (Asia/Seoul), whitelist default
+
+**Auditoría City Intelligence:**
+- 8 canary (Atlanta, Chicago, Milan, Munich, NYC, Seoul, Shanghai, Tokyo)
+- 16 background_watch — bottleneck `trader_discovery` en la mayoría
+- Dallas: `review_runtime_policy_gate` priority `now`
+
+**Auditoría Dallas:**
+- Degradado Apr-6 por "WR=11.8%, 17 trades, PnL=-$1.60" → diagnóstico: los "17 trades" incluían 66 entradas `LOSS_TOTAL` fantasma del bug de posiciones fantasma (corregido en v10.5.12, mismo token_id repetido)
+- Trades reales: 4 (BUY range Mar-28, BUY range Mar-28, BUY range Mar-31, BUY at_or_above Apr-2)
+- 2 stop-loss (-$1.36, -$0.56), 2 ganancias pequeñas (+$0.26, +$0.06) → net -$1.60
+- Shadow actual: `best_edge=68.9%`, 12 shadow edge hits en 9 ciclos, settlement_fidelity=4/5
+- Conclusión: muestra real insuficiente para bloquear la ciudad; rehabilitado
+
+**v10.6.30 — Dallas al whitelist**
+
+**Schedule:** `SCHEDULE_HOURS_UTC=0,4,8,12,16,20` (6 ciclos/día cada 4h)
+- Antes: 4,8,12,16 (4 ciclos, gap nocturno de 12h)
+- cycles_history: 16:00 y 08:00 son los slots más productivos (2.2 y 1.5 avg edges)
+- Ciclo post-deploy a 20:10 UTC produjo 3 compras inmediatas
+- Cambio solo en Railway env var, sin redeploy
+
+### Verificación
+`verify_before_deploy.py` 763/763 (v10.6.29: 6 tests nuevos Busan; v10.6.30: 2 tests nuevos Dallas)
