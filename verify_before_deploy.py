@@ -5104,7 +5104,7 @@ def run_tests():
                 except Exception:
                     pass
 
-    test("Version v10.6.28", 'BOT_VERSION = "v10.6.28"' in code)
+    test("Version v10.6.29", 'BOT_VERSION = "v10.6.29"' in code)
 
     # ---- v10.6.15: Quality-trader canary exact/range ----
     test(
@@ -5273,8 +5273,8 @@ def run_tests():
     )
     # ---- v10.6.28: P5 new cities ----
     test(
-        "v10.6.28: BOT_VERSION bumped a v10.6.28",
-        'BOT_VERSION = "v10.6.28"' in code,
+        "v10.6.28: P5 cities presentes en RESOLUTION_STATIONS",
+        '"Moscow":' in code and "Vnukovo" in code,
     )
     test(
         "v10.6.28: Moscow en RESOLUTION_STATIONS",
@@ -5299,6 +5299,31 @@ def run_tests():
     test(
         "v10.6.28: whitelist default incluye P5 cities",
         "Moscow,Amsterdam,Jeddah,Istanbul,Helsinki" in code,
+    )
+    # ---- v10.6.29: Busan ICAO-only ----
+    test(
+        "v10.6.29: BOT_VERSION bumped a v10.6.29",
+        'BOT_VERSION = "v10.6.29"' in code,
+    )
+    test(
+        "v10.6.29: Busan en RESOLUTION_STATIONS con Gimhae",
+        '"Busan":' in code and "Gimhae" in code,
+    )
+    test(
+        "v10.6.29: Busan en RESOLUTION_ICAO con RKPK",
+        '"RKPK"' in code,
+    )
+    test(
+        "v10.6.29: Busan en OBSERVED_AUDIT_CITIES",
+        '"Busan",' in code or '"Busan"\n' in code,
+    )
+    test(
+        "v10.6.29: Busan en CITY_TIMEZONES con Asia/Seoul",
+        '"Busan":' in code and '"Asia/Seoul"' in code,
+    )
+    test(
+        "v10.6.29: whitelist default incluye Busan",
+        "Helsinki,Busan" in code,
     )
     test(
         "v10.6.26: maybe_alert_busan_expansion definida",

@@ -25,6 +25,7 @@ from waitress import serve
 load_dotenv()
 
 # =============================================================
+# bot.py v10.6.29 — Busan (RKPK) ICAO-only: WU/RKPK resolution confirmado, NOAA 2026 dead
 # bot.py v10.6.28 — P5 new cities: Moscow, Amsterdam, Jeddah, Istanbul, Helsinki (ICAO-only)
 # bot.py v10.6.27 — P4 whitelist expansion: Tel Aviv, Taipei, Singapore, Wuhan
 # bot.py v10.6.24 — reactivar intra-cycle SL/TP monitor
@@ -104,7 +105,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.28"
+BOT_VERSION = "v10.6.29"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -243,7 +244,7 @@ QUALITY_TRADER_CITIES_WHITELIST = {
     c.strip()
     for c in os.getenv(
         "QUALITY_TRADER_CITIES_WHITELIST",
-        "Seattle,Tokyo,Hong Kong,Seoul,Toronto,Chengdu,Shenzhen,Shanghai,Milan,Atlanta,London,New York City,Munich,Ankara,Madrid,Miami,Paris,Wellington,Houston,Jakarta,Kuala Lumpur,Tel Aviv,Taipei,Singapore,Wuhan,Moscow,Amsterdam,Jeddah,Istanbul,Helsinki",
+        "Seattle,Tokyo,Hong Kong,Seoul,Toronto,Chengdu,Shenzhen,Shanghai,Milan,Atlanta,London,New York City,Munich,Ankara,Madrid,Miami,Paris,Wellington,Houston,Jakarta,Kuala Lumpur,Tel Aviv,Taipei,Singapore,Wuhan,Moscow,Amsterdam,Jeddah,Istanbul,Helsinki,Busan",
     ).split(",")
     if c.strip()
 }
@@ -11913,6 +11914,8 @@ RESOLUTION_STATIONS = {
     "Helsinki":       {"lat": 60.317,  "lon": 24.963,   "name": "Helsinki Vantaa"},
     # Istanbul: LTFM (Istanbul Airport nuevo) — NO existe en NOAA ISD, por tanto riesgo Seoul-mismatch = cero
     "Istanbul":       {"lat": 41.2622, "lon": 28.7278,  "name": "Istanbul Airport"},
+    # Busan: RKPK (Gimhae Intl) — NOAA global-hourly 2026 dead (404); WU/RKPK resolution confirmado v10.6.29
+    "Busan":          {"lat": 35.18,   "lon": 128.95,   "name": "Gimhae Intl"},
 }
 
 
@@ -11991,6 +11994,9 @@ RESOLUTION_ICAO = {
     "Jeddah":         {"icao": "OEJN", "wu_url": _wu_history_url("OEJN")},
     "Helsinki":       {"icao": "EFHK", "wu_url": _wu_history_url("EFHK")},
     "Istanbul":       {"icao": "LTFM", "wu_url": _wu_history_url("LTFM")},
+    # Añadida en v10.6.29 — Busan TRADER_ONLY 7/7; WU/RKPK es fuente Polymarket (confirmado Apr-21-2026)
+    # NOAA global-hourly 2026: 404 para 47158099999; WU historical "No data" = artefacto JS no renderizado
+    "Busan":          {"icao": "RKPK", "wu_url": _wu_history_url("RKPK")},
 }
 
 # Verify anchor (legacy): OBSERVED_AUDIT_CITIES = {"Chicago", "Atlanta", "Buenos Aires", "Dallas"}
@@ -12016,6 +12022,7 @@ OBSERVED_AUDIT_CITIES = {
     "Seattle",
     "Seoul",
     "Shanghai",
+    "Busan",
     "Tel Aviv",
     "Tokyo",
     "Wellington",
@@ -12068,6 +12075,7 @@ CITY_TIMEZONES = {
     "Jeddah":         "Asia/Riyadh",
     "Istanbul":       "Europe/Istanbul",
     "Helsinki":       "Europe/Helsinki",
+    "Busan":          "Asia/Seoul",
 }
 
 # Alias → nombre canónico (mercados de rango usan abreviaturas)
