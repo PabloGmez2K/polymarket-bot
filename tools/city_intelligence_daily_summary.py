@@ -226,6 +226,11 @@ def build_canonical_story(pipeline, ledger, gate, effective_view, alignment, pro
     active_effective_count = effective_summary.get("active_effective_count", 0)
     operational_errors = alignment_summary.get("error", 0)
     runtime_pulled_at = effective_summary.get("runtime_snapshot_pulled_at", "")[:16].replace("T", " ")
+    preflight_text = (
+        "preflight operacional sin errores"
+        if int(operational_errors or 0) == 0
+        else f"preflight operacional con <code>error={operational_errors}</code>"
+    )
 
     runtime_target_text = ", ".join(runtime_targets[:6]) if runtime_targets else "sin canaries efectivas visibles"
     watch_count = review_counts.get("watch", 0)
@@ -237,7 +242,7 @@ def build_canonical_story(pipeline, ledger, gate, effective_view, alignment, pro
         "",
         "<b>Estado</b>",
         (
-            "Base operativa usable: runtime read-only manifestado, preflight operacional sin errores "
+            f"Runtime read-only manifestado; {preflight_text} "
             f"y topologia efectiva <code>blocked={mode_counts.get('blocked', 0)}</code> / "
             f"<code>canary={mode_counts.get('canary', 0)}</code> / "
             f"<code>shadow={mode_counts.get('shadow', 0)}</code> / "
