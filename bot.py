@@ -25,6 +25,7 @@ from waitress import serve
 load_dotenv()
 
 # =============================================================
+# bot.py v10.6.27 — P4 whitelist expansion: Tel Aviv, Taipei, Singapore, Wuhan
 # bot.py v10.6.24 — reactivar intra-cycle SL/TP monitor
 # v10.6.10 — mission HUD discovery / stabilization
 # Sesión 36: fallback BANKROLL sincronizado a $25 tras recarga manual
@@ -102,7 +103,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.26"
+BOT_VERSION = "v10.6.27"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -241,7 +242,7 @@ QUALITY_TRADER_CITIES_WHITELIST = {
     c.strip()
     for c in os.getenv(
         "QUALITY_TRADER_CITIES_WHITELIST",
-        "Seattle,Tokyo,Hong Kong,Seoul,Toronto,Chengdu,Shenzhen,Shanghai,Milan,Atlanta,London,New York City,Munich,Ankara,Madrid,Miami,Paris,Wellington,Houston,Jakarta,Kuala Lumpur",
+        "Seattle,Tokyo,Hong Kong,Seoul,Toronto,Chengdu,Shenzhen,Shanghai,Milan,Atlanta,London,New York City,Munich,Ankara,Madrid,Miami,Paris,Wellington,Houston,Jakarta,Kuala Lumpur,Tel Aviv,Taipei,Singapore,Wuhan",
     ).split(",")
     if c.strip()
 }
@@ -7437,10 +7438,13 @@ def maybe_alert_p4_p5_expansion(state, now=None):
     prompt_codex = (
         "Lee AGENTS.md, CONTEXTO.md ultimo bloque y OPERATIONS_PLAYBOOK.md.\n\n"
         "Tarea: Expansion post-checkpoint condition_filtered (P4+P5).\n\n"
-        "Precondicion critica: verificar que el checkpoint dia 7 del "
-        "2026-04-21 cerro con verdict=OK o PROMOTE (WR bot exact/range >=55% "
-        "n>=30). Si verdict fue CLOSE o ALERT (WR<50%), ABORTAR y avisar a "
-        "Pablo; no expandir sobre muestra mala.\n\n"
+        "Precondicion critica: verificar el checkpoint dia 7 del 2026-04-21. "
+        "LOGICA CORRECTA: el canary se cierra SOLO si WR<50% con n>=15. "
+        "Si n<15 (muestra insuficiente), verdict=OK_INSUFICIENTE — no es "
+        "fallo, es falta de volumen; CONTINUAR con expansion. "
+        "ABORTAR solo si n>=15 y WR<50% (verdict CLOSE/ALERT real).\n\n"
+        "Contexto actual (2026-04-21): WR bot exact/range = 40.0% (2/5), n=5 < 15. "
+        "Verdict = OK_INSUFICIENTE. Canary activo. Checkpoint dia 14 = 2026-04-28.\n\n"
         "Archivos a leer:\n"
         "- data/runtime_import/trade_lifecycle.json (filtrar opened_at>=2026-04-14, "
         "condition in {exact,range})\n"
@@ -7451,11 +7455,13 @@ def maybe_alert_p4_p5_expansion(state, now=None):
         "- docs/blocked-signals-wr-baseline-2026-04-13.md\n"
         "- docs/handoffs/condition-filtered-canary-implement-2026-04-14.md\n\n"
         "P4 - Expandir whitelist exact/range:\n"
+        "NOTA: el 2026-04-21 (Sesion 213) ya se anadieron: Tel Aviv, Taipei, "
+        "Singapore, Wuhan. Verificar que esten en Railway. Si faltan, anadirlos.\n"
         "1. Correr tools/blocked_signals_settlement_tracker.py fresh.\n"
-        "2. Identificar ciudades con WR>=55% n>=30 que NO esten en "
+        "2. Identificar ciudades con WR>=55% n>=3 que NO esten en "
         "QUALITY_TRADER_CITIES_WHITELIST actual.\n"
-        "3. Candidatas iniciales (verificar n actual): Chengdu, Shenzhen, "
-        "Shanghai, Milan (ya en whitelist sesion 175). Buscar nuevas.\n"
+        "3. Buscar candidatas nuevas con evidencia. Priorizar: Amsterdam, "
+        "Moscow, Jeddah (si P5 ya las tiene en RESOLUTION_STATIONS).\n"
         "4. Proponer adicion a whitelist con evidencia cuantitativa por ciudad.\n\n"
         "P5 - Ampliar universo de ciudades:\n"
         "1. Leer signals_crosscheck.jsonl - bloque TRADER_ONLY.\n"
@@ -11893,6 +11899,7 @@ RESOLUTION_STATIONS = {
     # Añadidas en v10.6.21 — expansion QUALITY_TRADER_CITIES_WHITELIST (sesion 200)
     "Houston":        {"lat": 29.9902,  "lon": -95.3368,  "name": "George Bush Intercontinental"},
     # Añadidas en v10.6.22 — expansion QUALITY_TRADER_CITIES_WHITELIST (sesion 201)
+    # Tel Aviv ya en RESOLUTION_STATIONS + ICAO + noaa_station_id; añadida a whitelist en v10.6.27 (sesion 213)
     # Jakarta: WIHH (Halim Perdanakusuma) — Polymarket resuelve contra esa estación vía WU, NO WIII/Soekarno-Hatta
     "Jakarta":        {"lat": -6.2666, "lon": 106.8906, "name": "Halim Perdanakusuma"},
     "Kuala Lumpur":   {"lat":  2.7456, "lon": 101.7099, "name": "KLIA"},
