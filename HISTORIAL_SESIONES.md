@@ -2976,6 +2976,35 @@ Opus verificó Polymarket resolution sources vía WebFetch y confirmó NOAA glob
 
 **Verificación:** `verify_before_deploy.py` 755/755 (9 tests nuevos).
 
+## Sesión 219 — Bankroll Readiness Score (21 abr 2026)
+
+**Tipo:** Explícita | **Agente:** Sonnet
+
+### Contexto
+Cierre de día. Discusión estratégica sobre monetización, timeline y cuándo escalar bankroll. Se construye un indicador operativo para medir el progreso hacia ese umbral.
+
+### Acciones
+
+**`tools/bankroll_readiness_score.py`** — score 0-100% con 5 dimensiones ponderadas:
+- **D1 WR Confidence (30%):** WR de trades reales cerrados (ventana 60d), ponderado por n. n_factor=min(n/20,1), wr_factor=(WR-0.45)/0.25. Target: WR≥70% con n≥20.
+- **D2 PnL Trajectory (25%):** PnL 30d positivo (+60pts) y PnL 60d positivo (+40pts).
+- **D3 Edge Density (20%):** avg edges/ciclo últimos 14d. Score=min(avg/1.0,1)×100. Target: 1 edge/ciclo.
+- **D4 Size Pressure (15%):** kelly_too_low + buy_min_size como % de oportunidades con edge evaluado. Señal de que el bankroll limita, no la calidad del sistema.
+- **D5 System Stability (10%):** % ciclos en versión dominante, ventana 7d, penalización suave por versiones extra.
+
+**Umbrales de acción:**
+- <40%: etapa temprana, cuello es el sistema
+- 40-60%: mejorando
+- 60-75%: madurando, preparar escala
+- ≥75%: BANKROLL ES EL CUELLO → añadir capital
+
+**Score inicial: 23.9%** — D1=0 (WR=32%<45%), D2=0 (PnL=-$21.92), D3=21% (0.21 edges/ciclo), D4=100% (29.5% kelly_too_low), D5=46%.
+
+### Verificación
+`verify_before_deploy.py` 763/763. Herramienta standalone, sin cambios en bot.py ni Railway.
+
+---
+
 ## Sesión 218 — Busan + Dallas + schedule 6 ciclos/día (21 abr 2026)
 
 **Tipo:** Explícita | **Agente:** Sonnet

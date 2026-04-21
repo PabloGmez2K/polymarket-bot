@@ -3,6 +3,9 @@
 
 
 
+**Última actualización:** 21 de abril de 2026 (Sesión 219 — Bankroll Readiness Score)
+**Sesión 219 (21 abr 2026, Sonnet):** se implementa `tools/bankroll_readiness_score.py`, un indicador 0-100% que mide cuán cerca está el sistema de que el bankroll sea el cuello de botella real (en vez del sistema). 5 dimensiones ponderadas: D1 WR Confidence (30%, WR live con peso estadístico n≥20), D2 PnL Trajectory (25%, PnL 30d+60d positivo), D3 Edge Density (20%, edges/ciclo últimos 14d, target 1.0), D4 Size Pressure (15%, kelly_too_low como señal de bankroll limitante), D5 System Stability (10%, consistencia de versión en 7d). Score >75% = bankroll es el cuello → considera añadir capital. Score actual: **23.9%** (etapa temprana — D1=0 por WR=32%, D2=0 por PnL 30d=-$21.92, D3=21% por 0.21 edges/ciclo, D4=100% por kelly_too_low en 29.5% de oportunidades). El tool guarda historial en `data/bankroll_readiness_state.json` para seguimiento de tendencia. `verify_before_deploy.py` 763/763 sin cambios.
+
 **Última actualización:** 21 de abril de 2026 (Sesión 218 — Busan + Dallas + schedule 6 ciclos/día)
 **Sesión 218 — cierre (21 abr 2026, Sonnet):** activados 6 ciclos/día `SCHEDULE_HOURS_UTC=0,4,8,12,16,20` (antes 4,8,12,16). Motivación: cycles_history muestra 16:00 y 08:00 como horas más productivas; bloque 20:00-00:00 tenía actividad real en el schedule anterior (23:00, 21 ciclos, 1.3 edges/ciclo). El ciclo de las 20:10 UTC post-deploy produjo 3 compras (Shanghai NO, New York City YES, Seoul NO). Cambio solo en Railway env var, sin tocar bot.py.
 
