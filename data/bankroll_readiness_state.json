@@ -1,0 +1,45 @@
+{
+  "generated_at": "2026-04-21T20:56:27.159911+00:00",
+  "composite": 23.9,
+  "status": "early",
+  "dimensions": {
+    "wr_confidence": {
+      "score": 0.0,
+      "n": 50,
+      "wr": 32.0,
+      "wins": 16,
+      "n_factor": 1.0,
+      "wr_factor": 0.0
+    },
+    "pnl_trajectory": {
+      "score": 0.0,
+      "pnl_30d": -21.92,
+      "pnl_60d": -21.92
+    },
+    "edge_density": {
+      "score": 21.428571428571427,
+      "n_cycles": 84,
+      "avg_edges": 0.21,
+      "total_edges": 18
+    },
+    "size_pressure": {
+      "score": 100.0,
+      "size_blocked": 28,
+      "edge_evaluated": 95,
+      "rate": 29.5
+    },
+    "system_stability": {
+      "score": 45.975609756097555,
+      "n_cycles": 41,
+      "unique_versions": 6,
+      "dominant_version": "v10.6.15",
+      "consistency_pct": 61.0
+    }
+  },
+  "history": [
+    {
+      "ts": "2026-04-21T20:56:27.159930+00:00",
+      "score": 23.9
+    }
+  ]
+}
