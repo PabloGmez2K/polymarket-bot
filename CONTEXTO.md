@@ -3,6 +3,9 @@
 
 
 
+**Última actualización:** 21 de abril de 2026 (Sesión 218 — Busan + Dallas + schedule 6 ciclos/día)
+**Sesión 218 — cierre (21 abr 2026, Sonnet):** activados 6 ciclos/día `SCHEDULE_HOURS_UTC=0,4,8,12,16,20` (antes 4,8,12,16). Motivación: cycles_history muestra 16:00 y 08:00 como horas más productivas; bloque 20:00-00:00 tenía actividad real en el schedule anterior (23:00, 21 ciclos, 1.3 edges/ciclo). El ciclo de las 20:10 UTC post-deploy produjo 3 compras (Shanghai NO, New York City YES, Seoul NO). Cambio solo en Railway env var, sin tocar bot.py.
+
 **Última actualización:** 21 de abril de 2026 (Sesión 218 — Busan + Dallas al whitelist v10.6.29+v10.6.30)
 **Sesión 218 — parte 2 (21 abr 2026, Sonnet):** tras incorporar Busan (v10.6.29), auditoría de Dallas reveló que la degradación del Apr-6 (WR=11.8%, "17 trades") era falsa: los 17 conteos incluían 66 entradas `LOSS_TOTAL` fantasma del bug de posiciones fantasma corregido en v10.5.12. Los trades reales de Dallas fueron 4 (2 SL, 2 pequeñas ganancias), muestra insuficiente para bloquear la ciudad. Shadow evidence actual: `best_edge=68.9%`, 12 shadow edge hits en 9 ciclos, NOAA 4/5 riesgo bajo. **v10.6.30:** Dallas agregado a `QUALITY_TRADER_CITIES_WHITELIST` (ahora 32 ciudades). Railway env actualizada. `verify_before_deploy.py` pasa **763/763**.
 
