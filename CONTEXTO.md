@@ -3,6 +3,9 @@
 
 
 
+**Última actualización:** 21 de abril de 2026 (Sesión 218 — Busan + Dallas al whitelist v10.6.29+v10.6.30)
+**Sesión 218 — parte 2 (21 abr 2026, Sonnet):** tras incorporar Busan (v10.6.29), auditoría de Dallas reveló que la degradación del Apr-6 (WR=11.8%, "17 trades") era falsa: los 17 conteos incluían 66 entradas `LOSS_TOTAL` fantasma del bug de posiciones fantasma corregido en v10.5.12. Los trades reales de Dallas fueron 4 (2 SL, 2 pequeñas ganancias), muestra insuficiente para bloquear la ciudad. Shadow evidence actual: `best_edge=68.9%`, 12 shadow edge hits en 9 ciclos, NOAA 4/5 riesgo bajo. **v10.6.30:** Dallas agregado a `QUALITY_TRADER_CITIES_WHITELIST` (ahora 32 ciudades). Railway env actualizada. `verify_before_deploy.py` pasa **763/763**.
+
 **Última actualización:** 21 de abril de 2026 (Sesión 218 — Busan (RKPK) incorporado como ICAO-only v10.6.29)
 **Sesión 218 (21 abr 2026, Sonnet):** incorporación de Busan al bot tras verificación completa. Busan era TRADER_ONLY en 7/7 corridas del cross-check. Investigación confirmó: resolución Polymarket vía WU/RKPK (Gimhae Intl Airport Station) — fuente verificada en descripción real del mercado Apr-22; NOAA global-hourly 2026 dead (404 para estación 47158099999); WU histórico muestra "No data recorded" pero es artefacto de JavaScript no renderizado — WU real-time sí funciona ($85.8K volumen en mercado Apr-21, resuelto YES). Sin mismatch de fuente (diferencia con London). **v10.6.29:** Busan agregado a `RESOLUTION_STATIONS` (RKPK, lat 35.18, lon 128.95), `RESOLUTION_ICAO` (RKPK, ICAO-only), `OBSERVED_AUDIT_CITIES`, `CITY_TIMEZONES` (Asia/Seoul) y `QUALITY_TRADER_CITIES_WHITELIST` default (31 ciudades). Railway env var actualizada. `verify_before_deploy.py` pasa **761/761** (6 tests nuevos v10.6.29).
 
