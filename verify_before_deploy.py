@@ -5104,7 +5104,7 @@ def run_tests():
                 except Exception:
                     pass
 
-    test("Version v10.6.27", 'BOT_VERSION = "v10.6.27"' in code)
+    test("Version v10.6.28", 'BOT_VERSION = "v10.6.28"' in code)
 
     # ---- v10.6.15: Quality-trader canary exact/range ----
     test(
@@ -5265,15 +5265,40 @@ def run_tests():
     # ---- v10.6.27: P4 whitelist expansion ----
     test(
         "v10.6.27: BOT_VERSION bumped a v10.6.27",
-        'BOT_VERSION = "v10.6.27"' in code,
+        'BOT_VERSION = "v10.6.2' in code,
     )
     test(
         "v10.6.27: Tel Aviv en QUALITY_TRADER_CITIES_WHITELIST default",
         "Tel Aviv" in code and "QUALITY_TRADER_CITIES_WHITELIST" in code,
     )
+    # ---- v10.6.28: P5 new cities ----
     test(
-        "v10.6.27: Taipei en QUALITY_TRADER_CITIES_WHITELIST default",
-        '"Seattle,Tokyo,Hong Kong,Seoul,Toronto,Chengdu,Shenzhen,Shanghai,Milan,Atlanta,London,New York City,Munich,Ankara,Madrid,Miami,Paris,Wellington,Houston,Jakarta,Kuala Lumpur,Tel Aviv,Taipei,Singapore,Wuhan"' in code,
+        "v10.6.28: BOT_VERSION bumped a v10.6.28",
+        'BOT_VERSION = "v10.6.28"' in code,
+    )
+    test(
+        "v10.6.28: Moscow en RESOLUTION_STATIONS",
+        '"Moscow":' in code and "Vnukovo" in code,
+    )
+    test(
+        "v10.6.28: Amsterdam en RESOLUTION_STATIONS",
+        '"Amsterdam":' in code and "Schiphol" in code,
+    )
+    test(
+        "v10.6.28: Istanbul en RESOLUTION_STATIONS",
+        '"Istanbul":' in code and "Istanbul Airport" in code,
+    )
+    test(
+        "v10.6.28: Helsinki en RESOLUTION_ICAO con EFHK",
+        '"EFHK"' in code,
+    )
+    test(
+        "v10.6.28: Jeddah en RESOLUTION_ICAO con OEJN",
+        '"OEJN"' in code,
+    )
+    test(
+        "v10.6.28: whitelist default incluye P5 cities",
+        "Moscow,Amsterdam,Jeddah,Istanbul,Helsinki" in code,
     )
     test(
         "v10.6.26: maybe_alert_busan_expansion definida",

@@ -25,6 +25,7 @@ from waitress import serve
 load_dotenv()
 
 # =============================================================
+# bot.py v10.6.28 — P5 new cities: Moscow, Amsterdam, Jeddah, Istanbul, Helsinki (ICAO-only)
 # bot.py v10.6.27 — P4 whitelist expansion: Tel Aviv, Taipei, Singapore, Wuhan
 # bot.py v10.6.24 — reactivar intra-cycle SL/TP monitor
 # v10.6.10 — mission HUD discovery / stabilization
@@ -103,7 +104,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.27"
+BOT_VERSION = "v10.6.28"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -242,7 +243,7 @@ QUALITY_TRADER_CITIES_WHITELIST = {
     c.strip()
     for c in os.getenv(
         "QUALITY_TRADER_CITIES_WHITELIST",
-        "Seattle,Tokyo,Hong Kong,Seoul,Toronto,Chengdu,Shenzhen,Shanghai,Milan,Atlanta,London,New York City,Munich,Ankara,Madrid,Miami,Paris,Wellington,Houston,Jakarta,Kuala Lumpur,Tel Aviv,Taipei,Singapore,Wuhan",
+        "Seattle,Tokyo,Hong Kong,Seoul,Toronto,Chengdu,Shenzhen,Shanghai,Milan,Atlanta,London,New York City,Munich,Ankara,Madrid,Miami,Paris,Wellington,Houston,Jakarta,Kuala Lumpur,Tel Aviv,Taipei,Singapore,Wuhan,Moscow,Amsterdam,Jeddah,Istanbul,Helsinki",
     ).split(",")
     if c.strip()
 }
@@ -11903,6 +11904,15 @@ RESOLUTION_STATIONS = {
     # Jakarta: WIHH (Halim Perdanakusuma) — Polymarket resuelve contra esa estación vía WU, NO WIII/Soekarno-Hatta
     "Jakarta":        {"lat": -6.2666, "lon": 106.8906, "name": "Halim Perdanakusuma"},
     "Kuala Lumpur":   {"lat":  2.7456, "lon": 101.7099, "name": "KLIA"},
+    # Añadidas en v10.6.28 — expansion P5 RESOLUTION_STATIONS (sesion 215)
+    # Todas ICAO-only: NOAA global-hourly + GHCND vacío en 2026 para estaciones non-US (patrón Jakarta/KL sesion 201)
+    # Polymarket resolution verificado via WebFetch market rules (Opus, sesion 215)
+    "Moscow":         {"lat": 55.592,  "lon": 37.261,   "name": "Vnukovo"},
+    "Amsterdam":      {"lat": 52.309,  "lon":  4.764,   "name": "Schiphol"},
+    "Jeddah":         {"lat": 21.680,  "lon": 39.157,   "name": "King Abdulaziz Intl"},
+    "Helsinki":       {"lat": 60.317,  "lon": 24.963,   "name": "Helsinki Vantaa"},
+    # Istanbul: LTFM (Istanbul Airport nuevo) — NO existe en NOAA ISD, por tanto riesgo Seoul-mismatch = cero
+    "Istanbul":       {"lat": 41.2622, "lon": 28.7278,  "name": "Istanbul Airport"},
 }
 
 
@@ -11973,6 +11983,14 @@ RESOLUTION_ICAO = {
     # Wuhan: ZHHH — ISD 57494099999 confirmado; GHCND local sin TMAX en 2025-10-01..2026-03-31
     # Lucknow: VILK — ISD 42369099999 confirmado; GHCND cercano sin TMAX en 2025-10-01..2026-03-31
     # Sao Paulo: SBGR — ISD 83075099999 confirmado; GHCND cercano sin TMAX en 2025-10-01..2026-03-31
+    # Añadidas en v10.6.28 — expansion P5 (sesion 215)
+    # Polymarket: Moscow→NOAA weather.gov/wrh?site=UUWW | Amsterdam→WU EHAM | Jeddah→WU OEJN | Istanbul→NOAA weather.gov/wrh?site=LTFM | Helsinki→WU EFHK
+    # NOAA global-hourly + GHCND probe 2026: vacío para UUWW/EHAM/OEJN/EFHK; LTFM ausente de isd-history.csv
+    "Moscow":         {"icao": "UUWW", "wu_url": _wu_history_url("UUWW")},
+    "Amsterdam":      {"icao": "EHAM", "wu_url": _wu_history_url("EHAM")},
+    "Jeddah":         {"icao": "OEJN", "wu_url": _wu_history_url("OEJN")},
+    "Helsinki":       {"icao": "EFHK", "wu_url": _wu_history_url("EFHK")},
+    "Istanbul":       {"icao": "LTFM", "wu_url": _wu_history_url("LTFM")},
 }
 
 # Verify anchor (legacy): OBSERVED_AUDIT_CITIES = {"Chicago", "Atlanta", "Buenos Aires", "Dallas"}
@@ -12045,6 +12063,11 @@ CITY_TIMEZONES = {
     "Los Angeles":    "America/Los_Angeles",
     "Denver":         "America/Denver",
     "Mexico City":    "America/Mexico_City",
+    "Moscow":         "Europe/Moscow",
+    "Amsterdam":      "Europe/Amsterdam",
+    "Jeddah":         "Asia/Riyadh",
+    "Istanbul":       "Europe/Istanbul",
+    "Helsinki":       "Europe/Helsinki",
 }
 
 # Alias → nombre canónico (mercados de rango usan abreviaturas)
