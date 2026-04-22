@@ -1961,7 +1961,7 @@ git push
 - **Dashboard y alertas alineados con base resoluble real:** `_build_shadow_noaa_resolution_stats()` expone también `matched`, y tanto `build_dashboard_road_to_real()` como `get_dashboard_alert_summary()` pasan a derivar `directional_signals`, `resolved` y `win_rate` desde esa capa en vez de usar `shadow.summary.edge_hits` como proxy mezclado. Se elimina así la lectura engañosa donde el numerador y el denominador del `WR observado direccional` salían de bases distintas.
 - **Higiene adicional detectada durante la implementación:** `build_dashboard_city_decisions()` tenía una referencia latente a `shadow_summary` sin inicializar; se corrige para no dejar un `NameError` oculto en contextos aislados.
 
-**Última actualización:** 17 de abril de 2026 (Sesión W17-Opus — revisión estratégica + bloque completo ejecutado)
+**Última actualización:** 22 de abril de 2026 (Sesión 223 — INTRA_SL_INTERVAL 60→20 min)
 
 **Sesión W17-Opus (17 abr 2026, Opus + Sonnet):** revisión estratégica quincenal + ejecución completa del bloque W17 en una sola sesión. Causa raíz del throughput bajo identificada por primera vez con datos concretos. Bloque ejecutado sin pasos manuales para el usuario.
 
@@ -1997,4 +1997,10 @@ git push
 - `verify_before_deploy.py` pasando en `702/702` antes del último push.
 - Observación activa: criterios de éxito a medir entre 17-24 de abril → `markets_evaluated≥25`, `with_edge≥0.5`, `buys≥0.3` por ciclo.
 - Próxima revisión Opus: semana del 24 de abril de 2026.
+
+**Sesión 223 (22 abr 2026, Sonnet):** reducción del intervalo intra-SL de 60 a 20 minutos.
+- **Contexto:** SL de Shanghai No disparó en ciclo 04:00 UTC a -35.2% pese a que el umbral es -25%. Gap de polling: la posición estaba por encima de -25% en el check anterior y cayó ~10pp adicionales en los 60 min siguientes.
+- **Fix:** `INTRA_SL_INTERVAL` default `"60"` → `"20"` en `bot.py:365`. Con checks cada 20 min el slippage máximo vs. el umbral baja de ~35pp a ~10pp.
+- **Sin cambio en `STOP_LOSS_PCT`** (-25% sigue siendo el umbral correcto).
+- `verify_before_deploy.py` no requiere nuevos tests (cambio de constante numérica sin lógica nueva).
 - **Validación local:** `python -m py_compile bot.py` OK. `verify_before_deploy.py` deja de fallar por la lógica del funnel, pero el harness aún cae en Windows por `Access denied` al tocar un directorio temporal (`[WinError 5]` sobre `%TEMP%`), así que queda pendiente una pasada limpia del verificador o aislar ese bug del harness antes de usarlo como gate final de deploy.

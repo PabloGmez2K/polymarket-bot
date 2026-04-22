@@ -2980,6 +2980,24 @@ Opus verificó Polymarket resolution sources vía WebFetch y confirmó NOAA glob
 
 **Verificación:** `verify_before_deploy.py` 755/755 (9 tests nuevos).
 
+## Sesión 223 — INTRA_SL_INTERVAL 60→20 min (22 abr 2026)
+
+**Tipo:** Explícita | **Agente:** Sonnet
+
+### Contexto
+
+SL de Shanghai No disparó en ciclo 04:00 UTC a -35.2% pese a umbral de -25%. Causa: gap de polling de 60 min — posición cruzó el umbral entre checks y fue atrapada 10pp más abajo en el siguiente.
+
+### Cambios
+
+- `bot.py:365`: `INTRA_SL_INTERVAL` default `"60"` → `"20"` (checks cada 20 min en vez de 60).
+
+### Verificación
+
+No requiere nuevos tests en `verify_before_deploy.py` (cambio de constante numérica).
+
+---
+
 ## Sesión 222 — City Intelligence runtime bridge in `polymarket-bot` (22 abr 2026)
 
 **Tipo:** Explícita | **Agente:** Codex

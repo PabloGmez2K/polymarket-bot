@@ -4166,7 +4166,7 @@ def run_tests():
     # ---- Test v10.5.1: Intra-cycle SL monitor ----
     print("\n v10.5.1: Intra-cycle SL monitor")
     test("INTRA_SL_INTERVAL definido", "INTRA_SL_INTERVAL" in code)
-    test("INTRA_SL_INTERVAL default 60", '"INTRA_SL_INTERVAL", "60"' in code)
+    test("INTRA_SL_INTERVAL default 20", '"INTRA_SL_INTERVAL", "20"' in code)
     test("sell_lock definido", "sell_lock" in code and "threading.Lock()" in code)
     test("intra_cycle_sl_check definida", "def intra_cycle_sl_check(" in code)
     test("intra_sl_loop definida", "def intra_sl_loop(" in code)
@@ -5428,8 +5428,8 @@ def run_tests():
 
     # ---- v10.6.24: intra-cycle SL/TP reactivado ----
     test(
-        "v10.6.24: INTRA_SL_INTERVAL default 60",
-        '"INTRA_SL_INTERVAL", "60"' in code,
+        "v10.6.24: INTRA_SL_INTERVAL default 20",
+        '"INTRA_SL_INTERVAL", "20"' in code,
     )
     test(
         "v10.6.24: intra_cycle_sl_check solo SL+TP sin re-eval",
