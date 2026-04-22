@@ -31,6 +31,10 @@ Comandos útiles:
 
 | Fecha | Tipo | Referencia | Commits clave | Resumen |
 |------|------|------------|---------------|---------|
+| 2026-04-22 | Explícita | Sesión 222 | City Intelligence runtime bridge in `polymarket-bot` | Se aplica la recomendación de arquitectura tras la alarma: mantener `city-intelligence` separado como capa analítica, pero mover el readout diario de runtime al servicio que sí ve el volumen real del bot. `bot.py` añade un puente read-only one-shot diario (`maybe_run_city_intelligence_runtime_summary`) gated por env, que exporta runtime, regenera effective view, pipeline dry-run, preflight operacional y daily summary sin tocar trading, NOAA, whitelist, sizing ni `city_policy_state.json`. Se crea `tools/runtime_import_local_export.py` para copiar desde `DATA_DIR` a `DATA_DIR/runtime_import`, exigir `shadow_city_tracking`, `audit` y `city_policy_state`, y escribir manifest + snapshot de env. `verify_before_deploy.py` suma checks v10.6.31. Validación: sintaxis OK y export local OK; el preflight completo queda bloqueado solo por 2 asserts heredados de `INTRA_SL_INTERVAL default 60`, porque el worktree ya traía `INTRA_SL_INTERVAL=20`. |
+| 2026-04-22 | Explícita | Sesión 221 | City Intelligence runtime_import faltante en servicio live | Auditoría operativa de la alarma diaria `City Intelligence` sin tocar `bot.py`, `city_policy_state.json`, NOAA, scheduler ni trading core. El pull read-only local desde `polymarket-bot` funciona y deja `runtime_import_manifest.json` fresco (`2026-04-22T07:19:13Z`, 12/12 archivos, sin drift); tras regenerar effective view, ledger, gate y pipeline, local queda `runtime_inputs_status=available`, `overall_status=ok`, cuello dominante `trader_discovery`, topología `blocked=1 / canary=8 / shadow=16 / active=0` y preflight operacional `error=0`. La causa live de la alarma está en el servicio separado `city-intelligence`: su `/app/data` no contiene `/app/data/runtime_import`, así que el pipeline live cae correctamente en `runtime_inputs_missing` por faltar `shadow_city_tracking`, `audit` y `city_policy_state`. No hay ajuste de trading hoy; el pendiente es infraestructura/cableado read-only para que `city-intelligence` consuma runtime fresco antes de emitir recomendaciones. |
+| 2026-04-22 | Explícita | Sesión 220 | daily traders-vs-bot readout, no code | Se registra el parte diario `traders vs bot` / `blocked signals` como actualización de trazabilidad, sin tocar `bot.py`, whitelist, NOAA, scheduler ni trading core. Foto UTC 2026-04-22: `MATCH=16`, `BOT_ONLY=5`, `TRADER_ONLY=18`; serie reciente de 7 corridas con medianas `MATCH=16`, `BOT_ONLY=3`, `TRADER_ONLY=23`. Lectura: la serie se mueve, pero todavía no da una historia única de mejora o deterioro; hoy no hay gap operativo fuerte fuera de `blocked` con consenso y condición operable. Persisten en `TRADER_ONLY` `7/7`: `Ankara`, `Busan`, `Houston`, `Jakarta`, `Miami`; casi persistentes `6/7`: `Buenos Aires`, `Chengdu`, `Los Angeles`, `Madrid`, `Singapore`, `Toronto`. `Blocked signals` fuera de whitelist: 61 resueltas, 60 wins, WR 98.4%, 207 señales excluidas por whitelist. Instrucción reiterada: si este bloque persistente sigue estable varios días, revisar primero `QUALITY_TRADER_CITIES_WHITELIST` y cobertura observada/NOAA antes de tocar reglas de entrada o trading core. |
+| 2026-04-21 | Explícita | Sesión 219 | Bankroll Readiness Score | Se implementa `tools/bankroll_readiness_score.py`, indicador standalone 0-100% para medir cuándo el bankroll empieza a ser el cuello real del sistema. Score inicial 23.9%: etapa temprana, con WR/PnL todavía débiles y edge density baja, aunque ya aparece presión de tamaño por `kelly_too_low`. No toca `bot.py` ni Railway. `verify_before_deploy.py` 763/763. |
 | 2026-04-21 | Explícita | Sesión 218 | Busan + Dallas al whitelist + schedule 6 ciclos/día | Sesión pre-mañana con tiempo disponible. (1) Railway env `QUALITY_TRADER_CITIES_WHITELIST` verificada — ya tenía las 32 ciudades del pendiente Sesión 215, sin cambios necesarios. (2) **v10.6.29 — Busan ICAO-only:** investigación NOAA/WU/Polymarket completa: NOAA global-hourly 2026 dead (404 estación 47158099999), WU/RKPK confirmado como fuente Polymarket resolution (obtenido de descripción real del mercado Apr-22), WU real-time vivo aunque archivo histórico muestra "No data recorded" (artefacto JS WebFetch), $85.8K volumen en mercado Apr-21 resuelto YES. Busan agregado a `RESOLUTION_STATIONS` (lat 35.18, lon 128.95), `RESOLUTION_ICAO` (RKPK), `OBSERVED_AUDIT_CITIES`, `CITY_TIMEZONES` (Asia/Seoul) y whitelist default. (3) Auditoría City Intelligence: 8 canary, 16 background_watch, Dallas con `review_runtime_policy_gate` priority `now`. (4) **Auditoría Dallas:** WR=11.8% (17 trades) que disparó la degradación Apr-6 era falso — los "17" incluían 66 `LOSS_TOTAL` fantasma del bug ghost-positions corregido en v10.5.12. Trades reales: 4 (2 SL, 2 wins). Shadow actual: `best_edge=68.9%`, 12 hits en 9 ciclos, NOAA 4/5. **v10.6.30:** Dallas agregado al whitelist. (5) **Schedule:** `SCHEDULE_HOURS_UTC=4,8,12,16` → `0,4,8,12,16,20` (6 ciclos/día cada 4h). Motivación: cycles_history muestra 16:00 y 08:00 como horas más productivas; ciclo post-deploy a las 20:10 UTC produjo 3 compras. Railway env actualizada sin redeploy. `verify_before_deploy.py` 763/763. |
 | 2026-04-21 | Explícita | Sesión 217 | London runtime overlay neutralizado | Se ejecuta el cierre operativo mínimo de London sin tocar `bot.py`, reglas de entrada/salida, NOAA, scheduler, thresholds, whitelist ni trading core. Con `tools/railway_safe.ps1 ssh` se confirma que `London` seguía en `/app/data/city_policy_state.json` bajo `auto_canary_cities` desde `2026-04-12T15:03:51Z`; se crea backup remoto `/app/data/city_policy_state.json.bak_london_auto_canary_1776788976` y se elimina solo esa entrada, conservando `BLOCKED_CITIES=London` como guardrail estructural por el mismatch `Weather Underground vs Open-Meteo`. Tras `tools/railway_runtime_snapshot_pull.ps1`, se regeneran effective view, cross, ledger, gate, pipeline y `system_alignment_check --decision-mode operational`: London queda `env=blocked`, `runtime=runtime_unknown`, `cross=blocked`, `effective=blocked`, `collision_flag=false`; `blocking_operational_collision_count=0`; el preflight operacional queda en `error=0` (`ok=5`, `warning=3`). |
 | 2026-04-21 | Explícita | Sesión 216 | City Intelligence runtime transport repaired + summary wording | Se repara el bloqueo abierto en la Sesión 214. Tras limpiar tokens caducados, Pablo completa `railway login` interactivo y Codex valida desde los wrappers repo-locales: `railway_safe.ps1 whoami` devuelve `pablogomez.eu@gmail.com` y `railway_safe.ps1 status` confirma `enchanting-respect / production / polymarket-bot`. `tools/railway_runtime_snapshot_pull.ps1` vuelve a funcionar y deja `data/runtime_import/` fresco con manifest `pulled_at=2026-04-21T14:54:02Z`, `12/12` archivos y sin drift. Se instala la dependencia local faltante `py-clob-client-v2==1.0.0` para que `city_validation_ledger.py` pueda lazy-importar `bot.py`; después `city_validation_ledger.py` y `city_promotion_gate.py` quedan en `runtime_inputs_status=available`, y `city_intelligence_pipeline.py` cierra `overall_status=ok` con `dominant_bottleneck=policy_execution_gate`, `top_now_city=Dallas` y `signal_health=usable_signal`. Queda un blocker distinto, no de transporte: `system_alignment_check.py --decision-mode operational` sigue en `error=1` por `London` (`BLOCKED_CITIES` + `auto_canary_cities`), sin tocar `city_policy_state.json` por el guardrail original. Además se corrige `tools/city_intelligence_daily_summary.py` para no decir “preflight operacional sin errores” cuando `alignment_summary.error > 0`; dry-run muestra `preflight operacional con error=1`. Handoff creado: `docs/handoffs/london-blocked-policy-review-2026-04-21.md` para analizar en otra sesión si London debe seguir `blocked`, pasar a `shadow` o requerir revalidación externa. |
@@ -2975,6 +2979,94 @@ Opus verificó Polymarket resolution sources vía WebFetch y confirmó NOAA glob
 **Railway:** `BLOCKED_CITIES` actualizado a solo `London` (Singapore y Toronto removidas — bloqueaban el canary gate). `QUALITY_TRADER_CITIES_WHITELIST` a 32 ciudades.
 
 **Verificación:** `verify_before_deploy.py` 755/755 (9 tests nuevos).
+
+## Sesión 222 — City Intelligence runtime bridge in `polymarket-bot` (22 abr 2026)
+
+**Tipo:** Explícita | **Agente:** Codex
+
+### Contexto
+Tras validar que el servicio separado `city-intelligence` no veía `/app/data/runtime_import`, se aplica la decisión recomendada: mantener la capa analítica separada, pero hacer que el readout diario que depende del runtime corra desde `polymarket-bot`, que sí ve el volumen real.
+
+### Cambios
+
+- `bot.py`: añade `maybe_run_city_intelligence_runtime_summary`, one-shot diario y configurable por `CITY_INTELLIGENCE_RUNTIME_BRIDGE_ENABLED` / `CITY_INTELLIGENCE_RUNTIME_BRIDGE_HOUR_UTC`.
+- `tools/runtime_import_local_export.py`: exporta desde `DATA_DIR` a `DATA_DIR/runtime_import`, exige `shadow_city_tracking.json`, `audit.json` y `city_policy_state.json`, y escribe manifest + snapshot de env.
+- `verify_before_deploy.py`: añade checks v10.6.31 para cubrir el bridge.
+- `.gitignore`: ignora directorios locales de prueba del export.
+
+### Validación
+
+- `python tools/check_python_syntax.py bot.py tools/runtime_import_local_export.py verify_before_deploy.py`: OK
+- `python tools/runtime_import_local_export.py --data-dir data\runtime_import --output-dir data\runtime_import_bridge_test_verify`: OK
+- `python verify_before_deploy.py`: 769 tests ejecutados; solo fallan 2 asserts heredados de `INTRA_SL_INTERVAL default 60` porque el worktree ya traía `INTRA_SL_INTERVAL=20`.
+
+### Decisión
+No hacer deploy hasta resolver explícitamente el default de `INTRA_SL_INTERVAL`: confirmar que `20` es intencional y actualizar el preflight, o volver a `60`.
+
+---
+
+## Sesión 221 — City Intelligence runtime_import faltante en servicio live (22 abr 2026)
+
+**Tipo:** Explícita | **Agente:** Codex
+
+### Contexto
+Alarma diaria `City Intelligence` del 2026-04-22 UTC: `runtime_inputs_missing`, faltan `shadow_tracking`, `audit` y `city_policy_state`. Guardrail respetado: no tocar `bot.py`, `city_policy_state.json`, NOAA, scheduler, reglas de entrada/salida ni trading core.
+
+### Evidencia
+
+**Transporte read-only local:**
+- `powershell -ExecutionPolicy Bypass -File .\tools\railway_runtime_snapshot_pull.ps1` funciona
+- `data/runtime_import/runtime_import_manifest.json` queda fresco: `pulled_at=2026-04-22T07:19:13Z`
+- Manifest: `12/12` archivos, sin missing/extra/byte mismatch
+- Inputs requeridos presentes localmente: `shadow_city_tracking.json`, `audit.json`, `city_policy_state.json`
+
+**Artefactos derivados locales:**
+- `city_validation_ledger.py`: `runtime_inputs_status=available`, `n_cities=27`
+- `city_promotion_gate.py`: `runtime_inputs_status=available`
+- `city_intelligence_pipeline.py --telegram-dry-run`: `overall_status=ok`, cuello dominante `trader_discovery`
+- `runtime_policy_effective_view.py`: topología efectiva `blocked=1 / canary=8 / shadow=16 / active=0`, `blocking_operational_collision_count=0`
+- `system_alignment_check.py --decision-mode operational`: `error=0` (`ok=5`, `warning=3`)
+
+**Servicio live `city-intelligence`:**
+- `railway_safe.ps1 service status -a --json`: servicio `city-intelligence` en `SUCCESS`
+- `railway_safe.ps1 ssh -s city-intelligence "ls -la /app/data/runtime_import"`: `No such file or directory`
+- `/app/data/city_intelligence_pipeline.json` live queda en `overall_status=runtime_inputs_missing` porque faltan `/app/data/runtime_import/shadow_city_tracking.json`, `/app/data/runtime_import/audit.json` y `/app/data/runtime_import/city_policy_state.json`
+
+### Decisión
+La alarma es correcta para el servicio `city-intelligence`, pero no implica ausencia real de edge ni problema del bot principal. No hay ajuste de trading hoy. El ajuste pendiente es infraestructura/cableado: hacer que `city-intelligence` consuma una copia read-only fresca del runtime del bot antes de emitir su daily summary, o mover esa lectura al servicio `polymarket-bot` como se hizo con `signals_crosscheck`.
+
+---
+
+## Sesión 220 — daily traders-vs-bot readout, no code (22 abr 2026)
+
+**Tipo:** Explícita | **Agente:** Codex
+
+### Contexto
+Parte diario del summary `traders vs bot` y `blocked signals` del 2026-04-22 UTC. Actualización de trazabilidad, no sesión de cambios funcionales.
+
+### Lectura registrada
+
+**Cross-check traders vs bot:**
+- Última corrida: `MATCH=16`, `BOT_ONLY=5`, `TRADER_ONLY=18`
+- Serie reciente: 7 corridas, medianas `MATCH=16`, `BOT_ONLY=3`, `TRADER_ONLY=23`
+- Lectura: la serie se mueve, pero todavía no da una historia única de mejora o deterioro
+- No aparece gap operativo fuerte fuera de `blocked` con consenso y condición operable
+
+**TRADER_ONLY persistente:**
+- `7/7`: Ankara, Busan, Houston, Jakarta, Miami
+- `6/7`: Buenos Aires, Chengdu, Los Angeles, Madrid, Singapore, Toronto
+
+**Blocked signals fuera de whitelist:**
+- Resueltas: 61
+- Wins: 60
+- WR: 98.4%
+- Whitelist excluidas: 207
+- Baseline fuera de `QUALITY_TRADER_CITIES_WHITELIST`
+
+### Decisión
+Sin cambios en `bot.py`, whitelist, NOAA, scheduler, reglas de entrada/salida ni trading core. Se reitera la instrucción operativa: si el bloque `TRADER_ONLY` persistente sigue estable varios días, revisar primero `QUALITY_TRADER_CITIES_WHITELIST` y cobertura observada/NOAA antes de tocar reglas de entrada o trading core.
+
+---
 
 ## Sesión 219 — Bankroll Readiness Score (21 abr 2026)
 

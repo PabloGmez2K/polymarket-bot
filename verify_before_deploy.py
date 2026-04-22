@@ -5462,6 +5462,45 @@ def run_tests():
         '"2026-05-10"' in code and "tp_sl_price_steps_alert_sent" in code,
     )
 
+    # ---- v10.6.31: City Intelligence runtime bridge read-only ----
+    runtime_export_path = os.path.join(os.path.dirname(__file__), "tools", "runtime_import_local_export.py")
+    runtime_export_code = ""
+    if os.path.exists(runtime_export_path):
+        with open(runtime_export_path, "r", encoding="utf-8") as f:
+            runtime_export_code = f.read()
+    test(
+        "v10.6.31: runtime_import_local_export.py existe",
+        bool(runtime_export_code),
+    )
+    test(
+        "v10.6.31: export runtime escribe en DATA_DIR/runtime_import",
+        'DEFAULT_OUTPUT_DIR = DEFAULT_DATA_DIR / "runtime_import"' in runtime_export_code,
+    )
+    test(
+        "v10.6.31: export exige runtime files canonicos",
+        '"shadow_city_tracking.json"' in runtime_export_code
+        and '"audit.json"' in runtime_export_code
+        and '"city_policy_state.json"' in runtime_export_code
+        and "REQUIRED_FILES" in runtime_export_code,
+    )
+    test(
+        "v10.6.31: bridge runtime definido en bot",
+        "CITY_INTELLIGENCE_RUNTIME_EXPORT_SCRIPT" in code
+        and "def maybe_run_city_intelligence_runtime_summary(" in code,
+    )
+    test(
+        "v10.6.31: bridge corre antes de blocked signals",
+        code.find("maybe_run_city_intelligence_runtime_summary(state)") != -1
+        and code.find("maybe_run_city_intelligence_runtime_summary(state)") < code.find("maybe_run_blocked_signals_check(state)"),
+    )
+    test(
+        "v10.6.31: bridge no escribe policy live",
+        "CITY_INTELLIGENCE_DAILY_SUMMARY_SCRIPT" in code
+        and "--telegram-dry-run" in code
+        and '"city_policy_state.json", "w"' not in runtime_export_code
+        and "CITY_POLICY_FILE" not in runtime_export_code,
+    )
+
     # ---- Resultado ----
     print(f"\n{'='*50}")
     total = passed + failed

@@ -564,6 +564,33 @@ SIGNALS_CROSSCHECK_DAILY_SUMMARY_SCRIPT = os.path.join(
     "tools",
     "signals_crosscheck_daily_summary.py",
 )
+CITY_INTELLIGENCE_RUNTIME_EXPORT_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "tools",
+    "runtime_import_local_export.py",
+)
+CITY_INTELLIGENCE_EFFECTIVE_VIEW_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "tools",
+    "runtime_policy_effective_view.py",
+)
+CITY_INTELLIGENCE_PIPELINE_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "tools",
+    "city_intelligence_pipeline.py",
+)
+CITY_INTELLIGENCE_ALIGNMENT_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "tools",
+    "system_alignment_check.py",
+)
+CITY_INTELLIGENCE_DAILY_SUMMARY_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "tools",
+    "city_intelligence_daily_summary.py",
+)
+CITY_INTELLIGENCE_RUNTIME_BRIDGE_ENABLED = os.getenv("CITY_INTELLIGENCE_RUNTIME_BRIDGE_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+CITY_INTELLIGENCE_RUNTIME_BRIDGE_HOUR_UTC = int(os.getenv("CITY_INTELLIGENCE_RUNTIME_BRIDGE_HOUR_UTC", "7"))
 BLOCKED_SIGNALS_FILE = _data_path("blocked_signals_resolutions.jsonl")
 TRADERS_DB_FILE = _seed_data_file("traders_db.json")
 
@@ -4057,6 +4084,15 @@ def run_observability_alerts():
             logger.warning(f"crosscheck diario: fallo ({e})")
 
     # v10.6.13: seguimiento resoluciones blocked signals (exact/range), una vez por día.
+    # v10.6.31: puente runtime read-only para City Intelligence desde el volumen real del bot.
+    try:
+        if maybe_run_city_intelligence_runtime_summary(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"city intelligence runtime summary: fallo ({e})")
+
     try:
         if maybe_run_blocked_signals_check(state):
             changed = True
@@ -7085,6 +7121,79 @@ def maybe_run_daily_crosscheck_temporal_summary(now=None):
         if logger:
             logger.warning(f"crosscheck temporal summary: fallo ({e})")
         return False
+
+
+def maybe_run_city_intelligence_runtime_summary(state, now=None):
+    """
+    Puente read-only desde el bot principal: exporta su runtime local a
+    data/runtime_import y genera el daily summary con inputs reales.
+    No escribe policy ni toca trading; solo produce artefactos derivados.
+    """
+    if not CITY_INTELLIGENCE_RUNTIME_BRIDGE_ENABLED:
+        return False
+    if now is None:
+        now = datetime.now(timezone.utc)
+    today = now.date().isoformat()
+    if state.get("city_intelligence_runtime_summary_last_date") == today:
+        return False
+    if now.hour < CITY_INTELLIGENCE_RUNTIME_BRIDGE_HOUR_UTC:
+        return False
+
+    required_scripts = [
+        CITY_INTELLIGENCE_RUNTIME_EXPORT_SCRIPT,
+        CITY_INTELLIGENCE_EFFECTIVE_VIEW_SCRIPT,
+        CITY_INTELLIGENCE_PIPELINE_SCRIPT,
+        CITY_INTELLIGENCE_ALIGNMENT_SCRIPT,
+        CITY_INTELLIGENCE_DAILY_SUMMARY_SCRIPT,
+    ]
+    missing_scripts = [path for path in required_scripts if not os.path.exists(path)]
+    logger = globals().get("log")
+    if missing_scripts:
+        if logger:
+            logger.warning(f"city-intelligence runtime bridge: scripts faltantes {missing_scripts}")
+        return False
+
+    repo_root = os.path.dirname(os.path.abspath(__file__))
+    pipeline_command = [sys.executable, CITY_INTELLIGENCE_PIPELINE_SCRIPT, "--telegram-dry-run"]
+    if not os.path.exists(os.path.join(repo_root, "data", "directional_trader_census.json")):
+        pipeline_command.append("--refresh-census")
+
+    commands = [
+        [sys.executable, CITY_INTELLIGENCE_RUNTIME_EXPORT_SCRIPT],
+        [sys.executable, CITY_INTELLIGENCE_EFFECTIVE_VIEW_SCRIPT],
+        pipeline_command,
+        [sys.executable, CITY_INTELLIGENCE_ALIGNMENT_SCRIPT, "--decision-mode", "operational"],
+        [sys.executable, CITY_INTELLIGENCE_DAILY_SUMMARY_SCRIPT],
+    ]
+
+    for command in commands:
+        try:
+            result = subprocess.run(
+                command,
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                timeout=360,
+                check=False,
+            )
+        except Exception as exc:
+            if logger:
+                logger.warning(f"city-intelligence runtime bridge: fallo ejecutando {os.path.basename(command[1])}: {exc}")
+            return False
+        if result.returncode != 0:
+            if logger:
+                stderr = (result.stderr or "").strip()
+                stdout = (result.stdout or "").strip()
+                detail = stderr or stdout or "sin detalle"
+                logger.warning(
+                    f"city-intelligence runtime bridge: {os.path.basename(command[1])} fallo ({detail[:500]})"
+                )
+            return False
+
+    state["city_intelligence_runtime_summary_last_date"] = today
+    if logger:
+        logger.info("city-intelligence runtime bridge: OK")
+    return True
 
 
 def maybe_run_blocked_signals_check(state, now=None):

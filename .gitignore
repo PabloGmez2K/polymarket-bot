@@ -42,6 +42,8 @@ keys.env
 # ─── Runtime imports (Railway snapshot, never canonical) ─────────────────────
 data/runtime_import/
 data/runtime_import_derived/
+data/runtime_import_bridge_test*/
+data/_runtime_import_bridge_test*/
 
 # ─── Tool-generated output snapshots (regenerable) ───────────────────────────
 data/system_alignment_check.json
