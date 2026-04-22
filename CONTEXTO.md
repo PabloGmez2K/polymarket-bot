@@ -2004,3 +2004,13 @@ git push
 - **Sin cambio en `STOP_LOSS_PCT`** (-25% sigue siendo el umbral correcto).
 - `verify_before_deploy.py` no requiere nuevos tests (cambio de constante numérica sin lógica nueva).
 - **Validación local:** `python -m py_compile bot.py` OK. `verify_before_deploy.py` deja de fallar por la lógica del funnel, pero el harness aún cae en Windows por `Access denied` al tocar un directorio temporal (`[WinError 5]` sobre `%TEMP%`), así que queda pendiente una pasada limpia del verificador o aislar ese bug del harness antes de usarlo como gate final de deploy.
+
+**Última actualización:** 22 de abril de 2026 (Sesión 224 — INTRA-REEVAL shadow-log)
+
+**Sesión 224 (22 abr 2026, Opus diseño + Sonnet implementación):** re-evaluación condicional en el monitor intra-ciclo, en modo shadow-log (no vende, solo alerta) para alimentar con evidencia propia la próxima decisión.
+- **Problema atacado:** hoy el monitor intra (cada 20 min) solo mira SL/TP. Una posición puede pasar de +20% a -50% entre ciclos principales (4h) sin que el edge justifique mantenerla. Histórico: 1 caso real claro (Atlanta YES +25% → -56% por SL).
+- **Diseño (Opus):** A-only + shadow-log. Un único disparador (drift ≥10pp entre `cur_price` y `entry_context.price`) + cooldown 80 min por posición + edge threshold -3% (idéntico al ciclo principal). En shadow, si edge<-3% → Telegram breve (rate-limit 1/h) + estado persistente en `data/intra_reeval_state.json`, NO vende. A los 7 días del primer trigger, alerta one-shot con resumen para decidir promoción.
+- **Cambios (Sonnet):** 5 ENV vars nuevas (`INTRA_REEVAL_ENABLED/SHADOW_MODE/PRICE_DRIFT_PP/COOLDOWN_MIN/EDGE_THRESHOLD`), helper puro `recompute_position_edge` extraído del CHECK 3 de `manage_positions` (byte-compatible), integración opt-in en `intra_cycle_sl_check` después del bloque SL/TP, alerta one-shot `maybe_run_intra_reeval_review_alert` wired en `run_alerts`.
+- **Verificación:** `verify_before_deploy.py` → 795/795 (19 checks estructurales + 9 funcionales nuevos).
+- **Railway pendiente (acción usuario):** añadir `INTRA_REEVAL_ENABLED=1` y `INTRA_REEVAL_SHADOW_MODE=1` (el resto usa defaults). Flip a `SHADOW_MODE=0` solo tras review one-shot a los 7 días.
+- **Próximo hito auto-disparado:** en 7 días desde el primer trigger shadow llegará un Telegram de "Review INTRA-REEVAL" con datos agregados y prompt listo para la siguiente sesión.

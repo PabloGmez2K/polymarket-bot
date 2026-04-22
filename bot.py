@@ -365,6 +365,12 @@ SELL_AGGRESSION = 0.02  # cuánto bajar el precio para asegurar venta rápida
 INTRA_SL_INTERVAL = int(os.getenv("INTRA_SL_INTERVAL", "20"))  # v10.6.24: reactivado solo SL+TP (sin re-eval) — evita perder TPs entre ciclos
 # v10.6.17: city-level SL cooldown — bloquea re-entrada en la misma ciudad tras stop-loss
 SL_CITY_COOLDOWN_HOURS = int(os.getenv("SL_CITY_COOLDOWN_HOURS", "48"))
+# v10.6.30: re-evaluación condicional intra-ciclo (shadow-log opt-in)
+INTRA_REEVAL_ENABLED = int(os.getenv("INTRA_REEVAL_ENABLED", "0")) == 1        # master switch (default off)
+INTRA_REEVAL_SHADOW_MODE = int(os.getenv("INTRA_REEVAL_SHADOW_MODE", "1")) == 1 # 1=solo loggea; 0=vende de verdad
+INTRA_REEVAL_PRICE_DRIFT_PP = float(os.getenv("INTRA_REEVAL_PRICE_DRIFT_PP", "10.0"))  # pp mínimos de drift desde entry
+INTRA_REEVAL_COOLDOWN_MIN = int(os.getenv("INTRA_REEVAL_COOLDOWN_MIN", "80"))   # minutos entre reevals de misma posición
+INTRA_REEVAL_EDGE_THRESHOLD = float(os.getenv("INTRA_REEVAL_EDGE_THRESHOLD", "-3.0"))  # umbral de venta
 
 MIN_PRICE = 0.20
 MAX_PRICE = 0.80
@@ -556,6 +562,7 @@ CITY_POLICY_FILE = _data_path("city_policy_state.json")
 SKIP_LOG_FILE = _data_path("skip_log.jsonl")
 SKIP_LOG_MAX_SIZE_BYTES = 20 * 1024 * 1024  # 20 MB — rotación del contrato R3
 SL_COOLDOWN_FILE = _data_path("sl_city_cooldown.json")
+INTRA_REEVAL_STATE_FILE = _data_path("intra_reeval_state.json")
 AGENT_EVENTS_FILE = _sync_agent_events_seed()
 SIGNALS_FILE = _seed_data_file("signals.json")
 SIGNALS_CROSSCHECK_FILE = _data_path("signals_crosscheck.jsonl")
@@ -921,6 +928,8 @@ def load_alerts_state():
         "slot_monetization_last_signature": None,
         # v10.6.11 (M5): ciudades ya notificadas como candidatas a canary (one-shot por ciudad)
         "canary_candidate_notified": {},
+        # v10.6.30: revisión one-shot intra-reeval shadow (7 días tras primer trigger)
+        "intra_reeval_review_alert_sent": False,
     }
     if not os.path.exists(ALERTS_FILE):
         return default
@@ -948,6 +957,7 @@ def load_alerts_state():
         state.setdefault("slot_monetization_last_date", None)
         state.setdefault("slot_monetization_last_signature", None)
         state.setdefault("canary_candidate_notified", {})
+        state.setdefault("intra_reeval_review_alert_sent", False)
         return state
     except Exception:
         return default
@@ -1464,6 +1474,56 @@ def save_alerts_state(state):
             json.dump(state, f, indent=2, ensure_ascii=False)
     except Exception as e:
         log.warning(f"Error guardando alerts_state: {e}")
+
+
+def load_intra_reeval_state(observed_token_ids=None):
+    """Carga el estado persistente de re-evaluación intra-ciclo.
+
+    observed_token_ids: si se pasa, purga del cooldown los token_ids que no estén ahí.
+    """
+    default = {
+        "generated_at": "",
+        "cooldown": {},
+        "shadow_log": {
+            "triggers": [],
+            "first_trigger_at": "",
+            "last_telegram_at": "",
+            "review_alert_sent": False,
+        },
+    }
+    if not os.path.exists(INTRA_REEVAL_STATE_FILE):
+        return default
+    try:
+        with open(INTRA_REEVAL_STATE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return default
+        state = dict(default)
+        state["cooldown"] = data.get("cooldown", {}) if isinstance(data.get("cooldown"), dict) else {}
+        shadow = data.get("shadow_log", {}) if isinstance(data.get("shadow_log"), dict) else {}
+        state["shadow_log"] = {
+            "triggers": shadow.get("triggers", []) if isinstance(shadow.get("triggers"), list) else [],
+            "first_trigger_at": shadow.get("first_trigger_at", ""),
+            "last_telegram_at": shadow.get("last_telegram_at", ""),
+            "review_alert_sent": shadow.get("review_alert_sent", False),
+        }
+        # Purgar entradas cooldown cuyos token_ids no estén en posiciones observadas
+        if observed_token_ids is not None:
+            obs_set = set(str(t) for t in observed_token_ids)
+            state["cooldown"] = {k: v for k, v in state["cooldown"].items() if k in obs_set}
+        return state
+    except Exception:
+        return default
+
+
+def save_intra_reeval_state(state):
+    """Guarda el estado persistente de re-evaluación intra-ciclo."""
+    try:
+        state["generated_at"] = datetime.now(timezone.utc).isoformat()
+        with open(INTRA_REEVAL_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        log.warning(f"Error guardando intra_reeval_state: {e}")
 
 
 def _extract_logic_series(value):
@@ -4171,6 +4231,15 @@ def run_observability_alerts():
         logger = globals().get("log")
         if logger:
             logger.warning(f"slot monetization review: fallo ({e})")
+
+    # v10.6.30: alerta one-shot revision intra-reeval shadow (7 dias tras primer trigger).
+    try:
+        if maybe_run_intra_reeval_review_alert(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"intra reeval review alert: fallo ({e})")
 
     if changed:
         save_alerts_state(state)
@@ -7842,6 +7911,110 @@ def maybe_alert_tp_sl_price_steps(state, now=None):
 
     state[STATE_KEY] = True
     state["tp_sl_price_steps_alert_last_daily"] = today_str
+    return True
+
+
+def maybe_run_intra_reeval_review_alert(state, now=None):
+    """
+    v10.6.30: alerta one-shot de revision intra-reeval shadow.
+
+    Dispara 7 dias despues del primer trigger shadow, una sola vez.
+    Lee data/intra_reeval_state.json y envia resumen con prompt para sesion Opus/Sonnet.
+
+    El campo de idempotencia esta en alerts_state: 'intra_reeval_review_alert_sent'.
+    Retorna True si state fue mutado.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    STATE_KEY = "intra_reeval_review_alert_sent"
+    if state.get(STATE_KEY):
+        return False
+
+    # Leer estado shadow
+    try:
+        reeval_state = load_intra_reeval_state()
+    except Exception:
+        return False
+
+    first_trigger_at = reeval_state.get("shadow_log", {}).get("first_trigger_at", "")
+    if not first_trigger_at:
+        return False  # Nunca hubo un trigger
+
+    try:
+        first_dt = datetime.fromisoformat(first_trigger_at.replace("Z", "+00:00"))
+    except Exception:
+        return False
+
+    # Disparar solo 7 días después del primer trigger
+    if (now - first_dt).total_seconds() < 7 * 24 * 3600:
+        return False
+
+    # Calcular métricas del shadow_log
+    triggers = reeval_state.get("shadow_log", {}).get("triggers", [])
+    n_triggers = len(triggers)
+    if n_triggers == 0:
+        return False
+
+    # Top 3 ciudades
+    from collections import Counter
+    city_counts = Counter(t.get("city", "") for t in triggers)
+    top3_cities = ", ".join(f"{c}({n})" for c, n in city_counts.most_common(3))
+
+    # PnL stats
+    pnl_list = [t.get("pnl_pct", 0) for t in triggers]
+    pnl_avg = sum(pnl_list) / len(pnl_list) if pnl_list else 0
+    pnl_sorted = sorted(pnl_list)
+    mid = len(pnl_sorted) // 2
+    pnl_median = pnl_sorted[mid] if len(pnl_sorted) % 2 == 1 else (pnl_sorted[mid - 1] + pnl_sorted[mid]) / 2
+
+    # Edge stats
+    edge_list = [t.get("fresh_edge_pct", 0) for t in triggers]
+    edge_avg = sum(edge_list) / len(edge_list) if edge_list else 0
+
+    # Distribución por banda de PnL
+    in_positive_band = sum(1 for pnl in pnl_list if 20 <= pnl <= 40)
+    in_drawdown = sum(1 for pnl in pnl_list if pnl < 0)
+
+    prompt_opus = (
+        "Lee AGENTS.md y el bloque reciente de CONTEXTO.md.\n\n"
+        "Tarea: Sesion de revision intra-reeval shadow — decidir si promover a modo real.\n\n"
+        f"Datos del shadow log (ultimos 7 dias, n={n_triggers}):\n"
+        f"- Top ciudades: {top3_cities}\n"
+        f"- PnL% promedio al trigger: {pnl_avg:+.1f}%\n"
+        f"- PnL% mediana al trigger: {pnl_median:+.1f}%\n"
+        f"- fresh_edge_pct promedio: {edge_avg:+.1f}%\n"
+        f"- Triggers con PnL en +20..+40%: {in_positive_band}\n"
+        f"- Triggers con PnL negativo: {in_drawdown}\n\n"
+        "Preguntas a responder:\n"
+        "1. Es la mediana de PnL en triggers positiva? Si si -> shadow predice ventas prematuras; "
+        "ajustar INTRA_REEVAL_PRICE_DRIFT_PP o INTRA_REEVAL_EDGE_THRESHOLD antes de promover.\n"
+        "2. Las ciudades del top3 coinciden con el perfil de errores documentados en CONTEXTO.md?\n"
+        "3. Promovemos a INTRA_REEVAL_SHADOW_MODE=0? Criterio sugerido: mediana PnL < 0 "
+        "Y edge_avg < -5% Y n_triggers >= 10.\n\n"
+        "Archivo a revisar: data/intra_reeval_state.json (triggers completos)\n"
+        "Si se promueve a modo real: actualizar Railway ENV INTRA_REEVAL_SHADOW_MODE=0 "
+        "y documentar en CONTEXTO.md + HISTORIAL_SESIONES.md."
+    )
+
+    msg = (
+        f"\U0001f9ea <b>Review: intra-reeval shadow (7 dias)</b>\n\n"
+        f"Han pasado 7 dias desde el primer trigger shadow de re-evaluacion intra-ciclo.\n\n"
+        f"<b>Resumen shadow log ({n_triggers} triggers):</b>\n"
+        f"  Top ciudades: {top3_cities}\n"
+        f"  PnL% promedio: {pnl_avg:+.1f}% | mediana: {pnl_median:+.1f}%\n"
+        f"  Edge promedio: {edge_avg:+.1f}%\n"
+        f"  Triggers en +20..+40%: {in_positive_band} | en drawdown: {in_drawdown}\n\n"
+        f"<b>Prompt para Opus/Sonnet</b> (copiar y pegar):\n"
+        f"<code>{prompt_opus}</code>"
+    )
+
+    try:
+        send_telegram(msg)
+    except Exception:
+        pass
+
+    state[STATE_KEY] = True
     return True
 
 
@@ -13830,6 +14003,96 @@ def _mark_micro_as_loss_total(position, dl):
         reason="micro_position_unsellable",
     )
 
+def recompute_position_edge(position, forecast_cache, lc_by_token=None):
+    """
+    Recalcula edge actual usando forecast fresco. Pura: no muta lifecycle.
+
+    Args:
+        position: dict del endpoint /positions
+        forecast_cache: dict {city: forecast_dict} para amortizar NOAA calls dentro del check.
+                        MUTADO in-place para agregar entradas de ciudades nuevas.
+        lc_by_token: opcional, no usado (compat futura)
+
+    Returns:
+        dict {"edge_pct", "our_prob", "mkt_price", "forecast_max", "days_ahead", "city"}
+        o None si no re-evaluable (sin station, sin forecast, date pasada, título no parseable)
+    """
+    title_full = position.get("title", "")
+    outcome = position.get("outcome", "YES")
+    cur_price = float(position.get("curPrice", 0))
+
+    parsed = parse_temperature_question(title_full)
+    if not parsed or not parsed.get("date_str"):
+        return None
+
+    city = parsed["city"]
+    date_iso = date_text_to_iso(parsed["date_str"])
+    if not date_iso:
+        return None
+
+    try:
+        days_ahead = (date.fromisoformat(date_iso) - date.today()).days
+    except ValueError:
+        return None
+
+    # Si ya pasó la fecha, no re-evaluar
+    if days_ahead < 0:
+        return None
+
+    # Obtener previsión fresca (con cache)
+    if city not in forecast_cache:
+        station = RESOLUTION_STATIONS.get(city)
+        if station:
+            try:
+                forecast_cache[city] = get_forecast(station["lat"], station["lon"])
+            except Exception:
+                forecast_cache[city] = None
+        else:
+            forecast_cache[city] = None
+
+    fc = forecast_cache.get(city)
+    if not fc or date_iso not in fc:
+        return None
+
+    # Recalcular probabilidad con datos frescos
+    forecast_max = fc[date_iso]["temp_max"]
+    threshold = parsed["temp_threshold"]
+    threshold_c = (threshold - 32) * 5 / 9 if parsed["unit"] == "F" else float(threshold)
+
+    threshold_high = parsed.get("temp_threshold_high")
+    threshold_high_c = None
+    if threshold_high is not None:
+        threshold_high_c = (threshold_high - 32) * 5 / 9 if parsed["unit"] == "F" else float(threshold_high)
+
+    our_prob_yes = estimate_prob_with_city(
+        forecast_max,
+        threshold_c,
+        parsed["condition"],
+        days_ahead,
+        threshold_high_c,
+        city=city,
+    )
+
+    # ¿Qué lado tenemos? Calcular edge actual
+    if outcome.upper() == "YES":
+        our_prob = our_prob_yes
+        mkt_price = cur_price
+    else:
+        our_prob = 1.0 - our_prob_yes
+        mkt_price = 1.0 - cur_price
+
+    edge_pct = (our_prob - mkt_price) * 100
+
+    return {
+        "edge_pct": edge_pct,
+        "our_prob": our_prob,
+        "mkt_price": mkt_price,
+        "forecast_max": forecast_max,
+        "days_ahead": days_ahead,
+        "city": city,
+    }
+
+
 def manage_positions(client, dl):
     """
     Gestión activa: stop-loss, take-profit, Y re-evaluación con datos frescos.
@@ -14001,76 +14264,37 @@ def manage_positions(client, dl):
             continue
 
         # ---- CHECK 3: Re-evaluación con previsión fresca ----
-        parsed = parse_temperature_question(title_full)
-        if not parsed or not parsed.get("date_str"):
-            dl.append(f"  ✓ MANTENER ({pct_pnl:+.1f}%) | {label} | no parseable")
-            keeping.append(p)
-            continue
-
-        city = parsed["city"]
-        date_iso = date_text_to_iso(parsed["date_str"])
-        if not date_iso:
-            dl.append(f"  ✓ MANTENER ({pct_pnl:+.1f}%) | {label} | fecha inválida")
-            keeping.append(p)
-            continue
-
-        try:
-            days_ahead = (date.fromisoformat(date_iso) - date.today()).days
-        except ValueError:
-            keeping.append(p)
-            continue
-
-        # Si ya pasó la fecha, no re-evaluar (se resolverá sola)
-        if days_ahead < 0:
-            dl.append(f"   RESOLUCIÓN pendiente | {label}")
-            keeping.append(p)
-            continue
-
-        # Obtener previsión fresca (con cache)
-        if city not in forecast_cache:
-            station = RESOLUTION_STATIONS.get(city)
-            if station:
-                try:
-                    forecast_cache[city] = get_forecast(station["lat"], station["lon"])
-                except Exception:
-                    forecast_cache[city] = None
+        fresh = recompute_position_edge(p, forecast_cache)
+        if fresh is None:
+            # No hay forecast o no parseable — verificar si es fecha pasada
+            parsed_chk = parse_temperature_question(title_full)
+            if parsed_chk and parsed_chk.get("date_str"):
+                date_iso_chk = date_text_to_iso(parsed_chk["date_str"])
+                if date_iso_chk:
+                    try:
+                        days_ahead_chk = (date.fromisoformat(date_iso_chk) - date.today()).days
+                    except ValueError:
+                        days_ahead_chk = 1
+                    if days_ahead_chk < 0:
+                        dl.append(f"   RESOLUCIÓN pendiente | {label}")
+                        keeping.append(p)
+                        continue
+                    city_chk = parsed_chk.get("city", "")
+                    if not RESOLUTION_STATIONS.get(city_chk):
+                        dl.append(f"  ✓ MANTENER ({pct_pnl:+.1f}%) | {label} | no parseable")
+                    else:
+                        dl.append(f"  ✓ MANTENER ({pct_pnl:+.1f}%) | {label} | sin previsión")
+                else:
+                    dl.append(f"  ✓ MANTENER ({pct_pnl:+.1f}%) | {label} | fecha inválida")
             else:
-                forecast_cache[city] = None
-
-        fc = forecast_cache.get(city)
-        if not fc or date_iso not in fc:
-            dl.append(f"  ✓ MANTENER ({pct_pnl:+.1f}%) | {label} | sin previsión")
+                dl.append(f"  ✓ MANTENER ({pct_pnl:+.1f}%) | {label} | no parseable")
             keeping.append(p)
             continue
 
-        # Recalcular probabilidad con datos frescos
-        forecast_max = fc[date_iso]["temp_max"]
-        threshold = parsed["temp_threshold"]
-        threshold_c = (threshold - 32) * 5 / 9 if parsed["unit"] == "F" else float(threshold)
-
-        threshold_high = parsed.get("temp_threshold_high")
-        threshold_high_c = None
-        if threshold_high is not None:
-            threshold_high_c = (threshold_high - 32) * 5 / 9 if parsed["unit"] == "F" else float(threshold_high)
-
-        our_prob_yes = estimate_prob_with_city(
-            forecast_max,
-            threshold_c,
-            parsed["condition"],
-            days_ahead,
-            threshold_high_c,
-            city=city,
-        )
-
-        # ¿Qué lado tenemos? Calcular edge actual
-        if outcome.upper() == "YES":
-            our_prob = our_prob_yes
-            mkt_price = cur_price
-        else:
-            our_prob = 1.0 - our_prob_yes
-            mkt_price = 1.0 - cur_price
-
-        edge_pct = (our_prob - mkt_price) * 100
+        edge_pct = fresh["edge_pct"]
+        our_prob = fresh["our_prob"]
+        mkt_price = fresh["mkt_price"]
+        forecast_max = fresh["forecast_max"]
 
         # Si edge es negativo: la previsión dice que estamos equivocados
         if edge_pct < -3.0:
@@ -14233,6 +14457,62 @@ def manage_positions(client, dl):
 
 # ---- v10.5.1: INTRA-CYCLE SL/TP MONITOR ----
 
+def _within_cooldown(last_reeval_at, cooldown_min, now_utc):
+    """Devuelve True si last_reeval_at está dentro de cooldown_min minutos desde now_utc."""
+    if not last_reeval_at:
+        return False
+    try:
+        last_dt = datetime.fromisoformat(last_reeval_at.replace("Z", "+00:00"))
+        return (now_utc - last_dt).total_seconds() < cooldown_min * 60
+    except Exception:
+        return False
+
+
+def _log_shadow_intra_reeval_trigger(state, position, entry_ctx, fresh, pct_pnl):
+    """Registra un trigger shadow y manda Telegram si pasó >60 min desde el último."""
+    now = datetime.now(timezone.utc)
+    trigger = {
+        "ts": now.isoformat(),
+        "city": fresh.get("city", ""),
+        "side": position.get("outcome", ""),
+        "token_id": position.get("asset", ""),
+        "entry_price": float(entry_ctx.get("price") or 0),
+        "cur_price": float(position.get("curPrice") or 0),
+        "pnl_pct": pct_pnl,
+        "fresh_edge_pct": fresh["edge_pct"],
+        "entry_edge_pct": float(entry_ctx.get("edge_pct") or 0),
+        "our_prob_now": fresh["our_prob"],
+        "our_prob_entry": (float(entry_ctx.get("our_prob") or 0)) / 100.0,  # entry guarda como %; normalizar
+        "would_sell": True,
+    }
+    shadow_log = state.setdefault("shadow_log", {
+        "triggers": [],
+        "first_trigger_at": "",
+        "last_telegram_at": "",
+        "review_alert_sent": False,
+    })
+    shadow_log.setdefault("triggers", []).append(trigger)
+    # Cap a últimos 200 triggers para no crecer sin control
+    shadow_log["triggers"] = shadow_log["triggers"][-200:]
+    if not shadow_log.get("first_trigger_at"):
+        shadow_log["first_trigger_at"] = now.isoformat()
+    # Telegram rate-limit 60 min
+    last_tg = shadow_log.get("last_telegram_at", "")
+    if not last_tg or (now - datetime.fromisoformat(last_tg.replace("Z", "+00:00"))).total_seconds() >= 3600:
+        msg = (
+            f"\U0001f9ea <b>[INTRA-REEVAL SHADOW] habría vendido</b>\n"
+            f"{position.get('outcome', '?')} {fresh.get('city', '?')} PnL={pct_pnl:+.1f}%\n"
+            f"Edge entry={trigger['entry_edge_pct']:+.1f}% → ahora={fresh['edge_pct']:+.1f}%\n"
+            f"Precio entry=${trigger['entry_price']:.2f} → ahora=${trigger['cur_price']:.2f}\n"
+            f"<i>Shadow mode: no se vende. Review a los 7 días del primer trigger.</i>"
+        )
+        try:
+            send_telegram(msg)
+            shadow_log["last_telegram_at"] = now.isoformat()
+        except Exception:
+            pass
+
+
 def intra_cycle_sl_check(client):
     """Check SL/TP entre ciclos — solo protección, no compras ni re-evaluación."""
     if not sell_lock.acquire(timeout=5):
@@ -14282,18 +14562,33 @@ def intra_cycle_sl_check(client):
             )
 
         # TP dinámico: lookup our_prob de entrada por token_id
+        # También construimos _lc_by_token_intra_full con el dict completo del entry_context
         try:
             _lc_data_intra = load_trade_lifecycle_data()
-            _lc_by_token_intra = {
-                str(r.get("token_id", "") or "").strip(): float(
-                    (r.get("entry_context") or {}).get("our_prob")
-                )
-                for r in _lc_data_intra.get("records", [])
-                if str(r.get("token_id", "") or "").strip()
-                and (r.get("entry_context") or {}).get("our_prob") is not None
-            }
+            _lc_by_token_intra = {}
+            _lc_by_token_intra_full = {}
+            for r in _lc_data_intra.get("records", []):
+                tid = str(r.get("token_id", "") or "").strip()
+                if not tid:
+                    continue
+                ec = r.get("entry_context") or {}
+                if ec.get("our_prob") is not None:
+                    try:
+                        _lc_by_token_intra[tid] = float(ec["our_prob"])
+                    except (ValueError, TypeError):
+                        pass
+                _lc_by_token_intra_full[tid] = ec
         except Exception:
             _lc_by_token_intra = {}
+            _lc_by_token_intra_full = {}
+
+        # v10.6.30: estado de re-evaluación intra-ciclo (purgar cooldown por token_ids observados)
+        observed_token_ids = {p.get("asset", "") for p in observed_positions}
+        reeval_state = load_intra_reeval_state(observed_token_ids=observed_token_ids)
+        # Cache de forecasts local a esta ejecución (idéntico patrón a manage_positions)
+        forecast_cache = {}
+        now_utc = datetime.now(timezone.utc)
+        reeval_state_changed = False
 
         n_checked = 0
         n_sold = 0
@@ -14301,6 +14596,7 @@ def intra_cycle_sl_check(client):
         for p in observed_positions:
             title_full = p.get("title", "")
             asset_id = p.get("asset", "")
+            cur_price = float(p.get("curPrice", 0))
 
             pct_pnl = float(p.get("percentPnl", 0))
             n_checked += 1
@@ -14315,10 +14611,42 @@ def intra_cycle_sl_check(client):
             sell_type = None
             if pct_pnl <= STOP_LOSS_PCT:
                 sell_type = "stop_loss_intra"
-                icon, type_label = "🔻", "Stop-loss"
+                icon, type_label = "\U0001f53b", "Stop-loss"
             elif pct_pnl >= effective_tp_intra:
                 sell_type = "take_profit_intra"
-                icon, type_label = "💰", "Take-profit"
+                icon, type_label = "\U0001f4b0", "Take-profit"
+
+            # v10.6.30: re-evaluación condicional intra-ciclo (solo si master switch activo y sin SL/TP)
+            if INTRA_REEVAL_ENABLED and not sell_type:
+                entry_ctx = _lc_by_token_intra_full.get(asset_id, {})
+                entry_price_raw = entry_ctx.get("price")
+                if entry_price_raw is not None:
+                    try:
+                        entry_price = float(entry_price_raw)
+                        drift_pp = abs(cur_price - entry_price) * 100
+                        if drift_pp >= INTRA_REEVAL_PRICE_DRIFT_PP:
+                            # Cooldown check
+                            last_reeval = reeval_state["cooldown"].get(asset_id, {}).get("last_reeval_at", "")
+                            if not _within_cooldown(last_reeval, INTRA_REEVAL_COOLDOWN_MIN, now_utc):
+                                fresh = recompute_position_edge(p, forecast_cache)
+                                if fresh is not None:
+                                    reeval_state["cooldown"][asset_id] = {
+                                        "last_reeval_at": now_utc.isoformat(),
+                                        "last_edge_pct": fresh["edge_pct"],
+                                    }
+                                    reeval_state_changed = True
+                                    if fresh["edge_pct"] < INTRA_REEVAL_EDGE_THRESHOLD:
+                                        if INTRA_REEVAL_SHADOW_MODE:
+                                            # SHADOW: log + telegram (rate-limited) — NO vende
+                                            _log_shadow_intra_reeval_trigger(
+                                                reeval_state, p, entry_ctx, fresh, pct_pnl
+                                            )
+                                        else:
+                                            # REAL: marca venta como reeval_intra
+                                            sell_type = "reeval_intra"
+                                            icon, type_label = "\U0001f504", "Re-evaluación intra"
+                    except (ValueError, TypeError):
+                        pass
 
             if not sell_type:
                 continue
@@ -14396,6 +14724,10 @@ def intra_cycle_sl_check(client):
 
             except Exception as e:
                 log.error(f"[INTRA-SL] Error vendiendo {outcome} {city}: {e}")
+
+        # v10.6.30: guardar reeval_state al final (no a mitad)
+        if reeval_state_changed or INTRA_REEVAL_ENABLED:
+            save_intra_reeval_state(reeval_state)
 
         log.info(f"[INTRA-SL] Check: {n_checked} posiciones, {n_sold} vendidas")
 

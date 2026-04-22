@@ -5501,6 +5501,210 @@ def run_tests():
         and "CITY_POLICY_FILE" not in runtime_export_code,
     )
 
+    # ---- v10.6.30: intra-reeval shadow-log ----
+    print("\n v10.6.30: Intra-cycle re-eval shadow-log")
+
+    # 1. Structural checks
+    test(
+        "v10.6.30: INTRA_REEVAL_ENABLED definido",
+        "INTRA_REEVAL_ENABLED" in code,
+    )
+    test(
+        "v10.6.30: INTRA_REEVAL_SHADOW_MODE definido",
+        "INTRA_REEVAL_SHADOW_MODE" in code,
+    )
+    test(
+        "v10.6.30: INTRA_REEVAL_PRICE_DRIFT_PP definido",
+        "INTRA_REEVAL_PRICE_DRIFT_PP" in code,
+    )
+    test(
+        "v10.6.30: INTRA_REEVAL_COOLDOWN_MIN definido",
+        "INTRA_REEVAL_COOLDOWN_MIN" in code,
+    )
+    test(
+        "v10.6.30: INTRA_REEVAL_EDGE_THRESHOLD definido",
+        "INTRA_REEVAL_EDGE_THRESHOLD" in code,
+    )
+    test(
+        "v10.6.30: recompute_position_edge definida",
+        "def recompute_position_edge(" in code,
+    )
+    test(
+        "v10.6.30: load_intra_reeval_state definida",
+        "def load_intra_reeval_state(" in code,
+    )
+    test(
+        "v10.6.30: save_intra_reeval_state definida",
+        "def save_intra_reeval_state(" in code,
+    )
+    test(
+        "v10.6.30: _within_cooldown definida",
+        "def _within_cooldown(" in code,
+    )
+    test(
+        "v10.6.30: _log_shadow_intra_reeval_trigger definida",
+        "def _log_shadow_intra_reeval_trigger(" in code,
+    )
+    test(
+        "v10.6.30: maybe_run_intra_reeval_review_alert definida",
+        "def maybe_run_intra_reeval_review_alert(" in code,
+    )
+    test(
+        "v10.6.30: intra_reeval_review_alert registrada en run_alerts",
+        "maybe_run_intra_reeval_review_alert(state)" in code,
+    )
+    test(
+        "v10.6.30: INTRA_REEVAL_STATE_FILE definido",
+        'INTRA_REEVAL_STATE_FILE = _data_path("intra_reeval_state.json")' in code,
+    )
+    test(
+        "v10.6.30: intra_reeval_review_alert_sent en alerts_state default",
+        '"intra_reeval_review_alert_sent": False' in code,
+    )
+    test(
+        "v10.6.30: intra_cycle_sl_check carga reeval_state",
+        "load_intra_reeval_state(" in code and "save_intra_reeval_state(" in code,
+    )
+    test(
+        "v10.6.30: INTRA_REEVAL_ENABLED guarda intra_reeval (shadow NO vende)",
+        "INTRA_REEVAL_SHADOW_MODE" in code and "INTRA_REEVAL_ENABLED and not sell_type" in code,
+    )
+    test(
+        "v10.6.30: reeval_intra sell_type definido",
+        '"reeval_intra"' in code,
+    )
+    test(
+        "v10.6.30: manage_positions refactorizado usa recompute_position_edge",
+        "fresh = recompute_position_edge(p, forecast_cache)" in code,
+    )
+    test(
+        "v10.6.30: _lc_by_token_intra_full construido en intra_cycle_sl_check",
+        "_lc_by_token_intra_full" in code,
+    )
+
+    # 2. Functional tests — pure helpers exectuables en namespace aislado
+    print("  Funcionales intra-reeval")
+    try:
+        fd, tmp_reeval_state = tempfile.mkstemp(
+            dir=_verify_tmp_dir(),
+            prefix="_tmp_intra_reeval_state_",
+            suffix=".json",
+        )
+        os.close(fd)
+        if os.path.exists(tmp_reeval_state):
+            try:
+                os.remove(tmp_reeval_state)
+            except PermissionError:
+                pass
+
+        reeval_ns = {
+            "os": os,
+            "json": json,
+            "datetime": datetime,
+            "timezone": timezone,
+            "timedelta": timedelta,
+            "INTRA_REEVAL_STATE_FILE": tmp_reeval_state,
+            "log": types.SimpleNamespace(warning=lambda *args, **kwargs: None),
+        }
+        for fn_name in ["load_intra_reeval_state", "save_intra_reeval_state", "_within_cooldown"]:
+            exec(get_function_source(module_ast, code_lines, fn_name), reeval_ns)
+
+        # Test: state roundtrip
+        state0 = reeval_ns["load_intra_reeval_state"]()
+        state0["cooldown"]["tok1"] = {"last_reeval_at": "2026-04-22T10:00:00+00:00", "last_edge_pct": -5.2}
+        state0["shadow_log"]["triggers"].append({"ts": "2026-04-22T10:00:00+00:00", "city": "Atlanta"})
+        state0["shadow_log"]["first_trigger_at"] = "2026-04-22T10:00:00+00:00"
+        reeval_ns["save_intra_reeval_state"](state0)
+
+        state1 = reeval_ns["load_intra_reeval_state"]()
+        test(
+            "test_intra_reeval_state_roundtrip: cooldown preservado",
+            "tok1" in state1["cooldown"] and state1["cooldown"]["tok1"]["last_edge_pct"] == -5.2,
+            str(state1),
+        )
+        test(
+            "test_intra_reeval_state_roundtrip: trigger preservado",
+            len(state1["shadow_log"]["triggers"]) == 1 and state1["shadow_log"]["triggers"][0]["city"] == "Atlanta",
+            str(state1),
+        )
+
+        # Test: purga de cooldown elimina entradas sin token observado
+        state2 = reeval_ns["load_intra_reeval_state"](observed_token_ids={"tok_other"})
+        test(
+            "test_intra_reeval_state_roundtrip: purga cooldown elimina tok1",
+            "tok1" not in state2["cooldown"],
+            str(state2["cooldown"]),
+        )
+
+        if os.path.exists(tmp_reeval_state):
+            try:
+                os.remove(tmp_reeval_state)
+            except OSError:
+                pass
+
+    except Exception as e:
+        test("test_intra_reeval_state_roundtrip funcional ejecuta", False, str(e))
+
+    # Test: _within_cooldown
+    try:
+        cooldown_ns = {
+            "datetime": datetime,
+            "timezone": timezone,
+        }
+        exec(get_function_source(module_ast, code_lines, "_within_cooldown"), cooldown_ns)
+        now_utc = datetime.now(timezone.utc)
+        # Inside cooldown (5 minutes ago, cooldown 80 min)
+        recent = (now_utc - timedelta(minutes=5)).isoformat()
+        test(
+            "test_intra_reeval_cooldown: dentro de ventana bloquea",
+            cooldown_ns["_within_cooldown"](recent, 80, now_utc) is True,
+        )
+        # Outside cooldown (90 minutes ago)
+        old = (now_utc - timedelta(minutes=90)).isoformat()
+        test(
+            "test_intra_reeval_cooldown: fuera de ventana permite",
+            cooldown_ns["_within_cooldown"](old, 80, now_utc) is False,
+        )
+        # Empty last_reeval
+        test(
+            "test_intra_reeval_cooldown: vacio no bloquea",
+            cooldown_ns["_within_cooldown"]("", 80, now_utc) is False,
+        )
+    except Exception as e:
+        test("test_intra_reeval_cooldown_blocks_repeat funcional ejecuta", False, str(e))
+
+    # Test: recompute_position_edge parity guard (returns None when no station)
+    try:
+        rpe_ns = {
+            "os": os,
+            "json": json,
+            "re": re,
+            "math": __import__("math"),
+            "datetime": datetime,
+            "timezone": timezone,
+            "date": date,
+            "RESOLUTION_STATIONS": {},  # vacío: forzar None return
+            "get_forecast": lambda lat, lon: {},
+            "estimate_prob_with_city": lambda *a, **kw: 0.5,
+        }
+        for fn_name in ["parse_temperature_question", "date_text_to_iso", "recompute_position_edge"]:
+            exec(get_function_source(module_ast, code_lines, fn_name), rpe_ns)
+
+        # Sin station → debe devolver None (no re-evaluable)
+        pos_no_station = {
+            "title": "Will the temperature in Atlanta reach 25°C on April 30, 2026?",
+            "outcome": "YES",
+            "curPrice": "0.45",
+        }
+        result_none = rpe_ns["recompute_position_edge"](pos_no_station, {})
+        test(
+            "test_recompute_position_edge_parity: sin station devuelve None",
+            result_none is None,
+            str(result_none),
+        )
+    except Exception as e:
+        test("test_recompute_position_edge_parity funcional ejecuta", False, str(e))
+
     # ---- Resultado ----
     print(f"\n{'='*50}")
     total = passed + failed

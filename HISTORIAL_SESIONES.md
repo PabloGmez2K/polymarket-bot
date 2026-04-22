@@ -2980,6 +2980,54 @@ Opus verificó Polymarket resolution sources vía WebFetch y confirmó NOAA glob
 
 **Verificación:** `verify_before_deploy.py` 755/755 (9 tests nuevos).
 
+## Sesión 224 — INTRA-REEVAL shadow-log (22 abr 2026)
+
+**Tipo:** Explícita | **Agente:** Opus (diseño) + Sonnet (implementación)
+
+### Contexto
+
+Hoy el monitor intra-ciclo (cada 20 min) solo comprueba SL/TP. Si una posición pasa de +20% a -50% entre ciclos principales (4h) porque el edge desapareció pero no hay cruce de umbrales, solo lo detecta el próximo ciclo principal. Histórico: 1 caso real claro (Atlanta YES +25% → -56% por SL). Plan: añadir re-evaluación condicional en modo **shadow-log** primera semana — solo alerta, no vende, alimenta un review one-shot.
+
+### Diseño (Opus)
+
+- **Un disparador**: price drift ≥ `INTRA_REEVAL_PRICE_DRIFT_PP=10.0` pp entre `cur_price` y `entry_context.price`.
+- **Cooldown** 80 min por posición → aprovecha el cache HTTP de 15 min de `get_forecast`, ~40-75% NOAA extra sobre baseline.
+- **Edge threshold** -3% (idéntico al ciclo principal — consistencia).
+- **Shadow mode primera semana**: si edge<-3% → log + Telegram compacto (rate-limited 1/h), NO vende.
+- **Alerta one-shot** 7 días tras primer trigger: resumen agregado + prompt para sesión Opus/Sonnet de review.
+
+### Cambios (Sonnet)
+
+- `bot.py:369-373`: 5 ENV vars nuevas (`INTRA_REEVAL_ENABLED/SHADOW_MODE/PRICE_DRIFT_PP/COOLDOWN_MIN/EDGE_THRESHOLD`), todas con defaults seguros (ENABLED=0).
+- `bot.py:565`: `INTRA_REEVAL_STATE_FILE` → `data/intra_reeval_state.json`.
+- `bot.py:932`: `intra_reeval_review_alert_sent` añadido al default de `alerts_state`.
+- `bot.py:1494`: `load_intra_reeval_state()` / `save_intra_reeval_state()` — purga cooldown por tokens no observados.
+- `bot.py:14006`: `recompute_position_edge()` — helper puro extraído del CHECK 3 de `manage_positions`. Esta última ahora llama al helper (refactor byte-compatible).
+- `bot.py:14471`: `_log_shadow_intra_reeval_trigger()` — registra trigger + Telegram rate-limited a 60 min.
+- `bot.py:14619-14649`: bloque `INTRA_REEVAL_ENABLED` dentro de `intra_cycle_sl_check`, después de SL/TP. Solo actúa si drift≥10pp + cooldown OK + edge<-3%.
+- `bot.py:7917`: `maybe_run_intra_reeval_review_alert()` — one-shot 7 días tras primer trigger, wired en `run_alerts` (línea 4237).
+- `verify_before_deploy.py`: bloque v10.6.30 — 19 checks estructurales + 9 tests funcionales (roundtrip, cooldown, parity del helper).
+
+### Verificación
+
+`verify_before_deploy.py` → **795/795** tests OK.
+
+### Railway — requiere acción manual
+
+Añadir a producción (defaults seguros, feature off por defecto):
+```
+INTRA_REEVAL_ENABLED=1
+INTRA_REEVAL_SHADOW_MODE=1
+```
+(El resto de vars funcionan con default.) Flip a `SHADOW_MODE=0` solo tras review one-shot a los 7 días.
+
+### Observabilidad
+
+- Telegram compacto por trigger (rate-limit 1/h): `🧪 [INTRA-REEVAL SHADOW] habría vendido | ...`
+- Alerta review one-shot a los 7 días del primer trigger con: totales, top 3 ciudades, PnL medio/mediano en trigger, fresh_edge_pct, distribución por banda. Incluye prompt para sesión de decisión (promocionar a real / ajustar umbrales / mantener).
+
+---
+
 ## Sesión 223 — INTRA_SL_INTERVAL 60→20 min (22 abr 2026)
 
 **Tipo:** Explícita | **Agente:** Sonnet
