@@ -1,6 +1,12 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
 
+**Última actualización:** 23 de abril de 2026 (Sesión 230 — validación live de SL retrospective en Railway)
+**Sesión 230 (23 abr 2026, Codex):** cierre corto de validación live tras deploy manual de Pablo. Sin tocar trading core, NOAA, scheduler, whitelist ni reglas de entrada/salida, se confirma en shell del contenedor `polymarket-bot` que `tools/sl_retrospective.py` y `tools/daily_position_briefing.py` funcionan contra `/app/data/trade_lifecycle.json` real de Railway. El dry-run live ya no depende del fallback local y muestra datos más frescos que el checkout local: `SL Retro` sigue en `5/16` resueltos (`3` falsas salidas por SL, `2` SL correctos), mientras el briefing ya ve `3` cierres `stop_loss_intra` en las últimas 24h y una posición nueva `Seoul 21°C Apr24 YES`.
+- **Validación live cerrada:** el deploy quedó bien; los scripts leen el volume real, formatean bien el mensaje y están listos para dispararse por ciclo sin esperar cambios de código.
+- **Lectura estratégica nueva:** `trade_lifecycle` deja de ser solo observabilidad y pasa a ser la hipótesis más concreta y medible sobre el problema de PnL de las últimas semanas: el bot no solo puede estar entrando mal, también puede estar cortando demasiado pronto posiciones que luego sí resolvían bien.
+- **Siguiente checkpoint operativo:** esperar el próximo ciclo natural de observabilidad para ver en logs el hook real (`sl retrospective: OK`) y, después, acumular muestra hasta `n>=8` SLs resueltos para sacar un veredicto preliminar con suficiente señal.
+
 **Última actualización:** 23 de abril de 2026 (Sesión 229 — SL retrospective más claro: con SL vs sin SL)
 **Sesión 229 (23 abr 2026, Codex):** ajuste corto sobre `tools/sl_retrospective.py` para que el mensaje deje de ser ambiguo. Sin tocar trading core, NOAA, scheduler, whitelist ni reglas de entrada/salida, el retrospective pasa de hablar en términos `RIGHT/WRONG` a mostrar explícitamente `con SL` vs `sin SL (mejor precio visto después)` por trade y en agregado. `verify_before_deploy.py` sigue pasando **817/817**.
 - **Lectura humana nueva:** `falsas salidas por SL` y `SL correctos`, en vez de “tesis correcta / SL correcto”.
