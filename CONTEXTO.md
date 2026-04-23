@@ -1,6 +1,11 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
 
+**Última actualización:** 23 de abril de 2026 (Sesión 231 — logging de skip reasons para SL retrospective / daily briefing)
+**Sesión 231 (23 abr 2026, Codex):** patch mínimo de observabilidad sobre `bot.py` tras ver que el ciclo de las `20:00 UTC` ejecutó `run_observability_alerts()` pero no dejó rastro de `sl retrospective: OK`. Sin tocar trading core, NOAA, scheduler, whitelist ni reglas de entrada/salida, `maybe_run_sl_retrospective()` y `maybe_run_daily_briefing()` ahora loggean explícitamente por qué se saltan (`feature flag off`, archivo faltante, fuera de ventana horaria, ya enviado hoy, o ausencia de nuevos `stop_loss` / recheck no vencido). `python tools/check_python_syntax.py bot.py` y `python verify_before_deploy.py` siguen en verde: **817/817**.
+- **Objetivo del patch:** cerrar el gap entre “el script funciona manualmente en Railway shell” y “el hook automático no deja huella en logs”.
+- **Próxima lectura esperada en Railway:** el siguiente ciclo ya no debería ser silencioso; debería dejar un `sl retrospective: OK` o un `sl retrospective: skip (...)` con causa concreta.
+
 **Última actualización:** 23 de abril de 2026 (Sesión 230 — validación live de SL retrospective en Railway)
 **Sesión 230 (23 abr 2026, Codex):** cierre corto de validación live tras deploy manual de Pablo. Sin tocar trading core, NOAA, scheduler, whitelist ni reglas de entrada/salida, se confirma en shell del contenedor `polymarket-bot` que `tools/sl_retrospective.py` y `tools/daily_position_briefing.py` funcionan contra `/app/data/trade_lifecycle.json` real de Railway. El dry-run live ya no depende del fallback local y muestra datos más frescos que el checkout local: `SL Retro` sigue en `5/16` resueltos (`3` falsas salidas por SL, `2` SL correctos), mientras el briefing ya ve `3` cierres `stop_loss_intra` en las últimas 24h y una posición nueva `Seoul 21°C Apr24 YES`.
 - **Validación live cerrada:** el deploy quedó bien; los scripts leen el volume real, formatean bien el mensaje y están listos para dispararse por ciclo sin esperar cambios de código.

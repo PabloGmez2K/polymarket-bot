@@ -7325,14 +7325,20 @@ def maybe_run_city_intelligence_runtime_summary(state, now=None):
 
 def maybe_run_sl_retrospective(state):
     """Analiza SLs pasados y reporta si el bot era correcto al ser stoppeado."""
+    logger = globals().get("log")
     if not SL_RETRO_ENABLED:
+        if logger:
+            logger.info("sl retrospective: skip (SL_RETRO_ENABLED=0)")
         return False
     if not os.path.exists(TRADE_LIFECYCLE_FILE):
+        if logger:
+            logger.info(f"sl retrospective: skip (missing lifecycle file: {TRADE_LIFECYCLE_FILE})")
         return False
     if not os.path.exists(SL_RETROSPECTIVE_SCRIPT):
+        if logger:
+            logger.info(f"sl retrospective: skip (missing script: {SL_RETROSPECTIVE_SCRIPT})")
         return False
 
-    logger = globals().get("log")
     now = datetime.now(timezone.utc)
 
     lifecycle_data = load_trade_lifecycle_data()
@@ -7384,6 +7390,13 @@ def maybe_run_sl_retrospective(state):
 
     periodic_recheck_due = last_run_at is None or (now - last_run_at) >= timedelta(hours=24)
     if not has_new_stop_loss and not periodic_recheck_due:
+        if logger:
+            logger.info(
+                "sl retrospective: skip "
+                f"(no new stop_loss since last_run_at={last_run_raw or 'never'}; "
+                f"periodic_recheck_due={periodic_recheck_due}; "
+                f"tracked_stop_losses={len(stop_loss_closes)})"
+            )
         return False
 
     command = [
@@ -7421,20 +7434,31 @@ def maybe_run_sl_retrospective(state):
 
 def maybe_run_daily_briefing(state):
     """Briefing diario de posiciones abiertas y estado del sistema."""
+    logger = globals().get("log")
     if not DAILY_BRIEFING_ENABLED:
+        if logger:
+            logger.info("daily briefing: skip (DAILY_BRIEFING_ENABLED=0)")
         return False
     if not os.path.exists(TRADE_LIFECYCLE_FILE):
+        if logger:
+            logger.info(f"daily briefing: skip (missing lifecycle file: {TRADE_LIFECYCLE_FILE})")
         return False
     if not os.path.exists(DAILY_POSITION_BRIEFING_SCRIPT):
+        if logger:
+            logger.info(f"daily briefing: skip (missing script: {DAILY_POSITION_BRIEFING_SCRIPT})")
         return False
 
     now = datetime.now(timezone.utc)
     target_hour = DAILY_BRIEFING_HOUR_UTC % 24
     hour_delta = min((now.hour - target_hour) % 24, (target_hour - now.hour) % 24)
     if hour_delta > 1:
+        if logger:
+            logger.info(
+                "daily briefing: skip "
+                f"(outside hour window: now_hour={now.hour} target_hour={target_hour} delta={hour_delta})"
+            )
         return False
 
-    logger = globals().get("log")
     briefing_state = {}
     if os.path.exists(DAILY_BRIEFING_STATE_FILE):
         try:
@@ -7447,6 +7471,8 @@ def maybe_run_daily_briefing(state):
 
     today = now.date().isoformat()
     if briefing_state.get("last_sent_date") == today:
+        if logger:
+            logger.info(f"daily briefing: skip (already sent today: {today})")
         return False
 
     command = [
