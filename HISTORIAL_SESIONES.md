@@ -31,6 +31,9 @@ Comandos útiles:
 
 | Fecha | Tipo | Referencia | Commits clave | Resumen |
 |------|------|------------|---------------|---------|
+| 2026-04-23 | Explícita | Sesión 228 | SL retrospective + daily briefing | Codex añade dos herramientas observables sin tocar trading core, NOAA, scheduler, whitelist ni reglas de entrada/salida: `tools/sl_retrospective.py` para medir si los `stop_loss` cortaron posiciones que luego resultaron correctas, y `tools/daily_position_briefing.py` para resumir abiertas, actividad 24h y estado del retro score por Telegram. `bot.py` integra ambos hooks al final de `run_observability_alerts()` con env vars `SL_RETRO_ENABLED`, `DAILY_BRIEFING_ENABLED` y `DAILY_BRIEFING_HOUR_UTC`; `verify_before_deploy.py` suma 7 checks y pasa 817/817. Dry-run local usa fallback a `data/runtime_import/trade_lifecycle.json` porque el repo no trae `data/trade_lifecycle.json` canónico: hoy ve 14 SLs, 5/16 resueltos (3 RIGHT, 2 WRONG) y 13 posiciones abiertas. |
+| 2026-04-23 | Explícita | Sesión 227 | Cierre de trazabilidad `INTRA_REEVAL` live | Cierre corto de contexto y trazabilidad, sin tocar `bot.py`, trading core, NOAA, scheduler, sizing, whitelist ni reglas de entrada/salida. Se corrige el drift documental sobre `INTRA_REEVAL`: el snapshot live de Railway confirma que `INTRA_REEVAL_ENABLED=1` e `INTRA_REEVAL_SHADOW_MODE=1` ya están cargadas en producción y que el contenedor de `polymarket-bot` fue reiniciado/actualizado correctamente. La feature queda activa en modo `shadow-log` con defaults implícitos (`PRICE_DRIFT_PP=10`, `COOLDOWN_MIN=80`, `EDGE_THRESHOLD=-3`) y el próximo hito real pasa a ser el one-shot `Review INTRA-REEVAL` 7 días después del primer trigger, no la activación manual. |
+| 2026-04-23 | Explícita | Sesión 226 | v10.6.31 gate LOW+exact + TP dinámico por precio | Sonnet+Opus analizan trades cerrados Apr 9-23 (n=18): WR=53% pero PnL casi breakeven (+$0.21) por ratio adverso avg_win=$0.61 vs avg_loss=$0.76; el bucket LOW (<35¢) sale claramente dañado (n=2, WR=0%, PnL=-$2.57) por eventos exact baratos con gap risk. Se implementa `v10.6.31`: `BLOCK_LOW_EXACT_ENTRIES=1` bloquea entradas `exact` con `mkt_price<0.35` y `effective_tp_pct(entry_price, our_prob)` introduce TP dinámico por precio (LOW≥60%, MID=40%, HIGH≥80%) reutilizado también en `intra_cycle_sl_check`. El step de abs SL queda diferido hasta n≥30 post-gate. `verify_before_deploy.py` pasa 810/810. |
 | 2026-04-23 | Explícita | Sesión 225 | Plan operativo transición City Intelligence/Phase5 | Codex convierte la review Opus de la sesión 224 en plan operativo ejecutable y empieza la Fase 1 (`silenciar → observar`) sin tocar `bot.py`, trading core, NOAA, scheduler core, sizing, whitelist, reglas de entrada/salida ni `city_policy_state.json`. Se crean `docs/city-intelligence-phase5-operational-transition-plan-2026-04-23.md` y `data/service_transition_followup.json`; `tools/city_intelligence_daily_summary.py` añade un bloque `Seguimiento programado` al summary diario existente, con checkpoints UTC 2026-04-24, 2026-04-28, 2026-05-01 y 2026-05-07. En Railway se valida que `polymarket-bot`, `city-intelligence` y `phase5-visibility` siguen `SUCCESS`; se elimina `TELEGRAM_TOKEN` solo de `city-intelligence` y `phase5-visibility`, se reinician ambos servicios legacy para cargar el entorno silenciado, y `polymarket-bot` conserva su token como único emisor canónico. Dry-run del daily summary con salidas temporales OK; el dry-run sobre estado real quedó bloqueado por el lock Windows ya conocido. Siguiente checkpoint: 2026-04-24, confirmar que no hay doble emisor y que el bridge entrega el aviso útil. |
 | 2026-04-23 | Explícita | Sesión 224 | Review Opus city-intelligence + phase5-visibility | Revisión estratégica/operacional read-only de ambos servicios, sin tocar `bot.py`, trading core, NOAA, scheduler, sizing, whitelist, reglas de entrada/salida ni `city_policy_state.json`. Entrega completa en `docs/Sesion Opus.md`. **city-intelligence:** mantener como dominio analítico (census, enrichment, cross, tracker, ledger, gate, daily summary, signals crosscheck), apagar como servicio Railway separado porque el puente 222 ya corre el pipeline dentro de `polymarket-bot` con runtime real mientras el servicio remoto vive en fail-closed por `/app/data/runtime_import` ausente. **phase5-visibility:** congelar como legacy y apagar el servicio — kill criteria ya cumplidos (strategic review 2026-04-17 `pausar`, 11 coincidencias Shanghai+Chicago sin decisión nueva, tracker/alerta/comparador absorbidos por `city-intelligence`). Plan por fases reversible (silenciar Telegram del servicio separado → validar 5–7 días que el bridge cubre señal → `pause → stop`), kill criteria explícitos y 10 acciones concretas. El prompt original (`docs/claude-opus-prompt-city-intelligence-phase5-service-review-2026-04-22.md`) se elimina al cierre. Siguiente paso: Codex convierte la review en plan operativo ejecutable y empieza por silenciar alertas del servicio separado `city-intelligence`. |
 | 2026-04-22 | Explícita | Sesión 222 | City Intelligence runtime bridge in `polymarket-bot` | Se aplica la recomendación de arquitectura tras la alarma: mantener `city-intelligence` separado como capa analítica, pero mover el readout diario de runtime al servicio que sí ve el volumen real del bot. `bot.py` añade un puente read-only one-shot diario (`maybe_run_city_intelligence_runtime_summary`) gated por env, que exporta runtime, regenera effective view, pipeline dry-run, preflight operacional y daily summary sin tocar trading, NOAA, whitelist, sizing ni `city_policy_state.json`. Se crea `tools/runtime_import_local_export.py` para copiar desde `DATA_DIR` a `DATA_DIR/runtime_import`, exigir `shadow_city_tracking`, `audit` y `city_policy_state`, y escribir manifest + snapshot de env. `verify_before_deploy.py` suma checks v10.6.31. Validación: sintaxis OK y export local OK; el preflight completo queda bloqueado solo por 2 asserts heredados de `INTRA_SL_INTERVAL default 60`, porque el worktree ya traía `INTRA_SL_INTERVAL=20`. |
@@ -3205,3 +3208,58 @@ Sesión pre-mañana con tiempo disponible tras las sesiones 211-217 del mismo d�
 
 ### Verificación
 `verify_before_deploy.py` 763/763 (v10.6.29: 6 tests nuevos Busan; v10.6.30: 2 tests nuevos Dallas)
+
+## Sesión 226 — v10.6.31 gate LOW+exact + TP dinámico por precio (23 abr 2026)
+
+**Tipo:** Explícita | **Agente:** Sonnet+Opus
+
+### Contexto
+
+Análisis de posiciones cerradas Apr 9-23 (`n=18`) con una lectura incómoda pero clara: el sistema sostenía `WR=53%` y aun así quedaba casi en breakeven (`PnL=+$0.21`) por ratio adverso `avg_win=$0.61` vs `avg_loss=$0.76`. El bucket LOW (`mkt_price<0.35`) concentraba el riesgo peor: `n=2`, `WR=0%`, `PnL=-$2.57`, con el caso London Apr-19 @0.235 → 0.01 como ejemplo de gap risk catastrófico en eventos binarios baratos.
+
+### Cambios
+
+- **Gate LOW+exact:** `BLOCK_LOW_EXACT_ENTRIES=1` (default on) bloquea entradas `condition=exact` con `mkt_price<0.35`.
+- **Nuevo skip reason:** `low_exact_gap_risk`, para dejar visible que el rechazo viene por riesgo estructural de gap y no por falta de edge.
+- **TP dinámico por precio:** `effective_tp_pct(entry_price, our_prob)` preserva el TP de alta convicción y añade floors por precio:
+  - LOW `<0.35` → `TP>=60%`
+  - MID `0.35..0.65` → `TP=40%`
+  - HIGH `>=0.65` → `TP>=80%`
+- **Reutilización coherente:** el TP dinámico se usa también en `intra_cycle_sl_check`.
+- **Step 3 diferido:** el stop-loss absoluto queda pospuesto hasta acumular `n>=30` trades post-gate, porque Opus concluye que sería más leniente precisamente en LOW/MID y no ataca el problema raíz.
+
+### Verificación
+
+`verify_before_deploy.py` → **810/810**.
+
+### Siguiente acción
+
+Observar el comportamiento live en Railway y mantener el checkpoint del canary `condition_filtered` para el `2026-04-28`.
+
+## Sesión 227 — cierre de trazabilidad: INTRA_REEVAL live en Railway shadow (23 abr 2026)
+
+**Tipo:** Explícita | **Agente:** Codex
+
+### Contexto
+
+Durante el cierre de sesión aparece una contradicción entre el contexto histórico y el estado live: `CONTEXTO.md` seguía diciendo que `INTRA_REEVAL` requería activación manual en Railway, pero el snapshot actual de variables compartido por Pablo ya mostraba `INTRA_REEVAL_ENABLED=1` e `INTRA_REEVAL_SHADOW_MODE=1`.
+
+### Acciones
+
+- Se valida documentalmente que el pendiente de la sesión 224 quedó resuelto en live.
+- Se fija que el contenedor de `polymarket-bot` ya fue reiniciado/actualizado, así que la configuración está cargada en el proceso real.
+- Se sincronizan `CONTEXTO.md`, `HISTORIAL_SESIONES.md` y `agent_events.jsonl` para que el repo no siga contando “pendiente” lo que ya está activo.
+
+### Estado live resultante
+
+- `INTRA_REEVAL_ENABLED=1`
+- `INTRA_REEVAL_SHADOW_MODE=1`
+- Defaults implícitos vigentes:
+  - `INTRA_REEVAL_PRICE_DRIFT_PP=10.0`
+  - `INTRA_REEVAL_COOLDOWN_MIN=80`
+  - `INTRA_REEVAL_EDGE_THRESHOLD=-3.0`
+- La feature queda activa en modo `shadow-log`: observa, registra y alerta, pero no vende.
+
+### Próximo hito
+
+El siguiente evento real ya no es “activar Railway”, sino esperar el one-shot `Review INTRA-REEVAL` 7 días después del primer trigger shadow persistido en `data/intra_reeval_state.json`.

@@ -152,6 +152,9 @@ SIGNALS_CROSSCHECK_NOTIFY_THRESHOLD = int(os.getenv("SIGNALS_CROSSCHECK_NOTIFY_T
 # Default 8 → ciclo 08:00 UTC = 9h España (CET/invierno) / 10h España (CEST/verano).
 # Para 9h exactas en verano CEST añadir slot 7 a SCHEDULE_HOURS_UTC en Railway.
 DAILY_SUMMARY_HOUR_UTC = int(os.getenv("DAILY_SUMMARY_HOUR_UTC", "8"))
+SL_RETRO_ENABLED = os.getenv("SL_RETRO_ENABLED", "1").lower() in ("1", "true", "yes", "on")
+DAILY_BRIEFING_ENABLED = os.getenv("DAILY_BRIEFING_ENABLED", "1").lower() in ("1", "true", "yes", "on")
+DAILY_BRIEFING_HOUR_UTC = int(os.getenv("DAILY_BRIEFING_HOUR_UTC", "8"))
 # Cutoff de stats por ciudad: "Dallas=2026-04-06,Chicago=2026-03-01"
 # Trades cerrados ANTES de la fecha indicada se ignoran en get_city_accuracy().
 CITY_STATS_CUTOFF: dict[str, str] = {}
@@ -597,6 +600,18 @@ SIGNALS_CROSSCHECK_DAILY_SUMMARY_SCRIPT = os.path.join(
     "tools",
     "signals_crosscheck_daily_summary.py",
 )
+SL_RETROSPECTIVE_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "tools",
+    "sl_retrospective.py",
+)
+DAILY_POSITION_BRIEFING_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "tools",
+    "daily_position_briefing.py",
+)
+SL_RETROSPECTIVE_STATE_FILE = _data_path("sl_retrospective_state.json")
+DAILY_BRIEFING_STATE_FILE = _data_path("daily_briefing_state.json")
 CITY_INTELLIGENCE_RUNTIME_EXPORT_SCRIPT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "tools",
@@ -4268,6 +4283,22 @@ def run_observability_alerts():
         if logger:
             logger.warning(f"intra reeval review alert: fallo ({e})")
 
+    try:
+        if maybe_run_sl_retrospective(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"sl retrospective: fallo ({e})")
+
+    try:
+        if maybe_run_daily_briefing(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"daily briefing: fallo ({e})")
+
     if changed:
         save_alerts_state(state)
 
@@ -7289,6 +7320,167 @@ def maybe_run_city_intelligence_runtime_summary(state, now=None):
     state["city_intelligence_runtime_summary_last_date"] = today
     if logger:
         logger.info("city-intelligence runtime bridge: OK")
+    return True
+
+
+def maybe_run_sl_retrospective(state):
+    """Analiza SLs pasados y reporta si el bot era correcto al ser stoppeado."""
+    if not SL_RETRO_ENABLED:
+        return False
+    if not os.path.exists(TRADE_LIFECYCLE_FILE):
+        return False
+    if not os.path.exists(SL_RETROSPECTIVE_SCRIPT):
+        return False
+
+    logger = globals().get("log")
+    now = datetime.now(timezone.utc)
+
+    lifecycle_data = load_trade_lifecycle_data()
+    records = lifecycle_data.get("records", []) if isinstance(lifecycle_data, dict) else []
+    stop_loss_closes = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        close_context = record.get("close_context") or {}
+        if close_context.get("close_reason") != "stop_loss":
+            continue
+        closed_at = record.get("closed_at")
+        if closed_at:
+            stop_loss_closes.append(closed_at)
+
+    retrospective_state = {}
+    if os.path.exists(SL_RETROSPECTIVE_STATE_FILE):
+        try:
+            with open(SL_RETROSPECTIVE_STATE_FILE, "r", encoding="utf-8-sig") as fh:
+                retrospective_state = json.load(fh)
+        except Exception as exc:
+            if logger:
+                logger.warning(f"sl retrospective: no pude leer state ({exc})")
+            retrospective_state = {}
+
+    last_run_raw = retrospective_state.get("last_run_at", "")
+    try:
+        last_run_at = datetime.fromisoformat(last_run_raw) if last_run_raw else None
+    except Exception:
+        last_run_at = None
+    if last_run_at and last_run_at.tzinfo is None:
+        last_run_at = last_run_at.replace(tzinfo=timezone.utc)
+    elif last_run_at:
+        last_run_at = last_run_at.astimezone(timezone.utc)
+
+    has_new_stop_loss = False
+    for closed_at_raw in stop_loss_closes:
+        try:
+            closed_at = datetime.fromisoformat(str(closed_at_raw).replace("Z", "+00:00"))
+        except Exception:
+            continue
+        if closed_at.tzinfo is None:
+            closed_at = closed_at.replace(tzinfo=timezone.utc)
+        else:
+            closed_at = closed_at.astimezone(timezone.utc)
+        if last_run_at is None or closed_at > last_run_at:
+            has_new_stop_loss = True
+            break
+
+    periodic_recheck_due = last_run_at is None or (now - last_run_at) >= timedelta(hours=24)
+    if not has_new_stop_loss and not periodic_recheck_due:
+        return False
+
+    command = [
+        sys.executable,
+        SL_RETROSPECTIVE_SCRIPT,
+        "--lifecycle-file",
+        TRADE_LIFECYCLE_FILE,
+        "--state-file",
+        SL_RETROSPECTIVE_STATE_FILE,
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=False,
+        )
+    except Exception as exc:
+        if logger:
+            logger.warning(f"sl retrospective: fallo ejecutando script ({exc})")
+        return False
+
+    if result.returncode != 0:
+        if logger:
+            detail = (result.stderr or result.stdout or "sin detalle").strip()
+            logger.warning(f"sl retrospective: fallo ({detail[:500]})")
+        return False
+
+    if logger:
+        logger.info("sl retrospective: OK")
+    return True
+
+
+def maybe_run_daily_briefing(state):
+    """Briefing diario de posiciones abiertas y estado del sistema."""
+    if not DAILY_BRIEFING_ENABLED:
+        return False
+    if not os.path.exists(TRADE_LIFECYCLE_FILE):
+        return False
+    if not os.path.exists(DAILY_POSITION_BRIEFING_SCRIPT):
+        return False
+
+    now = datetime.now(timezone.utc)
+    target_hour = DAILY_BRIEFING_HOUR_UTC % 24
+    hour_delta = min((now.hour - target_hour) % 24, (target_hour - now.hour) % 24)
+    if hour_delta > 1:
+        return False
+
+    logger = globals().get("log")
+    briefing_state = {}
+    if os.path.exists(DAILY_BRIEFING_STATE_FILE):
+        try:
+            with open(DAILY_BRIEFING_STATE_FILE, "r", encoding="utf-8-sig") as fh:
+                briefing_state = json.load(fh)
+        except Exception as exc:
+            if logger:
+                logger.warning(f"daily briefing: no pude leer state ({exc})")
+            briefing_state = {}
+
+    today = now.date().isoformat()
+    if briefing_state.get("last_sent_date") == today:
+        return False
+
+    command = [
+        sys.executable,
+        DAILY_POSITION_BRIEFING_SCRIPT,
+        "--lifecycle-file",
+        TRADE_LIFECYCLE_FILE,
+        "--sl-state-file",
+        SL_RETROSPECTIVE_STATE_FILE,
+        "--briefing-state-file",
+        DAILY_BRIEFING_STATE_FILE,
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=False,
+        )
+    except Exception as exc:
+        if logger:
+            logger.warning(f"daily briefing: fallo ejecutando script ({exc})")
+        return False
+
+    if result.returncode != 0:
+        if logger:
+            detail = (result.stderr or result.stdout or "sin detalle").strip()
+            logger.warning(f"daily briefing: fallo ({detail[:500]})")
+        return False
+
+    if logger:
+        logger.info("daily briefing: OK")
     return True
 
 

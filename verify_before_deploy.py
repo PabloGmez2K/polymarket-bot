@@ -19,6 +19,7 @@ import sys
 import os
 import ast
 import math
+import py_compile
 import re
 import builtins
 import types
@@ -5189,6 +5190,58 @@ def run_tests():
     test(
         "v10.6.16: tools/condition_reopen_monitor.py existe",
         os.path.exists(os.path.join(os.path.dirname(__file__), "tools", "condition_reopen_monitor.py")),
+    )
+
+    # ---- v10.6.32: SL retrospective + daily briefing ----
+    sl_retro_script = os.path.join(os.path.dirname(__file__), "tools", "sl_retrospective.py")
+    daily_briefing_script = os.path.join(os.path.dirname(__file__), "tools", "daily_position_briefing.py")
+    sl_retro_compiles = False
+    daily_briefing_compiles = False
+    sl_retro_detail = ""
+    daily_briefing_detail = ""
+    if os.path.exists(sl_retro_script):
+        try:
+            py_compile.compile(sl_retro_script, doraise=True)
+            sl_retro_compiles = True
+        except Exception as exc:
+            sl_retro_detail = str(exc)
+    if os.path.exists(daily_briefing_script):
+        try:
+            py_compile.compile(daily_briefing_script, doraise=True)
+            daily_briefing_compiles = True
+        except Exception as exc:
+            daily_briefing_detail = str(exc)
+    test(
+        "v10.6.32: tools/sl_retrospective.py existe y compila",
+        os.path.exists(sl_retro_script) and sl_retro_compiles,
+        sl_retro_detail,
+    )
+    test(
+        "v10.6.32: tools/daily_position_briefing.py existe y compila",
+        os.path.exists(daily_briefing_script) and daily_briefing_compiles,
+        daily_briefing_detail,
+    )
+    test(
+        "v10.6.32: maybe_run_sl_retrospective definida",
+        "def maybe_run_sl_retrospective(" in code,
+    )
+    test(
+        "v10.6.32: maybe_run_daily_briefing definida",
+        "def maybe_run_daily_briefing(" in code,
+    )
+    test(
+        "v10.6.32: env vars SL retro + daily briefing definidas",
+        'SL_RETRO_ENABLED = os.getenv("SL_RETRO_ENABLED"' in code
+        and 'DAILY_BRIEFING_ENABLED = os.getenv("DAILY_BRIEFING_ENABLED"' in code
+        and 'DAILY_BRIEFING_HOUR_UTC = int(os.getenv("DAILY_BRIEFING_HOUR_UTC"' in code,
+    )
+    test(
+        "v10.6.32: maybe_run_sl_retrospective integrada en run_observability_alerts",
+        "maybe_run_sl_retrospective(state)" in code,
+    )
+    test(
+        "v10.6.32: maybe_run_daily_briefing integrada en run_observability_alerts",
+        "maybe_run_daily_briefing(state)" in code,
     )
 
     # ---- v10.6.17: Austin canary onboarding ----
