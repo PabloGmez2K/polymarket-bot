@@ -1,7 +1,12 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
 
-
+**Última actualización:** 23 de abril de 2026 (Sesión 226 — v10.6.31 gate LOW+exact + TP dinámico por precio)
+**Sesión 226 (23 abr 2026, Sonnet+Opus):** análisis de posiciones cerradas (Apr 9-23, n=18) reveló WR=53% pero PnL=+$0.21 (breakeven) por ratio adverso avg_win=$0.61 vs avg_loss=$0.76. Bucket LOW (<35¢): n=2 WR=0% PnL=-$2.57 — London Apr19 @0.235 cayó a 1¢ (-95.7%, -$2.26 solo). Opus consultado: recomendó gate LOW+exact como palanca prioritaria; Step 3 (abs SL) diferido por ser más leniente en LOW/MID sin atacar el gap risk real. Implementado en **v10.6.31** — commit `da...` — `verify_before_deploy.py` pasa **810/810**.
+- **Gate LOW+exact:** `BLOCK_LOW_EXACT_ENTRIES=1` (default on) bloquea entradas con `condition=exact` y `mkt_price<0.35`. Nuevo skip reason `low_exact_gap_risk`. Elimina la fuente del gap risk catastrófico en binary events sin afectar buckets productivos (MID/HIGH tienen WR=40% y 83%).
+- **TP dinámico por precio:** función `effective_tp_pct(entry_price, our_prob)` combina HIGH_CONVICTION existente con floors por precio — LOW(<0.35): TP≥60%, HIGH(≥0.65): TP≥80%, MID: sin cambio. Nuevo cache `_lc_by_token_price` en `manage_positions`. Reemplaza inline también en `intra_cycle_sl_check`.
+- **Step 3 (abs SL) diferido:** reevaluar cuando n≥30 trades post-gate. Opus identificó que abs SL es MÁS leniente para LOW/MID (amplifica pérdidas tipo gap) y no resuelve el problema raíz.
+- **Siguiente acción:** observar comportamiento en Railway next cycles; checkpoint canary condition_filtered Apr 28.
 
 **Última actualización:** 23 de abril de 2026 (Sesión 225 — plan operativo y Fase 1 de transición City Intelligence/Phase5)
 **Sesión 225 (23 abr 2026, Codex):** se convierte la review de Opus de la sesión 224 en un plan operativo ejecutable y se inicia la Fase 1 (`silenciar → observar`) sin tocar `bot.py`, trading core, NOAA, scheduler core, sizing, whitelist, reglas de entrada/salida ni `city_policy_state.json`. Se crea `docs/city-intelligence-phase5-operational-transition-plan-2026-04-23.md` y `data/service_transition_followup.json`; `tools/city_intelligence_daily_summary.py` pasa a leer ese plan y añadir un bloque `Seguimiento programado` al summary diario ya existente, de modo que los avisos/checkpoints usan el bridge de `polymarket-bot` y no crean un scheduler nuevo.
