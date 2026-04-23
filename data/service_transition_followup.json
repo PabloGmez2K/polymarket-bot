@@ -1,0 +1,55 @@
+{
+  "enabled": true,
+  "title": "City Intelligence / Phase5 transition",
+  "started_at": "2026-04-23",
+  "owner": "Pablo + Codex",
+  "current_strategy": "silenciar -> observar -> pausar -> apagar",
+  "canonical_runtime_service": "polymarket-bot",
+  "reminder_channel": "city_intelligence_daily_summary",
+  "phase": "silence_and_observe",
+  "applied_actions": [
+    {
+      "timestamp": "2026-04-23T08:05:00Z",
+      "action": "removed_telegram_token_from_legacy_services",
+      "services": [
+        "city-intelligence",
+        "phase5-visibility"
+      ],
+      "notes": "polymarket-bot keeps TELEGRAM_TOKEN; both legacy services were restarted so future runs inherit the muted environment."
+    }
+  ],
+  "checkpoints": [
+    {
+      "id": "bridge_single_emitter_2026_04_24",
+      "due_date": "2026-04-24",
+      "status": "pending",
+      "label": "Confirmar bridge como unico emisor util",
+      "reminder": "Verifica que el summary de City Intelligence llego desde polymarket-bot y que no hubo doble aviso desde city-intelligence o phase5-visibility.",
+      "decision": "Si el bridge falla, no pauses servicios; si el bridge funciona, mantener servicios separados silenciados."
+    },
+    {
+      "id": "phase5_pause_gate_2026_04_28",
+      "due_date": "2026-04-28",
+      "status": "pending",
+      "label": "Checkpoint para pausar phase5-visibility",
+      "reminder": "Si nadie echo en falta la alerta Shanghai+Chicago y city-intelligence conserva tracker/benchmark, pausar phase5-visibility en Railway.",
+      "decision": "Pausar phase5-visibility o documentar la funcion unica que aun falta migrar."
+    },
+    {
+      "id": "city_intelligence_pause_gate_2026_05_01",
+      "due_date": "2026-05-01",
+      "status": "pending",
+      "label": "Checkpoint para pausar city-intelligence separado",
+      "reminder": "Si el bridge acumulo al menos 5 ejecuciones diarias con runtime_inputs_status=available y overall_status=ok, pausar el servicio Railway city-intelligence.",
+      "decision": "Pausar city-intelligence separado o extender observacion si el bridge no acumulo evidencia suficiente."
+    },
+    {
+      "id": "transition_closeout_2026_05_07",
+      "due_date": "2026-05-07",
+      "status": "pending",
+      "label": "Cierre de transformacion",
+      "reminder": "Archivar docs phase5, cerrar trazabilidad en CONTEXTO/HISTORIAL/agent_events y mover foco a exact/range + position management.",
+      "decision": "Cerrar transicion o abrir follow-up si quedo algun emisor/escritor duplicado."
+    }
+  ]
+}

@@ -16,6 +16,7 @@ DEFAULT_LEDGER_PATH = REPO_ROOT / "data" / "city_validation_ledger.json"
 DEFAULT_GATE_PATH = REPO_ROOT / "data" / "city_promotion_gate.json"
 DEFAULT_EFFECTIVE_VIEW_PATH = REPO_ROOT / "data" / "runtime_policy_effective_view.json"
 DEFAULT_ALIGNMENT_PATH = REPO_ROOT / "data" / "system_alignment_check_operational.json"
+DEFAULT_SERVICE_TRANSITION_PLAN_PATH = REPO_ROOT / "data" / "service_transition_followup.json"
 DEFAULT_STATE_PATH = REPO_ROOT / "data" / "city_intelligence_daily_summary_state.json"
 DEFAULT_MD_OUTPUT = REPO_ROOT / "docs" / "city_intelligence_daily_summary_latest.md"
 LOCK_STALE_SECONDS = 15 * 60
@@ -40,6 +41,7 @@ def parse_args():
     parser.add_argument("--gate", default=str(DEFAULT_GATE_PATH))
     parser.add_argument("--effective-view", default=str(DEFAULT_EFFECTIVE_VIEW_PATH))
     parser.add_argument("--alignment-operational", default=str(DEFAULT_ALIGNMENT_PATH))
+    parser.add_argument("--service-transition-plan", default=str(DEFAULT_SERVICE_TRANSITION_PLAN_PATH))
     parser.add_argument("--state-output", default=str(DEFAULT_STATE_PATH))
     parser.add_argument("--md-output", default=str(DEFAULT_MD_OUTPUT))
     parser.add_argument("--dry-run", action="store_true")
@@ -210,7 +212,51 @@ def progress_sentence(progress_state):
     return mapping.get(progress_state, mapping["seguimos_trabajando"])
 
 
-def build_canonical_story(pipeline, ledger, gate, effective_view, alignment, progress_state):
+def build_service_transition_block(plan, today_utc):
+    if not isinstance(plan, dict) or not plan.get("enabled", False):
+        return []
+    checkpoints = plan.get("checkpoints", []) or []
+    pending = [
+        row
+        for row in checkpoints
+        if row.get("status", "pending") == "pending" and row.get("due_date", "") <= today_utc
+    ]
+    if not pending:
+        future = [
+            row
+            for row in checkpoints
+            if row.get("status", "pending") == "pending" and row.get("due_date", "") > today_utc
+        ]
+        future.sort(key=lambda row: row.get("due_date", "9999-99-99"))
+        if not future:
+            return []
+        next_row = future[0]
+        return [
+            "",
+            "<b>Seguimiento programado</b>",
+            (
+                f"Proximo checkpoint <code>{next_row.get('due_date')}</code>: "
+                f"{next_row.get('label', 'revision pendiente')}."
+            ),
+        ]
+
+    pending.sort(key=lambda row: row.get("due_date", "9999-99-99"))
+    row = pending[0]
+    lines = [
+        "",
+        "<b>Seguimiento programado</b>",
+        f"Checkpoint pendiente <code>{row.get('due_date')}</code>: {row.get('label', 'revision pendiente')}.",
+    ]
+    reminder = row.get("reminder")
+    decision = row.get("decision")
+    if reminder:
+        lines.append(f"- {reminder}")
+    if decision:
+        lines.append(f"- Decision esperada: {decision}")
+    return lines
+
+
+def build_canonical_story(pipeline, ledger, gate, effective_view, alignment, progress_state, service_transition_plan=None):
     pipeline_summary = pipeline.get("summary", {})
     ledger_summary = ledger.get("summary", {})
     gate_summary = gate.get("summary", {})
@@ -237,7 +283,7 @@ def build_canonical_story(pipeline, ledger, gate, effective_view, alignment, pro
     now_count = review_counts.get("now", 0)
     soon_count = review_counts.get("soon", 0)
 
-    return "\n".join([
+    lines = [
         f"<b>City Intelligence - resumen diario ({pipeline.get('generated_at', '')[:10]} UTC)</b>",
         "",
         "<b>Estado</b>",
@@ -261,10 +307,13 @@ def build_canonical_story(pipeline, ledger, gate, effective_view, alignment, pro
         "",
         "<b>Instruccion para Codex</b>",
         "No revalidar el transporte read-only del runtime. Si abres una sesion nueva, parte de `runtime_policy_effective_view`, `system_alignment_check --decision-mode operational` y la evidencia runtime manifestada para decidir si solo toca observar o si aparecio un blocker real.",
-    ])
+    ]
+    today_utc = datetime.now(timezone.utc).date().isoformat()
+    lines.extend(build_service_transition_block(service_transition_plan, today_utc))
+    return "\n".join(lines)
 
 
-def build_message(pipeline, ledger, gate, effective_view, alignment, progress_state):
+def build_message(pipeline, ledger, gate, effective_view, alignment, progress_state, service_transition_plan=None):
     pipeline_summary = pipeline.get("summary", {})
     gate_summary = gate.get("summary", {})
     ledger_summary = ledger.get("summary", {})
@@ -309,7 +358,15 @@ def build_message(pipeline, ledger, gate, effective_view, alignment, progress_st
         ])
 
     if effective_view and alignment:
-        return build_canonical_story(pipeline, ledger, gate, effective_view, alignment, progress_state)
+        return build_canonical_story(
+            pipeline,
+            ledger,
+            gate,
+            effective_view,
+            alignment,
+            progress_state,
+            service_transition_plan=service_transition_plan,
+        )
 
     summary_rows = pick_summary_rows(gate, ledger, limit=3)
     instruction_row = pick_instruction_row(gate)
@@ -365,6 +422,8 @@ def build_message(pipeline, ledger, gate, effective_view, alignment, progress_st
             "<b>Instruccion para Codex</b>",
             "No hace falta abrir una revision nueva hoy salvo que quieras auditar si el sistema esta produciendo senal util o solo ruido. Si revisas algo, usa la review queue vigente y no reabras ciudades que ya cayeron a background watch. Lee AGENTS.md, el bloque reciente de CONTEXTO.md, data/city_validation_ledger.json, data/city_promotion_gate.json y docs/city_intelligence_pipeline_latest.md.",
         ])
+    today_utc = datetime.now(timezone.utc).date().isoformat()
+    lines.extend(build_service_transition_block(service_transition_plan, today_utc))
     return "\n".join(lines)
 
 
@@ -393,6 +452,7 @@ def main():
     gate = load_json(args.gate, required=True)
     effective_view = load_json(args.effective_view, required=False) or {}
     alignment = load_json(args.alignment_operational, required=False) or {}
+    service_transition_plan = load_json(args.service_transition_plan, required=False) or {}
     state_path = ensure_parent(args.state_output)
     md_path = ensure_parent(args.md_output)
     lock_path = lock_path_for(args.state_output)
@@ -416,7 +476,15 @@ def main():
             gate.get("summary", {}),
             state,
         )
-        message = build_message(pipeline, ledger, gate, effective_view, alignment, progress_state)
+        message = build_message(
+            pipeline,
+            ledger,
+            gate,
+            effective_view,
+            alignment,
+            progress_state,
+            service_transition_plan=service_transition_plan,
+        )
         today_utc = datetime.now(timezone.utc).date().isoformat()
 
         if not args.dry_run and state.get("last_sent_date") == today_utc:
