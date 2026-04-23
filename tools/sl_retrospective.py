@@ -98,6 +98,9 @@ def load_sl_rows(lifecycle_path: Path):
         max_price = as_float(post_exit.get("max_price_after_close"))
         min_price = as_float(post_exit.get("min_price_after_close"))
         upside = as_float(post_exit.get("upside_left_cash_peak"))
+        pnl_cash = as_float(close_context.get("pnl_cash"))
+        close_shares = as_float(close_context.get("close_shares"))
+        close_price = as_float(close_context.get("close_price"))
         market_seen = bool(post_exit.get("market_seen_after_close"))
         reached_98 = bool(post_exit.get("reached_98_after_close"))
         if reached_98 or (max_price is not None and max_price >= 0.85):
@@ -106,13 +109,25 @@ def load_sl_rows(lifecycle_path: Path):
             verdict = "WRONG"
         else:
             verdict = "UNKNOWN"
+        pnl_without_sl_best = None
+        pnl_without_sl_worst = None
+        delta_vs_sl_best = None
+        delta_vs_sl_worst = None
+        if None not in (pnl_cash, close_price, close_shares, max_price):
+            delta_vs_sl_best = round((max_price - close_price) * close_shares, 2)
+            pnl_without_sl_best = round(pnl_cash + delta_vs_sl_best, 2)
+        if None not in (pnl_cash, close_price, close_shares, min_price):
+            delta_vs_sl_worst = round((min_price - close_price) * close_shares, 2)
+            pnl_without_sl_worst = round(pnl_cash + delta_vs_sl_worst, 2)
         rows.append(
             {
                 "label": record.get("label") or record.get("question") or "Unknown",
                 "side": record.get("side") or "?",
                 "avg_entry_price": as_float(record.get("avg_entry_price")),
-                "close_price": as_float(close_context.get("close_price")),
+                "close_price": close_price,
                 "pnl_pct": as_float(close_context.get("pnl_pct")),
+                "pnl_cash_with_sl": pnl_cash,
+                "close_shares": close_shares,
                 "closed_at": record.get("closed_at"),
                 "verdict": verdict,
                 "reached_98_after_close": reached_98,
@@ -120,6 +135,10 @@ def load_sl_rows(lifecycle_path: Path):
                 "min_price_after_close": min_price,
                 "market_seen_after_close": market_seen,
                 "upside_left_cash_peak": upside,
+                "pnl_without_sl_best": pnl_without_sl_best,
+                "pnl_without_sl_worst": pnl_without_sl_worst,
+                "delta_vs_sl_best": delta_vs_sl_best,
+                "delta_vs_sl_worst": delta_vs_sl_worst,
             }
         )
     rows.sort(key=lambda row: str(row.get("closed_at") or ""), reverse=True)
@@ -137,6 +156,18 @@ def summarize(rows: list[dict]):
         if row["verdict"] == "RIGHT" and row.get("upside_left_cash_peak") is not None
     ]
     cash_lost = round(sum(row["upside_left_cash_peak"] for row in cash_rows), 2)
+    false_exit_rows = [
+        row for row in rows
+        if row["verdict"] == "RIGHT"
+        and row.get("pnl_cash_with_sl") is not None
+        and row.get("pnl_without_sl_best") is not None
+    ]
+    protected_rows = [
+        row for row in rows
+        if row["verdict"] == "WRONG"
+        and row.get("pnl_cash_with_sl") is not None
+        and row.get("pnl_without_sl_best") is not None
+    ]
     threshold_preliminary = n_resolved >= PRELIMINARY_THRESHOLD
     threshold_final = n_resolved >= FINAL_THRESHOLD
     verdict_brief = "acumulando datos"
@@ -156,6 +187,12 @@ def summarize(rows: list[dict]):
         "accuracy_pct": accuracy_pct,
         "cash_lost_by_sl": cash_lost,
         "cash_rows": cash_rows,
+        "false_exit_rows": false_exit_rows,
+        "protected_rows": protected_rows,
+        "false_exit_with_sl_total": round(sum(row["pnl_cash_with_sl"] for row in false_exit_rows), 2),
+        "false_exit_without_sl_best_total": round(sum(row["pnl_without_sl_best"] for row in false_exit_rows), 2),
+        "protected_with_sl_total": round(sum(row["pnl_cash_with_sl"] for row in protected_rows), 2),
+        "protected_without_sl_best_total": round(sum(row["pnl_without_sl_best"] for row in protected_rows), 2),
         "threshold_preliminary": threshold_preliminary,
         "threshold_final": threshold_final,
         "preliminary_verdict": verdict_brief if threshold_preliminary else "",
@@ -173,36 +210,71 @@ def build_message(summary: dict):
     if n_resolved == 0:
         return "🔍 SL Retrospective — acumulando datos\nAún no hay SLs resueltos para analizar."
 
+    false_exit_helped = round(
+        summary["false_exit_without_sl_best_total"] - summary["false_exit_with_sl_total"],
+        2,
+    )
+    protected_saved = round(
+        summary["protected_with_sl_total"] - summary["protected_without_sl_best_total"],
+        2,
+    )
+
     if n_resolved < PRELIMINARY_THRESHOLD:
-        missing = PRELIMINARY_THRESHOLD - n_resolved
-        return (
-            "🔍 SL Retrospective\n"
-            f"Resueltos: {n_resolved}/{TARGET_SAMPLE_SIZE} — faltan {missing} para conclusión preliminar\n"
-            f"✅ Tesis correcta: {n_right} | ❌ SL correcto: {n_wrong}"
-        )
+        lines = [
+            "🔍 SL Retrospective",
+            f"Resueltos: {n_resolved}/{TARGET_SAMPLE_SIZE} — faltan {PRELIMINARY_THRESHOLD - n_resolved} para conclusión preliminar",
+            f"🚫 Falsas salidas por SL: {n_right}",
+            f"🛡️ SL correctos: {n_wrong}",
+        ]
+        if summary["false_exit_rows"]:
+            lines.extend(
+                [
+                    "",
+                    "En las falsas salidas ya confirmadas:",
+                    f"• Con SL: {summary['false_exit_with_sl_total']:+.2f}$",
+                    f"• Sin SL (mejor precio visto después): {summary['false_exit_without_sl_best_total']:+.2f}$",
+                    f"• Diferencia atribuible al SL: {false_exit_helped:+.2f}$",
+                ]
+            )
+        return "\n".join(lines)
 
     wrong_pct = 100.0 - (accuracy_pct or 0.0)
     lines = [
         "🔍 SL Retrospective — ¿Cortamos bien o mal?",
         "",
         f"📊 Resueltos: {n_resolved}/{TARGET_SAMPLE_SIZE} SLs",
-        f"✅ Tesis correcta tras SL: {n_right} ({accuracy_pct:.0f}%) — el mercado rebotó después",
-        f"❌ SL correcto: {n_wrong} ({wrong_pct:.0f}%) — no hubo rebote útil",
+        f"🚫 Falsas salidas por SL: {n_right} ({accuracy_pct:.0f}%)",
+        f"🛡️ SL correctos: {n_wrong} ({wrong_pct:.0f}%)",
         f"⏳ Pendientes: {n_unknown}",
         "",
     ]
 
-    if summary["cash_lost_by_sl"] > 0:
-        lines.append("💸 Dinero perdido por salir antes (posiciones correctas):")
-        for row in summary["cash_rows"]:
-            pnl_pct = row.get("pnl_pct")
-            pnl_text = f"{pnl_pct:.0f}%" if pnl_pct is not None else "n/d"
-            lines.append(
-                f"  • {row['label']}: SL {pnl_text} → (-${row['upside_left_cash_peak']:.2f})"
-            )
+    if summary["false_exit_rows"]:
+        lines.append("💸 Impacto de las falsas salidas ya confirmadas:")
+        lines.append(f"  • Con SL: {summary['false_exit_with_sl_total']:+.2f}$")
         lines.append(
-            f"  Total: -${summary['cash_lost_by_sl']:.2f} perdido por SL en posiciones correctas"
+            f"  • Sin SL (mejor precio visto después): {summary['false_exit_without_sl_best_total']:+.2f}$"
         )
+        lines.append(f"  • Diferencia atribuible al SL: {false_exit_helped:+.2f}$")
+        for row in summary["false_exit_rows"]:
+            lines.append(
+                f"  • {row['label']}: con SL {row['pnl_cash_with_sl']:+.2f}$ → "
+                f"sin SL {row['pnl_without_sl_best']:+.2f}$"
+            )
+        lines.append("")
+
+    if summary["protected_rows"]:
+        lines.append("🛡️ En los SL correctos ya medidos:")
+        lines.append(f"  • Con SL: {summary['protected_with_sl_total']:+.2f}$")
+        lines.append(
+            f"  • Sin SL (mejor precio visto después): {summary['protected_without_sl_best_total']:+.2f}$"
+        )
+        lines.append(f"  • Pérdida adicional evitada por el SL: {protected_saved:+.2f}$")
+        for row in summary["protected_rows"]:
+            lines.append(
+                f"  • {row['label']}: con SL {row['pnl_cash_with_sl']:+.2f}$ → "
+                f"sin SL {row['pnl_without_sl_best']:+.2f}$"
+            )
         lines.append("")
 
     if accuracy_pct is not None and accuracy_pct >= 60 and summary["threshold_preliminary"]:
@@ -253,26 +325,34 @@ def send_telegram(message: str):
 
 def print_table(rows: list[dict]):
     print("SL retrospective rows:")
-    header = f"{'VERDICT':<8} {'SIDE':<4} {'ENTRY':>6} {'CLOSE':>6} {'PNL%':>6} {'MAX':>6} {'UPSIDE':>8} LABEL"
+    header = (
+        f"{'VERDICT':<8} {'SIDE':<4} {'ENTRY':>6} {'CLOSE':>6} {'PNL%':>6} "
+        f"{'WITH_SL':>9} {'NO_SL':>9} {'MAX':>6} LABEL"
+    )
     print(header)
     print("-" * len(header))
     for row in rows:
         entry = f"{row['avg_entry_price']:.2f}" if row["avg_entry_price"] is not None else "n/d"
         close = f"{row['close_price']:.2f}" if row["close_price"] is not None else "n/d"
         pnl = f"{row['pnl_pct']:.0f}" if row["pnl_pct"] is not None else "n/d"
+        pnl_with_sl = (
+            f"{row['pnl_cash_with_sl']:+.2f}"
+            if row["pnl_cash_with_sl"] is not None
+            else "n/d"
+        )
+        pnl_without_sl = (
+            f"{row['pnl_without_sl_best']:+.2f}"
+            if row["pnl_without_sl_best"] is not None
+            else "n/d"
+        )
         max_price = (
             f"{row['max_price_after_close']:.2f}"
             if row["max_price_after_close"] is not None
             else "n/d"
         )
-        upside = (
-            f"{row['upside_left_cash_peak']:.2f}"
-            if row["upside_left_cash_peak"] is not None
-            else "n/d"
-        )
         print(
             f"{row['verdict']:<8} {row['side']:<4} {entry:>6} {close:>6} {pnl:>6} "
-            f"{max_price:>6} {upside:>8} {row['label']}"
+            f"{pnl_with_sl:>9} {pnl_without_sl:>9} {max_price:>6} {row['label']}"
         )
 
 

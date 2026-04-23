@@ -1,6 +1,12 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
 
+**Última actualización:** 23 de abril de 2026 (Sesión 229 — SL retrospective más claro: con SL vs sin SL)
+**Sesión 229 (23 abr 2026, Codex):** ajuste corto sobre `tools/sl_retrospective.py` para que el mensaje deje de ser ambiguo. Sin tocar trading core, NOAA, scheduler, whitelist ni reglas de entrada/salida, el retrospective pasa de hablar en términos `RIGHT/WRONG` a mostrar explícitamente `con SL` vs `sin SL (mejor precio visto después)` por trade y en agregado. `verify_before_deploy.py` sigue pasando **817/817**.
+- **Lectura humana nueva:** `falsas salidas por SL` y `SL correctos`, en vez de “tesis correcta / SL correcto”.
+- **Métrica aclarada:** `upside_left_cash_peak` ya no se presenta como si fuese beneficio total; ahora el tool calcula `P/L con SL`, `P/L sin SL` y la diferencia atribuible al stop.
+- **Foto actual de la muestra:** en los `3` SLs ya clasificados como falsas salidas, el total real fue `-0.96$ con SL` frente a `+4.46$ sin SL` al mejor precio visto después; diferencia `+5.42$`. En los `2` SLs correctos, el total fue `-3.56$ con SL` frente a `-4.39$ sin SL`; el stop evitó `0.83$` adicionales de pérdida.
+
 **Última actualización:** 23 de abril de 2026 (Sesión 228 — SL retrospective + daily briefing)
 **Sesión 228 (23 abr 2026, Codex):** se añaden dos capas observables nuevas sin tocar la lógica core de trading, NOAA, scheduler, whitelist ni reglas de entrada/salida: `tools/sl_retrospective.py` y `tools/daily_position_briefing.py`. `bot.py` integra ambos hooks al final de `run_observability_alerts()` con env vars nuevas `SL_RETRO_ENABLED`, `DAILY_BRIEFING_ENABLED` y `DAILY_BRIEFING_HOUR_UTC`. `verify_before_deploy.py` suma 7 checks nuevos; el preflight completo queda en **817/817**.
 - **SL retrospective:** lee `trade_lifecycle`, clasifica cada `stop_loss` en `RIGHT/WRONG/UNKNOWN`, calcula muestra resuelta, accuracy y dinero dejado sobre la mesa, persiste estado en `data/sl_retrospective_state.json` y evita spam salvo nuevos datos, recordatorio diario o primer cruce del umbral preliminar (`n>=8`).
