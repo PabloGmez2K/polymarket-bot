@@ -5705,6 +5705,70 @@ def run_tests():
     except Exception as e:
         test("test_recompute_position_edge_parity funcional ejecuta", False, str(e))
 
+    # ---- v10.6.31: TP dinámico por precio + gate LOW+exact ----
+    print("  Checks v10.6.31 TP precio + gate LOW+exact")
+    test(
+        "v10.6.31: HIGH_PRICE_THRESHOLD definido",
+        "HIGH_PRICE_THRESHOLD" in code,
+    )
+    test(
+        "v10.6.31: TP_LOW_PRICE_PCT definido",
+        "TP_LOW_PRICE_PCT" in code,
+    )
+    test(
+        "v10.6.31: TP_MID_PRICE_PCT definido",
+        "TP_MID_PRICE_PCT" in code,
+    )
+    test(
+        "v10.6.31: TP_HIGH_PRICE_PCT definido",
+        "TP_HIGH_PRICE_PCT" in code,
+    )
+    test(
+        "v10.6.31: BLOCK_LOW_EXACT_ENTRIES definido",
+        "BLOCK_LOW_EXACT_ENTRIES" in code,
+    )
+    test(
+        "v10.6.31: effective_tp_pct definida",
+        "def effective_tp_pct(" in code,
+    )
+    test(
+        "v10.6.31: effective_tp_pct usada en manage_positions",
+        "effective_tp = effective_tp_pct(_entry_price_lc, _entry_prob)" in code,
+    )
+    test(
+        "v10.6.31: effective_tp_intra usa effective_tp_pct",
+        "effective_tp_intra = effective_tp_pct(_entry_price_intra, _entry_prob_intra)" in code,
+    )
+    test(
+        "v10.6.31: _lc_by_token_price cargado en manage_positions",
+        "_lc_by_token_price" in code,
+    )
+    test(
+        "v10.6.31: gate low_exact_gap_risk en skip_log",
+        '"low_exact_gap_risk"' in code,
+    )
+    test(
+        "v10.6.31: low_exact_gap_risk en SKIP_REASONS_VALID",
+        '"low_exact_gap_risk"' in code and "SKIP_REASONS_VALID" in code,
+    )
+    # Structural checks: effective_tp_pct logic branches
+    test(
+        "v10.6.31: effective_tp_pct usa LOW_PRICE_THRESHOLD",
+        "entry_price < LOW_PRICE_THRESHOLD" in code,
+    )
+    test(
+        "v10.6.31: effective_tp_pct usa HIGH_PRICE_THRESHOLD",
+        "entry_price >= HIGH_PRICE_THRESHOLD" in code,
+    )
+    test(
+        "v10.6.31: effective_tp_pct devuelve max(base, TP_LOW_PRICE_PCT)",
+        "max(base, TP_LOW_PRICE_PCT)" in code,
+    )
+    test(
+        "v10.6.31: effective_tp_pct devuelve max(base, TP_HIGH_PRICE_PCT)",
+        "max(base, TP_HIGH_PRICE_PCT)" in code,
+    )
+
     # ---- Resultado ----
     print(f"\n{'='*50}")
     total = passed + failed

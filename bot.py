@@ -361,6 +361,12 @@ STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", "-25.0"))     # vender si PnL% 
 TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", "40.0"))  # vender si PnL% > +40%
 HIGH_CONVICTION_TP_PCT        = float(os.getenv("HIGH_CONVICTION_TP_PCT", "80.0"))         # TP elevado si our_prob >= umbral
 HIGH_CONVICTION_PROB_THRESHOLD = float(os.getenv("HIGH_CONVICTION_PROB_THRESHOLD", "0.80")) # umbral de alta convicción
+# v10.6.31: TP escalonado por precio + gate LOW+exact (Opus sesión 225, 2026-04-23)
+HIGH_PRICE_THRESHOLD         = float(os.getenv("HIGH_PRICE_THRESHOLD", "0.65"))
+TP_LOW_PRICE_PCT             = float(os.getenv("TP_LOW_PRICE_PCT", "60.0"))
+TP_MID_PRICE_PCT             = float(os.getenv("TP_MID_PRICE_PCT", "40.0"))
+TP_HIGH_PRICE_PCT            = float(os.getenv("TP_HIGH_PRICE_PCT", "80.0"))
+BLOCK_LOW_EXACT_ENTRIES      = int(os.getenv("BLOCK_LOW_EXACT_ENTRIES", "1")) == 1
 SELL_AGGRESSION = 0.02  # cuánto bajar el precio para asegurar venta rápida
 INTRA_SL_INTERVAL = int(os.getenv("INTRA_SL_INTERVAL", "20"))  # v10.6.24: reactivado solo SL+TP (sin re-eval) — evita perder TPs entre ciclos
 # v10.6.17: city-level SL cooldown — bloquea re-entrada en la misma ciudad tras stop-loss
@@ -377,6 +383,26 @@ MAX_PRICE = 0.80
 PRICE_AGGRESSION = 0.02
 ORDER_MAX_AGE_HOURS = 8
 ORDER_MIN_NOTIONAL = float(os.getenv("ORDER_MIN_NOTIONAL", "1.00"))
+
+
+def effective_tp_pct(entry_price, our_prob=None):
+    """v10.6.31: TP combinando conviccion (our_prob) y precio de entrada.
+
+    Preserva la logica HIGH_CONVICTION existente y aniade floors por precio:
+    - LOW (<LOW_PRICE_THRESHOLD): TP >= TP_LOW_PRICE_PCT (60%)
+    - HIGH (>=HIGH_PRICE_THRESHOLD): TP >= TP_HIGH_PRICE_PCT (80%, unreachable, deja resolver)
+    - MID: usa la logica base sin modificar
+    """
+    base = (
+        HIGH_CONVICTION_TP_PCT
+        if our_prob is not None and our_prob >= HIGH_CONVICTION_PROB_THRESHOLD
+        else TAKE_PROFIT_PCT
+    )
+    if entry_price is not None and entry_price < LOW_PRICE_THRESHOLD:
+        return max(base, TP_LOW_PRICE_PCT)
+    if entry_price is not None and entry_price >= HIGH_PRICE_THRESHOLD:
+        return max(base, TP_HIGH_PRICE_PCT)
+    return base
 
 
 def _parse_schedule_hours_utc(raw):
@@ -632,6 +658,7 @@ SKIP_REASONS_VALID = frozenset({
     "sold_this_cycle",
     "sl_city_cooldown",
     "existing_position",
+    "low_exact_gap_risk",
     # Grupo B — datos parciales (Loop A, pre-edge)
     "blocked_city",
     "timezone_filter",
@@ -14174,7 +14201,7 @@ def manage_positions(client, dl):
     # ---- Cache de previsiones para re-evaluación ----
     forecast_cache = {}
 
-    # ---- Cache de our_prob por token_id para TP dinámico (alta convicción) ----
+    # ---- Cache de our_prob y entry_price por token_id para TP dinámico ----
     try:
         _lc_data = load_trade_lifecycle_data()
         _lc_by_token = {
@@ -14185,8 +14212,17 @@ def manage_positions(client, dl):
             if str(r.get("token_id", "") or "").strip()
             and (r.get("entry_context") or {}).get("our_prob") is not None
         }
+        _lc_by_token_price = {
+            str(r.get("token_id", "") or "").strip(): float(
+                (r.get("entry_context") or {}).get("price")
+            )
+            for r in _lc_data.get("records", [])
+            if str(r.get("token_id", "") or "").strip()
+            and (r.get("entry_context") or {}).get("price") is not None
+        }
     except Exception:
         _lc_by_token = {}
+        _lc_by_token_price = {}
 
     # ---- Evaluar cada posición ----
     to_sell = []        # lista de (posición, tipo, razón)
@@ -14249,16 +14285,13 @@ def manage_positions(client, dl):
             dl.append(f"  {reason} | {label} | ${cash_pnl:+.2f}")
             continue
 
-        # ---- CHECK 2: Take-profit (dinámico por convicción) ----
+        # ---- CHECK 2: Take-profit (dinámico por precio de entrada + convicción) ----
         _entry_prob = _lc_by_token.get(asset_id)
-        effective_tp = (
-            HIGH_CONVICTION_TP_PCT
-            if _entry_prob is not None and _entry_prob >= HIGH_CONVICTION_PROB_THRESHOLD
-            else TAKE_PROFIT_PCT
-        )
+        _entry_price_lc = _lc_by_token_price.get(asset_id)
+        effective_tp = effective_tp_pct(_entry_price_lc, _entry_prob)
         if pct_pnl >= effective_tp:
-            _prob_tag = f" [conv={_entry_prob:.0%}]" if _entry_prob is not None else ""
-            reason = f"💰 TAKE-PROFIT ({pct_pnl:+.1f}% > +{effective_tp:.0f}%{_prob_tag})"
+            _price_tag = f" [entry={_entry_price_lc:.2f}]" if _entry_price_lc is not None else ""
+            reason = f"💰 TAKE-PROFIT ({pct_pnl:+.1f}% > +{effective_tp:.0f}%{_price_tag})"
             to_sell.append((p, "take_profit", reason))
             dl.append(f"  {reason} | {label} | ${cash_pnl:+.2f}")
             continue
@@ -14603,11 +14636,14 @@ def intra_cycle_sl_check(client):
 
             # Determinar si hay que vender (TP dinámico por convicción)
             _entry_prob_intra = _lc_by_token_intra.get(asset_id)
-            effective_tp_intra = (
-                HIGH_CONVICTION_TP_PCT
-                if _entry_prob_intra is not None and _entry_prob_intra >= HIGH_CONVICTION_PROB_THRESHOLD
-                else TAKE_PROFIT_PCT
-            )
+            _entry_ctx_intra = _lc_by_token_intra_full.get(asset_id, {})
+            _entry_price_intra = _entry_ctx_intra.get("price")
+            if _entry_price_intra is not None:
+                try:
+                    _entry_price_intra = float(_entry_price_intra)
+                except (ValueError, TypeError):
+                    _entry_price_intra = None
+            effective_tp_intra = effective_tp_pct(_entry_price_intra, _entry_prob_intra)
             sell_type = None
             if pct_pnl <= STOP_LOSS_PCT:
                 sell_type = "stop_loss_intra"
@@ -16660,6 +16696,25 @@ def main(client):
         # v10.6.24: buffer adicional en posiciones baratas (<LOW_PRICE_THRESHOLD)
         if mkt_price < LOW_PRICE_THRESHOLD:
             _effective_min_edge += MIN_EDGE_LOW_PRICE_BUFFER_PP
+        # v10.6.31: gate — exact + precio bajo → gap risk catastrófico (binary events a 0)
+        if BLOCK_LOW_EXACT_ENTRIES and condition_name == "exact" and mkt_price < LOW_PRICE_THRESHOLD:
+            edge_analysis.append(
+                f"  ⊘ {city} {side} {temp_label} {c['date_iso']} | "
+                f"mkt={mkt_price*100:.0f}¢ exact+LOW → gap_risk bloqueado"
+            )
+            skip_log_entries.append(_make_skip_entry(
+                "low_exact_gap_risk", cycle_id=cycle_id,
+                city=city, date_iso=c["date_iso"], side=side, days_ahead=c["days_ahead"],
+                city_mode=c.get("city_mode"), allowlisted=c.get("allowlisted"),
+                edge_pct=round(edge_pct, 2),
+                our_prob=round(our_prob * 100, 2), mkt_prob=round(mkt_price * 100, 2),
+                min_edge=_effective_min_edge,
+                forecast_max=forecast_max, threshold=threshold, threshold_high=threshold_high,
+                unit=c["unit"], condition=condition_name, sigma_used=sigma_used_val,
+                question=c["question"],
+                extras={"skip_reason_detail": "low_exact_gap_risk"},
+            ))
+            continue
         # v10.6.18: exact/range canary YES-side requiere our_prob >= 65% exact / 72% range
         # (autopsia C1: YES range WR=9% vs exact WR=29% → range necesita floor más exigente)
         _yes_floor = 0.72 if condition_name == "range" else 0.65
