@@ -119,31 +119,58 @@ def extract_snapshot_metrics(record: dict):
 
 
 def build_open_positions(records: list[dict], today: date):
-    rows = []
+    active_rows = []
+    stale_rows = []
+    post_resolution_rows = []
     for record in records:
         if record.get("status") != "open":
             continue
         opened_at = parse_dt(record.get("opened_at"))
         resolution_date = parse_date(record.get("date"))
         metrics = extract_snapshot_metrics(record)
-        flag = ""
-        if resolution_date is not None and resolution_date <= (today + timedelta(days=2)):
-            flag = f" | ⏰ resuelve {resolution_date.isoformat()}"
+        snapshots = record.get("position_snapshots") or []
+        market_observations = record.get("market_observations") or []
+        has_live_context = bool(snapshots) or bool(market_observations) or metrics["cur_price"] is not None or metrics["pct_pnl"] is not None
+        resolution_status = ""
+        days_past_resolution = None
+        if resolution_date is not None:
+            if resolution_date < today:
+                days_past_resolution = (today - resolution_date).days
+                resolution_status = f" | ⚠ venció {resolution_date.isoformat()}"
+            elif resolution_date <= (today + timedelta(days=2)):
+                resolution_status = f" | ⏰ resuelve {resolution_date.isoformat()}"
         age_days = (today - opened_at.date()).days if opened_at else None
-        rows.append(
-            {
-                "label": record.get("label") or record.get("question") or "Unknown",
-                "avg_entry_price": as_float(record.get("avg_entry_price")),
-                "date": resolution_date.isoformat() if resolution_date else None,
-                "opened_at": record.get("opened_at"),
-                "age_days": age_days,
-                "cur_price": metrics["cur_price"],
-                "pct_pnl": metrics["pct_pnl"],
-                "flag_resolution": flag,
-            }
-        )
-    rows.sort(key=lambda row: (row["date"] or "9999-12-31", row["label"]))
-    return rows
+        row = {
+            "label": record.get("label") or record.get("question") or "Unknown",
+            "side": str(record.get("side", "") or "").upper(),
+            "avg_entry_price": as_float(record.get("avg_entry_price")),
+            "date": resolution_date.isoformat() if resolution_date else None,
+            "opened_at": record.get("opened_at"),
+            "age_days": age_days,
+            "cur_price": metrics["cur_price"],
+            "pct_pnl": metrics["pct_pnl"],
+            "resolution_status": resolution_status,
+            "days_past_resolution": days_past_resolution,
+            "snapshot_count": len(snapshots),
+            "market_obs_count": len(market_observations),
+            "has_live_context": has_live_context,
+        }
+        if resolution_date is not None and resolution_date < today:
+            if has_live_context:
+                post_resolution_rows.append(row)
+            else:
+                stale_rows.append(row)
+        else:
+            active_rows.append(row)
+    sort_key = lambda row: (row["date"] or "9999-12-31", row["label"])
+    active_rows.sort(key=sort_key)
+    stale_rows.sort(key=sort_key)
+    post_resolution_rows.sort(key=sort_key)
+    return {
+        "active": active_rows,
+        "stale": stale_rows,
+        "post_resolution": post_resolution_rows,
+    }
 
 
 def build_recent_closes(records: list[dict], now: datetime):
@@ -157,6 +184,10 @@ def build_recent_closes(records: list[dict], now: datetime):
         rows.append(
             {
                 "label": record.get("label") or record.get("question") or "Unknown",
+                "side": str(record.get("side", "") or "").upper(),
+                "avg_entry_price": as_float(record.get("avg_entry_price")),
+                "close_price": as_float(close_context.get("close_price")),
+                "close_action": close_context.get("close_action") or "",
                 "close_reason": close_context.get("close_reason") or "unknown",
                 "pnl_pct": as_float(close_context.get("pnl_pct")),
                 "closed_at": closed_at.isoformat(),
@@ -164,6 +195,34 @@ def build_recent_closes(records: list[dict], now: datetime):
         )
     rows.sort(key=lambda row: row["closed_at"], reverse=True)
     return rows
+
+
+def describe_close_reason(row: dict):
+    reason = str(row.get("close_reason", "") or "").strip()
+    action = str(row.get("close_action", "") or "").strip()
+    if reason == "market_resolved_yes":
+        return "mercado resolvió a favor de nuestro token"
+    if reason == "market_resolved_no":
+        return "mercado resolvió en contra de nuestro token"
+    if reason == "stop_loss_intra":
+        return "salida por stop-loss intra"
+    if reason == "stop_loss":
+        return "salida por stop-loss"
+    if reason == "take_profit_intra":
+        return "salida por take-profit intra"
+    if reason == "take_profit":
+        return "salida por take-profit"
+    if reason == "micro_position_unsellable":
+        return "residuo micro sin salida"
+    if reason:
+        return reason
+    if action == "RESOLVED_WIN":
+        return "mercado resuelto a favor"
+    if action == "LOSS_TOTAL":
+        return "cierre total en contra"
+    if action == "SELL":
+        return "salida ejecutada"
+    return "cierre sin detalle"
 
 
 def build_sl_retro_line(state_path: Path):
@@ -177,27 +236,71 @@ def build_sl_retro_line(state_path: Path):
     return f"🔍 SL Retro: {int(n_resolved)}/{TARGET_SAMPLE_SIZE} resueltos — {verdict}"
 
 
-def build_message(open_rows: list[dict], recent_closes: list[dict], sl_retro_line: str, today: date):
+def build_message(open_sections: dict, recent_closes: list[dict], sl_retro_line: str, today: date):
     lines = [f"📋 Briefing Diario — {today.isoformat()}", ""]
+    active_rows = open_sections.get("active", [])
+    stale_rows = open_sections.get("stale", [])
+    post_resolution_rows = open_sections.get("post_resolution", [])
 
-    if open_rows:
-        lines.append(f"📂 POSICIONES ABIERTAS ({len(open_rows)})")
-        for row in open_rows:
+    if active_rows:
+        lines.append(f"📂 POSICIONES ABIERTAS ({len(active_rows)})")
+        for row in active_rows:
             entry_text = f"{row['avg_entry_price']:.2f}" if row["avg_entry_price"] is not None else "n/d"
             pnl_text = f"{row['pct_pnl']:+.0f}%" if row["pct_pnl"] is not None else "n/d"
             age_text = f" | {row['age_days']}d abiertas" if row["age_days"] is not None else ""
             lines.append(
-                f"  • {row['label']} — entrada {entry_text} | P&L: {pnl_text}{age_text}{row['flag_resolution']}"
+                f"  • {row['label']} — entrada {entry_text} | P&L: {pnl_text}{age_text}{row['resolution_status']}"
             )
     else:
         lines.append("📂 Sin posiciones abiertas")
+
+    if post_resolution_rows:
+        lines.append("")
+        lines.append(f"⚠️ POSICIONES VENCIDAS PENDIENTES DE RECONCILIAR ({len(post_resolution_rows)})")
+        for row in post_resolution_rows:
+            entry_text = f"{row['avg_entry_price']:.2f}" if row["avg_entry_price"] is not None else "n/d"
+            pnl_text = f"{row['pct_pnl']:+.0f}%" if row["pct_pnl"] is not None else "n/d"
+            lag_text = (
+                f"{row['days_past_resolution']}d tras resolución"
+                if row["days_past_resolution"] is not None
+                else "fecha de resolución pasada"
+            )
+            evidence_bits = []
+            if row["snapshot_count"]:
+                evidence_bits.append(f"{row['snapshot_count']} snapshots")
+            if row["market_obs_count"]:
+                evidence_bits.append(f"{row['market_obs_count']} obs mercado")
+            evidence_text = f" | {' / '.join(evidence_bits)}" if evidence_bits else ""
+            lines.append(
+                f"  • {row['label']} — entrada {entry_text} | P&L: {pnl_text} | {lag_text}{evidence_text}"
+            )
+
+    if stale_rows:
+        lines.append("")
+        lines.append(f"🗃 LEGACY STALE NO RECONCILIADO ({len(stale_rows)})")
+        for row in stale_rows:
+            lag_text = (
+                f"{row['days_past_resolution']}d vencida"
+                if row["days_past_resolution"] is not None
+                else "fecha pasada"
+            )
+            lines.append(
+                f"  • {row['label']} — sigue marcada open pero sin snapshots ni cierre registrado | {lag_text}"
+            )
 
     lines.append("")
     lines.append("🔄 ÚLTIMAS 24H")
     if recent_closes:
         for row in recent_closes:
+            side_text = row["side"] or "?"
+            entry_text = f"{row['avg_entry_price']:.2f}" if row["avg_entry_price"] is not None else "n/d"
+            close_price = row.get("close_price")
+            close_text = f" → salida {close_price:.2f}" if close_price is not None else ""
             pnl_text = f"{row['pnl_pct']:+.0f}%" if row["pnl_pct"] is not None else "n/d"
-            lines.append(f"  • {row['label']} — {row['close_reason']} | {pnl_text}")
+            lines.append(
+                f"  • {row['label']} — {side_text} comprada @ {entry_text}{close_text} | "
+                f"{describe_close_reason(row)} | {pnl_text}"
+            )
     else:
         lines.append("  Sin actividad en las últimas 24h")
 
@@ -235,10 +338,10 @@ def main():
     now = datetime.now(timezone.utc).replace(microsecond=0)
     today = now.date()
 
-    open_rows = build_open_positions(records, today)
+    open_sections = build_open_positions(records, today)
     recent_closes = build_recent_closes(records, now)
     sl_retro_line = build_sl_retro_line(Path(args.sl_state_file))
-    message = build_message(open_rows, recent_closes, sl_retro_line, today)
+    message = build_message(open_sections, recent_closes, sl_retro_line, today)
 
     print(message)
     print("")
@@ -246,7 +349,9 @@ def main():
         json.dumps(
             {
                 "lifecycle_file_used": str(lifecycle_path),
-                "open_positions": len(open_rows),
+                "open_positions": len(open_sections.get("active", [])),
+                "post_resolution_positions": len(open_sections.get("post_resolution", [])),
+                "stale_open_positions": len(open_sections.get("stale", [])),
                 "recent_closes_24h": len(recent_closes),
                 "sl_retro_line": sl_retro_line,
             },

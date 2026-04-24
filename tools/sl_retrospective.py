@@ -5,8 +5,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
+import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -15,10 +18,13 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_LIFECYCLE_FILE = REPO_ROOT / "data" / "trade_lifecycle.json"
 DEFAULT_LIFECYCLE_FALLBACK = REPO_ROOT / "data" / "runtime_import" / "trade_lifecycle.json"
+DEFAULT_FORECAST_ACCURACY_FILE = REPO_ROOT / "data" / "forecast_accuracy_raw.json"
+DEFAULT_AUDIT_FILE = REPO_ROOT / "data" / "runtime_import" / "audit.json"
 DEFAULT_STATE_FILE = REPO_ROOT / "data" / "sl_retrospective_state.json"
 TARGET_SAMPLE_SIZE = 16
 PRELIMINARY_THRESHOLD = 8
 FINAL_THRESHOLD = 12
+SL_REASONS = {"stop_loss", "stop_loss_intra"}
 
 
 def parse_args():
@@ -84,16 +90,397 @@ def as_float(value):
         return None
 
 
+def to_probability(value):
+    prob = as_float(value)
+    if prob is None:
+        return None
+    return prob / 100.0 if prob > 1 else prob
+
+
+def _normalize_text(value):
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def _record_question_text(record: dict) -> str:
+    question = str(record.get("question") or "").strip()
+    if question:
+        return question
+    label = str(record.get("label") or "").strip()
+    if label.startswith("Will the highest temperature") and "?" in label:
+        return label[: label.index("?") + 1]
+    return ""
+
+
+def _question_signature(question: str):
+    text = str(question or "").strip()
+    if not text.startswith("Will the highest temperature in ") or "?" not in text:
+        return None
+    body = text[len("Will the highest temperature in ") : text.index("?")]
+    def _parse_threshold(text_value: str):
+        cleaned = (
+            str(text_value or "")
+            .replace("Â°", "")
+            .replace("Âº", "")
+            .replace("°", "")
+            .replace("º", "")
+            .replace("Â", "")
+            .strip()
+        )
+        unit = cleaned[-1]
+        value = float(cleaned[:-1])
+        return value, unit
+
+    if " be between " in body:
+        city, rest = body.split(" be between ", 1)
+        range_part, date_text = rest.split(" on ", 1)
+        low_text, high_unit = range_part.split("-", 1)
+        low, unit = _parse_threshold(low_text + high_unit[-1])
+        high, unit = _parse_threshold(high_unit)
+        condition = "range"
+    elif " be " in body and " or higher on " in body:
+        city, rest = body.split(" be ", 1)
+        threshold_unit, date_text = rest.split(" or higher on ", 1)
+        low, unit = _parse_threshold(threshold_unit)
+        high = None
+        condition = "at_or_above"
+    elif " be " in body and " or below on " in body:
+        city, rest = body.split(" be ", 1)
+        threshold_unit, date_text = rest.split(" or below on ", 1)
+        low, unit = _parse_threshold(threshold_unit)
+        high = None
+        condition = "at_or_below"
+    elif " be " in body and " on " in body:
+        city, rest = body.split(" be ", 1)
+        threshold_unit, date_text = rest.split(" on ", 1)
+        low, unit = _parse_threshold(threshold_unit)
+        high = None
+        condition = "exact"
+    else:
+        return None
+
+    def _to_celsius(value):
+        if unit.upper() == "F":
+            return round((value - 32.0) * 5.0 / 9.0, 1)
+        return round(value, 1)
+
+    return {
+        "city": city.strip(),
+        "date_text": date_text.strip(),
+        "condition": condition,
+        "threshold_c": _to_celsius(low),
+        "threshold_high_c": _to_celsius(high) if high is not None else None,
+    }
+
+
+def _resolution_lookup_key(city: str, date_iso: str, side: str, question: str = ""):
+    parsed = _question_signature(question)
+    condition = parsed.get("condition") if parsed else ""
+    threshold_c = parsed.get("threshold_c") if parsed else None
+    threshold_high_c = parsed.get("threshold_high_c") if parsed else None
+    return (
+        _normalize_text(city),
+        str(date_iso or "").strip(),
+        str(side or "").strip().upper(),
+        condition,
+        threshold_c,
+        threshold_high_c,
+    )
+
+
+def normal_cdf(x, mu, sigma):
+    if sigma <= 0:
+        return 1.0 if x >= mu else 0.0
+    return 0.5 * (1.0 + math.erf((x - mu) / (sigma * math.sqrt(2))))
+
+
+def estimate_prob_with_sigma(
+    forecast_max,
+    threshold_c,
+    condition,
+    days_ahead,
+    threshold_high_c=None,
+):
+    sigma = {0: 1.2, 1: 1.5, 2: 2.0, 3: 2.5}.get(
+        days_ahead,
+        3.0 if days_ahead <= 5 else 3.5,
+    )
+    if condition == "exact":
+        prob = normal_cdf(threshold_c + 0.5, forecast_max, sigma) - normal_cdf(
+            threshold_c - 0.5,
+            forecast_max,
+            sigma,
+        )
+    elif condition == "at_or_below":
+        prob = normal_cdf(threshold_c + 0.5, forecast_max, sigma)
+    elif condition == "at_or_above":
+        prob = 1.0 - normal_cdf(threshold_c - 0.5, forecast_max, sigma)
+    elif condition == "range" and threshold_high_c is not None:
+        prob = normal_cdf(threshold_high_c + 0.5, forecast_max, sigma) - normal_cdf(
+            threshold_c - 0.5,
+            forecast_max,
+            sigma,
+        )
+    else:
+        prob = 0.5
+    return max(0.01, min(0.99, prob))
+
+
+def condition_happened(observed_temp_c, condition, threshold_c, threshold_high_c=None):
+    if observed_temp_c is None or threshold_c is None:
+        return None
+    if condition == "exact":
+        return threshold_c - 0.5 <= observed_temp_c <= threshold_c + 0.5
+    if condition == "at_or_below":
+        return observed_temp_c <= threshold_c + 0.5
+    if condition == "at_or_above":
+        return observed_temp_c >= threshold_c - 0.5
+    if condition == "range" and threshold_high_c is not None:
+        return threshold_c - 0.5 <= observed_temp_c <= threshold_high_c + 0.5
+    return None
+
+
+def infer_threshold_from_prob(forecast_max, condition, side, side_prob, days_ahead):
+    if forecast_max is None or condition not in {"exact", "at_or_below", "at_or_above", "range"}:
+        return None, None
+    target_yes = side_prob if side == "YES" else 1.0 - side_prob
+    best_low = None
+    best_high = None
+    best_gap = float("inf")
+    start = int(math.floor(forecast_max - 25.0))
+    end = int(math.ceil(forecast_max + 25.0))
+    for step in range(start * 10, end * 10 + 1):
+        low = step / 10.0
+        width_options = [1.0, 0.6, 1.1] if condition == "range" else [None]
+        for width in width_options:
+            high = round(low + width, 1) if width is not None else None
+            prob_yes = estimate_prob_with_sigma(
+                forecast_max,
+                low,
+                condition,
+                days_ahead,
+                high,
+            )
+            gap = abs(prob_yes - target_yes)
+            if gap < best_gap:
+                best_gap = gap
+                best_low = low
+                best_high = high
+    if best_gap > 0.08:
+        return None, None
+    return best_low, best_high
+
+
+def load_resolution_stations():
+    try:
+        import bot  # type: ignore
+
+        return dict(getattr(bot, "RESOLUTION_STATIONS", {}))
+    except Exception:
+        return {}
+
+
+def fetch_open_meteo_observed_max(city: str, date_iso: str, resolution_stations: dict):
+    station = resolution_stations.get(city, {})
+    lat = station.get("lat")
+    lon = station.get("lon")
+    if lat is None or lon is None or not date_iso:
+        return None, None
+    params = urllib.parse.urlencode(
+        {
+            "latitude": lat,
+            "longitude": lon,
+            "start_date": date_iso,
+            "end_date": date_iso,
+            "daily": "temperature_2m_max",
+            "timezone": "UTC",
+        }
+    )
+    req = urllib.request.Request(f"https://archive-api.open-meteo.com/v1/archive?{params}")
+    req.add_header("User-Agent", "sl-retrospective/1.0")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            payload = json.loads(resp.read())
+    except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError):
+        return None, None
+    temps = payload.get("daily", {}).get("temperature_2m_max", [])
+    temp_c = as_float(temps[0] if temps else None)
+    if temp_c is None:
+        return None, None
+    return round(temp_c, 1), "open_meteo_archive"
+
+
+def fetch_live_observed_row(record: dict, resolution_stations: dict):
+    observed_real, source = fetch_open_meteo_observed_max(
+        str(record.get("city") or "").strip(),
+        str(record.get("date") or "").strip(),
+        resolution_stations,
+    )
+    if observed_real is None:
+        return None
+    return {
+        "observed_temp_c": observed_real,
+        "source": source or "",
+        "observed_dataset": source or "",
+    }
+
+
+def load_resolution_fallback_rows(path: Path = DEFAULT_FORECAST_ACCURACY_FILE):
+    payload = load_json(path, required=False) or {}
+    rows = payload.get("trades") or payload.get("rows") or []
+    by_id = {}
+    by_key = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        outcome_correct = row.get("outcome_correct")
+        if outcome_correct not in {True, False}:
+            continue
+        row_id = str(row.get("id") or "").strip()
+        if row_id:
+            by_id[row_id] = row
+        key = (
+            _normalize_text(row.get("city")),
+            str(row.get("date_iso") or "").strip(),
+            str(row.get("side") or "").strip().upper(),
+            str(row.get("condition") or "").strip(),
+            as_float(row.get("threshold_c")),
+            as_float(row.get("threshold_high_c")),
+        )
+        by_key[key] = row
+    return {"by_id": by_id, "by_key": by_key}
+
+
+def load_observed_vs_forecast_rows(path: Path = DEFAULT_AUDIT_FILE):
+    payload = load_json(path, required=False) or {}
+    rows = payload.get("observed_vs_forecast") or []
+    by_city_date = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        observed_temp_c = as_float(row.get("observed_temp_c"))
+        date_iso = str(row.get("date") or "").strip()
+        city = _normalize_text(row.get("city"))
+        if observed_temp_c is None or not city or not date_iso:
+            continue
+        key = (city, date_iso)
+        previous = by_city_date.get(key)
+        if previous is None or str(row.get("checked_at") or "") >= str(previous.get("checked_at") or ""):
+            by_city_date[key] = row
+    return {"by_city_date": by_city_date}
+
+
+def infer_observed_vs_forecast_verdict(record: dict, audit_lookup: dict, resolution_stations: dict | None = None):
+    key = (
+        _normalize_text(record.get("city")),
+        str(record.get("date") or "").strip(),
+    )
+    row = (audit_lookup.get("by_city_date") or {}).get(key)
+    if row is None and resolution_stations:
+        row = fetch_live_observed_row(record, resolution_stations)
+    if row is None:
+        return None
+
+    observed_real = as_float(row.get("observed_temp_c"))
+    if observed_real is None:
+        return None
+
+    parsed = _question_signature(_record_question_text(record))
+    condition = parsed.get("condition") if parsed else str(record.get("condition") or "").strip()
+    threshold_c = parsed.get("threshold_c") if parsed else None
+    threshold_high_c = parsed.get("threshold_high_c") if parsed else None
+
+    if threshold_c is None:
+        snapshots = [record.get("entry_context") or {}, record.get("latest_entry_context") or {}]
+        snapshots.extend(record.get("buys") or [])
+        for snapshot in snapshots:
+            forecast_max = as_float(snapshot.get("forecast_max"))
+            side_prob = to_probability(snapshot.get("our_prob"))
+            days_ahead = snapshot.get("days_ahead")
+            if (
+                forecast_max is None
+                or side_prob is None
+                or days_ahead is None
+                or not condition
+            ):
+                continue
+            threshold_c, threshold_high_c = infer_threshold_from_prob(
+                forecast_max,
+                condition,
+                str(record.get("side") or "").strip().upper(),
+                side_prob,
+                int(days_ahead),
+            )
+            if threshold_c is not None:
+                break
+
+    actual_yes = condition_happened(observed_real, condition, threshold_c, threshold_high_c)
+    if actual_yes is None:
+        return None
+
+    side = str(record.get("side") or "").strip().upper()
+    outcome_correct = actual_yes if side == "YES" else not actual_yes
+    return {
+        "verdict": "RIGHT" if outcome_correct else "WRONG",
+        "source": "observed_vs_forecast",
+        "observed_real": observed_real,
+        "observed_source": row.get("source") or row.get("observed_dataset") or "",
+    }
+
+
+def infer_resolution_verdict(record: dict, resolution_lookup: dict):
+    row = None
+    record_id = str(record.get("id") or "").strip()
+    if record_id:
+        row = (resolution_lookup.get("by_id") or {}).get(record_id)
+    if row is None:
+        key = _resolution_lookup_key(
+            record.get("city"),
+            record.get("date"),
+            record.get("side"),
+            _record_question_text(record),
+        )
+        row = (resolution_lookup.get("by_key") or {}).get(key)
+    if row is None:
+        return None
+    return {
+        "verdict": "RIGHT" if row.get("outcome_correct") is True else "WRONG",
+        "source": "resolved_outcome",
+        "observed_real": as_float(row.get("observed_real")),
+        "observed_source": row.get("observed_source") or "",
+    }
+
+
 def load_sl_rows(lifecycle_path: Path):
     payload = load_json(lifecycle_path)
     records = payload.get("records", []) if isinstance(payload, dict) else []
+    resolution_lookup = load_resolution_fallback_rows()
+    audit_path = lifecycle_path.parent / "audit.json"
+    if not audit_path.exists():
+        audit_path = DEFAULT_AUDIT_FILE
+    audit_lookup = load_observed_vs_forecast_rows(audit_path)
+    resolution_stations = load_resolution_stations()
     rows = []
+    seen_order_ids = set()
     for record in records:
         if not isinstance(record, dict):
             continue
         close_context = record.get("close_context") or {}
-        if close_context.get("close_reason") != "stop_loss":
+        close_reason = close_context.get("close_reason")
+        if close_reason not in SL_REASONS:
             continue
+        # Skip phantom legacy rows (shares==0 AND no token_id). The same trade
+        # is indexed with a richer dated record; counting both inflates the
+        # sample. Records missing total_shares entirely are left alone.
+        total_shares = as_float(record.get("total_shares"))
+        token_id = str(record.get("token_id") or "").strip()
+        if total_shares == 0.0 and not token_id:
+            continue
+        # Dedup by close order_id across the few remaining records.
+        order_id = str(close_context.get("order_id") or "").strip()
+        if order_id:
+            if order_id in seen_order_ids:
+                continue
+            seen_order_ids.add(order_id)
         post_exit = record.get("post_exit_analysis") or {}
         max_price = as_float(post_exit.get("max_price_after_close"))
         min_price = as_float(post_exit.get("min_price_after_close"))
@@ -103,12 +490,23 @@ def load_sl_rows(lifecycle_path: Path):
         close_price = as_float(close_context.get("close_price"))
         market_seen = bool(post_exit.get("market_seen_after_close"))
         reached_98 = bool(post_exit.get("reached_98_after_close"))
+        fallback = None
         if reached_98 or (max_price is not None and max_price >= 0.85):
             verdict = "RIGHT"
+            verdict_source = "post_exit_market_data"
         elif market_seen and max_price is not None and max_price <= 0.15:
             verdict = "WRONG"
+            verdict_source = "post_exit_market_data"
         else:
             verdict = "UNKNOWN"
+            verdict_source = ""
+        if verdict == "UNKNOWN":
+            fallback = infer_observed_vs_forecast_verdict(record, audit_lookup, resolution_stations)
+            if fallback is None:
+                fallback = infer_resolution_verdict(record, resolution_lookup)
+            if fallback is not None:
+                verdict = fallback["verdict"]
+                verdict_source = fallback["source"]
         pnl_without_sl_best = None
         pnl_without_sl_worst = None
         delta_vs_sl_best = None
@@ -129,11 +527,15 @@ def load_sl_rows(lifecycle_path: Path):
                 "pnl_cash_with_sl": pnl_cash,
                 "close_shares": close_shares,
                 "closed_at": record.get("closed_at"),
+                "close_reason": close_reason,
                 "verdict": verdict,
+                "verdict_source": verdict_source,
                 "reached_98_after_close": reached_98,
                 "max_price_after_close": max_price,
                 "min_price_after_close": min_price,
                 "market_seen_after_close": market_seen,
+                "observed_real": (fallback or {}).get("observed_real"),
+                "observed_source": (fallback or {}).get("observed_source") or "",
                 "upside_left_cash_peak": upside,
                 "pnl_without_sl_best": pnl_without_sl_best,
                 "pnl_without_sl_worst": pnl_without_sl_worst,

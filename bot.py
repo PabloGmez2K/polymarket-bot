@@ -2135,6 +2135,22 @@ def _find_trade_lifecycle_record(records, entry):
     side = str(entry.get("side", "")).upper()
     market_date = entry.get("date", "")
 
+    fallback_candidates = []
+    close_like_action = str(entry.get("action", "") or "").upper() in {
+        "SELL_PENDING",
+        "SELL",
+        "SELL_FAILED",
+        "LOSS_TOTAL",
+        "RESOLVED_WIN",
+    }
+    event_ts = str(
+        entry.get("fill_confirmed")
+        or entry.get("failed_at")
+        or entry.get("closed_at")
+        or entry.get("timestamp")
+        or ""
+    ).strip()
+
     for record in reversed(records):
         if record_id and record.get("id") == record_id:
             return record
@@ -2146,6 +2162,45 @@ def _find_trade_lifecycle_record(records, entry):
             return record
         if city and market_date and record.get("city") == city and record.get("side") == side and record.get("date") == market_date:
             return record
+
+        if not close_like_action or token_id or question or market_date:
+            continue
+        if record.get("city") != city or record.get("side") != side:
+            continue
+
+        opened_at = str(
+            record.get("last_buy_at")
+            or record.get("opened_at")
+            or _trade_lifecycle_entry_anchor(record)
+            or ""
+        ).strip()
+        if event_ts and opened_at and opened_at > event_ts:
+            continue
+
+        closed_at = str(
+            record.get("closed_at")
+            or (record.get("close_context") or {}).get("timestamp")
+            or ""
+        ).strip()
+        if closed_at and event_ts and closed_at <= event_ts:
+            continue
+
+        fallback_candidates.append(record)
+
+    if fallback_candidates:
+        fallback_candidates.sort(
+            key=lambda record: (
+                1 if record.get("status") in {"open", "pending_exit", "exit_failed"} else 0,
+                str(
+                    record.get("last_buy_at")
+                    or record.get("opened_at")
+                    or _trade_lifecycle_entry_anchor(record)
+                    or ""
+                ),
+            ),
+            reverse=True,
+        )
+        return fallback_candidates[0]
     return None
 
 
@@ -3006,7 +3061,10 @@ def _sync_trade_lifecycle_from_sources():
         if not record:
             continue
         _append_synthetic_postmortem_close_event(record, pm)
-        record["status"] = pm.get("status", record.get("status", "open"))
+        status_rank = {"open": 0, "pending_exit": 1, "exit_failed": 2, "closed": 3}
+        pm_status = pm.get("status", record.get("status", "open"))
+        if status_rank.get(pm_status, -1) > status_rank.get(record.get("status", ""), -1):
+            record["status"] = pm_status
         record["opened_at"] = pm.get("opened_at") or record.get("opened_at")
         record["last_buy_at"] = pm.get("last_buy_at") or record.get("last_buy_at")
         record["closed_at"] = pm.get("closed_at") or record.get("closed_at")
@@ -3266,6 +3324,22 @@ def _find_open_postmortem(records, entry):
     side = str(entry.get("side", "")).upper()
     market_date = entry.get("date", "")
 
+    fallback_candidates = []
+    close_like_action = str(entry.get("action", "") or "").upper() in {
+        "SELL_PENDING",
+        "SELL",
+        "SELL_FAILED",
+        "LOSS_TOTAL",
+        "RESOLVED_WIN",
+    }
+    event_ts = str(
+        entry.get("fill_confirmed")
+        or entry.get("failed_at")
+        or entry.get("closed_at")
+        or entry.get("timestamp")
+        or ""
+    ).strip()
+
     for record in reversed(records):
         if record.get("status") not in open_statuses:
             continue
@@ -3275,6 +3349,24 @@ def _find_open_postmortem(records, entry):
             return record
         if city and market_date and record.get("city") == city and record.get("side") == side and record.get("date") == market_date:
             return record
+
+        if not close_like_action or token_id or question or market_date:
+            continue
+        if record.get("city") != city or record.get("side") != side:
+            continue
+
+        opened_at = str(record.get("last_buy_at") or record.get("opened_at") or "").strip()
+        if event_ts and opened_at and opened_at > event_ts:
+            continue
+
+        fallback_candidates.append(record)
+
+    if fallback_candidates:
+        fallback_candidates.sort(
+            key=lambda record: str(record.get("last_buy_at") or record.get("opened_at") or ""),
+            reverse=True,
+        )
+        return fallback_candidates[0]
     return None
 
 
@@ -3307,7 +3399,9 @@ def update_postmortem(action, entry):
         return
 
     records = load_postmortem_data()
-    record = _find_open_postmortem(records, entry)
+    match_entry = dict(entry or {})
+    match_entry["action"] = action
+    record = _find_open_postmortem(records, match_entry)
 
     timestamp = (
         entry.get("fill_confirmed")
@@ -6852,7 +6946,7 @@ def _daily_summary_cycles_last_24h(now):
 
 def _daily_summary_closed_trades_last_24h(now):
     """Resoluciones del día: trades cerrados en las últimas 24h."""
-    stats = {"closed": 0, "wins": 0, "losses": 0, "pnl": 0.0}
+    stats = {"closed": 0, "wins": 0, "breakeven": 0, "losses": 0, "pnl": 0.0}
     cutoff = now - timedelta(hours=24)
     try:
         closed = _get_recent_closed_trades()
@@ -6873,8 +6967,10 @@ def _daily_summary_closed_trades_last_24h(now):
         stats["pnl"] += pnl
         if pnl > 0:
             stats["wins"] += 1
-        else:
+        elif pnl < 0:
             stats["losses"] += 1
+        else:
+            stats["breakeven"] += 1
     return stats
 
 
@@ -6950,6 +7046,29 @@ def _format_buy_mode_tag(city_mode):
     return mode.upper() if mode else "OPERABLE"
 
 
+def _daily_summary_has_cycle_today(now):
+    """True si ya hay al menos un ciclo real registrado hoy."""
+    try:
+        records = load_cycle_history()
+    except Exception:
+        records = []
+
+    latest_ts = None
+    for rec in records:
+        ts_raw = rec.get("timestamp_utc", "")
+        if not ts_raw:
+            continue
+        try:
+            ts = datetime.fromisoformat(ts_raw)
+        except Exception:
+            continue
+        if ts > now:
+            continue
+        if latest_ts is None or ts > latest_ts:
+            latest_ts = ts
+    return bool(latest_ts and latest_ts.date() == now.date())
+
+
 def build_daily_summary_payload(now=None):
     """Construye payload del resumen diario (datos crudos sin formateo)."""
     if now is None:
@@ -6965,8 +7084,14 @@ def build_daily_summary_payload(now=None):
             "canary": len(globals().get("CANARY_TRADING_CITIES", []) or []),
         }
     )
+    next_run_at = ""
+    try:
+        next_run_at = get_next_run_time().isoformat()
+    except Exception:
+        next_run_at = ""
     return {
         "generated_at": now.isoformat(),
+        "next_run_at": next_run_at,
         "cycles_24h": _daily_summary_cycles_last_24h(now),
         "resolutions_24h": _daily_summary_closed_trades_last_24h(now),
         "noaa_24h": _daily_summary_noaa_last_24h(now),
@@ -6984,6 +7109,11 @@ def format_daily_summary_text(payload):
     c = payload.get("cycles_24h", {})
     r = payload.get("resolutions_24h", {})
     n = payload.get("noaa_24h", {})
+    generated_at_raw = str(payload.get("generated_at", "") or "").strip()
+    try:
+        generated_at = datetime.fromisoformat(generated_at_raw)
+    except Exception:
+        generated_at = datetime.now(timezone.utc)
 
     mode_label_helper = globals().get("_format_operable_mode_label")
     mode_label = (
@@ -7007,7 +7137,7 @@ def format_daily_summary_text(payload):
         buys_line += f" ({' | '.join(buys_breakdown)})"
 
     lines = [
-        f"📊 <b>Resumen diario — {datetime.now(timezone.utc).strftime('%Y-%m-%d')}</b>",
+        f"📊 <b>Resumen diario — {generated_at.strftime('%Y-%m-%d')}</b>",
         f"<i>Bot {payload.get('version', '?')} · {mode_label}</i>",
         "",
         "<b>🔄 Ciclos 24h</b>",
@@ -7021,9 +7151,13 @@ def format_daily_summary_text(payload):
     ]
 
     if r.get("closed", 0) > 0:
+        resolution_parts = [f"✅ {r.get('wins', 0)}"]
+        if int(r.get("breakeven", 0) or 0) > 0:
+            resolution_parts.append(f"➖ {r.get('breakeven', 0)}")
+        resolution_parts.append(f"❌ {r.get('losses', 0)}")
         lines.append(
             f"• Cerrados: <b>{r['closed']}</b> "
-            f"(✅ {r.get('wins', 0)} / ❌ {r.get('losses', 0)})"
+            f"({' / '.join(resolution_parts)})"
         )
         lines.append(f"• PnL neto: <b>${r.get('pnl', 0.0):+.2f}</b>")
     else:
@@ -7041,13 +7175,14 @@ def format_daily_summary_text(payload):
     lines.append("")
     lines.append("<i>Caso NOAA = 1 fila city+date en observed_vs_forecast (forecast vs observado NOAA).</i>")
 
-    # Próximo ciclo (usa scheduler si está disponible).
-    try:
-        next_run = get_next_run_time()
-        lines.append("")
-        lines.append(f"<b>⏭ Próximo ciclo:</b> {next_run.strftime('%H:%M UTC')}")
-    except Exception:
-        pass
+    next_run_raw = str(payload.get("next_run_at", "") or "").strip()
+    if next_run_raw:
+        try:
+            next_run = datetime.fromisoformat(next_run_raw)
+            lines.append("")
+            lines.append(f"<b>⏭ Próximo ciclo:</b> {next_run.strftime('%H:%M UTC')}")
+        except Exception:
+            pass
 
     return "\n".join(lines)
 
@@ -7064,6 +7199,8 @@ def maybe_send_daily_summary_telegram(state, now=None):
         return False
     today = now.date().isoformat()
     if state.get("daily_summary_last_sent") == today:
+        return False
+    if not _daily_summary_has_cycle_today(now):
         return False
 
     try:

@@ -29,6 +29,7 @@ import tempfile
 import shutil
 import urllib.error
 from datetime import date, datetime, timezone, timedelta
+from pathlib import Path
 
 passed = 0
 failed = 0
@@ -2942,6 +2943,50 @@ def run_tests():
         test("postmortem funcional: reason y order_id preservados",
              rec.get("close_reason") == "reeval" and rec.get("order_id") == "oid-1", str(rec))
 
+        with open(tmp_postmortem, "w", encoding="utf-8") as f:
+            json.dump([], f, ensure_ascii=False)
+
+        orphan_buy = {
+            "timestamp": "2026-03-26T16:00:35.537606+00:00",
+            "bot_version": "v10.6.10",
+            "city": "Miami",
+            "side": "YES",
+            "date": "2026-03-26",
+            "question": "",
+            "token_id": "",
+            "condition": "range",
+            "amount": 2.20,
+            "shares": 11.28,
+            "price": 0.195,
+            "edge_pct": 14.5,
+            "forecast_max": 28.0,
+            "our_prob": 32.0,
+            "mkt_price": 17.5,
+            "trader_confirmed": [],
+        }
+        orphan_close = {
+            "timestamp": "2026-03-26T23:00:05.994490+00:00",
+            "bot_version": "v10.6.10",
+            "city": "Miami",
+            "side": "Yes",
+            "reason": "micro_position_unsellable",
+            "loss": -2.14,
+        }
+
+        pm_ns["update_postmortem"]("BUY", orphan_buy)
+        pm_ns["update_postmortem"]("LOSS_TOTAL", orphan_close)
+
+        orphan_records = pm_ns["load_postmortem_data"]()
+        orphan_rec = orphan_records[-1] if orphan_records else {}
+        test("postmortem funcional: LOSS_TOTAL sin date/question se pega al BUY abierto",
+             len(orphan_records) == 1
+             and orphan_rec.get("status") == "closed"
+             and orphan_rec.get("city") == "Miami"
+             and orphan_rec.get("date") == "2026-03-26"
+             and orphan_rec.get("close_action") == "LOSS_TOTAL"
+             and orphan_rec.get("close_reason") == "micro_position_unsellable",
+             orphan_records)
+
         if os.path.exists(tmp_postmortem):
             try:
                 os.remove(tmp_postmortem)
@@ -3224,6 +3269,111 @@ def run_tests():
         test("trade_lifecycle funcional: summary refleja casos con upside_left",
              after_market.get("summary", {}).get("with_upside_left_after_close") == 1,
              after_market.get("summary"))
+
+        with open(tmp_perf_lifecycle, "w", encoding="utf-8") as f:
+            json.dump([
+                {
+                    "timestamp": "2026-03-26T23:00:23.521678+00:00",
+                    "action": "BUY",
+                    "city": "Seattle",
+                    "side": "YES",
+                    "date": "2026-03-28",
+                    "question": "",
+                    "token_id": "",
+                    "amount": 2.50,
+                    "shares": 23.92,
+                    "price": 0.1045,
+                    "edge_pct": 27.0,
+                    "forecast_max": 11.8,
+                    "our_prob": 35.5,
+                    "mkt_price": 8.5,
+                    "days_ahead": 2,
+                    "condition": "at_or_below",
+                    "trader_confirmed": [],
+                    "bot_version": "v10.6.10",
+                },
+                {
+                    "timestamp": "2026-03-27T23:00:14.681144+00:00",
+                    "fill_confirmed": "2026-03-27T23:00:14.709743+00:00",
+                    "action": "SELL",
+                    "city": "Seattle",
+                    "side": "Yes",
+                    "reason": "stop_loss",
+                    "price": 0.02,
+                    "shares": 23.92,
+                    "return_est": 0.48,
+                    "pnl_pct": -56.29,
+                    "pnl_cash": -1.34,
+                    "order_id": "oid-sea-legacy",
+                    "bot_version": "v10.6.10",
+                },
+            ], f, ensure_ascii=False)
+
+        with open(tmp_pm_lifecycle, "w", encoding="utf-8") as f:
+            json.dump([
+                {
+                    "id": "market:seattle|date:2026-03-28|side:YES|2026-03-26T23:00:23.521678+00:00",
+                    "status": "open",
+                    "token_id": "",
+                    "question": "",
+                    "city": "Seattle",
+                    "side": "YES",
+                    "date": "2026-03-28",
+                    "condition": "at_or_below",
+                    "opened_at": "2026-03-26T23:00:23.521678+00:00",
+                    "last_buy_at": "2026-03-26T23:00:23.521678+00:00",
+                    "closed_at": None,
+                    "buy_count": 1,
+                    "total_amount": 2.50,
+                    "total_shares": 23.92,
+                    "avg_entry_price": 0.1045,
+                    "trader_confirmed": [],
+                    "bot_version_opened": "v10.6.10",
+                    "bot_version_closed": "",
+                    "buys": [
+                        {
+                            "timestamp": "2026-03-26T23:00:23.521678+00:00",
+                            "amount": 2.50,
+                            "shares": 23.92,
+                            "price": 0.1045,
+                            "edge_pct": 27.0,
+                            "forecast_max": 11.8,
+                            "our_prob": 35.5,
+                            "mkt_price": 8.5,
+                            "bot_version": "v10.6.10",
+                        }
+                    ],
+                    "close_action": "",
+                    "close_reason": "",
+                    "close_subtype": "",
+                    "close_price": None,
+                    "close_shares": None,
+                    "return_est": None,
+                    "pnl_cash": None,
+                    "pnl_pct": None,
+                    "order_id": "",
+                }
+            ], f, ensure_ascii=False)
+
+        with open(tmp_trade_lifecycle, "w", encoding="utf-8") as f:
+            json.dump({
+                "generated_at": "",
+                "summary": {},
+                "integrity": {},
+                "records": [],
+            }, f, ensure_ascii=False)
+
+        matched_close_payload = lifecycle_ns["_sync_trade_lifecycle_from_sources"]()
+        matched_close_records = matched_close_payload.get("records", [])
+        matched_close_record = matched_close_records[0] if matched_close_records else {}
+        test("trade_lifecycle funcional: SELL sin date/question se pega al BUY abierto",
+             len(matched_close_records) == 1
+             and matched_close_record.get("status") == "closed"
+             and matched_close_record.get("date") == "2026-03-28"
+             and matched_close_record.get("close_context", {}).get("close_action") == "SELL"
+             and matched_close_record.get("close_context", {}).get("close_reason") == "stop_loss"
+             and {item.get("action") for item in matched_close_record.get("timeline", [])} == {"BUY", "SELL"},
+             matched_close_records)
 
         orphan_fill_ts = "2026-03-27T08:00:26.261032+00:00"
         with open(tmp_perf_lifecycle, "w", encoding="utf-8") as f:
@@ -4241,6 +4391,7 @@ def run_tests():
     exec(get_function_source(module_ast, code_lines, "_daily_summary_cycles_last_24h"), daily_ns)
     exec(get_function_source(module_ast, code_lines, "_daily_summary_closed_trades_last_24h"), daily_ns)
     exec(get_function_source(module_ast, code_lines, "_daily_summary_noaa_last_24h"), daily_ns)
+    exec(get_function_source(module_ast, code_lines, "_daily_summary_has_cycle_today"), daily_ns)
     exec(get_function_source(module_ast, code_lines, "build_daily_summary_payload"), daily_ns)
     exec(get_function_source(module_ast, code_lines, "format_daily_summary_text"), daily_ns)
     exec(get_function_source(module_ast, code_lines, "maybe_send_daily_summary_telegram"), daily_ns)
@@ -4280,6 +4431,7 @@ def run_tests():
     test("M4 daily payload: resoluciones 24h split wins/losses",
          payload["resolutions_24h"]["closed"] == 2
          and payload["resolutions_24h"]["wins"] == 1
+         and payload["resolutions_24h"]["breakeven"] == 0
          and payload["resolutions_24h"]["losses"] == 1
          and abs(payload["resolutions_24h"]["pnl"] - 0.9) < 1e-9,
          payload["resolutions_24h"])
@@ -4291,6 +4443,46 @@ def run_tests():
     test("M4 daily payload: marca shadow_only cuando ACTIVE_TRADING_CITIES está vacío",
          payload["shadow_only"] is True,
          payload)
+    test("M4 daily text: usa generated_at y next_run_at del payload",
+         "2026-04-05" in daily_messages[0] and "16:00 UTC" in daily_messages[0],
+         daily_messages[0])
+
+    breakeven_ns = dict(daily_ns)
+    breakeven_ns["_get_recent_closed_trades"] = lambda: [
+        {"closed_at": "2026-04-05T03:00:00+00:00", "pnl_cash": 0.0},
+        {"closed_at": "2026-04-05T06:00:00+00:00", "pnl_cash": -0.0},
+        {"closed_at": "2026-04-05T07:00:00+00:00", "pnl_cash": -0.6},
+    ]
+    exec(get_function_source(module_ast, code_lines, "_daily_summary_closed_trades_last_24h"), breakeven_ns)
+    exec(get_function_source(module_ast, code_lines, "build_daily_summary_payload"), breakeven_ns)
+    exec(get_function_source(module_ast, code_lines, "format_daily_summary_text"), breakeven_ns)
+    breakeven_payload = breakeven_ns["build_daily_summary_payload"](now=probe_now)
+    breakeven_text = breakeven_ns["format_daily_summary_text"](breakeven_payload)
+    test("M4 daily payload: separa break-even de pérdidas",
+         breakeven_payload["resolutions_24h"]["wins"] == 0
+         and breakeven_payload["resolutions_24h"]["breakeven"] == 2
+         and breakeven_payload["resolutions_24h"]["losses"] == 1
+         and "➖ 2" in breakeven_text,
+         {
+             "resolutions": breakeven_payload["resolutions_24h"],
+             "has_breakeven_marker": "➖ 2" in breakeven_text,
+         })
+
+    stale_cycle_messages = []
+    stale_cycle_ns = dict(daily_ns)
+    stale_cycle_ns["load_cycle_history"] = lambda: [
+        {"timestamp_utc": "2026-04-04T23:00:00+00:00", "scan": {"markets_evaluated": 18, "with_edge": 2, "selected": 1, "shadow": 1}, "buys": [{"city": "Tokyo"}]},
+    ]
+    stale_cycle_ns["send_telegram"] = lambda text, with_menu=False, custom_keyboard=None: stale_cycle_messages.append(text)
+    exec(get_function_source(module_ast, code_lines, "_daily_summary_has_cycle_today"), stale_cycle_ns)
+    exec(get_function_source(module_ast, code_lines, "build_daily_summary_payload"), stale_cycle_ns)
+    exec(get_function_source(module_ast, code_lines, "format_daily_summary_text"), stale_cycle_ns)
+    exec(get_function_source(module_ast, code_lines, "maybe_send_daily_summary_telegram"), stale_cycle_ns)
+    stale_state = {"daily_summary_last_sent": None}
+    stale_result = stale_cycle_ns["maybe_send_daily_summary_telegram"](stale_state, now=probe_now)
+    test("M4 daily summary: no envía al arrancar si hoy todavía no hubo ciclo real",
+         stale_result is False and len(stale_cycle_messages) == 0,
+         {"result": stale_result, "messages": stale_cycle_messages})
 
     slot_ns = {
         "datetime": datetime,
@@ -5243,6 +5435,347 @@ def run_tests():
         "v10.6.32: maybe_run_daily_briefing integrada en run_observability_alerts",
         "maybe_run_daily_briefing(state)" in code,
     )
+    try:
+        with open(sl_retro_script, "r", encoding="utf-8") as f:
+            sl_retro_code = f.read()
+        sl_retro_ast = ast.parse(sl_retro_code)
+        sl_retro_lines = sl_retro_code.splitlines()
+
+        fd, tmp_sl_lifecycle = tempfile.mkstemp(
+            dir=_verify_tmp_dir(),
+            prefix="_tmp_sl_lifecycle_",
+            suffix=".json",
+        )
+        os.close(fd)
+        fd, tmp_sl_forecast = tempfile.mkstemp(
+            dir=_verify_tmp_dir(),
+            prefix="_tmp_sl_forecast_",
+            suffix=".json",
+        )
+        os.close(fd)
+        fd, tmp_sl_audit = tempfile.mkstemp(
+            dir=_verify_tmp_dir(),
+            prefix="_tmp_sl_audit_",
+            suffix=".json",
+        )
+        os.close(fd)
+
+        with open(tmp_sl_lifecycle, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "records": [
+                        {
+                            "id": "atl-1",
+                            "city": "Atlanta",
+                            "date": "2026-04-01",
+                            "side": "YES",
+                            "label": "Will the highest temperature in Atlanta be between 80-81°F on April 1? YES",
+                            "question": "Will the highest temperature in Atlanta be between 80-81°F on April 1?",
+                            "avg_entry_price": 0.15,
+                            "closed_at": "2026-04-01T16:00:00+00:00",
+                            "close_context": {
+                                "close_reason": "stop_loss",
+                                "close_price": 0.08,
+                                "close_shares": 10.0,
+                                "pnl_cash": -1.3,
+                                "pnl_pct": -56.0,
+                                "order_id": "order-atl-1",
+                            },
+                            "post_exit_analysis": {},
+                        },
+                        {
+                            "id": "chi-mismatch-id",
+                            "city": "Chicago",
+                            "date": "2026-03-29",
+                            "side": "YES",
+                            "label": "Will the highest temperature in Chicago be between 66-67°F on March 29? YES",
+                            "question": "Will the highest temperature in Chicago be between 66-67°F on March 29?",
+                            "avg_entry_price": 0.14,
+                            "closed_at": "2026-03-29T16:00:00+00:00",
+                            "close_context": {
+                                "close_reason": "stop_loss",
+                                "close_price": 0.02,
+                                "close_shares": 9.0,
+                                "pnl_cash": -1.21,
+                                "pnl_pct": -79.0,
+                                "order_id": "order-chi-1",
+                            },
+                            "post_exit_analysis": {},
+                        },
+                        {
+                            "id": "dal-runtime-id",
+                            "city": "Dallas",
+                            "date": "2026-03-28",
+                            "side": "YES",
+                            "label": "Will the highest temperature in Dallas be between 64-65Â°F on March 28? YES",
+                            "question": "Will the highest temperature in Dallas be between 64-65Â°F on March 28?",
+                            "avg_entry_price": 0.19,
+                            "closed_at": "2026-03-28T19:14:08+00:00",
+                            "close_context": {
+                                "close_reason": "stop_loss",
+                                "close_price": 0.08,
+                                "close_shares": 10.87,
+                                "pnl_cash": -1.36,
+                                "pnl_pct": -54.3,
+                                "order_id": "order-dal-1",
+                            },
+                            "entry_context": {
+                                "forecast_max": 14.9,
+                                "our_prob": 47.9,
+                                "days_ahead": 0,
+                            },
+                            "post_exit_analysis": {},
+                        },
+                        {
+                            "id": "sea-legacy-id",
+                            "city": "Seattle",
+                            "date": "2026-03-28",
+                            "side": "YES",
+                            "label": "Seattle 2026-03-28 YES",
+                            "question": "",
+                            "condition": "at_or_below",
+                            "avg_entry_price": 0.10,
+                            "closed_at": "2026-03-27T23:00:14+00:00",
+                            "close_context": {
+                                "close_reason": "stop_loss",
+                                "close_price": 0.02,
+                                "close_shares": 23.92,
+                                "pnl_cash": -1.34,
+                                "pnl_pct": -56.3,
+                                "order_id": "order-sea-1",
+                            },
+                            "entry_context": {
+                                "forecast_max": 11.8,
+                                "our_prob": 35.5,
+                                "days_ahead": 2,
+                            },
+                            "post_exit_analysis": {},
+                        },
+                        {
+                            "id": "par-1",
+                            "city": "Paris",
+                            "date": "2026-03-29",
+                            "side": "NO",
+                            "label": "Will the highest temperature in Paris be 12°C on March 29? NO",
+                            "question": "Will the highest temperature in Paris be 12°C on March 29?",
+                            "avg_entry_price": 0.44,
+                            "closed_at": "2026-03-29T11:00:00+00:00",
+                            "total_shares": 4.2,
+                            "close_context": {
+                                "close_reason": "stop_loss_intra",
+                                "close_price": 0.07,
+                                "close_shares": 4.2,
+                                "pnl_cash": -1.84,
+                                "pnl_pct": -77.9,
+                                "order_id": "order-par-1",
+                            },
+                            "post_exit_analysis": {},
+                        },
+                        {
+                            "id": "market:phantom|date:|side:YES|2026-03-28",
+                            "city": "Phantom",
+                            "date": "",
+                            "side": "YES",
+                            "label": "Phantom YES",
+                            "token_id": "",
+                            "total_shares": 0,
+                            "closed_at": "2026-03-28T08:00:00+00:00",
+                            "close_context": {
+                                "close_reason": "stop_loss",
+                                "close_price": 0.07,
+                                "close_shares": 0,
+                                "pnl_cash": -1.95,
+                                "pnl_pct": -40.5,
+                                "order_id": "order-par-1",
+                            },
+                            "post_exit_analysis": {},
+                        },
+                    ]
+                },
+                f,
+                ensure_ascii=False,
+            )
+
+        with open(tmp_sl_forecast, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "trades": [
+                        {
+                            "id": "atl-1",
+                            "city": "Atlanta",
+                            "date_iso": "2026-04-01",
+                            "side": "YES",
+                            "condition": "range",
+                            "threshold_c": 26.7,
+                            "threshold_high_c": 27.2,
+                            "observed_real": 28.1,
+                            "observed_source": "open_meteo_archive",
+                            "outcome_correct": False,
+                        },
+                        {
+                            "id": "chi-real-id",
+                            "city": "Chicago",
+                            "date_iso": "2026-03-29",
+                            "side": "YES",
+                            "condition": "range",
+                            "threshold_c": 18.9,
+                            "threshold_high_c": 19.4,
+                            "observed_real": 17.2,
+                            "observed_source": "daily-summaries_tmax",
+                            "outcome_correct": True,
+                        },
+                        {
+                            "id": "par-1",
+                            "city": "Paris",
+                            "date_iso": "2026-03-29",
+                            "side": "NO",
+                            "condition": "exact",
+                            "threshold_c": 12.0,
+                            "threshold_high_c": None,
+                            "observed_real": 10.8,
+                            "observed_source": "daily-summaries_tmax",
+                            "outcome_correct": True,
+                        },
+                        {
+                            "id": "dal-mismatch-id",
+                            "city": "Dallas",
+                            "date_iso": "2026-03-28",
+                            "side": "YES",
+                            "condition": "range",
+                            "threshold_c": 13.5,
+                            "threshold_high_c": 14.5,
+                            "observed_real": 14.4,
+                            "observed_source": "daily-summaries_tmax",
+                            "outcome_correct": True,
+                        },
+                    ]
+                },
+                f,
+                ensure_ascii=False,
+            )
+        with open(tmp_sl_audit, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "observed_vs_forecast": [
+                        {
+                            "city": "Dallas",
+                            "date": "2026-03-28",
+                            "observed_temp_c": 14.4,
+                            "source": "noaa_ncei",
+                            "observed_dataset": "daily-summaries_tmax",
+                            "checked_at": "2026-04-24T10:00:00+00:00",
+                        },
+                        {
+                            "city": "Seattle",
+                            "date": "2026-03-28",
+                            "observed_temp_c": 13.9,
+                            "source": "noaa_ncei",
+                            "observed_dataset": "daily-summaries_tmax",
+                            "checked_at": "2026-04-24T10:00:00+00:00",
+                        },
+                    ]
+                },
+                f,
+                ensure_ascii=False,
+            )
+
+        sl_ns = {
+            "json": json,
+            "math": math,
+            "Path": Path,
+            "DEFAULT_FORECAST_ACCURACY_FILE": Path(tmp_sl_forecast),
+            "DEFAULT_AUDIT_FILE": Path(tmp_sl_audit),
+            "PRELIMINARY_THRESHOLD": 8,
+            "FINAL_THRESHOLD": 12,
+            "SL_REASONS": {"stop_loss", "stop_loss_intra"},
+        }
+        for fn_name in [
+            "load_json",
+            "as_float",
+            "to_probability",
+            "_normalize_text",
+            "_record_question_text",
+            "_question_signature",
+            "_resolution_lookup_key",
+            "normal_cdf",
+            "estimate_prob_with_sigma",
+            "condition_happened",
+            "infer_threshold_from_prob",
+            "load_resolution_stations",
+            "fetch_open_meteo_observed_max",
+            "fetch_live_observed_row",
+            "load_resolution_fallback_rows",
+            "load_observed_vs_forecast_rows",
+            "infer_observed_vs_forecast_verdict",
+            "infer_resolution_verdict",
+            "load_sl_rows",
+            "summarize",
+        ]:
+            exec(get_function_source(sl_retro_ast, sl_retro_lines, fn_name), sl_ns)
+        sl_ns["load_resolution_stations"] = lambda: {}
+
+        sl_rows = sl_ns["load_sl_rows"](Path(tmp_sl_lifecycle))
+        sl_summary = sl_ns["summarize"](sl_rows)
+        atl_row = next((row for row in sl_rows if "Atlanta" in row.get("label", "")), {})
+        chi_row = next((row for row in sl_rows if "Chicago" in row.get("label", "")), {})
+        dal_row = next((row for row in sl_rows if "Dallas" in row.get("label", "")), {})
+        sea_row = next((row for row in sl_rows if row.get("label") == "Seattle 2026-03-28 YES"), {})
+        par_row = next((row for row in sl_rows if "Paris" in row.get("label", "")), {})
+        phantom_row = next((row for row in sl_rows if "Phantom" in row.get("label", "")), None)
+        test(
+            "v10.6.32: SL retro usa fallback por resolución real cuando faltan snapshots",
+            atl_row.get("verdict") == "WRONG"
+            and atl_row.get("verdict_source") == "resolved_outcome"
+            and chi_row.get("verdict") == "RIGHT"
+            and chi_row.get("verdict_source") == "resolved_outcome",
+            {"atl": atl_row, "chi": chi_row},
+        )
+        test(
+            "v10.6.32: SL retro resuelve por firma de pregunta aunque cambie el id",
+            chi_row.get("verdict") == "RIGHT" and chi_row.get("observed_real") == 17.2,
+            chi_row,
+        )
+        test(
+            "v10.6.34: SL retro prioriza audit NOAA cuando forecast_accuracy deriva un umbral incoherente",
+            dal_row.get("verdict") == "WRONG"
+            and dal_row.get("verdict_source") == "observed_vs_forecast"
+            and dal_row.get("observed_real") == 14.4,
+            dal_row,
+        )
+        test(
+            "v10.6.34: SL retro resuelve legacy sin question usando observed_vs_forecast e inferencia de umbral",
+            sea_row.get("verdict") == "WRONG"
+            and sea_row.get("verdict_source") == "observed_vs_forecast"
+            and sea_row.get("observed_real") == 13.9,
+            sea_row,
+        )
+        test(
+            "v10.6.33: SL retro incluye stop_loss_intra",
+            par_row.get("verdict") == "RIGHT"
+            and par_row.get("close_reason") == "stop_loss_intra",
+            par_row,
+        )
+        test(
+            "v10.6.33: SL retro omite filas phantom (total_shares=0 y sin token_id)",
+            phantom_row is None,
+            {"rows_labels": [row.get("label") for row in sl_rows]},
+        )
+        test(
+            "v10.6.34: resumen SL retro cuenta 5 resueltos (3 wrong + 2 right)",
+            sl_summary.get("n_resolved") == 5
+            and sl_summary.get("n_right") == 2
+            and sl_summary.get("n_wrong") == 3,
+            sl_summary,
+        )
+
+        for tmp_file in [tmp_sl_lifecycle, tmp_sl_forecast, tmp_sl_audit]:
+            if os.path.exists(tmp_file):
+                try:
+                    os.remove(tmp_file)
+                except OSError:
+                    pass
+    except Exception as exc:
+        test("v10.6.32: tests funcionales SL retrospective ejecutan sin excepción", False, str(exc))
 
     # ---- v10.6.17: Austin canary onboarding ----
     test(
@@ -5552,6 +6085,21 @@ def run_tests():
         and "--telegram-dry-run" in code
         and '"city_policy_state.json", "w"' not in runtime_export_code
         and "CITY_POLICY_FILE" not in runtime_export_code,
+    )
+    city_pipeline_path = os.path.join(os.path.dirname(__file__), "tools", "city_intelligence_pipeline.py")
+    city_pipeline_code = ""
+    if os.path.exists(city_pipeline_path):
+        with open(city_pipeline_path, "r", encoding="utf-8") as f:
+            city_pipeline_code = f.read()
+    test(
+        "v10.6.31: city pipeline expone failed_steps para Railway",
+        "failed_steps" in city_pipeline_code and "collect_failed_steps" in city_pipeline_code,
+    )
+    test(
+        "v10.6.31: city pipeline falla si algun step/output canónico falla",
+        "missing_outputs" in city_pipeline_code
+        and 'overall_status = "ok" if not failed_steps and not missing_outputs else "partial_failure"' in city_pipeline_code
+        and "sys.exit(1 if failed_steps or missing_outputs else 0)" in city_pipeline_code,
     )
 
     # ---- v10.6.30: intra-reeval shadow-log ----

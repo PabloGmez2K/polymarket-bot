@@ -222,6 +222,25 @@ def render_markdown(payload):
     return "\n".join(lines) + "\n"
 
 
+def collect_failed_steps(steps):
+    return [step["step"] for step in steps if not step.get("ok")]
+
+
+def collect_missing_outputs():
+    expected_outputs = {
+        "directional_trader_enrichment": REPO_ROOT / "data" / "directional_trader_enrichment.json",
+        "reference_trader_city_market_cross": REPO_ROOT / "data" / "reference_trader_city_market_cross.json",
+        "city_probe_visibility_tracker": REPO_ROOT / "data" / "city_probe_visibility_tracker.json",
+        "city_validation_ledger": REPO_ROOT / "data" / "city_validation_ledger.json",
+        "city_promotion_gate": REPO_ROOT / "data" / "city_promotion_gate.json",
+    }
+    missing = []
+    for step_name, path in expected_outputs.items():
+        if not path.exists():
+            missing.append({"step": step_name, "path": str(path)})
+    return missing
+
+
 def main():
     args = parse_args()
     python_exe = sys.executable
@@ -264,7 +283,9 @@ def main():
         alert_command.append("--dry-run")
     steps.append(run_step("city_intelligence_telegram_alert", alert_command))
 
-    overall_status = "ok" if all(step["ok"] for step in steps) else "partial_failure"
+    failed_steps = collect_failed_steps(steps)
+    missing_outputs = collect_missing_outputs()
+    overall_status = "ok" if not failed_steps and not missing_outputs else "partial_failure"
     summary = {}
     try:
         enrichment = load_json(REPO_ROOT / "data" / "directional_trader_enrichment.json")
@@ -309,6 +330,8 @@ def main():
         "exploratory_targets": target_contract["exploratory_targets"],
         "tracker_targets": target_contract["tracker_targets"],
         "steps": steps,
+        "failed_steps": failed_steps,
+        "missing_outputs": missing_outputs,
         "overall_status": overall_status,
         "summary": summary,
     }
@@ -318,9 +341,16 @@ def main():
     json_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     md_path.write_text(render_markdown(payload), encoding="utf-8")
 
+    result_summary = {"overall_status": overall_status, "summary": summary}
+    if failed_steps:
+        result_summary["failed_steps"] = failed_steps
+    if missing_outputs:
+        result_summary["missing_outputs"] = missing_outputs
+
     print(f"City intelligence pipeline written to {json_path}")
     print(f"Markdown summary written to {md_path}")
-    print(json.dumps({"overall_status": overall_status, "summary": summary}, indent=2, ensure_ascii=False))
+    print(json.dumps(result_summary, indent=2, ensure_ascii=False))
+    sys.exit(1 if failed_steps or missing_outputs else 0)
 
 
 if __name__ == "__main__":
