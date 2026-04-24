@@ -31,6 +31,7 @@ Comandos útiles:
 
 | Fecha | Tipo | Referencia | Commits clave | Resumen |
 |------|------|------------|---------------|---------|
+| 2026-04-24 | Explícita | Sesión 232 | Automatización `traders_intelligence` + gate explícito V1 | Codex convierte `traders_intelligence` en una capa automática de observabilidad sin tocar trading core, NOAA, scheduler, whitelist, sizing ni reglas de entrada/salida. Se implementa `tools/traders_intelligence_daily_summary.py`, se integra en `bot.py` dentro de `run_observability_alerts()` y se añade un monitor diario que regenera `data/traders_intelligence.json`, calcula checks de readiness para abrir V1, persiste estado anti-spam y deja instrucciones explícitas cuando toque pasar a snapshots/pseudo-lifecycle. Validación local completa: `python tools/traders_intelligence_report.py`, `python tools/traders_intelligence_daily_summary.py` y `python verify_before_deploy.py` pasan; suite final 817/817. La foto actual queda honesta: `V1 readiness = not_ready` por `census_stale_days=15` y `recent_crosscheck_runs=2`, aunque ya hay lead traders fuertes (`Thrifty-Original`, `Entire-Hood`) y ciudades `trader_only` suficientes. |
 | 2026-04-23 | Explícita | Sesión 231 | Logging de skip reasons para hooks SL retro / briefing | Codex añade un patch mínimo de observabilidad en `bot.py` tras comprobar que los tools funcionaban en Railway shell pero el hook automático no dejaba señal en logs. `maybe_run_sl_retrospective()` y `maybe_run_daily_briefing()` ahora registran por qué se saltan: feature flag desactivada, archivo/script faltante, fuera de ventana horaria, already sent today o ausencia de nuevos `stop_loss` / recheck aún no vencido. No cambia trading core ni reglas; solo hace visible el motivo del skip en el siguiente ciclo. `verify_before_deploy.py` sigue 817/817. |
 | 2026-04-23 | Explícita | Sesión 230 | Validación live de `SL retrospective` en Railway | Codex cierra la validación live post-deploy sin tocar trading core, NOAA, scheduler, whitelist ni reglas de entrada/salida. Desde la shell del contenedor `polymarket-bot`, `tools/sl_retrospective.py` y `tools/daily_position_briefing.py` corren correctamente contra `/app/data/trade_lifecycle.json` real de Railway. La muestra live sigue en `5/16` SLs resueltos (`3` falsas salidas por SL, `2` SL correctos), y el briefing ya ve `3` cierres `stop_loss_intra` en 24h además de una posición nueva `Seoul 21°C Apr24 YES`. La lectura importante queda explícita: `trade_lifecycle` ya no es solo observabilidad, sino la primera hipótesis concreta y medible sobre por qué el bot pierde, al sugerir que parte del daño puede venir de cortar demasiado pronto trades que después resolvían bien. |
 | 2026-04-23 | Explícita | Sesión 229 | Claridad SL retrospective: `con SL` vs `sin SL` | Codex ajusta `tools/sl_retrospective.py` para que el mensaje de Telegram no se lea como una hipótesis difusa, sino como una comparación explícita entre `P/L con SL` y `P/L sin SL (mejor precio visto después)` por trade y en agregado. Se sustituye el wording `RIGHT/WRONG` por `falsas salidas por SL` y `SL correctos`, y se deja claro que `$5.42` es la diferencia total entre ambos escenarios en los 3 falsos exits ya observados, no solo un número abstracto de upside. `verify_before_deploy.py` sigue 817/817. |
@@ -3266,3 +3267,47 @@ Durante el cierre de sesión aparece una contradicción entre el contexto histó
 ### Próximo hito
 
 El siguiente evento real ya no es “activar Railway”, sino esperar el one-shot `Review INTRA-REEVAL` 7 días después del primer trigger shadow persistido en `data/intra_reeval_state.json`.
+
+## Sesión 232 — traders_intelligence automatizado con gate explícito para abrir V1 (24 abr 2026)
+
+**Tipo:** Explícita | **Agente:** Codex
+
+### Contexto
+
+Tras implementar `traders_intelligence` v0 y leer el output real, la pregunta ya no era “qué más analytics podemos construir”, sino cómo evitar que la capa se quede estancada. El objetivo de esta sesión fue cerrar el circuito: que el propio sistema avise cuándo siguen faltando checks y cuándo ya merece abrir V1 sin depender de una auditoría manual permanente.
+
+### Acciones
+
+- Se implementa `tools/traders_intelligence_daily_summary.py`.
+- El nuevo tool:
+  - lee `data/traders_intelligence.json`;
+  - calcula checks explícitos de readiness para abrir V1;
+  - clasifica `lead_traders`, `strong_traders` y `candidate_cities`;
+  - genera el readout `docs/traders_intelligence_daily_summary_latest.md`;
+  - persiste estado anti-spam en `data/traders_intelligence_daily_summary_state.json`.
+- Se integra en `bot.py` mediante `maybe_run_traders_intelligence_summary()` dentro de `run_observability_alerts()`, con feature flag y ventana horaria propia.
+- Se añade higiene de worktree en `.gitignore` para excluir `data/traders_intelligence_daily_summary_state.json`, alineándolo con otros states regenerables/anti-spam.
+
+### Lectura resultante
+
+- `V1 readiness = not_ready`.
+- Blockers actuales:
+  - `census_stale_days=15` con umbral `<=14`;
+  - `recent_crosscheck_runs=2` con umbral `>=5`.
+- Checks ya cumplidos:
+  - health usable;
+  - al menos un lead trader fuerte y muy activo (`Thrifty-Original`, `Entire-Hood`);
+  - profundidad mínima de traders fuertes;
+  - suficientes `trader_only cities` candidatas.
+
+### Verificación
+
+- `python tools/traders_intelligence_report.py`
+- `python tools/traders_intelligence_daily_summary.py`
+- `python verify_before_deploy.py`
+
+Resultado final: **817/817**.
+
+### Siguiente acción
+
+Cerrar sesión, commitear solo código/docs/artefacto útil y desplegar. El valor nuevo ya no es otra iteración manual sobre V0, sino dejar esta automatización corriendo en Railway para que el propio sistema avise cuándo abrir un `external trade lifecycle` mínimo de V1.

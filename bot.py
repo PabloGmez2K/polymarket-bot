@@ -600,6 +600,16 @@ SIGNALS_CROSSCHECK_DAILY_SUMMARY_SCRIPT = os.path.join(
     "tools",
     "signals_crosscheck_daily_summary.py",
 )
+TRADERS_INTELLIGENCE_REPORT_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "tools",
+    "traders_intelligence_report.py",
+)
+TRADERS_INTELLIGENCE_DAILY_SUMMARY_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "tools",
+    "traders_intelligence_daily_summary.py",
+)
 SL_RETROSPECTIVE_SCRIPT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "tools",
@@ -637,6 +647,8 @@ CITY_INTELLIGENCE_DAILY_SUMMARY_SCRIPT = os.path.join(
     "tools",
     "city_intelligence_daily_summary.py",
 )
+TRADERS_INTELLIGENCE_ENABLED = os.getenv("TRADERS_INTELLIGENCE_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+TRADERS_INTELLIGENCE_HOUR_UTC = int(os.getenv("TRADERS_INTELLIGENCE_HOUR_UTC", "8"))
 CITY_INTELLIGENCE_RUNTIME_BRIDGE_ENABLED = os.getenv("CITY_INTELLIGENCE_RUNTIME_BRIDGE_ENABLED", "true").lower() in ("1", "true", "yes", "on")
 CITY_INTELLIGENCE_RUNTIME_BRIDGE_HOUR_UTC = int(os.getenv("CITY_INTELLIGENCE_RUNTIME_BRIDGE_HOUR_UTC", "7"))
 BLOCKED_SIGNALS_FILE = _data_path("blocked_signals_resolutions.jsonl")
@@ -4203,6 +4215,14 @@ def run_observability_alerts():
         if logger:
             logger.warning(f"blocked signals check: fallo ({e})")
 
+    try:
+        if maybe_run_traders_intelligence_summary(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"traders intelligence summary: fallo ({e})")
+
     # v10.6.14 (M3): alerta one-shot cuando las precondiciones para v2 se cumplen.
     try:
         if maybe_alert_v2_trigger(state):
@@ -7248,6 +7268,83 @@ def maybe_run_daily_crosscheck_temporal_summary(now=None):
         if logger:
             logger.warning(f"crosscheck temporal summary: fallo ({e})")
         return False
+
+
+def maybe_run_traders_intelligence_summary(state, now=None):
+    """
+    Regenera traders_intelligence v0 y dispara el resumen diario con checks de
+    readiness para abrir v1 cuando toque.
+    No toca trading ni policy; solo produce artefactos read-only y Telegram.
+    """
+    logger = globals().get("log")
+    if not TRADERS_INTELLIGENCE_ENABLED:
+        if logger:
+            logger.info("traders intelligence summary: skip (TRADERS_INTELLIGENCE_ENABLED=0)")
+        return False
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    target_hour = TRADERS_INTELLIGENCE_HOUR_UTC % 24
+    hour_delta = min((now.hour - target_hour) % 24, (target_hour - now.hour) % 24)
+    if hour_delta > 1:
+        if logger:
+            logger.info(
+                "traders intelligence summary: skip "
+                f"(outside hour window: now_hour={now.hour} target_hour={target_hour} delta={hour_delta})"
+            )
+        return False
+
+    today = now.date().isoformat()
+    if state.get("traders_intelligence_last_date") == today:
+        if logger:
+            logger.info(f"traders intelligence summary: skip (already ran today: {today})")
+        return False
+
+    required_scripts = [
+        TRADERS_INTELLIGENCE_REPORT_SCRIPT,
+        TRADERS_INTELLIGENCE_DAILY_SUMMARY_SCRIPT,
+    ]
+    missing_scripts = [path for path in required_scripts if not os.path.exists(path)]
+    if missing_scripts:
+        if logger:
+            logger.warning(f"traders intelligence summary: scripts faltantes {missing_scripts}")
+        return False
+
+    repo_root = os.path.dirname(os.path.abspath(__file__))
+    commands = [
+        [sys.executable, TRADERS_INTELLIGENCE_REPORT_SCRIPT],
+        [sys.executable, TRADERS_INTELLIGENCE_DAILY_SUMMARY_SCRIPT],
+    ]
+    for command in commands:
+        try:
+            result = subprocess.run(
+                command,
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                timeout=240,
+                check=False,
+            )
+        except Exception as exc:
+            if logger:
+                logger.warning(
+                    f"traders intelligence summary: fallo ejecutando {os.path.basename(command[1])}: {exc}"
+                )
+            return False
+        if result.returncode != 0:
+            if logger:
+                stderr = (result.stderr or "").strip()
+                stdout = (result.stdout or "").strip()
+                detail = stderr or stdout or "sin detalle"
+                logger.warning(
+                    f"traders intelligence summary: {os.path.basename(command[1])} fallo ({detail[:500]})"
+                )
+            return False
+
+    state["traders_intelligence_last_date"] = today
+    if logger:
+        logger.info("traders intelligence summary: OK")
+    return True
 
 
 def maybe_run_city_intelligence_runtime_summary(state, now=None):

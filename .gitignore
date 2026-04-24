@@ -52,6 +52,7 @@ data/runtime_policy_effective_view.json
 data/city_intelligence_pipeline.json
 data/city_intelligence_alert_state.json
 data/city_intelligence_daily_summary_state.json
+data/traders_intelligence_daily_summary_state.json
 data/*.lock
 data/signals_crosscheck.jsonl
 data/signals_crosscheck_daily_summary_state.json
