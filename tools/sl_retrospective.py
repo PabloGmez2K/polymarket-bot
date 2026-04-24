@@ -576,11 +576,20 @@ def summarize(rows: list[dict]):
     if threshold_preliminary:
         if accuracy_pct is not None and accuracy_pct >= 60:
             verdict_brief = "SL corta posiciones correctas"
-        elif accuracy_pct is not None and accuracy_pct < 40:
+        elif accuracy_pct is not None and accuracy_pct < 30:
             verdict_brief = "SL funciona correctamente"
         else:
-            verdict_brief = "datos mixtos"
-    verdict_final = verdict_brief + " (firme)" if threshold_final else ""
+            verdict_brief = "seguir monitorizando"
+    verdict_is_conclusive = verdict_brief in {
+        "SL corta posiciones correctas",
+        "SL funciona correctamente",
+    }
+    if threshold_final and verdict_is_conclusive:
+        verdict_final = verdict_brief + " (firme)"
+    elif threshold_final:
+        verdict_final = "seguir monitorizando"
+    else:
+        verdict_final = ""
     return {
         "n_right": n_right,
         "n_wrong": n_wrong,
@@ -679,17 +688,27 @@ def build_message(summary: dict):
             )
         lines.append("")
 
+    conclusive = False
     if accuracy_pct is not None and accuracy_pct >= 60 and summary["threshold_preliminary"]:
         lines.append("⚠️ VEREDICTO PRELIMINAR: EL SL ESTÁ CORTANDO POSICIONES CORRECTAS")
         lines.append("→ Revisar gestión de posiciones en checkpoint Apr 28")
-    elif accuracy_pct is not None and accuracy_pct < 40 and summary["threshold_preliminary"]:
+        conclusive = True
+    elif accuracy_pct is not None and accuracy_pct < 30 and summary["threshold_preliminary"]:
         lines.append("✅ VEREDICTO PRELIMINAR: EL SL ESTÁ FUNCIONANDO CORRECTAMENTE")
+        conclusive = True
     else:
-        lines.append("📊 VEREDICTO: datos mixtos, seguir acumulando")
+        lines.append(
+            f"📊 VEREDICTO: zona gris ({n_right} SLs acabaron ganando sin el corte) — seguimos monitorizando"
+        )
 
-    if summary["threshold_final"]:
+    if summary["threshold_final"] and conclusive:
         lines.append("")
         lines.append("🚨 CONCLUSIÓN FIRME — tenemos datos suficientes para tomar acción")
+    elif summary["threshold_final"]:
+        lines.append("")
+        lines.append(
+            "🔁 Muestra completa pero señal aún no concluyente — alerta seguirá llegando con cada nuevo SL"
+        )
 
     return "\n".join(lines)
 

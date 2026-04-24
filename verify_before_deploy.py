@@ -5710,8 +5710,10 @@ def run_tests():
             "infer_resolution_verdict",
             "load_sl_rows",
             "summarize",
+            "build_message",
         ]:
             exec(get_function_source(sl_retro_ast, sl_retro_lines, fn_name), sl_ns)
+        sl_ns["TARGET_SAMPLE_SIZE"] = 16
         sl_ns["load_resolution_stations"] = lambda: {}
 
         sl_rows = sl_ns["load_sl_rows"](Path(tmp_sl_lifecycle))
@@ -5766,6 +5768,44 @@ def run_tests():
             and sl_summary.get("n_right") == 2
             and sl_summary.get("n_wrong") == 3,
             sl_summary,
+        )
+
+        # v10.6.35: zona gris no cierra el caso — 37.5% queda "seguir monitorizando"
+        gray_summary = sl_ns["summarize"]([
+            {"verdict": "RIGHT", "pnl_cash_with_sl": None, "pnl_without_sl_best": None,
+             "upside_left_cash_peak": None} for _ in range(6)
+        ] + [
+            {"verdict": "WRONG", "pnl_cash_with_sl": None, "pnl_without_sl_best": None,
+             "upside_left_cash_peak": None} for _ in range(10)
+        ])
+        gray_message = sl_ns["build_message"](gray_summary)
+        test(
+            "v10.6.35: SL retro en zona gris (37.5%) no emite veredicto firme",
+            gray_summary.get("preliminary_verdict") == "seguir monitorizando"
+            and gray_summary.get("final_verdict") == "seguir monitorizando",
+            gray_summary,
+        )
+        test(
+            "v10.6.35: mensaje SL retro zona gris no incluye 'FUNCIONANDO CORRECTAMENTE' ni 'CONCLUSIÓN FIRME'",
+            "FUNCIONANDO CORRECTAMENTE" not in gray_message
+            and "CONCLUSIÓN FIRME" not in gray_message
+            and "zona gris" in gray_message
+            and "seguimos monitorizando" in gray_message,
+            {"message": gray_message},
+        )
+        # v10.6.35: umbral <30% sí cierra como "funciona correctamente"
+        clean_summary = sl_ns["summarize"]([
+            {"verdict": "RIGHT", "pnl_cash_with_sl": None, "pnl_without_sl_best": None,
+             "upside_left_cash_peak": None} for _ in range(4)
+        ] + [
+            {"verdict": "WRONG", "pnl_cash_with_sl": None, "pnl_without_sl_best": None,
+             "upside_left_cash_peak": None} for _ in range(12)
+        ])
+        test(
+            "v10.6.35: SL retro con 25% falsas salidas sigue cerrando verdict 'funciona correctamente'",
+            clean_summary.get("preliminary_verdict") == "SL funciona correctamente"
+            and clean_summary.get("final_verdict") == "SL funciona correctamente (firme)",
+            clean_summary,
         )
 
         for tmp_file in [tmp_sl_lifecycle, tmp_sl_forecast, tmp_sl_audit]:
