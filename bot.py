@@ -155,6 +155,8 @@ DAILY_SUMMARY_HOUR_UTC = int(os.getenv("DAILY_SUMMARY_HOUR_UTC", "8"))
 SL_RETRO_ENABLED = os.getenv("SL_RETRO_ENABLED", "1").lower() in ("1", "true", "yes", "on")
 DAILY_BRIEFING_ENABLED = os.getenv("DAILY_BRIEFING_ENABLED", "1").lower() in ("1", "true", "yes", "on")
 DAILY_BRIEFING_HOUR_UTC = int(os.getenv("DAILY_BRIEFING_HOUR_UTC", "8"))
+POST_INTRA_SL_COOLDOWN_REVIEW_ENABLED = os.getenv("POST_INTRA_SL_COOLDOWN_REVIEW_ENABLED", "1").lower() in ("1", "true", "yes", "on")
+POST_INTRA_SL_COOLDOWN_REVIEW_MIN_CLOSED = int(os.getenv("POST_INTRA_SL_COOLDOWN_REVIEW_MIN_CLOSED", "10"))
 # Cutoff de stats por ciudad: "Dallas=2026-04-06,Chicago=2026-03-01"
 # Trades cerrados ANTES de la fecha indicada se ignoran en get_city_accuracy().
 CITY_STATS_CUTOFF: dict[str, str] = {}
@@ -984,6 +986,7 @@ def load_alerts_state():
         "canary_candidate_notified": {},
         # v10.6.30: revisión one-shot intra-reeval shadow (7 días tras primer trigger)
         "intra_reeval_review_alert_sent": False,
+        "post_intra_sl_cooldown_review": {},
     }
     if not os.path.exists(ALERTS_FILE):
         return default
@@ -1012,6 +1015,7 @@ def load_alerts_state():
         state.setdefault("slot_monetization_last_signature", None)
         state.setdefault("canary_candidate_notified", {})
         state.setdefault("intra_reeval_review_alert_sent", False)
+        state.setdefault("post_intra_sl_cooldown_review", {})
         return state
     except Exception:
         return default
@@ -4396,6 +4400,15 @@ def run_observability_alerts():
         logger = globals().get("log")
         if logger:
             logger.warning(f"intra reeval review alert: fallo ({e})")
+
+    # v10.6.36: follow-up de muestra post-fix para cooldown de stop_loss_intra.
+    try:
+        if maybe_run_post_intra_sl_cooldown_review(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"post intra-SL cooldown review: fallo ({e})")
 
     try:
         if maybe_run_sl_retrospective(state):
@@ -8390,6 +8403,169 @@ def maybe_alert_tp_sl_price_steps(state, now=None):
 
     state[STATE_KEY] = True
     state["tp_sl_price_steps_alert_last_daily"] = today_str
+    return True
+
+
+def _parse_iso_utc(value):
+    if not value:
+        return None
+    try:
+        text = str(value).replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _post_intra_sl_cooldown_review_stats(started_at_iso):
+    started_at = _parse_iso_utc(started_at_iso)
+    if started_at is None:
+        return {"closed": [], "n": 0}
+
+    records = load_postmortem_data()
+    closed = []
+    for record in records:
+        if record.get("status") != "closed":
+            continue
+        if record.get("close_action") not in {"SELL", "LOSS_TOTAL", "RESOLVED_WIN"}:
+            continue
+        if record.get("pnl_cash") is None:
+            continue
+        closed_at = _parse_iso_utc(record.get("closed_at"))
+        if closed_at is None or closed_at < started_at:
+            continue
+        closed.append(record)
+
+    closed.sort(key=lambda r: str(r.get("closed_at") or ""))
+    wins = sum(1 for r in closed if float(r.get("pnl_cash") or 0) > 0)
+    pnl = round(sum(float(r.get("pnl_cash") or 0) for r in closed), 2)
+
+    low = []
+    mid_high = []
+    for record in closed:
+        try:
+            entry_price = float(record.get("avg_entry_price"))
+        except (TypeError, ValueError):
+            entry_price = None
+        if entry_price is not None and entry_price < LOW_PRICE_THRESHOLD:
+            low.append(record)
+        else:
+            mid_high.append(record)
+
+    def _bucket(rows):
+        n = len(rows)
+        w = sum(1 for r in rows if float(r.get("pnl_cash") or 0) > 0)
+        total_pnl = round(sum(float(r.get("pnl_cash") or 0) for r in rows), 2)
+        wr = round((w / n) * 100, 1) if n else 0.0
+        return {"n": n, "wins": w, "wr": wr, "pnl": total_pnl}
+
+    market_groups = {}
+    for record in closed:
+        token = str(record.get("token_id") or "").strip()
+        key = "|".join([
+            token or str(record.get("question") or record.get("city") or ""),
+            str(record.get("date") or ""),
+            str(record.get("side") or ""),
+        ])
+        market_groups.setdefault(key, []).append(record)
+
+    repeated_groups = [rows for rows in market_groups.values() if len(rows) > 1]
+    repeated_extra_closes = sum(len(rows) - 1 for rows in repeated_groups)
+    repeated_labels = []
+    for rows in sorted(repeated_groups, key=len, reverse=True)[:3]:
+        sample = rows[0]
+        repeated_labels.append(
+            f"{sample.get('city', '?')} {sample.get('side', '?')} {sample.get('date', '?')} x{len(rows)}"
+        )
+
+    intra_sl_rows = [r for r in closed if r.get("close_reason") == "stop_loss_intra"]
+    return {
+        "closed": closed,
+        "n": len(closed),
+        "wins": wins,
+        "wr": round((wins / len(closed)) * 100, 1) if closed else 0.0,
+        "pnl": pnl,
+        "low": _bucket(low),
+        "mid_high": _bucket(mid_high),
+        "intra_sl_count": len(intra_sl_rows),
+        "repeated_extra_closes": repeated_extra_closes,
+        "repeated_labels": repeated_labels,
+    }
+
+
+def maybe_run_post_intra_sl_cooldown_review(state, now=None):
+    """
+    v10.6.36: follow-up Telegram tras el fix de cooldown en stop_loss_intra.
+
+    En el primer ciclo post-deploy se auto-ancla en alerts_state. Cuando hay
+    POST_INTRA_SL_COOLDOWN_REVIEW_MIN_CLOSED cierres nuevos, envia una lectura
+    unica sobre WR/PnL, LOW bucket, SL intra y reentradas repetidas.
+    """
+    if not POST_INTRA_SL_COOLDOWN_REVIEW_ENABLED:
+        return False
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    review = state.setdefault("post_intra_sl_cooldown_review", {})
+    if review.get("sent_at"):
+        return False
+
+    if not review.get("started_at"):
+        review["started_at"] = now.isoformat()
+        review["min_closed"] = POST_INTRA_SL_COOLDOWN_REVIEW_MIN_CLOSED
+        return True
+
+    stats = _post_intra_sl_cooldown_review_stats(review.get("started_at"))
+    min_closed = int(review.get("min_closed") or POST_INTRA_SL_COOLDOWN_REVIEW_MIN_CLOSED)
+    if stats.get("n", 0) < min_closed:
+        review["last_seen_closed"] = stats.get("n", 0)
+        return True
+
+    low = stats["low"]
+    mid_high = stats["mid_high"]
+    repeated = stats["repeated_extra_closes"]
+    repeated_text = ", ".join(stats["repeated_labels"]) if stats["repeated_labels"] else "ninguna"
+    if repeated == 0:
+        readout = "El cooldown parece haber cortado las cascadas de reentrada post intra-SL."
+    else:
+        readout = "Aun hay cierres repetidos en el mismo mercado: revisar cooldown por token/mercado."
+
+    msg = (
+        f"\U0001f9ea <b>Review post-fix: cooldown intra-SL</b>\n\n"
+        f"Muestra desde <code>{review.get('started_at')}</code>: <b>{stats['n']}</b> cierres.\n"
+        f"WR: <b>{stats['wr']:.1f}%</b> ({stats['wins']}/{stats['n']}) | PnL: <b>${stats['pnl']:+.2f}</b>\n"
+        f"SL intra: <b>{stats['intra_sl_count']}</b> | reentradas repetidas: <b>{repeated}</b>\n"
+        f"Repetidos: <code>{repeated_text}</code>\n\n"
+        f"<b>Bucket LOW &lt;35c</b>: WR {low['wr']:.1f}% ({low['wins']}/{low['n']}), PnL ${low['pnl']:+.2f}\n"
+        f"<b>MID/HIGH</b>: WR {mid_high['wr']:.1f}% ({mid_high['wins']}/{mid_high['n']}), PnL ${mid_high['pnl']:+.2f}\n\n"
+        f"<b>Lectura</b>: {readout}\n"
+        f"<b>Siguiente paso</b>: si LOW sigue negativo, abrir investigacion especifica "
+        f"<code>LOW at_or_above YES</code>; no tocar sigma global sin evidencia nueva."
+    )
+
+    try:
+        send_telegram(msg)
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"post intra-SL cooldown review: fallo al enviar Telegram ({e})")
+        review["last_send_error_at"] = now.isoformat()
+        review["last_seen_closed"] = stats.get("n", 0)
+        return True
+
+    review["sent_at"] = now.isoformat()
+    review["summary"] = {
+        "n": stats["n"],
+        "wins": stats["wins"],
+        "wr": stats["wr"],
+        "pnl": stats["pnl"],
+        "low": low,
+        "mid_high": mid_high,
+        "intra_sl_count": stats["intra_sl_count"],
+        "repeated_extra_closes": repeated,
+    }
     return True
 
 
@@ -15209,6 +15385,9 @@ def intra_cycle_sl_check(client):
                     side=outcome, price=sell_price, shares=shares_to_sell,
                     return_est=estimated_return, reason=sell_type,
                 )
+                if sell_type in ("stop_loss", "stop_loss_intra") and city:
+                    _sl_cooldown_register(city)
+                    log.info(f"[INTRA-SL] SL cooldown activado: {city} {SL_CITY_COOLDOWN_HOURS}h")
 
             except Exception as e:
                 log.error(f"[INTRA-SL] Error vendiendo {outcome} {city}: {e}")

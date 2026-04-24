@@ -6061,6 +6061,28 @@ def run_tests():
         "v10.6.24: intra_cycle_sl_check solo SL+TP sin re-eval",
         "def intra_cycle_sl_check(" in code and "stop_loss_intra" in code and "take_profit_intra" in code,
     )
+    try:
+        intra_sl_src = code.split("def intra_cycle_sl_check(", 1)[1].split("def intra_sl_loop(", 1)[0]
+    except IndexError:
+        intra_sl_src = ""
+    test(
+        "v10.6.36: stop_loss_intra registra SL cooldown",
+        "_sl_cooldown_register(city)" in intra_sl_src
+        and 'sell_type in ("stop_loss", "stop_loss_intra")' in intra_sl_src,
+    )
+    test(
+        "v10.6.36: alarma post-fix intra-SL cooldown definida",
+        "def maybe_run_post_intra_sl_cooldown_review(" in code
+        and "POST_INTRA_SL_COOLDOWN_REVIEW_MIN_CLOSED" in code,
+    )
+    test(
+        "v10.6.36: alarma post-fix intra-SL integrada en observability",
+        "maybe_run_post_intra_sl_cooldown_review(state)" in code,
+    )
+    test(
+        "v10.6.36: alarma post-fix usa bucket LOW",
+        '"post_intra_sl_cooldown_review"' in code and "LOW_PRICE_THRESHOLD" in code and "LOW &lt;35c" in code,
+    )
 
     # ---- v10.6.25: low-price MIN_EDGE buffer + alarma Steps 2+3 ----
     test(
