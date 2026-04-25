@@ -43,7 +43,14 @@
       "status": "pending",
       "label": "Checkpoint para pausar city-intelligence separado",
       "reminder": "Si el bridge acumulo al menos 5 ejecuciones diarias con runtime_inputs_status=available y overall_status=ok, pausar el servicio Railway city-intelligence.",
-      "decision": "Pausar city-intelligence separado o extender observacion si el bridge no acumulo evidencia suficiente."
+      "decision": "Pausar city-intelligence separado o extender observacion si el bridge no acumulo evidencia suficiente.",
+      "executions_log": [
+        {
+          "run_at": "2026-04-25T11:00:36+00:00",
+          "status": "ok",
+          "notes": "Primera ejecucion exitosa post-fix. settlement_fidelity_probe.json creado via --refresh-probe (14KB). last_progress_state=mejorando, bottleneck=policy_execution_gate, actionable_cities=0, building=5."
+        }
+      ]
     },
     {
       "id": "transition_closeout_2026_05_07",
