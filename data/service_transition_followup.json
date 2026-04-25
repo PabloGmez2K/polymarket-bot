@@ -22,10 +22,12 @@
     {
       "id": "bridge_single_emitter_2026_04_24",
       "due_date": "2026-04-24",
-      "status": "pending",
+      "status": "resolved_with_fix",
       "label": "Confirmar bridge como unico emisor util",
       "reminder": "Verifica que el summary de City Intelligence llego desde polymarket-bot y que no hubo doble aviso desde city-intelligence o phase5-visibility.",
-      "decision": "Si el bridge falla, no pauses servicios; si el bridge funciona, mantener servicios separados silenciados."
+      "decision": "El bridge fallaba por cascade desde settlement_fidelity_probe.json faltante en el volumen de polymarket-bot. Fix: bootstrap --refresh-probe en el bridge (sesion 241, commit dfc9235). Checkpoint re-evaluado: bridge listo para correr tras redeploy. city-intelligence ya no tiene TELEGRAM_TOKEN (usa missing_telegram_env). Evaluar en el siguiente ciclo post-deploy.",
+      "fixed_at": "2026-04-25",
+      "fix_commit": "dfc9235"
     },
     {
       "id": "phase5_pause_gate_2026_04_28",
