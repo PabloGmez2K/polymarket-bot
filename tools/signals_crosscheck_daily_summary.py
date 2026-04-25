@@ -316,6 +316,8 @@ def build_message(summary: dict, today_operational_sample: list[dict]):
             f"<code>{', '.join(recurring)}</code>."
         )
 
+    action = classify_action_level(summary, today_operational_sample)
+
     lines.extend(["", "<b>Lectura del sistema</b>", f"- {progress_sentence(summary['gap_state'])}"])
     if today_operational_sample:
         sample_text = "; ".join(
@@ -329,11 +331,59 @@ def build_message(summary: dict, today_operational_sample: list[dict]):
     lines.extend(
         [
             "",
-            "<b>Instruccion para Codex</b>",
-            "Si el bloque TRADER_ONLY persistente sigue estable varios dias, revisar primero whitelist y cobertura observada de esas ciudades antes de tocar reglas de entrada o trading core.",
+            "<b>Nivel de accion</b>",
+            f"{action['label']}: {action['reason']}",
+            "",
+            "<b>Tarea para Codex</b>",
+            action["task"],
         ]
     )
     return "\n".join(lines)
+
+
+def classify_action_level(summary: dict, today_operational_sample: list[dict]) -> dict:
+    """Translate the daily readout into a concrete next step."""
+    run_count = int(summary.get("run_count", 0) or 0)
+    stable = summary.get("stable_trader_only", []) or []
+    recurring = summary.get("recurring_trader_only", []) or []
+
+    if run_count < 5:
+        return {
+            "label": "INFO",
+            "reason": "serie todavia corta; no hay base suficiente para decidir.",
+            "task": "No tocar reglas. Confirmar que el cross-check sigue acumulando corridas diarias.",
+        }
+
+    if today_operational_sample:
+        top_city = today_operational_sample[0]["city"]
+        return {
+            "label": "ACTION",
+            "reason": "hay gap operativo real fuera de blocked con consenso y condicion operable.",
+            "task": (
+                f"Auditar <code>{top_city}</code> primero: whitelist, RESOLUTION_ICAO/estacion, "
+                "OBSERVED_AUDIT_CITIES/cobertura NOAA y ultimas señales trader. Cerrar con decision: "
+                "<code>sin cambio</code>, <code>preparar whitelist/canary</code> o <code>bloqueo por fuente</code>. "
+                "No tocar reglas de entrada ni trading core en esta tarea."
+            ),
+        }
+
+    if len(stable) >= 3 or len(recurring) >= 5:
+        focus = stable[:3] or recurring[:3]
+        return {
+            "label": "WATCH",
+            "reason": "hay persistencia trader-only, pero hoy no hay gap operativo accionable.",
+            "task": (
+                "Preparar backlog de revision para "
+                f"<code>{', '.join(focus)}</code>: comprobar si faltan en whitelist o si falta cobertura observada. "
+                "Ejecutar solo cuando alguna ciudad tambien aparezca como gap operativo real."
+            ),
+        }
+
+    return {
+        "label": "INFO",
+        "reason": "sin gap operativo ni persistencia suficiente.",
+        "task": "No abrir tarea nueva; continuar acumulando serie.",
+    }
 
 
 def render_markdown(payload: dict):

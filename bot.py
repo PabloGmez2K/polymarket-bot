@@ -7329,6 +7329,23 @@ def maybe_run_daily_crosscheck(state, now=None):
 
         # Daily Telegram message
         action_lines = ""
+        if operational_trader_only:
+            top_city = operational_trader_only[0]
+            action_level = "ACTION"
+            action_task = (
+                f"Accion: auditar {top_city} primero (whitelist, RESOLUTION_ICAO/estacion, "
+                f"OBSERVED_AUDIT_CITIES/cobertura NOAA y ultimas seÃ±ales trader). "
+                f"Cerrar con: sin cambio / preparar whitelist-canary / bloqueo por fuente."
+            )
+        elif len(trader_only_cities) >= 10:
+            action_level = "WATCH"
+            action_task = (
+                "Accion diferida: si estas ciudades se repiten varios dias, revisar whitelist "
+                "y cobertura observada antes de tocar reglas core."
+            )
+        else:
+            action_level = "INFO"
+            action_task = "Sin tarea nueva: seguir acumulando serie."
         for c in operational_trader_only[:4]:
             st = city_stats[c]
             cons_tag = " (consenso)" if st["consensus"] > 0 else ""
@@ -7346,7 +7363,11 @@ def maybe_run_daily_crosscheck(state, now=None):
             )
         else:
             daily_msg += "Sin gap operativo real hoy <i>(TRADER_ONLY blocked o sin consenso no alertan)</i>\n"
-        daily_msg += f"<i>Corrida {n_records}/{SIGNALS_CROSSCHECK_NOTIFY_THRESHOLD}</i>"
+        daily_msg += (
+            f"Nivel: <b>{action_level}</b>\n"
+            f"{action_task}\n"
+            f"<i>Corrida {n_records}/{SIGNALS_CROSSCHECK_NOTIFY_THRESHOLD}</i>"
+        )
         send_telegram(daily_msg)
 
         # One-shot "ready for analysis" notification at threshold
@@ -7908,13 +7929,24 @@ def maybe_run_blocked_signals_check(state, now=None):
         wr_pct = round(n_win / n_resolved * 100, 1) if n_resolved > 0 else 0.0
 
         # --- Telegram diario ---
-        canary_excl_note = (
-            f" | Whitelist excluidas: {len(canary_excluded_recs)}" if canary_excluded_recs else ""
-        )
+        blocked_action = "INFO"
+        blocked_task = "Sin tarea nueva: usar como baseline de inteligencia, no como permiso automatico de trading."
+        if n_resolved >= 50 and wr_pct >= 70:
+            blocked_action = "ACTION"
+            blocked_task = (
+                "Accion: priorizar auditoria de las ciudades fuera de whitelist con mas muestra "
+                "(whitelist, cobertura observada y fuente de resolucion) antes de tocar reglas core."
+            )
+        elif n_resolved >= 30 and wr_pct >= 55:
+            blocked_action = "WATCH"
+            blocked_task = "Accion diferida: acumular muestra o cruzar con gap operativo real por ciudad."
         send_telegram(
             f"📊 <b>Blocked signals (fuera de whitelist) - WR diaria</b>\n"
-            f"Resueltas: {n_resolved} | Wins: {n_win} | WR: {wr_pct}%{canary_excl_note}\n"
-            f"<i>Baseline fuera de QUALITY_TRADER_CITIES_WHITELIST</i>"
+            f"Baseline fuera de whitelist: {n_resolved} resueltas | Wins: {n_win} | WR: {wr_pct}%\n"
+            f"Excluidas del calculo por estar ya en whitelist: {len(canary_excluded_recs)}\n"
+            f"Nivel: <b>{blocked_action}</b>\n"
+            f"{blocked_task}\n"
+            f"<i>Baseline fuera de QUALITY_TRADER_CITIES_WHITELIST; no mide ejecucion real del bot.</i>"
         )
 
         # --- One-shot n>=30/n>=50: suprimir si canary ya abierto (decision tomada en Sesion 175) ---

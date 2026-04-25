@@ -6084,6 +6084,37 @@ def run_tests():
         '"post_intra_sl_cooldown_review"' in code and "LOW_PRICE_THRESHOLD" in code and "LOW &lt;35c" in code,
     )
 
+    # ---- v10.6.37: alarmas con repercusion accionable ----
+    print("  Checks v10.6.37 alarmas con accion")
+    signals_summary_path = os.path.join(os.path.dirname(__file__), "tools", "signals_crosscheck_daily_summary.py")
+    signals_summary_code = ""
+    if os.path.exists(signals_summary_path):
+        with open(signals_summary_path, "r", encoding="utf-8") as f:
+            signals_summary_code = f.read()
+    test(
+        "v10.6.37: crosscheck summary clasifica nivel de accion",
+        "def classify_action_level(" in signals_summary_code
+        and "<b>Nivel de accion</b>" in signals_summary_code
+        and "<b>Tarea para Codex</b>" in signals_summary_code,
+    )
+    test(
+        "v10.6.37: crosscheck legacy incluye ACTION/WATCH/INFO",
+        'action_level = "ACTION"' in code
+        and 'action_level = "WATCH"' in code
+        and 'action_level = "INFO"' in code,
+    )
+    test(
+        "v10.6.37: blocked signals copy separa baseline y whitelist excluidas",
+        "Baseline fuera de whitelist" in code
+        and "Excluidas del calculo por estar ya en whitelist" in code
+        and "no mide ejecucion real del bot" in code,
+    )
+    test(
+        "v10.6.37: blocked signals genera tarea de auditoria antes de core",
+        "priorizar auditoria de las ciudades fuera de whitelist" in code
+        and "antes de tocar reglas core" in code,
+    )
+
     # ---- v10.6.25: low-price MIN_EDGE buffer + alarma Steps 2+3 ----
     test(
         "v10.6.25: MIN_EDGE_LOW_PRICE_BUFFER_PP definido",
