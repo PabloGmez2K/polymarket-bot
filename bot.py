@@ -7552,6 +7552,8 @@ def maybe_run_city_intelligence_runtime_summary(state, now=None):
     pipeline_command = [sys.executable, CITY_INTELLIGENCE_PIPELINE_SCRIPT, "--telegram-dry-run"]
     if not os.path.exists(os.path.join(repo_root, "data", "directional_trader_census.json")):
         pipeline_command.append("--refresh-census")
+    if not os.path.exists(os.path.join(repo_root, "data", "settlement_fidelity_probe.json")):
+        pipeline_command.append("--refresh-probe")
 
     commands = [
         [sys.executable, CITY_INTELLIGENCE_RUNTIME_EXPORT_SCRIPT],

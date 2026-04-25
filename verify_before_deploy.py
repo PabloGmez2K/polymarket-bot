@@ -6194,6 +6194,11 @@ def run_tests():
         and 'overall_status = "ok" if not failed_steps and not missing_outputs else "partial_failure"' in city_pipeline_code
         and "sys.exit(1 if failed_steps or missing_outputs else 0)" in city_pipeline_code,
     )
+    test(
+        "v10.6.31: bridge bootstrap refresh-probe si falta settlement_fidelity_probe",
+        'settlement_fidelity_probe.json"' in code
+        and '"--refresh-probe"' in code,
+    )
 
     # ---- v10.6.30: intra-reeval shadow-log ----
     print("\n v10.6.30: Intra-cycle re-eval shadow-log")
