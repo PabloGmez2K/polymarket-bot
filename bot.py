@@ -8867,7 +8867,7 @@ def maybe_evaluate_slot_monetization(state, now=None):
         if not slot_23_enabled:
             lines = lines[:10] + lines[-1:]
             if len(lines) > 1:
-                lines[1] = f"Ventana leÃ­da: 04h {slot_04.get('cycles', 0)} ciclos"
+                lines[1] = f"Ventana leída: 04h {slot_04.get('cycles', 0)} ciclos"
         if slot_04.get("decision") == "not_validated_yet":
             dominant = _top_reason(slot_04.get("execution_reject_reasons")) or _top_reason(slot_04.get("same_day_reject_reasons")) or "unknown"
             lines.append(f"• 04h sigue en <code>keep</code>; revisar si el cuello dominante <code>{dominant}</code> amerita patch operativo.")
