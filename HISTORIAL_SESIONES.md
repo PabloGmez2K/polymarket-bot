@@ -31,6 +31,8 @@ Comandos útiles:
 
 | Fecha | Tipo | Referencia | Commits clave | Resumen |
 |------|------|------------|---------------|---------|
+| 2026-04-26 | Explícita | Sesión 247 | blocked-signals live audit, no code | Codex ejecuta la primera auditoría read-only del `ACTION` diario `Blocked signals (fuera de whitelist)`, sin tocar `bot.py`, whitelist, NOAA, scheduler, sizing, Railway env ni reglas core. Fuente live: `/app/data/blocked_signals_resolutions.jsonl` en Railway `polymarket-bot`, `381` registros resueltos; whitelist live coincide con el default actual hasta `Dallas`; `BLOCKED_CITIES=London`. El agregado queda reproducido: fuera de whitelist `101` resueltas, `100` wins, WR `99.0%`; excluidas por whitelist `280`. Se crea `docs/blocked-signals-outside-whitelist-audit-2026-04-26.md`: el ranking fuera de whitelist lo lideran `Lucknow` `19/19` con consenso `7/7`, `Warsaw` `17/17` con consenso `8/8`, `Chongqing` `16/16` con consenso `2/2` y `Beijing` `14/14` con consenso `4/4`. Decisión: no whitelist masiva ni reglas core; primer bloque accionable = verificación de fuente/cobertura para `Lucknow`, `Warsaw`, `Beijing` y `Chongqing`. `Buenos Aires` queda detrás por falta de consenso/edge y observed live 0; `Miami` no aplica porque ya está en whitelist; `Lagos` necesita discovery de fuente antes de cualquier decisión. |
+| 2026-04-26 | Explícita | Sesión 246 | traders-vs-bot backlog, no code | Codex registra el parte diario `traders vs bot` / `Blocked signals` del 2026-04-26 UTC como backlog operativo read-only, sin tocar `bot.py`, whitelist, NOAA, scheduler, sizing, Railway ni reglas core. Foto recibida: `MATCH=23`, `BOT_ONLY=5`, `TRADER_ONLY=12`; serie reciente de 7 corridas con medianas `MATCH=19`, `BOT_ONLY=5`, `TRADER_ONLY=19`; persistentes `TRADER_ONLY` en `7/7`: `Buenos Aires`, `Miami`, `Warsaw`; casi persistentes `6/7`: `Chengdu`, `Lagos`. No hay gap operativo real hoy, asi que el cross-check queda en `WATCH`. `Blocked signals` fuera de whitelist queda en `ACTION` por `101` resueltas, `100` wins, WR `99.0%`, con `280` excluidas por whitelist, pero solo para auditoria ciudad/fuente/cobertura. Se crea `docs/trader-bot-review-backlog-2026-04-26.md`: Buenos Aires = falta whitelist/cobertura efectiva pese a `SAEZ` + NOAA + `OBSERVED_AUDIT_CITIES`; Miami = ya whitelist/observada, revisar edge/filtros si vuelve como gap real; Warsaw = no whitelist/no observed/ICAO-only, verificar fuente antes de cualquier canary. |
 | 2026-04-26 | Explícita | Sesión 245 | City Intelligence daily observe, no code | Codex cierra la alerta `City Intelligence - resumen diario (2026-04-25 UTC)` como decisión de observación, sin tocar `bot.py`, policy, Railway, NOAA, scheduler, reglas de entrada/salida ni trading core. Evidencia recibida: runtime read-only manifestado desde `2026-04-25 11:00 UTC`, preflight operacional live sin errores, topología efectiva `blocked=1 / canary=9 / shadow=1 / active=0`, `blocking_operational_collision_count=0`, señal `usable_signal`, review queue `now=1 / soon=3 / watch=14` y cuello dominante `policy_execution_gate`. Decisión: no revalidar transporte runtime ni repetir trabajo cerrado; no abrir policy todavía. Siguiente acción: observar si la evidencia fresca convierte el `now=1` en blocker real o acción concreta, manteniendo los checkpoints Apr 28 y May 1 ya programados. Nota: el preflight local del checkout cae por artefactos stale/no bijectivos, así que no contradice la lectura live de la alerta. |
 | 2026-04-26 | Explícita | Sesión 244 | slot 04h validated/keep, no code | Codex cierra la alerta `Slot monetization review` de `04h UTC` como decisión operativa de mantener el slot, sin tocar `bot.py`, scheduler, NOAA, reglas de entrada/salida, sizing, Railway env ni deploy. Evidencia de la ventana leída: 5 ciclos, `same_day_candidates=106`, `same_day_edges=3`, `same_day_selected=3`, `same_day_buys=2`, `buy_rate=66.67%` y `same_day_buy_rate=66.67%`; reject reasons dominantes `price_out_of_range=663`, `condition_filtered=86`, `blocked_city=22`; execution reject residual `buy_min_size=1`. Decisión: `04h UTC` queda `validated/keep`; siguiente acción, vigilar estabilidad y solo reabrir lógica si cae la conversión edge->buy o aparece un cuello recurrente nuevo. |
 | 2026-04-25 | Explícita | Sesión 239 | limpieza post-V2 cutover P6+P7 | Codex ejecuta la limpieza post-cutover V2 sin tocar trading core, NOAA, scheduler, Kelly, sigma ni reglas de entrada/salida. Precondición Railway revisada: sin errores recurrentes en `create_or_derive_api_key`, `get_open_orders`, auth endpoints ni CLOB. P6: se crea backup local `data/runtime_import/shadow_city_tracking.json.bak-pre-p6` y backup remoto `/app/data/shadow_city_tracking.json.bak-pre-p6`; `shadow_city_tracking.json` live queda con Seoul aislado a evidencia post-fix desde `2026-04-17T12:22:40Z` (`markets_seen 207 -> 54`, `edge_hits 5 -> 2`, `cycles_seen 91 -> 28`, `best_edge_pct 68.5 -> 26.4`) y una sola señal durable `Seoul|2026-04-18|YES|at_or_above|21`. Validación local con manifest post-P6: ledger/gate `runtime_inputs_status=available`, sin drift, Seoul en `canary_measurement`; `notify_active_candidates` usa trades cerrados post-promoción. P7: se crea `docs/min-edge-per-city-analysis-2026-04-25.md`; no hay ciudades con `n_closed>=10`, `WR>=70%` y `PnL>0`, por lo que no se aplica `MIN_EDGE_PER_CITY`. Tokyo queda como candidata a observar (`n=5`, `WR=80%`, `PnL=+$3.53`) pero sin muestra suficiente. Review Sonnet 4.6 aprobada en `docs/sonnet-review-post-v2-cleanup-p6-p7-2026-04-25.md`; su único finding bajo queda resuelto al actualizar `city_policy_state.auto_canary_cities.Seoul` en local/Railway a `shadow_edges=2`, `best_edge_pct=26.4` y reason post-P6, con backup remoto `/app/data/city_policy_state.json.bak-seoul-p6-traceability`. |
@@ -3400,3 +3402,36 @@ Las 11 posiciones legacy stale (Ankara ×2, London, Miami, Shanghai, Toronto, At
 2. Esperar que el servicio esté healthy.
 3. `powershell -ExecutionPolicy Bypass -File tools/railway_safe.ps1 ssh "python tools/close_legacy_stale_now.py"` — cierra las 11 posiciones en producción.
 4. Verificar con el briefing del día siguiente que el bloque LEGACY STALE desaparece.
+
+## Sesión 247 — Auditoría blocked signals fuera de whitelist + handoff ICAO-only (26 abr 2026)
+
+**Tipo:** Explícita | **Agente:** Codex
+
+### Contexto
+
+El daily `Blocked signals (fuera de whitelist)` marcó nivel `ACTION` con `101` señales resueltas fuera de whitelist, `100` wins y WR `99.0%`. El objetivo era verificar fuente/cobertura antes de cualquier whitelist/canary para `Lucknow`, `Warsaw`, `Beijing` y `Chongqing`, manteniendo read-only al inicio y sin tocar trading core, NOAA core, scheduler ni reglas.
+
+### Acciones
+
+- Se creó `docs/blocked-signals-outside-whitelist-audit-2026-04-26.md` con ranking y lectura live de `/app/data/blocked_signals_resolutions.jsonl`.
+- Se verificó que `Lucknow`, `Warsaw`, `Beijing` y `Chongqing` tienen `RESOLUTION_STATIONS`, `RESOLUTION_ICAO` y `CITY_TIMEZONES`, pero ninguna tiene NOAA ids útiles.
+- Se confirmó fuente Polymarket/WU para `VILK`, `EPWA`, `ZBAA` y `ZUCK`.
+- Se leyó Railway read-only: `audit.json` mantiene `observed_vs_forecast=0` para las cuatro; `shadow_city_tracking.json` da edge fuerte en `Lucknow` y `Beijing`, pero no en `Warsaw`/`Chongqing`.
+- Se comprobó NOAA/NCEI `global-hourly/access/2026`: los ISD comentados para las cuatro estaciones devuelven 404.
+- Se preparó `docs/claude-opus-prompt-icao-only-canary-review-2026-04-26.md`.
+
+### Resultado
+
+- `Lucknow`: `preparar whitelist-canary` solo como propuesta ICAO-only para Opus.
+- `Beijing`: `preparar whitelist-canary` solo como propuesta ICAO-only para Opus.
+- `Warsaw`: `seguir acumulando muestra`.
+- `Chongqing`: `seguir acumulando muestra`.
+- No hay `bloqueo por fuente`: las fuentes Polymarket/WU coinciden con las estaciones declaradas.
+
+### Verificación
+
+No se corrieron tests: sesión documental/read-only, sin cambios de runtime.
+
+### Siguiente acción
+
+Opus debe leer `docs/claude-opus-prompt-icao-only-canary-review-2026-04-26.md` y decidir si se permite canary ICAO-only con `observed_vs_forecast=0`, si se exige NOAA observado, o si se crea un estado intermedio sin BUY real.
