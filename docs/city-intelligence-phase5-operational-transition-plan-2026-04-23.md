@@ -67,6 +67,15 @@ Salida esperada:
 
 Ventana recomendada: 2026-04-28 a 2026-05-01.
 
+Estado 2026-04-26: ejecutada antes del checkpoint previsto.
+
+Evidencia de pausa:
+
+- `phase5-visibility` queda sin deployment activo mediante `railway down -s phase5-visibility -y`.
+- `city-intelligence` queda sin deployment activo mediante `railway down -s city-intelligence -y`.
+- Los volumenes `phase5-visibility-volume` y `city-intelligence-volume` siguen adjuntos para rollback/historial.
+- `polymarket-bot` sigue en `SUCCESS` y conserva el runtime/emisor canonico.
+
 Acciones:
 
 - Pausar `phase5-visibility` si no se echo en falta durante la ventana de silencio.
@@ -79,7 +88,23 @@ Salida esperada:
 - `city-intelligence` separado deja de competir con el bridge.
 - Queda una sola voz operativa: `polymarket-bot` + bridge + docs/artefactos.
 
-### Fase 3 - Archivo y cambio de foco
+### Fase 3 - Borrado controlado
+
+Ventana recomendada: desde 2026-05-03 si la pausa no rompe nada.
+
+Alarma programada: `legacy_services_delete_readiness_2026_05_03` en `data/service_transition_followup.json`.
+
+Condiciones:
+
+- `polymarket-bot` sigue en `SUCCESS`.
+- El bridge in-bot cubre runtime import, ledger, gate, pipeline y daily summary con `runtime_inputs_status=available`.
+- No reaparecen avisos legacy `runtime_inputs_missing`.
+- Nadie echo en falta la alerta Shanghai+Chicago ni el scheduler separado.
+- Los artefactos utiles quedan preservados como scripts/docs/seed data versionados.
+
+Runbook: `docs/legacy-analytics-service-cleanup-runbook-2026-04-26.md`.
+
+### Fase 4 - Archivo y cambio de foco
 
 Ventana recomendada: 2026-05-01 a 2026-05-07.
 
@@ -103,6 +128,7 @@ Salida esperada:
 | 2026-04-24 | Confirmar que el summary del bridge salio y no hubo doble emisor | Mantener silencio o revertir si falta aviso real |
 | 2026-04-28 | Checkpoint 5 dias de bridge | Pausar `phase5-visibility` si no aporto nada unico |
 | 2026-05-01 | Checkpoint 72h post-pausa phase5 | Pausar `city-intelligence` separado si el bridge sigue ok |
+| 2026-05-03 | Readiness de borrado legacy | Borrar servicios/volumenes legacy solo si la pausa no rompio funcionalidad |
 | 2026-05-07 | Cierre de transformacion | Archivar docs phase5 y cerrar trazabilidad |
 
 ## Validacion

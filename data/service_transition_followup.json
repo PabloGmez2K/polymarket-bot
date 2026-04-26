@@ -6,7 +6,7 @@
   "current_strategy": "silenciar -> observar -> pausar -> apagar",
   "canonical_runtime_service": "polymarket-bot",
   "reminder_channel": "city_intelligence_daily_summary",
-  "phase": "silence_and_observe",
+  "phase": "legacy_services_paused",
   "applied_actions": [
     {
       "timestamp": "2026-04-23T08:05:00Z",
@@ -16,6 +16,24 @@
         "phase5-visibility"
       ],
       "notes": "polymarket-bot keeps TELEGRAM_TOKEN; both legacy services were restarted so future runs inherit the muted environment."
+    },
+    {
+      "timestamp": "2026-04-26T10:56:00Z",
+      "action": "disabled_legacy_service_telegram_tokens",
+      "services": [
+        "city-intelligence",
+        "phase5-visibility"
+      ],
+      "notes": "TELEGRAM_TOKEN=DISABLED was set only on the two legacy analytics services after live evidence showed they still inherited Telegram env and emitted legacy alerts."
+    },
+    {
+      "timestamp": "2026-04-26T11:05:00Z",
+      "action": "paused_legacy_analytics_deployments",
+      "services": [
+        "city-intelligence",
+        "phase5-visibility"
+      ],
+      "notes": "railway down -s <service> -y removed the active deployments. Services, variables, docs, scripts and volumes remain for rollback/history; polymarket-bot remains the only live runtime/emitter."
     }
   ],
   "checkpoints": [
@@ -32,24 +50,43 @@
     {
       "id": "phase5_pause_gate_2026_04_28",
       "due_date": "2026-04-28",
-      "status": "pending",
+      "status": "resolved_early",
       "label": "Checkpoint para pausar phase5-visibility",
       "reminder": "Si nadie echo en falta la alerta Shanghai+Chicago y city-intelligence conserva tracker/benchmark, pausar phase5-visibility en Railway.",
-      "decision": "Pausar phase5-visibility o documentar la funcion unica que aun falta migrar."
+      "decision": "Resuelto antes del checkpoint: phase5-visibility queda pausado como servicio Railway; scripts, docs, data y volumen se conservan como historico.",
+      "resolved_at": "2026-04-26",
+      "evidence": "La coincidencia Shanghai+Chicago #20 no aporto decision nueva; la lectura util queda absorbida como benchmark/visibility en city-intelligence in-bot."
     },
     {
       "id": "city_intelligence_pause_gate_2026_05_01",
       "due_date": "2026-05-01",
-      "status": "pending",
+      "status": "resolved_early",
       "label": "Checkpoint para pausar city-intelligence separado",
       "reminder": "Si el bridge acumulo al menos 5 ejecuciones diarias con runtime_inputs_status=available y overall_status=ok, pausar el servicio Railway city-intelligence.",
-      "decision": "Pausar city-intelligence separado o extender observacion si el bridge no acumulo evidencia suficiente.",
+      "decision": "Resuelto antes del checkpoint: city-intelligence queda pausado como servicio Railway separado porque seguia sin /app/data/runtime_import y emitia runtime_inputs_missing. La capa util permanece en el bridge de polymarket-bot.",
+      "resolved_at": "2026-04-26",
       "executions_log": [
         {
           "run_at": "2026-04-25T11:00:36+00:00",
           "status": "ok",
           "notes": "Primera ejecucion exitosa post-fix. settlement_fidelity_probe.json creado via --refresh-probe (14KB). last_progress_state=mejorando, bottleneck=policy_execution_gate, actionable_cities=0, building=5."
         }
+      ]
+    },
+    {
+      "id": "legacy_services_delete_readiness_2026_05_03",
+      "due_date": "2026-05-03",
+      "status": "pending",
+      "label": "Alarma para borrar servicios/volumenes legacy",
+      "reminder": "Si desde la pausa no hubo perdida funcional, no reaparecio runtime_inputs_missing legacy, el bridge in-bot envio summaries utiles y nadie echo en falta Phase5, preparar borrado definitivo de city-intelligence y phase5-visibility.",
+      "decision": "Borrar servicios/volumenes legacy solo si los artefactos utiles ya estan preservados en repo o runtime canonico y la funcionalidad viva esta cubierta por polymarket-bot.",
+      "runbook": [
+        "1. Verificar Railway: solo polymarket-bot debe tener deployment activo; city-intelligence y phase5-visibility deben seguir sin deployment.",
+        "2. Confirmar que polymarket-bot sigue generando runtime_import, city_validation_ledger, city_promotion_gate, city_intelligence_pipeline y daily summary con runtime_inputs_status=available.",
+        "3. Preservar lo util: scripts tools/city_intelligence_*.py, tools/*phase5*.py, docs phase5/city-intelligence y seed_data/phase5 quedan en git; data de volumen solo es historico operativo.",
+        "4. Exportar o listar una ultima vez los volumenes legacy si se quiere evidencia antes de borrar: city-intelligence-volume y phase5-visibility-volume.",
+        "5. Borrar primero servicios Railway legacy desde Dashboard/API; despues borrar sus volumenes con railway volume delete -v city-intelligence-volume -y y railway volume delete -v phase5-visibility-volume -y. No tocar polymarket-bot ni polymarket-bot-volume.",
+        "6. Tras borrar, validar service status, volume list, daily summary dry-run y python verify_before_deploy.py."
       ]
     },
     {

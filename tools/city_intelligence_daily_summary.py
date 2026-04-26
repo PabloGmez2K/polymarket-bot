@@ -249,10 +249,14 @@ def build_service_transition_block(plan, today_utc):
     ]
     reminder = row.get("reminder")
     decision = row.get("decision")
+    runbook = row.get("runbook")
     if reminder:
         lines.append(f"- {reminder}")
     if decision:
         lines.append(f"- Decision esperada: {decision}")
+    if isinstance(runbook, list) and runbook:
+        lines.append("- Como hacerlo:")
+        lines.extend(f"  {item}" for item in runbook[:6] if item)
     return lines
 
 
