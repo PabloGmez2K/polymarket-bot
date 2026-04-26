@@ -155,6 +155,8 @@ DAILY_SUMMARY_HOUR_UTC = int(os.getenv("DAILY_SUMMARY_HOUR_UTC", "8"))
 SL_RETRO_ENABLED = os.getenv("SL_RETRO_ENABLED", "1").lower() in ("1", "true", "yes", "on")
 DAILY_BRIEFING_ENABLED = os.getenv("DAILY_BRIEFING_ENABLED", "1").lower() in ("1", "true", "yes", "on")
 DAILY_BRIEFING_HOUR_UTC = int(os.getenv("DAILY_BRIEFING_HOUR_UTC", "8"))
+PNL_RECONCILIATION_ENABLED = os.getenv("PNL_RECONCILIATION_ENABLED", "1").lower() in ("1", "true", "yes", "on")
+PNL_RECONCILIATION_HOUR_UTC = int(os.getenv("PNL_RECONCILIATION_HOUR_UTC", str(DAILY_BRIEFING_HOUR_UTC)))
 POST_INTRA_SL_COOLDOWN_REVIEW_ENABLED = os.getenv("POST_INTRA_SL_COOLDOWN_REVIEW_ENABLED", "1").lower() in ("1", "true", "yes", "on")
 POST_INTRA_SL_COOLDOWN_REVIEW_MIN_CLOSED = int(os.getenv("POST_INTRA_SL_COOLDOWN_REVIEW_MIN_CLOSED", "10"))
 # Cutoff de stats por ciudad: "Dallas=2026-04-06,Chicago=2026-03-01"
@@ -622,8 +624,14 @@ DAILY_POSITION_BRIEFING_SCRIPT = os.path.join(
     "tools",
     "daily_position_briefing.py",
 )
+PNL_RECONCILIATION_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "tools",
+    "pnl_reconciliation_alert.py",
+)
 SL_RETROSPECTIVE_STATE_FILE = _data_path("sl_retrospective_state.json")
 DAILY_BRIEFING_STATE_FILE = _data_path("daily_briefing_state.json")
+PNL_RECONCILIATION_STATE_FILE = _data_path("pnl_reconciliation_state.json")
 CITY_INTELLIGENCE_RUNTIME_EXPORT_SCRIPT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "tools",
@@ -4421,6 +4429,14 @@ def run_observability_alerts():
         if logger:
             logger.warning(f"sl retrospective: fallo ({e})")
 
+    try:
+        if maybe_run_pnl_reconciliation(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"pnl reconciliation: fallo ({e})")
+
     # v10.6.37: cierra posiciones expiradas sin evidencia antes del briefing.
     try:
         maybe_close_expired_legacy_positions(state)
@@ -7829,6 +7845,82 @@ def maybe_close_expired_legacy_positions(state, now=None):
     state["legacy_cleanup_last_run"] = today
     if logger:
         logger.info(f"legacy_cleanup: done (closed={closed})")
+    return True
+
+
+def maybe_run_pnl_reconciliation(state):
+    """Alerta diaria: reconcilia P/L wallet Polymarket vs lectura del bot."""
+    logger = globals().get("log")
+    if not PNL_RECONCILIATION_ENABLED:
+        if logger:
+            logger.info("pnl reconciliation: skip (PNL_RECONCILIATION_ENABLED=0)")
+        return False
+    if not os.path.exists(TRADE_LIFECYCLE_FILE):
+        if logger:
+            logger.info(f"pnl reconciliation: skip (missing lifecycle file: {TRADE_LIFECYCLE_FILE})")
+        return False
+    if not os.path.exists(PNL_RECONCILIATION_SCRIPT):
+        if logger:
+            logger.info(f"pnl reconciliation: skip (missing script: {PNL_RECONCILIATION_SCRIPT})")
+        return False
+
+    now = datetime.now(timezone.utc)
+    target_hour = PNL_RECONCILIATION_HOUR_UTC % 24
+    hour_delta = min((now.hour - target_hour) % 24, (target_hour - now.hour) % 24)
+    if hour_delta > 1:
+        if logger:
+            logger.info(
+                "pnl reconciliation: skip "
+                f"(outside hour window: now_hour={now.hour} target_hour={target_hour} delta={hour_delta})"
+            )
+        return False
+
+    reconciliation_state = {}
+    if os.path.exists(PNL_RECONCILIATION_STATE_FILE):
+        try:
+            with open(PNL_RECONCILIATION_STATE_FILE, "r", encoding="utf-8-sig") as fh:
+                reconciliation_state = json.load(fh)
+        except Exception as exc:
+            if logger:
+                logger.warning(f"pnl reconciliation: no pude leer state ({exc})")
+            reconciliation_state = {}
+
+    today = now.date().isoformat()
+    if reconciliation_state.get("last_sent_date") == today:
+        if logger:
+            logger.info(f"pnl reconciliation: skip (already sent today: {today})")
+        return False
+
+    command = [
+        sys.executable,
+        PNL_RECONCILIATION_SCRIPT,
+        "--lifecycle-file",
+        TRADE_LIFECYCLE_FILE,
+        "--state-file",
+        PNL_RECONCILIATION_STATE_FILE,
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=False,
+        )
+    except Exception as exc:
+        if logger:
+            logger.warning(f"pnl reconciliation: fallo ejecutando script ({exc})")
+        return False
+
+    if result.returncode != 0:
+        if logger:
+            detail = (result.stderr or result.stdout or "sin detalle").strip()
+            logger.warning(f"pnl reconciliation: fallo ({detail[:500]})")
+        return False
+
+    if logger:
+        logger.info("pnl reconciliation: OK")
     return True
 
 

@@ -3371,39 +3371,47 @@ Tras varias revisiones de alertas de Telegram, seguían dos problemas mezclados:
 
 Desplegar, validar en Railway que el servicio sano recoge el commit y hacer una verificación rápida con Opus sobre el estado live de `SL Retro` y `Briefing Diario`.
 
-## Sesión 243 — Cierre definitivo 11 posiciones legacy stale + auto-close wired (26 abr 2026)
+## Sesión 243 — Cierre definitivo 11 posiciones legacy stale + reconciliación con outcomes reales (26 abr 2026)
 
 **Tipo:** Explícita | **Agente:** Sonnet
 
 ### Contexto
 
-Las 11 posiciones legacy stale (Ankara ×2, London, Miami, Shanghai, Toronto, Atlanta, Buenos Aires, Seattle, Wellington, Madrid) seguían apareciendo en el briefing diario con `status=open` en Railway. La sesión 234 solo separó su display en una sección dedicada; nunca las cerró en la base de datos. El usuario quería cierre definitivo en producción y garantía de que no vuelva a ocurrir.
+Las 11 posiciones legacy stale (Ankara ×2, London, Miami, Shanghai, Toronto, Atlanta, Buenos Aires, Seattle, Wellington, Madrid — resolution_date 26-29 mar 2026, sin snapshots ni evidencia de mercado) seguían apareciendo en el briefing con `status=open` en Railway. La sesión 234 solo separó su display; nunca las cerró en la DB. El usuario pidió cierre definitivo en producción, garantía de que no vuelva a ocurrir, y que el cierre refleje el outcome real (no un LOSS_TOTAL especulativo).
 
 ### Acciones
 
-- `tools/close_legacy_stale_now.py`: script one-shot para Railway que cierra las 11 posiciones en `trade_lifecycle.json` + `postmortem.json` con `LOSS_TOTAL / legacy_unresolved` (pnl_cash = -total_amount conservador), crea backups `.bak_session_242` y escribe evento en `agent_events.jsonl`.
-- `bot.py`:
-  - Nueva función `close_expired_legacy_positions()`: busca posiciones `status=open` con `resolution_date < today - 2 días` sin snapshots ni market_observations, las cierra como `LOSS_TOTAL / legacy_unresolved` en ambos archivos y loguea el evento.
-  - Nueva función `maybe_close_expired_legacy_positions(state)`: wrapper diario (state key `legacy_cleanup_last_run`), corre una vez por día antes del briefing.
-  - Hook en `run_alerts()` justo antes de `maybe_run_daily_briefing`.
-  - State key `legacy_cleanup_last_run` añadida a defaults y setdefaults.
+**Auto-close wired en bot.py:**
+- Nueva función `close_expired_legacy_positions()`: busca posiciones `status=open` con `resolution_date < today - 2 días` sin snapshots ni market_observations. Cierra como `EXPIRED_UNVERIFIED` con `pnl_cash=None` y `reconciliation_needed=True` — no distorsiona P&L ni WR.
+- Nueva función `maybe_close_expired_legacy_positions(state)`: wrapper diario (state key `legacy_cleanup_last_run`), corre una vez por día antes del briefing.
+- Hook en `run_alerts()` justo antes de `maybe_run_daily_briefing`.
+- State key `legacy_cleanup_last_run` añadida a defaults y setdefaults.
+
+**Investigación y reconciliación con outcomes reales:**
+- Se investigaron los 11 outcomes reales en Polymarket consultando Wunderground (Esenboğa, Heathrow, KSEA), NWS (Miami, Atlanta), Shanghai Met Service, Environment Canada CYYZ, SMN/Pistarini, MetService/Kelburn y AEMET/Barajas.
+- `tools/reconcile_legacy_stale_with_outcomes.py`: parchea `trade_lifecycle.json` + `postmortem.json` en Railway con el resultado real (solo si `close_reason == "legacy_unresolved"`). Ejecutado en Railway sesión_243:
+  - **6 RESOLVED_WIN:** Ankara NO, Ankara YES, Miami YES, Shanghai NO, Buenos Aires NO, Wellington NO
+  - **5 LOSS_TOTAL:** London NO, Toronto NO, Atlanta YES, Seattle YES, Madrid YES
+  - **Net P&L corregido: +$49.94** (TL amounts). Backups `.bak_session_243` en Railway.
+
+**SL retrospectiva** (datos al cierre de sesión):
+- RIGHT=5, WRONG=8, UNKNOWN=10 (23 total); veredicto `seguir monitorizando`.
+- `maybe_run_sl_retrospective(state)` corre diariamente y envía Telegram automáticamente con cada nuevo SL resuelto.
 
 ### Resultado
 
+- Las 11 posiciones legacy stale quedan cerradas en Railway con sus outcomes reales documentados (fuente, temperatura observada, token bot, confianza).
+- El auto-close `EXPIRED_UNVERIFIED` garantiza que futuras posiciones vencidas sin evidencia no contaminan P&L hasta ser reconciliadas manualmente.
 - `verify_before_deploy.py` → **843/843**.
-- El briefing dejará de mostrar el bloque `LEGACY STALE` una vez que el script se ejecute en Railway.
-- De ahora en adelante cualquier posición que venza >2 días sin evidencia es cerrada automáticamente antes del briefing.
 
 ### Verificación
 
 - `python verify_before_deploy.py` → **843/843**
+- Railway SSH: `reconcile_legacy_stale_with_outcomes.py` → `11/11 TL patched, 11/11 PM patched`
 
 ### Siguiente acción
 
-1. `git push` — Railway hace auto-deploy.
-2. Esperar que el servicio esté healthy.
-3. `powershell -ExecutionPolicy Bypass -File tools/railway_safe.ps1 ssh "python tools/close_legacy_stale_now.py"` — cierra las 11 posiciones en producción.
-4. Verificar con el briefing del día siguiente que el bloque LEGACY STALE desaparece.
+El briefing del día siguiente ya no mostrará el bloque LEGACY STALE. Para reconciliaciones futuras, usar `tools/reconcile_legacy_stale_with_outcomes.py` como plantilla.
 
 ## Sesión 247 — Auditoría blocked signals fuera de whitelist + handoff ICAO-only (26 abr 2026)
 
@@ -3437,3 +3445,35 @@ No se corrieron tests: sesión documental/read-only, sin cambios de runtime.
 ### Siguiente acción
 
 Opus debe leer `docs/claude-opus-prompt-icao-only-canary-review-2026-04-26.md` y decidir si se permite canary ICAO-only con `observed_vs_forecast=0`, si se exige NOAA observado, o si se crea un estado intermedio sin BUY real.
+
+## Sesión 250 — Alerta diaria P/L reconciliation con tarea explicita (26 abr 2026)
+
+**Tipo:** Explícita | **Agente:** Codex
+
+### Contexto
+
+El usuario compartió captura de Polymarket con `Portfolio $20.38` y `P/L 1W -$3.65`, y pidió aprovechar Codex mientras Sonnet termina SL retrospectiva y Opus revisa la decisión ICAO-only. El objetivo fue convertir la frustración de "trabajamos mucho pero la cuenta no hace click" en una alerta Telegram accionable y honesta.
+
+### Acciones
+
+- Se agregó `tools/pnl_reconciliation_alert.py`.
+- El script lee `trade_lifecycle`, calcula PnL/WR realizados en `7d`, `30d`, `60d` y `ultimos 20`, y separa semántica de datos (`legacy_unresolved`, `closed_without_pnl`, open/pending).
+- La alerta detecta `batch market_resolved` antiguo dentro de la ventana 7d para no interpretar como mejora limpia resoluciones viejas procesadas hoy.
+- El mensaje Telegram incluye bloque `Tarea para Codex` con instrucciones explicitas y guardrail `No tocar trading core`.
+- `bot.py` integra `maybe_run_pnl_reconciliation(state)` como hook diario de observabilidad, con env vars `PNL_RECONCILIATION_ENABLED` y `PNL_RECONCILIATION_HOUR_UTC`.
+- `verify_before_deploy.py` suma checks de existencia/compilación, env vars e integración en observabilidad.
+
+### Resultado
+
+- Lectura local: `lifecycle 7d = +$20.37`, WR `40.7%`, pero con `+$23.36` de `market_resolved` antiguo dentro de 7d.
+- Si se compara con la captura `Polymarket 1W = -$3.65`, el delta sería `+$24.02`, por lo que la acción correcta es reconciliar wallet/fills/redeems/mark-to-market antes de usar el PnL 7d del lifecycle como señal de mejora.
+- No cambia trading core, NOAA, scheduler, whitelist, sizing ni reglas de entrada/salida.
+
+### Verificación
+
+- `python verify_before_deploy.py` → **847/847**.
+- `python -m py_compile tools/pnl_reconciliation_alert.py bot.py verify_before_deploy.py` volvió a fallar solo por el lock conocido de `__pycache__` en Windows (`WinError 5`), no por sintaxis; la suite compila el script nuevo en verde.
+
+### Siguiente acción
+
+Desplegar cuando convenga y dejar que el ciclo diario envíe la nueva alerta. Si la alerta muestra `wallet_pnl_missing`, comparar con el P/L 1W visible en Polymarket; si hay divergencia material, abrir auditoría de reconciliación wallet/fills antes de nuevas reglas.

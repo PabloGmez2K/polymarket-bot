@@ -5387,10 +5387,13 @@ def run_tests():
     # ---- v10.6.32: SL retrospective + daily briefing ----
     sl_retro_script = os.path.join(os.path.dirname(__file__), "tools", "sl_retrospective.py")
     daily_briefing_script = os.path.join(os.path.dirname(__file__), "tools", "daily_position_briefing.py")
+    pnl_reconciliation_script = os.path.join(os.path.dirname(__file__), "tools", "pnl_reconciliation_alert.py")
     sl_retro_compiles = False
     daily_briefing_compiles = False
+    pnl_reconciliation_compiles = False
     sl_retro_detail = ""
     daily_briefing_detail = ""
+    pnl_reconciliation_detail = ""
     if os.path.exists(sl_retro_script):
         try:
             py_compile.compile(sl_retro_script, doraise=True)
@@ -5403,6 +5406,12 @@ def run_tests():
             daily_briefing_compiles = True
         except Exception as exc:
             daily_briefing_detail = str(exc)
+    if os.path.exists(pnl_reconciliation_script):
+        try:
+            py_compile.compile(pnl_reconciliation_script, doraise=True)
+            pnl_reconciliation_compiles = True
+        except Exception as exc:
+            pnl_reconciliation_detail = str(exc)
     test(
         "v10.6.32: tools/sl_retrospective.py existe y compila",
         os.path.exists(sl_retro_script) and sl_retro_compiles,
@@ -5414,6 +5423,11 @@ def run_tests():
         daily_briefing_detail,
     )
     test(
+        "v10.6.38: tools/pnl_reconciliation_alert.py existe y compila",
+        os.path.exists(pnl_reconciliation_script) and pnl_reconciliation_compiles,
+        pnl_reconciliation_detail,
+    )
+    test(
         "v10.6.32: maybe_run_sl_retrospective definida",
         "def maybe_run_sl_retrospective(" in code,
     )
@@ -5422,10 +5436,19 @@ def run_tests():
         "def maybe_run_daily_briefing(" in code,
     )
     test(
+        "v10.6.38: maybe_run_pnl_reconciliation definida",
+        "def maybe_run_pnl_reconciliation(" in code,
+    )
+    test(
         "v10.6.32: env vars SL retro + daily briefing definidas",
         'SL_RETRO_ENABLED = os.getenv("SL_RETRO_ENABLED"' in code
         and 'DAILY_BRIEFING_ENABLED = os.getenv("DAILY_BRIEFING_ENABLED"' in code
         and 'DAILY_BRIEFING_HOUR_UTC = int(os.getenv("DAILY_BRIEFING_HOUR_UTC"' in code,
+    )
+    test(
+        "v10.6.38: env vars P/L reconciliation definidas",
+        'PNL_RECONCILIATION_ENABLED = os.getenv("PNL_RECONCILIATION_ENABLED"' in code
+        and 'PNL_RECONCILIATION_HOUR_UTC = int(os.getenv("PNL_RECONCILIATION_HOUR_UTC"' in code,
     )
     test(
         "v10.6.32: maybe_run_sl_retrospective integrada en run_observability_alerts",
@@ -5434,6 +5457,10 @@ def run_tests():
     test(
         "v10.6.32: maybe_run_daily_briefing integrada en run_observability_alerts",
         "maybe_run_daily_briefing(state)" in code,
+    )
+    test(
+        "v10.6.38: maybe_run_pnl_reconciliation integrada en run_observability_alerts",
+        "maybe_run_pnl_reconciliation(state)" in code,
     )
     try:
         with open(sl_retro_script, "r", encoding="utf-8") as f:
