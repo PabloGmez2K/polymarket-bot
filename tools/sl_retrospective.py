@@ -547,6 +547,22 @@ def load_sl_rows(lifecycle_path: Path):
     return rows
 
 
+def _summarize_type(rows: list[dict], close_reason: str) -> dict:
+    sub = [r for r in rows if r.get("close_reason") == close_reason]
+    n_right = sum(1 for r in sub if r["verdict"] == "RIGHT")
+    n_wrong = sum(1 for r in sub if r["verdict"] == "WRONG")
+    n_unknown = sum(1 for r in sub if r["verdict"] == "UNKNOWN")
+    n_resolved = n_right + n_wrong
+    return {
+        "n": len(sub),
+        "n_right": n_right,
+        "n_wrong": n_wrong,
+        "n_unknown": n_unknown,
+        "n_resolved": n_resolved,
+        "accuracy_pct": (n_right / n_resolved * 100.0) if n_resolved else None,
+    }
+
+
 def summarize(rows: list[dict]):
     n_right = sum(1 for row in rows if row["verdict"] == "RIGHT")
     n_wrong = sum(1 for row in rows if row["verdict"] == "WRONG")
@@ -608,6 +624,10 @@ def summarize(rows: list[dict]):
         "threshold_final": threshold_final,
         "preliminary_verdict": verdict_brief if threshold_preliminary else "",
         "final_verdict": verdict_final,
+        "by_type": {
+            "stop_loss": _summarize_type(rows, "stop_loss"),
+            "stop_loss_intra": _summarize_type(rows, "stop_loss_intra"),
+        },
     }
 
 
@@ -686,6 +706,23 @@ def build_message(summary: dict):
                 f"  • {row['label']}: con SL {row['pnl_cash_with_sl']:+.2f}$ → "
                 f"sin SL {row['pnl_without_sl_best']:+.2f}$"
             )
+        lines.append("")
+
+    by_type = summary.get("by_type", {})
+    sl_main = by_type.get("stop_loss", {})
+    sl_intra = by_type.get("stop_loss_intra", {})
+    if sl_main.get("n", 0) > 0 or sl_intra.get("n", 0) > 0:
+        lines.append("📋 Por tipo de SL:")
+        for label, t in [("Ciclo principal (stop_loss)", sl_main), ("Intra-ciclo (stop_loss_intra)", sl_intra)]:
+            n_t = t.get("n", 0)
+            if n_t == 0:
+                continue
+            nr = t.get("n_right", 0)
+            nw = t.get("n_wrong", 0)
+            nu = t.get("n_unknown", 0)
+            acc = t.get("accuracy_pct")
+            acc_str = f" → {acc:.0f}% falsas salidas" if acc is not None else ""
+            lines.append(f"  • {label}: n={n_t}, falsas={nr}, correctos={nw}, pend={nu}{acc_str}")
         lines.append("")
 
     conclusive = False

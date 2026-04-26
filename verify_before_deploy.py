@@ -5736,6 +5736,7 @@ def run_tests():
             "infer_observed_vs_forecast_verdict",
             "infer_resolution_verdict",
             "load_sl_rows",
+            "_summarize_type",
             "summarize",
             "build_message",
         ]:
