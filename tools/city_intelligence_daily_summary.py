@@ -17,6 +17,7 @@ DEFAULT_GATE_PATH = REPO_ROOT / "data" / "city_promotion_gate.json"
 DEFAULT_EFFECTIVE_VIEW_PATH = REPO_ROOT / "data" / "runtime_policy_effective_view.json"
 DEFAULT_ALIGNMENT_PATH = REPO_ROOT / "data" / "system_alignment_check_operational.json"
 DEFAULT_SERVICE_TRANSITION_PLAN_PATH = REPO_ROOT / "data" / "service_transition_followup.json"
+DEFAULT_FORECAST_ACCURACY_PATH = REPO_ROOT / "data" / "forecast_accuracy_raw.json"
 DEFAULT_STATE_PATH = REPO_ROOT / "data" / "city_intelligence_daily_summary_state.json"
 DEFAULT_MD_OUTPUT = REPO_ROOT / "docs" / "city_intelligence_daily_summary_latest.md"
 LOCK_STALE_SECONDS = 15 * 60
@@ -42,6 +43,7 @@ def parse_args():
     parser.add_argument("--effective-view", default=str(DEFAULT_EFFECTIVE_VIEW_PATH))
     parser.add_argument("--alignment-operational", default=str(DEFAULT_ALIGNMENT_PATH))
     parser.add_argument("--service-transition-plan", default=str(DEFAULT_SERVICE_TRANSITION_PLAN_PATH))
+    parser.add_argument("--forecast-accuracy", default=str(DEFAULT_FORECAST_ACCURACY_PATH))
     parser.add_argument("--state-output", default=str(DEFAULT_STATE_PATH))
     parser.add_argument("--md-output", default=str(DEFAULT_MD_OUTPUT))
     parser.add_argument("--dry-run", action="store_true")
@@ -260,7 +262,47 @@ def build_service_transition_block(plan, today_utc):
     return lines
 
 
-def build_canonical_story(pipeline, ledger, gate, effective_view, alignment, progress_state, service_transition_plan=None):
+def fmt_code_value(value, suffix=""):
+    if value is None or value == "":
+        return "n/d"
+    if isinstance(value, float):
+        return f"{value:.1f}{suffix}"
+    return f"{value}{suffix}"
+
+
+def build_icao_only_audit_block(forecast_accuracy):
+    audit = (forecast_accuracy or {}).get("icao_only_proxy_audit") or {}
+    rows = audit.get("cities") or []
+    if not rows:
+        return []
+
+    lines = ["", "<b>ICAO-only audit</b>"]
+    for row in rows:
+        city = row.get("city", "?")
+        icao = row.get("icao") or "n/d"
+        count = row.get("observed_via_proxy_count", 0)
+        last_date = row.get("last_observed_date") or "n/d"
+        last_obs = fmt_code_value(row.get("last_observed_max_c"), "C")
+        delta = fmt_code_value(row.get("last_delta_vs_forecast_c"), "C")
+        coverage = row.get("coverage_status") or "unknown"
+        lines.append(
+            f"- <b>{city}</b> <code>{icao}</code>: proxy rows <code>{count}</code>; "
+            f"ultimo <code>{last_date} {last_obs}</code>; "
+            f"delta vs forecast <code>{delta}</code>; cobertura <code>{coverage}</code>."
+        )
+    return lines
+
+
+def build_canonical_story(
+    pipeline,
+    ledger,
+    gate,
+    effective_view,
+    alignment,
+    progress_state,
+    service_transition_plan=None,
+    forecast_accuracy=None,
+):
     pipeline_summary = pipeline.get("summary", {})
     ledger_summary = ledger.get("summary", {})
     gate_summary = gate.get("summary", {})
@@ -308,16 +350,28 @@ def build_canonical_story(pipeline, ledger, gate, effective_view, alignment, pro
         f"- {progress_sentence(progress_state)}",
         f"- Seguimos en observacion operativa: el bloqueo principal ya no es el transporte runtime, sino convertir evidencia nueva en lectura mas fuerte. Hoy city-intelligence ve <code>{dominant_bottleneck}</code> como cuello dominante.",
         f"- No toca repetir trabajo cerrado ni abrir policy: hay <code>now={now_count}</code>, <code>soon={soon_count}</code> y <code>watch={watch_count}</code> en la review queue, con <code>{signal_health}</code> como estado de senal.",
+    ]
+    lines.extend(build_icao_only_audit_block(forecast_accuracy))
+    lines.extend([
         "",
         "<b>Instruccion para Codex</b>",
         "No revalidar el transporte read-only del runtime. Si abres una sesion nueva, parte de `runtime_policy_effective_view`, `system_alignment_check --decision-mode operational` y la evidencia runtime manifestada para decidir si solo toca observar o si aparecio un blocker real.",
-    ]
+    ])
     today_utc = datetime.now(timezone.utc).date().isoformat()
     lines.extend(build_service_transition_block(service_transition_plan, today_utc))
     return "\n".join(lines)
 
 
-def build_message(pipeline, ledger, gate, effective_view, alignment, progress_state, service_transition_plan=None):
+def build_message(
+    pipeline,
+    ledger,
+    gate,
+    effective_view,
+    alignment,
+    progress_state,
+    service_transition_plan=None,
+    forecast_accuracy=None,
+):
     pipeline_summary = pipeline.get("summary", {})
     gate_summary = gate.get("summary", {})
     ledger_summary = ledger.get("summary", {})
@@ -343,7 +397,7 @@ def build_message(pipeline, ledger, gate, effective_view, alignment, progress_st
             if row.get("name")
         ) or "runtime_manifest:snapshot_stale"
         generated_at = pipeline.get("generated_at", "")
-        return "\n".join([
+        lines = [
             f"<b>City Intelligence - resumen diario ({generated_at[:10]} UTC)</b>",
             "",
             "<b>Estado</b>",
@@ -356,10 +410,14 @@ def build_message(pipeline, ledger, gate, effective_view, alignment, progress_st
             "<b>Lectura del sistema</b>",
             "- No se puede interpretar <code>edge_evidence=0</code> como ausencia real de edge.",
             "- No se deben emitir recomendaciones por ciudad hasta tener runtime fresco en modo read-only.",
+        ]
+        lines.extend(build_icao_only_audit_block(forecast_accuracy))
+        lines.extend([
             "",
             "<b>Instruccion para Codex</b>",
             "Validar el transporte read-only del runtime y su manifest. No tocar bot.py ni city_policy_state.json.",
         ])
+        return "\n".join(lines)
 
     if effective_view and alignment:
         return build_canonical_story(
@@ -370,6 +428,7 @@ def build_message(pipeline, ledger, gate, effective_view, alignment, progress_st
             alignment,
             progress_state,
             service_transition_plan=service_transition_plan,
+            forecast_accuracy=forecast_accuracy,
         )
 
     summary_rows = pick_summary_rows(gate, ledger, limit=3)
@@ -414,6 +473,8 @@ def build_message(pipeline, ledger, gate, effective_view, alignment, progress_st
             f"- <b>{row['city']}</b>: {row['recommendation']} | cuello <code>{row['bottleneck']}</code> | {row['rationale']}"
         )
 
+    lines.extend(build_icao_only_audit_block(forecast_accuracy))
+
     if instruction_row:
         lines.extend([
             "",
@@ -457,6 +518,7 @@ def main():
     effective_view = load_json(args.effective_view, required=False) or {}
     alignment = load_json(args.alignment_operational, required=False) or {}
     service_transition_plan = load_json(args.service_transition_plan, required=False) or {}
+    forecast_accuracy = load_json(args.forecast_accuracy, required=False) or {}
     state_path = ensure_parent(args.state_output)
     md_path = ensure_parent(args.md_output)
     lock_path = lock_path_for(args.state_output)
@@ -488,6 +550,7 @@ def main():
             alignment,
             progress_state,
             service_transition_plan=service_transition_plan,
+            forecast_accuracy=forecast_accuracy,
         )
         today_utc = datetime.now(timezone.utc).date().isoformat()
 

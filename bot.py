@@ -13198,6 +13198,7 @@ OBSERVED_AUDIT_CITIES = {
     "Ankara",
     "Atlanta",
     "Austin",
+    "Beijing",
     "Buenos Aires",
     "Chengdu",
     "Chicago",

@@ -11,7 +11,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import Counter, defaultdict
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -29,6 +29,7 @@ NOAA_NCEI_ACCESS_URL = "https://www.ncei.noaa.gov/access/services/data/v1"
 NOAA_OBSERVED_LAG_DAYS = 2
 MIN_EDGE_DEFAULT = 7.0
 CLOSED_ACTIONS = {"SELL", "LOSS_TOTAL", "RESOLVED_WIN"}
+ICAO_ONLY_PROXY_AUDIT_CITIES = ("Lucknow", "Beijing")
 
 
 def get_model_sigma(days_ahead):
@@ -361,6 +362,21 @@ def parse_args():
     parser.add_argument("--min-edge", type=float, default=MIN_EDGE_DEFAULT)
     parser.add_argument("--noaa-retries", type=int, default=2)
     parser.add_argument("--noaa-delay", type=float, default=0)
+    parser.add_argument(
+        "--icao-only-proxy-cities",
+        default=",".join(ICAO_ONLY_PROXY_AUDIT_CITIES),
+        help="Ciudades ICAO-only a cubrir con auditoria explicita de proxy Open-Meteo.",
+    )
+    parser.add_argument(
+        "--icao-only-proxy-date",
+        default="",
+        help="Fecha YYYY-MM-DD para probar cobertura Open-Meteo; por defecto usa UTC hoy-2d.",
+    )
+    parser.add_argument(
+        "--skip-icao-only-proxy-audit",
+        action="store_true",
+        help="No genera el bloque icao_only_proxy_audit.",
+    )
     return parser.parse_args()
 
 
@@ -388,6 +404,10 @@ def first_non_null(*values):
         if value is not None and value != "":
             return value
     return None
+
+
+def parse_csv_arg(value):
+    return [item.strip() for item in str(value or "").split(",") if item.strip()]
 
 
 def unit_threshold_to_c(parsed_question):
@@ -568,6 +588,90 @@ def get_observed_temperature(city, date_iso, args):
         date_iso,
         BOT_HELPERS["RESOLUTION_STATIONS"],
     )
+
+
+def default_icao_only_proxy_date():
+    return (datetime.now(timezone.utc).date() - timedelta(days=NOAA_OBSERVED_LAG_DAYS)).isoformat()
+
+
+def latest_trade_for_city(trades, city):
+    rows = [
+        trade
+        for trade in trades
+        if trade.get("city") == city and trade.get("observed_source") == "open_meteo_archive"
+    ]
+    if not rows:
+        return None
+    return sorted(
+        rows,
+        key=lambda row: (
+            row.get("date_iso") or "",
+            row.get("closed_at") or "",
+            row.get("opened_at") or "",
+        ),
+        reverse=True,
+    )[0]
+
+
+def build_icao_only_proxy_audit(trades, args):
+    if args.skip_icao_only_proxy_audit:
+        return {"enabled": False, "cities": []}
+
+    probe_date = args.icao_only_proxy_date or default_icao_only_proxy_date()
+    rows = []
+    for city in parse_csv_arg(args.icao_only_proxy_cities):
+        station = BOT_HELPERS["RESOLUTION_STATIONS"].get(city, {})
+        meta = BOT_HELPERS["RESOLUTION_ICAO"].get(city, {})
+        proxy_rows = [
+            trade
+            for trade in trades
+            if trade.get("city") == city and trade.get("observed_source") == "open_meteo_archive"
+        ]
+        latest = latest_trade_for_city(trades, city)
+        probe_observed, probe_source = fetch_open_meteo_observed_max(
+            city,
+            probe_date,
+            BOT_HELPERS["RESOLUTION_STATIONS"],
+        )
+
+        latest_observed = latest.get("observed_real") if latest else probe_observed
+        latest_date = latest.get("date_iso") if latest else (probe_date if probe_observed is not None else "")
+        latest_forecast = latest.get("forecast_max") if latest else None
+        delta_vs_forecast = None
+        if latest and latest.get("observed_real") is not None and latest.get("forecast_max") is not None:
+            delta_vs_forecast = round(float(latest["observed_real"]) - float(latest["forecast_max"]), 2)
+
+        if probe_observed is not None:
+            coverage_status = "covered"
+        elif station.get("lat") is None or station.get("lon") is None:
+            coverage_status = "missing_resolution_station"
+        else:
+            coverage_status = "open_meteo_unavailable"
+
+        rows.append({
+            "city": city,
+            "icao": meta.get("icao", ""),
+            "lat": station.get("lat"),
+            "lon": station.get("lon"),
+            "noaa_configured": bool(meta.get("noaa_station_id") or meta.get("noaa_daily_station_id")),
+            "probe_date": probe_date,
+            "probe_observed_max_c": probe_observed,
+            "probe_source": probe_source,
+            "coverage_status": coverage_status,
+            "observed_via_proxy_count": len(proxy_rows),
+            "last_observed_date": latest_date,
+            "last_observed_max_c": latest_observed,
+            "last_forecast_max_c": latest_forecast,
+            "last_delta_vs_forecast_c": delta_vs_forecast,
+            "source_contract": "icao_only_open_meteo_archive_proxy",
+        })
+
+    return {
+        "enabled": True,
+        "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        "proxy_source": "open_meteo_archive",
+        "cities": rows,
+    }
 
 
 def select_reference_buy(record):
@@ -877,6 +981,7 @@ def build_report(records, source_name, args):
         "sigma_by_city_days_ahead": city_day_stats,
         "summary_by_city": city_stats,
         "top_5_worst_fictitious_edge": top_bad,
+        "icao_only_proxy_audit": build_icao_only_proxy_audit(trades, args),
         "trades": trades,
     }
 
@@ -970,6 +1075,32 @@ def build_markdown_report(report):
             row.get("close_action", "n/d"),
             fmt_num(row.get("pnl_cash"), 2, "$"),
         ]))
+
+    proxy_audit = report.get("icao_only_proxy_audit") or {}
+    if proxy_audit.get("enabled"):
+        lines.extend([
+            "",
+            "## ICAO-only proxy audit",
+            "",
+            table_row(["Ciudad", "ICAO", "Cobertura", "Proxy rows", "Ultimo observado", "Delta vs forecast", "Probe"]),
+            table_row(["---", "---", "---", "---", "---", "---", "---"]),
+        ])
+        for row in proxy_audit.get("cities", []):
+            latest = "n/d"
+            if row.get("last_observed_date") and row.get("last_observed_max_c") is not None:
+                latest = f"{row.get('last_observed_date')} {fmt_num(row.get('last_observed_max_c'), 1, 'C')}"
+            probe = "n/d"
+            if row.get("probe_date") and row.get("probe_observed_max_c") is not None:
+                probe = f"{row.get('probe_date')} {fmt_num(row.get('probe_observed_max_c'), 1, 'C')}"
+            lines.append(table_row([
+                row.get("city", "n/d"),
+                row.get("icao", "n/d"),
+                row.get("coverage_status", "n/d"),
+                row.get("observed_via_proxy_count", 0),
+                latest,
+                fmt_num(row.get("last_delta_vs_forecast_c"), 2, "C"),
+                probe,
+            ]))
 
     lines.extend([
         "",

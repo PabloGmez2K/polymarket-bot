@@ -3477,3 +3477,60 @@ El usuario compartió captura de Polymarket con `Portfolio $20.38` y `P/L 1W -$3
 ### Siguiente acción
 
 Desplegar cuando convenga y dejar que el ciclo diario envíe la nueva alerta. Si la alerta muestra `wallet_pnl_missing`, comparar con el P/L 1W visible en Polymarket; si hay divergencia material, abrir auditoría de reconciliación wallet/fills antes de nuevas reglas.
+
+## Sesión 251 — ICAO-only audit via Open-Meteo proxy (26 abr 2026)
+
+**Tipo:** Explícita | **Agente:** Codex
+
+### Contexto
+
+Opus decidió `Opción 3`: no abrir canary ICAO-only hoy, no exigir NOAA estricto, y crear estado intermedio sin BUY real usando Open-Meteo como proxy observado para `Lucknow/VILK` y `Beijing/ZBAA`. El usuario se encargará de añadir `Beijing` a `OBSERVED_AUDIT_CITIES` en Railway env var.
+
+### Acciones
+
+- `tools/forecast_accuracy_audit.py` ahora genera `icao_only_proxy_audit` para ciudades ICAO-only configurables.
+- El audit registra cobertura Open-Meteo, `observed_via_proxy_count`, último observado proxy y delta vs forecast cuando existan filas de forecast/postmortem.
+- `tools/city_intelligence_daily_summary.py` acepta `--forecast-accuracy` y añade sección `ICAO-only audit` al mensaje diario cuando el artefacto trae ese bloque.
+- No se tocó `bot.py`, trading core, NOAA core, scheduler, whitelist, sizing, reglas ni Railway env.
+
+### Resultado
+
+- Validación temporal con Railway postmortem y probe `2026-04-24`: `Lucknow/VILK` queda `covered` con `42.3C`; `Beijing/ZBAA` queda `covered` con `24.8C`.
+- `observed_via_proxy_count=0` en ambas porque todavía no hay filas forecast/postmortem para esas ciudades; el sistema muestra cobertura sin inventar muestra ni habilitar BUY real.
+
+### Verificación
+
+- `python verify_before_deploy.py` → **847/847**.
+- `python -B -c compile(...)` OK para `tools/forecast_accuracy_audit.py` y `tools/city_intelligence_daily_summary.py`.
+- `python -m py_compile` sigue afectado por el lock conocido de `__pycache__` en Windows (`WinError 5`).
+
+### Siguiente acción
+
+Pablo añade `Beijing` a `OBSERVED_AUDIT_CITIES` en Railway env var. Tras el próximo `forecast_accuracy_audit` canónico, el daily summary empezará a mostrar la sección `ICAO-only audit` con la muestra proxy real disponible.
+
+## Sesión 252 — Beijing observado en código, no env var (26 abr 2026)
+
+**Tipo:** Explícita | **Agente:** Codex
+
+### Contexto
+
+El usuario revisó Railway y confirmó que `OBSERVED_AUDIT_CITIES` no existe como env var. La instrucción anterior de añadir `Beijing` en Railway quedaba mal ubicada: la lista real vive en `bot.py`.
+
+### Acciones
+
+- Se agregó `"Beijing"` a `OBSERVED_AUDIT_CITIES` en `bot.py`.
+- Se añadió check en `verify_before_deploy.py`: `v10.6.39: Beijing en OBSERVED_AUDIT_CITIES para ICAO-only proxy audit`.
+- No se tocó whitelist, canary, active, trading core, NOAA core, scheduler, sizing ni reglas.
+
+### Resultado
+
+`Beijing/ZBAA` queda en observación formal para el estado intermedio ICAO-only vía proxy Open-Meteo. Este cambio permite acumular observabilidad cuando haya filas, pero no habilita BUY real.
+
+### Verificación
+
+- `python -B -c compile(...)` OK para `bot.py` y `verify_before_deploy.py`.
+- `python verify_before_deploy.py` → **848/848**.
+
+### Siguiente acción
+
+Deploy cuando convenga para que Railway use el set actualizado. Opus puede asumir que el patch mínimo completo ya no depende de env var: está en código y validado.

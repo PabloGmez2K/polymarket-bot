@@ -5979,6 +5979,10 @@ def run_tests():
         "v10.6.29: whitelist default incluye Busan",
         "Helsinki,Busan" in code,
     )
+    test(
+        "v10.6.39: Beijing en OBSERVED_AUDIT_CITIES para ICAO-only proxy audit",
+        re.search(r"OBSERVED_AUDIT_CITIES\s*=\s*\{[^}]*\"Beijing\"", code, re.S) is not None,
+    )
     # ---- v10.6.30: Dallas al whitelist ----
     test(
         "v10.6.30: BOT_VERSION bumped a v10.6.30",
