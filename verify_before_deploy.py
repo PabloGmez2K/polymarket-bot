@@ -5983,6 +5983,12 @@ def run_tests():
         "v10.6.39: Beijing en OBSERVED_AUDIT_CITIES para ICAO-only proxy audit",
         re.search(r"OBSERVED_AUDIT_CITIES\s*=\s*\{[^}]*\"Beijing\"", code, re.S) is not None,
     )
+    test(
+        "v10.6.39: ICAO-only proxy bloquea auto-canary sin revision manual",
+        "_city_requires_manual_proxy_canary_review" in code
+        and "and not needs_manual_proxy_review" in code
+        and "auto_canary_revoked" in code,
+    )
     # ---- v10.6.30: Dallas al whitelist ----
     test(
         "v10.6.30: BOT_VERSION bumped a v10.6.30",

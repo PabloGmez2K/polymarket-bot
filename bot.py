@@ -306,6 +306,18 @@ def _city_has_observed_proxy(city):
     )
 
 
+def _city_requires_manual_proxy_canary_review(city):
+    """True para ciudades ICAO-only observadas que no deben auto-promocionar."""
+    city = str(city or "").strip()
+    if not city or city not in OBSERVED_AUDIT_CITIES:
+        return False
+    resolution_meta = RESOLUTION_ICAO.get(city, {}) if isinstance(globals().get("RESOLUTION_ICAO"), dict) else {}
+    return not bool(
+        resolution_meta.get("noaa_station_id")
+        or resolution_meta.get("noaa_daily_station_id")
+    )
+
+
 def get_min_days_for_city(city):
     """
     Calcula MIN_DAYS_AHEAD para una ciudad específica, considerando su zona horaria.
@@ -1292,7 +1304,13 @@ def get_effective_city_mode(city, policy_state=None):
         return "canary"
     if city in ACTIVE_TRADING_CITIES:
         return "active"
-    if city in auto_canary or city in CANARY_TRADING_CITIES:
+    manual_proxy_review_helper = globals().get("_city_requires_manual_proxy_canary_review")
+    needs_manual_proxy_review = (
+        manual_proxy_review_helper(city) if callable(manual_proxy_review_helper) else False
+    )
+    if city in auto_canary and not needs_manual_proxy_review:
+        return "canary"
+    if city in CANARY_TRADING_CITIES:
         return "canary"
     return "shadow"
 
@@ -6153,6 +6171,10 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
         observed_count = int(row.get("observed_count", 0) or 0)
         observed_goal = int(row.get("observed_goal", OBSERVED_FORECAST_MIN_SAMPLE) or OBSERVED_FORECAST_MIN_SAMPLE)
         support_count = max(observed_count, trades, shadow_cycles)
+        manual_proxy_review_helper = globals().get("_city_requires_manual_proxy_canary_review")
+        needs_manual_proxy_review = (
+            manual_proxy_review_helper(city) if callable(manual_proxy_review_helper) else False
+        )
         # v10.6.17: calcular días en shadow desde first_seen_at
         _shadow_first_seen = shadow.get("first_seen_at", "")
         _shadow_days = 0
@@ -6180,6 +6202,7 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
             and support_count >= SHADOW_CANARY_MIN_SUPPORT
             and _shadow_days >= SHADOW_CANARY_MIN_DAYS
             and not verified_history_bad
+            and not needs_manual_proxy_review
         )
         provisional_review = (
             active
@@ -6276,6 +6299,11 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
                     f"WR {policy_win_rate:.1f}%, PnL ${policy_pnl:+.2f}); "
                     "promoción a canary bloqueada hasta reunir evidencia nueva mejor"
                 )
+            elif needs_manual_proxy_review:
+                reason = (
+                    "ciudad ICAO-only en observacion via proxy; auto-canary bloqueado "
+                    "hasta revision manual con muestra Open-Meteo suficiente"
+                )
             elif shadow_seen > 0:
                 reason = (
                     f"shadow ya vio {shadow_seen} mercados y {shadow_edges} edges; "
@@ -6313,6 +6341,8 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
         if _shadow_days < SHADOW_CANARY_MIN_DAYS:
             missing_days = SHADOW_CANARY_MIN_DAYS - _shadow_days
             canary_gaps.append(f"{missing_days} día{'s' if missing_days != 1 else ''} en shadow")
+        if needs_manual_proxy_review:
+            canary_gaps.append("revision proxy ICAO-only")
 
         if active:
             distance_label = "Ya operativa"
@@ -6748,6 +6778,30 @@ def sync_city_policy_state(notify=True):
         city = row.get("city", "?")
         current_mode = get_effective_city_mode(city, policy_state=policy_state)
         decision = row.get("decision")
+        manual_proxy_review_helper = globals().get("_city_requires_manual_proxy_canary_review")
+        needs_manual_proxy_review = (
+            manual_proxy_review_helper(city) if callable(manual_proxy_review_helper) else False
+        )
+        if city in auto_canary and needs_manual_proxy_review:
+            auto_canary.pop(city, None)
+            history.append({
+                "at": now_iso,
+                "city": city,
+                "from": "canary",
+                "to": "shadow",
+                "reason": "ICAO-only observation via proxy: auto-canary blocked until manual review",
+                "action": "auto_canary_revoked",
+            })
+            changed = True
+            if notify:
+                send_telegram(
+                    f"🧪 <b>Canary revertida a shadow</b>\n"
+                    f"{city} vuelve a <b>shadow</b>.\n"
+                    "Ciudad ICAO-only en observacion via proxy: auto-canary bloqueado "
+                    "hasta revision manual con muestra Open-Meteo suficiente.\n"
+                    "Sin BUY real por esta autopromocion."
+                )
+            continue
 
         if decision == "promote" and current_mode == "shadow" and city not in auto_blocked and city not in ACTIVE_TRADING_CITIES and city.lower() not in (globals().get("BLOCKED_CITIES") or set()):
             auto_canary[city] = {

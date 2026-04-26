@@ -1,6 +1,13 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
 
+**Ultima actualizacion:** 26 de abril de 2026 (Sesion 253 - guardrail auto-canary ICAO-only)
+**Sesion 253 (26 abr 2026, Codex):** tras deploy del patch ICAO-only proxy, Telegram emitio `Ciudad candidata a canary` y `Ciudad promovida a canary` para `Beijing` (`5` shadow edges, pico `37.9%`, `20` ciclos, `NOAA observados=0`). Diagnostico: no era normal segun la decision Opus; era un efecto colateral esperado por el codigo viejo. Al agregar Beijing a `OBSERVED_AUDIT_CITIES`, entro en `tracked_cities`; `promotable_shadow` solo exigia edges/ciclos/soporte/dias y no exigia muestra observada/interpretable ni revision manual para ICAO-only.
+- **Fix:** `bot.py` agrega `_city_requires_manual_proxy_canary_review(city)` para ciudades en `OBSERVED_AUDIT_CITIES` sin `noaa_station_id`/`noaa_daily_station_id`. Esas ciudades quedan observables, pero no pueden auto-promocionar por shadow edges (`promotable_shadow` exige `not needs_manual_proxy_review`).
+- **Estado persistido live:** como Beijing ya pudo quedar en `auto_canary_cities`, `get_effective_city_mode()` ignora `auto_canary` persistida para ciudades que requieren revision proxy manual, y `sync_city_policy_state()` la revoca (`auto_canary_revoked`) devolviendo la ciudad a shadow con Telegram explicito. Una configuracion manual en `CANARY_TRADING_CITIES` seguiria siendo una decision humana explicita.
+- **Guardrail:** `verify_before_deploy.py` suma check `v10.6.39: ICAO-only proxy bloquea auto-canary sin revision manual`.
+- **Validacion:** `python -B -c compile(...)` OK para `bot.py` y `verify_before_deploy.py`; `python verify_before_deploy.py` pasa **849/849**. Recomendacion operativa: commit/push/deploy urgente para revertir Beijing a shadow en el siguiente ciclo; si hay riesgo de BUY antes del deploy, pausar con `SHADOW_ONLY_MODE=true` o limpiar `auto_canary_cities.Beijing` en `city_policy_state.json`.
+
 **Ultima actualizacion:** 26 de abril de 2026 (Sesion 252 - Beijing observado en codigo, no env var)
 **Sesion 252 (26 abr 2026, Codex):** se corrige el ultimo supuesto operativo: Railway no tiene env var `OBSERVED_AUDIT_CITIES`; la lista vive hardcoded en `bot.py`. Se agrega `Beijing` a `OBSERVED_AUDIT_CITIES` para completar el estado intermedio decidido por Opus (`ICAO-only audit` via Open-Meteo proxy), sin agregarla a `QUALITY_TRADER_CITIES_WHITELIST`, `CANARY_TRADING_CITIES`, `ACTIVE_TRADING_CITIES` ni tocar reglas/sizing/scheduler/NOAA core.
 - **Cambio de codigo:** `bot.py` incluye `"Beijing"` en el set `OBSERVED_AUDIT_CITIES`, junto a sus estructuras ya existentes `RESOLUTION_STATIONS`, `RESOLUTION_ICAO=ZBAA` y timezone `Asia/Shanghai`.

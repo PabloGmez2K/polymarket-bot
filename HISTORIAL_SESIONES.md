@@ -3534,3 +3534,36 @@ El usuario revisó Railway y confirmó que `OBSERVED_AUDIT_CITIES` no existe com
 ### Siguiente acción
 
 Deploy cuando convenga para que Railway use el set actualizado. Opus puede asumir que el patch mínimo completo ya no depende de env var: está en código y validado.
+
+## Sesión 253 — Guardrail auto-canary para ICAO-only proxy (26 abr 2026)
+
+**Tipo:** Explícita | **Agente:** Codex
+
+### Contexto
+
+Tras deploy del patch ICAO-only proxy, Telegram avisó que `Beijing` cumplía shadow → canary y fue promovida a canary con `5` shadow edges, pico `37.9%`, `20` ciclos y `NOAA observados=0`. Esto contradice la decisión Opus: observation-only sin BUY real hasta acumular muestra proxy y revisión manual.
+
+### Diagnóstico
+
+La alarma era normal para el código previo, pero no para el criterio operativo. Al añadir `Beijing` a `OBSERVED_AUDIT_CITIES`, entró en `tracked_cities`; el gate `promotable_shadow` solo exigía edges/ciclos/soporte/días y no bloqueaba ciudades ICAO-only sin NOAA real ni muestra proxy revisada.
+
+### Acciones
+
+- `bot.py` añade `_city_requires_manual_proxy_canary_review(city)`.
+- `promotable_shadow` ahora exige `not needs_manual_proxy_review`.
+- `get_effective_city_mode()` ignora `auto_canary` persistida para ciudades ICAO-only observadas que requieren revisión proxy manual.
+- `sync_city_policy_state()` revoca una `auto_canary` persistida en ese caso (`auto_canary_revoked`) y devuelve la ciudad a shadow con mensaje Telegram.
+- `verify_before_deploy.py` suma check de guardrail.
+
+### Resultado
+
+`Lucknow/Beijing` pueden seguir observándose por el estado intermedio ICAO-only/Open-Meteo, pero no pueden auto-promocionar a canary por shadow edges mientras no haya revisión manual. Una inclusión manual en `CANARY_TRADING_CITIES` seguiría siendo una decisión humana explícita.
+
+### Verificación
+
+- `python -B -c compile(...)` OK para `bot.py` y `verify_before_deploy.py`.
+- `python verify_before_deploy.py` → **849/849**.
+
+### Siguiente acción
+
+Commit/push/deploy urgente para que Railway revierta Beijing a shadow en el siguiente ciclo. Si hay riesgo de BUY antes del deploy, pausar temporalmente con `SHADOW_ONLY_MODE=true` o limpiar `auto_canary_cities.Beijing` en `city_policy_state.json`.
