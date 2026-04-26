@@ -7737,26 +7737,26 @@ def close_expired_legacy_positions():
             continue
         if r.get("position_snapshots") or r.get("market_observations"):
             continue
-        pnl_cash = -round(float(r.get("total_amount", 0) or 0), 2)
         r["status"] = "closed"
         r["closed_at"] = now_str
         r.setdefault("close_context", {}).update({
-            "close_action": "LOSS_TOTAL",
-            "close_reason": "legacy_unresolved",
-            "close_subtype": "legacy_unresolved",
+            "close_action": "EXPIRED_UNVERIFIED",
+            "close_reason": "expired_no_evidence",
+            "close_subtype": "expired_no_evidence",
             "close_price": None,
             "close_shares": None,
             "return_est": None,
-            "pnl_cash": pnl_cash,
+            "pnl_cash": None,
             "pnl_pct": None,
             "order_id": "",
             "timestamp": now_str,
             "bot_version": BOT_VERSION,
+            "reconciliation_needed": True,
         })
         if logger:
             logger.info(
                 f"legacy_cleanup: closed {r.get('city')} {raw_date} {r.get('side')} "
-                f"pnl_cash={pnl_cash} (expired {(today - res_date).days}d ago, no evidence)"
+                f"EXPIRED_UNVERIFIED (expired {(today - res_date).days}d ago, no evidence — needs manual reconciliation)"
             )
         tl_closed += 1
     if tl_closed:
@@ -7776,20 +7776,20 @@ def close_expired_legacy_positions():
             continue
         if res_date >= cutoff:
             continue
-        pnl_cash = -round(float(r.get("total_amount", 0) or 0), 2)
         r["status"] = "closed"
         r["closed_at"] = now_str
-        r["close_action"] = "LOSS_TOTAL"
-        r["close_reason"] = "legacy_unresolved"
-        r["close_subtype"] = "legacy_unresolved"
+        r["close_action"] = "EXPIRED_UNVERIFIED"
+        r["close_reason"] = "expired_no_evidence"
+        r["close_subtype"] = "expired_no_evidence"
         r["close_price"] = None
         r["close_shares"] = 0.0
         r["return_est"] = None
-        r["pnl_cash"] = pnl_cash
+        r["pnl_cash"] = None
         r["pnl_pct"] = None
         r["order_id"] = None
         r["bot_version_closed"] = BOT_VERSION
         r["legacy_close"] = True
+        r["reconciliation_needed"] = True
         pm_closed += 1
     if pm_closed:
         save_postmortem_data(pm_records)
