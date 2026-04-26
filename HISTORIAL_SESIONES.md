@@ -31,6 +31,7 @@ Comandos útiles:
 
 | Fecha | Tipo | Referencia | Commits clave | Resumen |
 |------|------|------------|---------------|---------|
+| 2026-04-26 | Explícita | Sesión 242 | slot 04h validated/keep, no code | Codex cierra la alerta `Slot monetization review` de `04h UTC` como decisión operativa de mantener el slot, sin tocar `bot.py`, scheduler, NOAA, reglas de entrada/salida, sizing, Railway env ni deploy. Evidencia de la ventana leída: 5 ciclos, `same_day_candidates=106`, `same_day_edges=3`, `same_day_selected=3`, `same_day_buys=2`, `buy_rate=66.67%` y `same_day_buy_rate=66.67%`; reject reasons dominantes `price_out_of_range=663`, `condition_filtered=86`, `blocked_city=22`; execution reject residual `buy_min_size=1`. Decisión: `04h UTC` queda `validated/keep`; siguiente acción, vigilar estabilidad y solo reabrir lógica si cae la conversión edge->buy o aparece un cuello recurrente nuevo. |
 | 2026-04-25 | Explícita | Sesión 239 | limpieza post-V2 cutover P6+P7 | Codex ejecuta la limpieza post-cutover V2 sin tocar trading core, NOAA, scheduler, Kelly, sigma ni reglas de entrada/salida. Precondición Railway revisada: sin errores recurrentes en `create_or_derive_api_key`, `get_open_orders`, auth endpoints ni CLOB. P6: se crea backup local `data/runtime_import/shadow_city_tracking.json.bak-pre-p6` y backup remoto `/app/data/shadow_city_tracking.json.bak-pre-p6`; `shadow_city_tracking.json` live queda con Seoul aislado a evidencia post-fix desde `2026-04-17T12:22:40Z` (`markets_seen 207 -> 54`, `edge_hits 5 -> 2`, `cycles_seen 91 -> 28`, `best_edge_pct 68.5 -> 26.4`) y una sola señal durable `Seoul|2026-04-18|YES|at_or_above|21`. Validación local con manifest post-P6: ledger/gate `runtime_inputs_status=available`, sin drift, Seoul en `canary_measurement`; `notify_active_candidates` usa trades cerrados post-promoción. P7: se crea `docs/min-edge-per-city-analysis-2026-04-25.md`; no hay ciudades con `n_closed>=10`, `WR>=70%` y `PnL>0`, por lo que no se aplica `MIN_EDGE_PER_CITY`. Tokyo queda como candidata a observar (`n=5`, `WR=80%`, `PnL=+$3.53`) pero sin muestra suficiente. Review Sonnet 4.6 aprobada en `docs/sonnet-review-post-v2-cleanup-p6-p7-2026-04-25.md`; su único finding bajo queda resuelto al actualizar `city_policy_state.auto_canary_cities.Seoul` en local/Railway a `shadow_edges=2`, `best_edge_pct=26.4` y reason post-P6, con backup remoto `/app/data/city_policy_state.json.bak-seoul-p6-traceability`. |
 | 2026-04-25 | Explícita | Sesión 238 | alarmas con nivel de acción y tarea concreta | Se convierte el frente de alarmas `traders vs bot` / `Blocked signals` en una capa con repercusión explícita, sin tocar reglas de entrada/salida, NOAA, scheduler, sizing ni trading core. `tools/signals_crosscheck_daily_summary.py` ahora clasifica cada daily como `INFO`, `WATCH` o `ACTION` y emite una `Tarea para Codex`; si hay gap operativo real fuera de `blocked`, la tarea es auditar la ciudad líder por whitelist, `RESOLUTION_ICAO`/estación, `OBSERVED_AUDIT_CITIES`/cobertura NOAA y señales trader, cerrando con `sin cambio`, `preparar whitelist/canary` o `bloqueo por fuente`. El aviso corto legacy en `bot.py` también añade `Nivel` + `Accion`. El copy de `Blocked signals` separa baseline fuera de whitelist de registros excluidos por estar ya en whitelist y aclara que el WR no mide ejecución real del bot; con `n>=50` y `WR>=70%` escala a `ACTION` de auditoría, no a cambio automático de reglas. `verify_before_deploy.py` suma checks `v10.6.37`; validación local: sintaxis OK y preflight **842/842**. |
 | 2026-04-25 | Explícita | Sesión 237 | daily traders-vs-bot readout, no code | Se registra el parte diario `traders vs bot` / `blocked signals` como actualización de trazabilidad, sin tocar `bot.py`, whitelist, NOAA, scheduler, reglas de entrada/salida ni trading core. Foto UTC 2026-04-25: `MATCH=19`, `BOT_ONLY=7`, `TRADER_ONLY=13`; serie reciente de 7 corridas con medianas `MATCH=17`, `BOT_ONLY=5`, `TRADER_ONLY=20`. Lectura: el gap se está cerrando respecto al inicio de la serie reciente, pero hoy aparece un gap operativo real fuera de `blocked`: `Los Angeles` con 2 señales, consenso 2 y WR max 80%. Persisten en `TRADER_ONLY` `7/7`: `Buenos Aires`, `Chengdu`, `Miami`, `Warsaw`; casi persistentes `6/7`: `Busan`, `Lagos`, `Los Angeles`. `Blocked signals` fuera de whitelist: 95 resueltas, 94 wins, WR 98.9%, 273 señales excluidas por whitelist. Instrucción reiterada: si el bloque persistente sigue estable varios días, revisar primero `QUALITY_TRADER_CITIES_WHITELIST` y cobertura observada/NOAA antes de tocar reglas de entrada o trading core. |
@@ -3364,3 +3365,37 @@ Tras varias revisiones de alertas de Telegram, seguían dos problemas mezclados:
 ### Siguiente acción
 
 Desplegar, validar en Railway que el servicio sano recoge el commit y hacer una verificación rápida con Opus sobre el estado live de `SL Retro` y `Briefing Diario`.
+
+## Sesión 243 — Cierre definitivo 11 posiciones legacy stale + auto-close wired (26 abr 2026)
+
+**Tipo:** Explícita | **Agente:** Sonnet
+
+### Contexto
+
+Las 11 posiciones legacy stale (Ankara ×2, London, Miami, Shanghai, Toronto, Atlanta, Buenos Aires, Seattle, Wellington, Madrid) seguían apareciendo en el briefing diario con `status=open` en Railway. La sesión 234 solo separó su display en una sección dedicada; nunca las cerró en la base de datos. El usuario quería cierre definitivo en producción y garantía de que no vuelva a ocurrir.
+
+### Acciones
+
+- `tools/close_legacy_stale_now.py`: script one-shot para Railway que cierra las 11 posiciones en `trade_lifecycle.json` + `postmortem.json` con `LOSS_TOTAL / legacy_unresolved` (pnl_cash = -total_amount conservador), crea backups `.bak_session_242` y escribe evento en `agent_events.jsonl`.
+- `bot.py`:
+  - Nueva función `close_expired_legacy_positions()`: busca posiciones `status=open` con `resolution_date < today - 2 días` sin snapshots ni market_observations, las cierra como `LOSS_TOTAL / legacy_unresolved` en ambos archivos y loguea el evento.
+  - Nueva función `maybe_close_expired_legacy_positions(state)`: wrapper diario (state key `legacy_cleanup_last_run`), corre una vez por día antes del briefing.
+  - Hook en `run_alerts()` justo antes de `maybe_run_daily_briefing`.
+  - State key `legacy_cleanup_last_run` añadida a defaults y setdefaults.
+
+### Resultado
+
+- `verify_before_deploy.py` → **843/843**.
+- El briefing dejará de mostrar el bloque `LEGACY STALE` una vez que el script se ejecute en Railway.
+- De ahora en adelante cualquier posición que venza >2 días sin evidencia es cerrada automáticamente antes del briefing.
+
+### Verificación
+
+- `python verify_before_deploy.py` → **843/843**
+
+### Siguiente acción
+
+1. `git push` — Railway hace auto-deploy.
+2. Esperar que el servicio esté healthy.
+3. `powershell -ExecutionPolicy Bypass -File tools/railway_safe.ps1 ssh "python tools/close_legacy_stale_now.py"` — cierra las 11 posiciones en producción.
+4. Verificar con el briefing del día siguiente que el bloque LEGACY STALE desaparece.

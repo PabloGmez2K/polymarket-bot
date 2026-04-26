@@ -987,6 +987,8 @@ def load_alerts_state():
         # v10.6.30: revisión one-shot intra-reeval shadow (7 días tras primer trigger)
         "intra_reeval_review_alert_sent": False,
         "post_intra_sl_cooldown_review": {},
+        # v10.6.37: auto-close de posiciones expiradas sin evidencia (daily)
+        "legacy_cleanup_last_run": None,
     }
     if not os.path.exists(ALERTS_FILE):
         return default
@@ -1016,6 +1018,7 @@ def load_alerts_state():
         state.setdefault("canary_candidate_notified", {})
         state.setdefault("intra_reeval_review_alert_sent", False)
         state.setdefault("post_intra_sl_cooldown_review", {})
+        state.setdefault("legacy_cleanup_last_run", None)
         return state
     except Exception:
         return default
@@ -4418,6 +4421,14 @@ def run_observability_alerts():
         if logger:
             logger.warning(f"sl retrospective: fallo ({e})")
 
+    # v10.6.37: cierra posiciones expiradas sin evidencia antes del briefing.
+    try:
+        maybe_close_expired_legacy_positions(state)
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"legacy cleanup: fallo ({e})")
+
     try:
         if maybe_run_daily_briefing(state):
             changed = True
@@ -7699,6 +7710,125 @@ def maybe_run_sl_retrospective(state):
 
     if logger:
         logger.info("sl retrospective: OK")
+    return True
+
+
+def close_expired_legacy_positions():
+    """Cierra posiciones abiertas cuya fecha de resolución venció hace >2 días sin snapshots ni observaciones."""
+    from datetime import date as _date
+    today = datetime.now(timezone.utc).date()
+    cutoff = today - timedelta(days=2)
+    now_str = datetime.now(timezone.utc).isoformat()
+    logger = globals().get("log")
+
+    tl_data = load_trade_lifecycle_data()
+    tl_closed = 0
+    for r in tl_data.get("records", []):
+        if r.get("status") != "open":
+            continue
+        raw_date = str(r.get("date") or "").strip()[:10]
+        if not raw_date:
+            continue
+        try:
+            res_date = _date.fromisoformat(raw_date)
+        except ValueError:
+            continue
+        if res_date >= cutoff:
+            continue
+        if r.get("position_snapshots") or r.get("market_observations"):
+            continue
+        pnl_cash = -round(float(r.get("total_amount", 0) or 0), 2)
+        r["status"] = "closed"
+        r["closed_at"] = now_str
+        r.setdefault("close_context", {}).update({
+            "close_action": "LOSS_TOTAL",
+            "close_reason": "legacy_unresolved",
+            "close_subtype": "legacy_unresolved",
+            "close_price": None,
+            "close_shares": None,
+            "return_est": None,
+            "pnl_cash": pnl_cash,
+            "pnl_pct": None,
+            "order_id": "",
+            "timestamp": now_str,
+            "bot_version": BOT_VERSION,
+        })
+        if logger:
+            logger.info(
+                f"legacy_cleanup: closed {r.get('city')} {raw_date} {r.get('side')} "
+                f"pnl_cash={pnl_cash} (expired {(today - res_date).days}d ago, no evidence)"
+            )
+        tl_closed += 1
+    if tl_closed:
+        save_trade_lifecycle_data(tl_data)
+
+    pm_records = load_postmortem_data()
+    pm_closed = 0
+    for r in pm_records:
+        if r.get("status") != "open":
+            continue
+        raw_date = str(r.get("date") or "").strip()[:10]
+        if not raw_date:
+            continue
+        try:
+            res_date = _date.fromisoformat(raw_date)
+        except ValueError:
+            continue
+        if res_date >= cutoff:
+            continue
+        pnl_cash = -round(float(r.get("total_amount", 0) or 0), 2)
+        r["status"] = "closed"
+        r["closed_at"] = now_str
+        r["close_action"] = "LOSS_TOTAL"
+        r["close_reason"] = "legacy_unresolved"
+        r["close_subtype"] = "legacy_unresolved"
+        r["close_price"] = None
+        r["close_shares"] = 0.0
+        r["return_est"] = None
+        r["pnl_cash"] = pnl_cash
+        r["pnl_pct"] = None
+        r["order_id"] = None
+        r["bot_version_closed"] = BOT_VERSION
+        r["legacy_close"] = True
+        pm_closed += 1
+    if pm_closed:
+        save_postmortem_data(pm_records)
+
+    if tl_closed or pm_closed:
+        event = {
+            "session": "auto",
+            "timestamp": now_str,
+            "action": "legacy_cleanup_auto_close",
+            "description": (
+                f"Auto-close de posiciones expiradas sin evidencia: "
+                f"trade_lifecycle={tl_closed}, postmortem={pm_closed}."
+            ),
+            "tl_closed": tl_closed,
+            "pm_closed": pm_closed,
+            "bot_version": BOT_VERSION,
+        }
+        try:
+            with open(AGENT_EVENTS_FILE, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(event) + "\n")
+        except Exception as exc:
+            if logger:
+                logger.warning(f"legacy_cleanup: no pude escribir agent_events ({exc})")
+
+    return tl_closed + pm_closed
+
+
+def maybe_close_expired_legacy_positions(state, now=None):
+    """Wrapper diario para close_expired_legacy_positions — una vez por día."""
+    logger = globals().get("log")
+    if now is None:
+        now = datetime.now(timezone.utc)
+    today = now.date().isoformat()
+    if state.get("legacy_cleanup_last_run") == today:
+        return False
+    closed = close_expired_legacy_positions()
+    state["legacy_cleanup_last_run"] = today
+    if logger:
+        logger.info(f"legacy_cleanup: done (closed={closed})")
     return True
 
 
