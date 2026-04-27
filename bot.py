@@ -18,13 +18,14 @@ from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, render_template, request
 from py_clob_client_v2.client import ClobClient
-from py_clob_client_v2.clob_types import OrderArgs, OrderType, BalanceAllowanceParams, AssetType
+from py_clob_client_v2.clob_types import OrderArgs, OrderType, BalanceAllowanceParams, AssetType, TradeParams
 from py_clob_client_v2.order_builder.constants import BUY, SELL
 from waitress import serve
 
 load_dotenv()
 
 # =============================================================
+# bot.py v10.6.41 — Fill-real reconciliation para SELL por order_id + anti-flapping guard legacy (sesion 255, 2026-04-27)
 # bot.py v10.6.40 — Guard SL_intra para condition=exact + days<=1 (Opus, sesion 246, 2026-04-26)
 # bot.py v10.6.30 — Dallas al whitelist: degradacion inflada por ghost-position bug (v10.5.12)
 # bot.py v10.6.29 — Busan (RKPK) ICAO-only: WU/RKPK resolution confirmado, NOAA 2026 dead
@@ -107,7 +108,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.40"
+BOT_VERSION = "v10.6.41"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -2686,6 +2687,10 @@ def _timeline_event_from_entry(entry):
         "decision_note": entry.get("decision_note", ""),
         "decision_source": entry.get("decision_source", ""),
         "price": _to_lifecycle_float(entry.get("price")),
+        "limit_price": _to_lifecycle_float(entry.get("limit_price")),
+        "fill_price": _to_lifecycle_float(entry.get("fill_price")),
+        "fill_value": _to_lifecycle_float(entry.get("fill_value"), 2),
+        "fill_source": entry.get("fill_source", ""),
         "shares": _to_lifecycle_float(entry.get("shares")),
         "amount": _to_lifecycle_float(entry.get("amount"), 2),
         "return_est": _to_lifecycle_float(entry.get("return_est"), 2),
@@ -2824,9 +2829,14 @@ def _append_trade_lifecycle_exit_attempt(record, entry):
         "reason": entry.get("reason", ""),
         "decision_note": entry.get("decision_note", ""),
         "decision_source": entry.get("decision_source", ""),
-        "limit_price": _to_lifecycle_float(entry.get("price")),
+        "limit_price": _to_lifecycle_float(entry.get("limit_price", entry.get("price"))),
         "trigger_price": _to_lifecycle_float(entry.get("trigger_price")),
         "shares": _to_lifecycle_float(entry.get("shares")),
+        "fill_price": _to_lifecycle_float(entry.get("fill_price")),
+        "fill_shares": _to_lifecycle_float(entry.get("fill_shares")),
+        "fill_value": _to_lifecycle_float(entry.get("fill_value"), 2),
+        "fill_source": entry.get("fill_source", ""),
+        "fill_count": entry.get("fill_count"),
         "return_est": _to_lifecycle_float(entry.get("return_est"), 2),
         "pnl_pct": _to_lifecycle_float(entry.get("pnl_pct"), 2),
         "pnl_cash": _to_lifecycle_float(entry.get("pnl_cash"), 2),
@@ -2866,6 +2876,10 @@ def _update_trade_lifecycle_exit_attempt(record, entry, status):
     target["status"] = status
     if status == "filled":
         target["confirmed_at"] = entry.get("fill_confirmed") or entry.get("timestamp") or datetime.now(timezone.utc).isoformat()
+        for key in ["fill_price", "fill_shares", "fill_value", "fill_source", "fill_count"]:
+            value = entry.get(key)
+            if value not in {None, ""}:
+                target[key] = value
     elif status == "failed":
         target["failed_at"] = entry.get("failed_at") or entry.get("timestamp") or datetime.now(timezone.utc).isoformat()
         target["fail_reason"] = entry.get("fail_reason", "")
@@ -2890,15 +2904,19 @@ def _apply_trade_lifecycle_close(record, entry):
         "close_action": action or record.get("close_context", {}).get("close_action", ""),
         "close_reason": entry.get("reason", record.get("close_context", {}).get("close_reason", "")),
         "close_subtype": entry.get("reason", record.get("close_context", {}).get("close_subtype", "")),
-        "close_price": _to_lifecycle_float(entry.get("price", entry.get("cur_price"))),
-        "close_shares": _to_lifecycle_float(entry.get("shares", record.get("total_shares"))),
-        "return_est": _to_lifecycle_float(entry.get("return_est", entry.get("payout_est")), 2),
+        "close_price": _to_lifecycle_float(entry.get("fill_price", entry.get("price", entry.get("cur_price")))),
+        "close_shares": _to_lifecycle_float(entry.get("fill_shares", entry.get("shares", record.get("total_shares")))),
+        "return_est": _to_lifecycle_float(entry.get("fill_value", entry.get("return_est", entry.get("payout_est"))), 2),
         "pnl_cash": _to_lifecycle_float(entry.get("pnl_cash", entry.get("loss")), 2),
         "pnl_pct": _to_lifecycle_float(entry.get("pnl_pct"), 2),
         "order_id": entry.get("order_id", ""),
         "timestamp": timestamp,
         "bot_version": entry.get("bot_version", ""),
     }
+    if entry.get("limit_price") is not None:
+        record["close_context"]["limit_price"] = _to_lifecycle_float(entry.get("limit_price"))
+    if entry.get("fill_source"):
+        record["close_context"]["fill_source"] = entry.get("fill_source", "")
     if action == "SELL":
         _update_trade_lifecycle_exit_attempt(record, entry, "filled")
     elif action == "SELL_FAILED":
@@ -3071,6 +3089,10 @@ def _sync_trade_lifecycle_from_sources():
             "timestamp": pm.get("closed_at", ""),
             "bot_version": pm.get("bot_version_closed", ""),
         }
+        if pm.get("limit_price") is not None:
+            record["close_context"]["limit_price"] = _to_lifecycle_float(pm.get("limit_price"))
+        if pm.get("fill_source"):
+            record["close_context"]["fill_source"] = pm.get("fill_source")
         pending_exit = pm.get("pending_exit") or {}
         if isinstance(pending_exit, dict) and pending_exit:
             record["exit_attempts"].append({
@@ -3184,6 +3206,10 @@ def _sync_trade_lifecycle_from_sources():
                 "timestamp": pm.get("closed_at", ""),
                 "bot_version": pm.get("bot_version_closed", ""),
             }
+            if pm.get("limit_price") is not None:
+                record["close_context"]["limit_price"] = _to_lifecycle_float(pm.get("limit_price"))
+            if pm.get("fill_source"):
+                record["close_context"]["fill_source"] = pm.get("fill_source")
         if not record.get("last_activity_at"):
             record["last_activity_at"] = (
                 record.get("closed_at")
@@ -3707,6 +3733,14 @@ def update_postmortem(action, entry):
         record["pnl_cash"] = pnl_cash
         record["pnl_pct"] = pnl_pct
         record["order_id"] = entry.get("order_id", record.get("order_id"))
+        if entry.get("limit_price") is not None:
+            record["limit_price"] = entry.get("limit_price")
+        if entry.get("fill_price") is not None:
+            record["fill_price"] = entry.get("fill_price")
+        if entry.get("fill_value") is not None:
+            record["fill_value"] = entry.get("fill_value")
+        if entry.get("fill_source"):
+            record["fill_source"] = entry.get("fill_source")
         record["bot_version_closed"] = entry.get("bot_version", "")
         record.pop("pending_exit", None)
 
@@ -6268,25 +6302,6 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
         )
         removable_active = active and verified_history_bad
         history_bad = verified_history_bad
-        # v10.6.20: anti-flapping — bloquea promoción shadow→canary si el historial
-        # NOAA-verificado es malo. Sin este guard, una ciudad degradada por regla de
-        # salida se re-promociona en el siguiente ciclo por sus edges shadow acumulados.
-        promotable_shadow = (
-            shadow_edges >= SHADOW_CANARY_MIN_EDGE_HITS
-            and shadow_cycles >= SHADOW_CANARY_MIN_CYCLES
-            and shadow_best_edge >= SHADOW_CANARY_MIN_BEST_EDGE
-            and support_count >= SHADOW_CANARY_MIN_SUPPORT
-            and _shadow_days >= SHADOW_CANARY_MIN_DAYS
-            and not verified_history_bad
-            and not needs_manual_proxy_review
-        )
-        provisional_review = (
-            active
-            and policy_is_provisional
-            and legacy_trades >= ALLOWLIST_REMOVE_MIN_TRADES
-            and win_rate <= ALLOWLIST_REMOVE_MAX_WIN_RATE
-            and pnl <= ALLOWLIST_REMOVE_MAX_PNL
-        )
         auto_shadow_meta = auto_shadow.get(city, {}) if isinstance(auto_shadow, dict) else {}
         auto_canary_meta = auto_canary.get(city, {}) if isinstance(auto_canary, dict) else {}
         auto_block_meta = auto_blocked.get(city, {}) if isinstance(auto_blocked, dict) else {}
@@ -6301,6 +6316,35 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
             city_mode == "shadow"
             and isinstance(latest_transition, dict)
             and latest_transition.get("to") == "shadow"
+        )
+        # v10.6.20: anti-flapping — bloquea promoción shadow→canary si el historial
+        # NOAA-verificado es malo. Sin este guard, una ciudad degradada por regla de
+        # salida se re-promociona en el siguiente ciclo por sus edges shadow acumulados.
+        # v10.6.41: extiende el anti-flapping a ciudades degradadas con historial legacy malo.
+        # Sin esto, ciudades con policy_source="legacy" evaden el guard y se re-promocionan
+        # aunque tengan WR/PnL malos (bug observado en Dallas: 17t WR 11.8% PnL -$1.60).
+        degraded_history_bad = (
+            degraded
+            and policy_trades >= ALLOWLIST_REMOVE_MIN_TRADES
+            and policy_win_rate <= ALLOWLIST_REMOVE_MAX_WIN_RATE
+            and policy_pnl <= ALLOWLIST_REMOVE_MAX_PNL
+        )
+        promotable_shadow = (
+            shadow_edges >= SHADOW_CANARY_MIN_EDGE_HITS
+            and shadow_cycles >= SHADOW_CANARY_MIN_CYCLES
+            and shadow_best_edge >= SHADOW_CANARY_MIN_BEST_EDGE
+            and support_count >= SHADOW_CANARY_MIN_SUPPORT
+            and _shadow_days >= SHADOW_CANARY_MIN_DAYS
+            and not verified_history_bad
+            and not degraded_history_bad
+            and not needs_manual_proxy_review
+        )
+        provisional_review = (
+            active
+            and policy_is_provisional
+            and legacy_trades >= ALLOWLIST_REMOVE_MIN_TRADES
+            and win_rate <= ALLOWLIST_REMOVE_MAX_WIN_RATE
+            and pnl <= ALLOWLIST_REMOVE_MAX_PNL
         )
         state_label = (
             "Activa" if city_mode == "active"
@@ -7115,8 +7159,17 @@ def _daily_summary_cycles_last_24h(now):
 
 
 def _daily_summary_closed_trades_last_24h(now):
-    """Resoluciones del día: trades cerrados en las últimas 24h."""
-    stats = {"closed": 0, "wins": 0, "breakeven": 0, "losses": 0, "pnl": 0.0}
+    """Resoluciones del día: trades cerrados en las últimas 24h.
+
+    Separa trades recientes reales de resoluciones batch (market_resolved de
+    fechas antiguas que el bot detecta hoy). El PnL neto solo cuenta trades
+    reales; el batch se reporta aparte para no inflar la cifra del día.
+    """
+    batch_reasons = {"market_resolved", "market_resolved_yes"}
+    stats = {
+        "closed": 0, "wins": 0, "breakeven": 0, "losses": 0, "pnl": 0.0,
+        "batch_closed": 0, "batch_pnl": 0.0,
+    }
     cutoff = now - timedelta(hours=24)
     try:
         closed = _get_recent_closed_trades()
@@ -7133,14 +7186,19 @@ def _daily_summary_closed_trades_last_24h(now):
         if closed_at < cutoff:
             continue
         pnl = float(rec.get("pnl_cash", 0) or 0)
-        stats["closed"] += 1
-        stats["pnl"] += pnl
-        if pnl > 0:
-            stats["wins"] += 1
-        elif pnl < 0:
-            stats["losses"] += 1
+        close_reason = str(rec.get("close_reason", "") or "")
+        if close_reason in batch_reasons:
+            stats["batch_closed"] += 1
+            stats["batch_pnl"] += pnl
         else:
-            stats["breakeven"] += 1
+            stats["closed"] += 1
+            stats["pnl"] += pnl
+            if pnl > 0:
+                stats["wins"] += 1
+            elif pnl < 0:
+                stats["losses"] += 1
+            else:
+                stats["breakeven"] += 1
     return stats
 
 
@@ -7331,7 +7389,12 @@ def format_daily_summary_text(payload):
         )
         lines.append(f"• PnL neto: <b>${r.get('pnl', 0.0):+.2f}</b>")
     else:
-        lines.append("• Sin trades cerrados hoy")
+        lines.append("• Sin trades recientes cerrados hoy")
+    if int(r.get("batch_closed", 0) or 0) > 0:
+        lines.append(
+            f"• Batch market_resolved: {r['batch_closed']} trades "
+            f"(${r.get('batch_pnl', 0.0):+.2f}) — resoluciones de mercados antiguos"
+        )
 
     lines.append("")
     lines.append("<b>🛰 NOAA 24h</b>")
@@ -15663,7 +15726,7 @@ def manage_positions(client, dl):
             audit_register_pending_sell(
                 order_id=oid, city=city,
                 side=outcome, price=sell_price, shares=shares_to_sell,
-                return_est=estimated_return, reason=sell_type,
+                return_est=estimated_return, reason=sell_type, token_id=asset_id,
             )
 
         except Exception as e:
@@ -16003,9 +16066,9 @@ def intra_cycle_sl_check(client):
                 send_telegram(
                     f"{icon} <b>[INTRA-SL] {type_label}</b>\n"
                     f"{outcome} {city}\n"
-                    f"Venta: {shares_to_sell}sh × ${sell_price:.2f}\n"
+                    f"Venta: {shares_to_sell}sh × ${sell_price:.2f} (precio límite)\n"
                     f"PnL: {pct_pnl:+.1f}% (${float(p.get('cashPnl', 0)):+.2f})\n"
-                    f"<i>Entre ciclos — próximo ciclo confirmará fill</i>"
+                    f"<i>Entre ciclos — próximo ciclo confirmará fill; precio real puede diferir</i>"
                 )
 
                 pct = float(p.get("percentPnl", 0))
@@ -16033,7 +16096,7 @@ def intra_cycle_sl_check(client):
                 audit_register_pending_sell(
                     order_id=oid, city=city,
                     side=outcome, price=sell_price, shares=shares_to_sell,
-                    return_est=estimated_return, reason=sell_type,
+                    return_est=estimated_return, reason=sell_type, token_id=asset_id,
                 )
                 if sell_type in ("stop_loss", "stop_loss_intra") and city:
                     _sl_cooldown_register(city)
@@ -16167,9 +16230,18 @@ def audit_check_sell_fills(client, dl):
             else:
                 still_pending.append(sell)
         else:
-            # Ya no está en open_orders → se llenó (o fue cancelada por stale cleanup)
-            filled.append(sell)
-            dl.append(f"  ✅ Venta llenada: {sell.get('city', '?')} {sell.get('side', '?')} | ~${sell.get('return_est', 0):.2f} recuperados")
+            # Ya no esta en open_orders: normalmente se lleno. Intentar leer fills reales.
+            enriched_sell = _enrich_pending_sell_with_fill(client, sell)
+            filled.append(enriched_sell)
+            fill_value = _safe_float(enriched_sell.get("fill_value"))
+            fill_price = _safe_float(enriched_sell.get("fill_price"))
+            if fill_value is not None and fill_price is not None:
+                dl.append(
+                    f"  ✅ Venta llenada: {sell.get('city', '?')} {sell.get('side', '?')} | "
+                    f"${fill_value:.2f} reales @ ${fill_price:.4f}"
+                )
+            else:
+                dl.append(f"  ✅ Venta llenada: {sell.get('city', '?')} {sell.get('side', '?')} | ~${sell.get('return_est', 0):.2f} estimados")
 
     audit["pending_sells"] = still_pending
     save_audit_data(audit)
@@ -16185,8 +16257,163 @@ def audit_check_sell_fills(client, dl):
         if n_filled > 0:
             send_telegram(
                 f"✅ <b>{n_filled} venta(s) confirmada(s)</b>\n"
-                + "\n".join(f"  {s.get('city','?')} {s.get('side','?')} ~${s.get('return_est',0):.2f}" for s in filled)
+                + "\n".join(_format_confirmed_sell_fill_line(s) for s in filled)
             )
+
+
+def _safe_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _get_first_number(payload, keys):
+    if not isinstance(payload, dict):
+        return None
+    for key in keys:
+        value = _safe_float(payload.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _order_id_seen_in_trade(trade, order_id):
+    if not order_id:
+        return True
+    if not isinstance(trade, dict):
+        return False
+    wanted = str(order_id).lower()
+    for key in [
+        "order_id",
+        "orderID",
+        "orderId",
+        "maker_order_id",
+        "makerOrderId",
+        "taker_order_id",
+        "takerOrderId",
+    ]:
+        value = trade.get(key)
+        if value is not None and str(value).lower() == wanted:
+            return True
+    try:
+        return wanted in json.dumps(trade, ensure_ascii=False).lower()
+    except Exception:
+        return False
+
+
+def _extract_fill_summary_from_trades(trades, order_id=""):
+    rows = trades.get("data", []) if isinstance(trades, dict) else (trades or [])
+    if not isinstance(rows, list):
+        return None
+
+    matched = [t for t in rows if isinstance(t, dict) and _order_id_seen_in_trade(t, order_id)]
+    if not matched:
+        return None
+
+    total_size = 0.0
+    total_value = 0.0
+    normalized = []
+    for trade in matched:
+        price = _get_first_number(trade, ["price", "match_price", "fill_price", "execution_price"])
+        size = _get_first_number(trade, ["size", "shares", "filled_size", "matched_size"])
+        value = _get_first_number(trade, ["value", "notional", "proceeds", "usdc_amount", "amount_usdc", "amount"])
+        if value is None and price is not None and size is not None:
+            value = price * size
+        if price is None and value is not None and size not in (None, 0):
+            price = value / size
+        if price is None or size in (None, 0):
+            continue
+        total_size += size
+        total_value += value if value is not None else price * size
+        normalized.append({
+            "id": trade.get("id", ""),
+            "price": round(price, 6),
+            "size": round(size, 6),
+            "value": round(value if value is not None else price * size, 6),
+            "timestamp": trade.get("timestamp") or trade.get("match_time") or trade.get("created_at") or "",
+            "transaction_hash": trade.get("transaction_hash") or trade.get("transactionHash") or "",
+        })
+
+    if total_size <= 0:
+        return None
+
+    return {
+        "fill_price": round(total_value / total_size, 6),
+        "fill_shares": round(total_size, 6),
+        "fill_value": round(total_value, 6),
+        "fill_source": "clob_trades",
+        "fill_count": len(normalized),
+        "fill_trades": normalized[:10],
+    }
+
+
+def _extract_fill_summary_from_order(order):
+    if not isinstance(order, dict):
+        return None
+    matched_size = _get_first_number(order, ["size_matched", "matched_size", "filled_size"])
+    if matched_size is None or matched_size <= 0:
+        return None
+    price = _get_first_number(order, ["average_price", "avg_price", "filled_price"])
+    if price is None:
+        return None
+    return {
+        "fill_price": round(price, 6),
+        "fill_shares": round(matched_size, 6),
+        "fill_value": round(price * matched_size, 6),
+        "fill_source": "clob_order",
+        "fill_count": None,
+    }
+
+
+def _fetch_sell_fill_summary(client, pending_sell):
+    order_id = str((pending_sell or {}).get("order_id", "") or "").strip()
+    if not order_id:
+        return None
+
+    try:
+        trades = client.get_trades(TradeParams(id=order_id), only_first_page=True)
+        summary = _extract_fill_summary_from_trades(trades, order_id)
+        if summary:
+            return summary
+    except Exception as e:
+        log.warning(f"fill lookup get_trades fallo para {order_id}: {e}")
+
+    token_id = str((pending_sell or {}).get("token_id", "") or "").strip()
+    if token_id:
+        try:
+            trades = client.get_trades(TradeParams(asset_id=token_id), only_first_page=True)
+            summary = _extract_fill_summary_from_trades(trades, order_id)
+            if summary:
+                return summary
+        except Exception as e:
+            log.warning(f"fill lookup get_trades(asset_id) fallo para {order_id}: {e}")
+
+    try:
+        order = client.get_order(order_id)
+        summary = _extract_fill_summary_from_order(order)
+        if summary:
+            return summary
+    except Exception as e:
+        log.warning(f"fill lookup get_order fallo para {order_id}: {e}")
+
+    return None
+
+
+def _enrich_pending_sell_with_fill(client, sell):
+    enriched = dict(sell or {})
+    summary = _fetch_sell_fill_summary(client, enriched)
+    if summary:
+        enriched.update(summary)
+    return enriched
+
+
+def _format_confirmed_sell_fill_line(sell):
+    fill_value = _safe_float(sell.get("fill_value"))
+    fill_price = _safe_float(sell.get("fill_price"))
+    if fill_value is not None and fill_price is not None:
+        return f"  {sell.get('city','?')} {sell.get('side','?')} ${fill_value:.2f} reales @ ${fill_price:.4f}"
+    return f"  {sell.get('city','?')} {sell.get('side','?')} ~${sell.get('return_est',0):.2f} estimados"
 
 
 def _confirm_sell_fills_in_performance(filled, expired, dl):
@@ -16205,6 +16432,11 @@ def _confirm_sell_fills_in_performance(filled, expired, dl):
 
     filled_ids = set(s.get("order_id", "") for s in filled)
     expired_ids = set(s.get("order_id", "") for s in expired)
+    filled_by_id = {
+        s.get("order_id", ""): s
+        for s in filled
+        if s.get("order_id", "")
+    }
 
     updated = 0
     updated_entries = []
@@ -16213,8 +16445,34 @@ def _confirm_sell_fills_in_performance(filled, expired, dl):
             continue
         oid = entry.get("order_id", "")
         if oid in filled_ids:
+            fill_info = filled_by_id.get(oid, {})
+            fill_price = _safe_float(fill_info.get("fill_price"))
+            fill_shares = _safe_float(fill_info.get("fill_shares"))
+            fill_value = _safe_float(fill_info.get("fill_value"))
             entry["action"] = "SELL"
             entry["fill_confirmed"] = datetime.now(timezone.utc).isoformat()
+            if fill_price is not None and fill_value is not None:
+                entry["limit_price"] = entry.get("limit_price", entry.get("price"))
+                entry["price"] = round(fill_price, 6)
+                entry["fill_price"] = round(fill_price, 6)
+                entry["fill_value"] = round(fill_value, 2)
+                entry["return_est_limit"] = entry.get("return_est")
+                entry["return_est"] = round(fill_value, 2)
+                entry["fill_source"] = fill_info.get("fill_source", "")
+                if fill_shares is not None:
+                    entry["fill_shares"] = round(fill_shares, 6)
+                    entry["shares"] = round(fill_shares, 6)
+                if fill_info.get("fill_count") is not None:
+                    entry["fill_count"] = fill_info.get("fill_count")
+                if fill_info.get("fill_trades"):
+                    entry["fill_trades"] = fill_info.get("fill_trades")
+                avg_buy_price = _safe_float(entry.get("avg_buy_price"))
+                shares_for_pnl = _safe_float(entry.get("shares"))
+                if avg_buy_price is not None and shares_for_pnl not in (None, 0):
+                    cost = avg_buy_price * shares_for_pnl
+                    if cost > 0:
+                        entry["pnl_cash"] = round(fill_value - cost, 2)
+                        entry["pnl_pct"] = round((fill_value / cost - 1.0) * 100, 2)
             updated += 1
             updated_entries.append(dict(entry))
         elif oid in expired_ids:
@@ -16242,7 +16500,7 @@ def _confirm_sell_fills_in_performance(filled, expired, dl):
             log.warning(f"Error actualizando performance.json: {e}")
 
 
-def audit_register_pending_sell(order_id, city, side, price, shares, return_est, reason):
+def audit_register_pending_sell(order_id, city, side, price, shares, return_est, reason, token_id=""):
     """Registra una orden de venta pendiente para seguimiento."""
     audit = load_audit_data()
     audit["pending_sells"].append({
@@ -16253,6 +16511,7 @@ def audit_register_pending_sell(order_id, city, side, price, shares, return_est,
         "shares": shares,
         "return_est": return_est,
         "reason": reason,
+        "token_id": token_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
     save_audit_data(audit)

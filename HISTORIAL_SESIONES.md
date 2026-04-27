@@ -31,6 +31,8 @@ Comandos útiles:
 
 | Fecha | Tipo | Referencia | Commits clave | Resumen |
 |------|------|------------|---------------|---------|
+| 2026-04-27 | Explícita | Sesión 256 | anti-flapping guard legacy + PnL reporting fix v10.6.41 | Sonnet revisa las alarmas del dia 27 contra produccion. Encuentra y corrige dos bugs en v10.6.41: (1) anti-flapping guard: `verified_history_bad` solo cubria `noaa_verified`; Dallas (17t WR 11.8% PnL -$1.60 en active, unico ref Academic-Maniac WR 5%) evadio el guard y se re-promovio a canary. Fix: nuevo `degraded_history_bad` que bloquea `promotable_shadow` tambien para ciudades degradadas con historial legacy malo. Dallas demotada manualmente en prod; canary queda en 9. (2) PnL daily briefing: `_daily_summary_closed_trades_last_24h` mezcla `market_resolved` de marzo (+$23.36) con trades reales del dia (-$1.89), inflando la cifra. Fix: separa `batch_closed/batch_pnl` y lo reporta en linea propia. Alarmas verificadas correctas: NOAA NYC (1 caso confirmado), Munich open (0.60, +$0.81 unrealizado), SL_intra guard (0 skips, correcto). 859/859 tests. Archivo alarmas borrado. |
+| 2026-04-27 | Explícita | Sesión 255 | fill real por order_id v10.6.41 | Codex corrige la reconciliación de ventas confirmadas tras detectar en Shanghai `27C Apr27 NO` que Telegram/lifecycle mostraban el precio límite (`0.80`) y no el fill real visto en Polymarket (`~0.99`). `audit_check_sell_fills()` ahora intenta leer fills reales por `order_id` con `get_trades`, conserva `limit_price`, actualiza `price/fill_price/return_est` con `fill_value` cuando existe, y propaga `fill_*` a `postmortem`/`trade_lifecycle`. El copy `[INTRA-SL]` aclara `precio límite` y que el precio real puede diferir. Validación: sintaxis OK, helper probado con trade sintético, `verify_before_deploy.py` 859/859; `py_compile` solo falla por lock conocido de `__pycache__`. |
 | 2026-04-26 | Explícita | Sesión 249 | legacy analytics paused + delete alarm | Codex pausa los servicios Railway separados `phase5-visibility` y `city-intelligence` con `railway down -s <service> -y`, conservando servicios, variables y volúmenes para rollback/historial. Verificación live: `polymarket-bot` sigue `SUCCESS`; los dos legacy quedan sin deployment activo (`deploymentId=null`); `phase5-visibility-volume` y `city-intelligence-volume` siguen adjuntos. Se actualiza `data/service_transition_followup.json` a fase `legacy_services_paused`, se resuelven temprano los checkpoints de pausa y se programa `legacy_services_delete_readiness_2026_05_03`, que avisará cuándo borrar servicios/volúmenes si la pausa no rompió funcionalidad. `tools/city_intelligence_daily_summary.py` aprende a mostrar un `runbook` resumido en checkpoints vencidos; dry-run muestra el próximo checkpoint del 2026-05-03. Se crea `docs/legacy-analytics-service-cleanup-runbook-2026-04-26.md` y se actualiza el plan de transición. Validación: sintaxis del tool OK y `verify_before_deploy.py` 843/843. No se toca `bot.py`, `city_policy_state.json`, trading, NOAA, scheduler, whitelist, sizing ni reglas core. |
 | 2026-04-26 | Explícita | Sesión 248 | legacy analytics Telegram silenced | Codex atiende la alerta combinada `Phase 5 Visibility` + `City Intelligence - resumen diario (2026-04-26 UTC)` y ejecuta la siguiente acción operacional clara: reducir ruido de emisores legacy sin tocar `bot.py`, `city_policy_state.json`, trading core, NOAA, scheduler, whitelist, sizing ni reglas de entrada/salida. Se valida que el transporte read-only desde `polymarket-bot` funciona (`runtime_import` fresco `2026-04-26T10:42:33Z`, manifest 12/12, sin drift; ledger/pipeline local `runtime_inputs_status=available`, `overall_status=ok`). La raíz de la alarma queda separada: `city-intelligence` Railway separado sigue sin `/app/data/runtime_import` y por eso envió `runtime_inputs_missing` a las 07:00 UTC; `phase5-visibility` sigue acumulando coincidencias Shanghai+Chicago (`20`, probe `2026-04-26T05:10:38Z`) pero como plano legacy/benchmark. Cambio live reversible: `TELEGRAM_TOKEN=DISABLED` solo en `city-intelligence` y `phase5-visibility`; ambos vuelven a `SUCCESS` y validan `TOKEN_DISABLED`, mientras `polymarket-bot` conserva el emisor Telegram canónico. Riesgo residual: preflight operacional local queda con `error=1` por Atlanta (`runtime auto_shadow` vs `cross canary`), no por runtime transport. |
 | 2026-04-26 | Explícita | Sesión 247 | blocked-signals live audit, no code | Codex ejecuta la primera auditoría read-only del `ACTION` diario `Blocked signals (fuera de whitelist)`, sin tocar `bot.py`, whitelist, NOAA, scheduler, sizing, Railway env ni reglas core. Fuente live: `/app/data/blocked_signals_resolutions.jsonl` en Railway `polymarket-bot`, `381` registros resueltos; whitelist live coincide con el default actual hasta `Dallas`; `BLOCKED_CITIES=London`. El agregado queda reproducido: fuera de whitelist `101` resueltas, `100` wins, WR `99.0%`; excluidas por whitelist `280`. Se crea `docs/blocked-signals-outside-whitelist-audit-2026-04-26.md`: el ranking fuera de whitelist lo lideran `Lucknow` `19/19` con consenso `7/7`, `Warsaw` `17/17` con consenso `8/8`, `Chongqing` `16/16` con consenso `2/2` y `Beijing` `14/14` con consenso `4/4`. Decisión: no whitelist masiva ni reglas core; primer bloque accionable = verificación de fuente/cobertura para `Lucknow`, `Warsaw`, `Beijing` y `Chongqing`. `Buenos Aires` queda detrás por falta de consenso/edge y observed live 0; `Miami` no aplica porque ya está en whitelist; `Lagos` necesita discovery de fuente antes de cualquier decisión. |
@@ -3609,3 +3611,31 @@ Trading core, NOAA core, scheduler, MIN_EDGE, sigma, take_profit, sizing, BANKRO
 ### Siguiente acción
 
 Commit + push + deploy. Esperar primer skip live para confirmar que el Telegram dispara con el formato correcto. Si en 7 días hay ≥5 skips resueltos, llegará automático el review one-shot con veredicto.
+
+## Sesión 255 — Fill real en SELL por order_id (v10.6.41, 27 abr 2026)
+
+**Tipo:** Explícita | **Agente:** Codex | **Origen:** revisión de la operación Shanghai `27C Apr27 NO` del ciclo 187.
+
+### Diagnóstico
+
+La operación fue buena, pero el reporting era conservador/incorrecto: el bot mostraba y persistía el precio límite (`0.80`) aunque Polymarket enseñaba fill real cercano a `0.99`. En el snapshot Railway fresco, `performance.json` tenía `SELL price=0.80`, `trigger_price=0.82`, `return_est=$3.55`; la reconciliación solo convertía `SELL_PENDING -> SELL` cuando la orden desaparecía de `open_orders`, sin consultar trades/fills reales.
+
+### Acciones
+
+- `bot.py` v10.6.41 importa `TradeParams`.
+- `audit_check_sell_fills()` intenta enriquecer cada venta confirmada con fill real: `get_trades(TradeParams(id=order_id))`, luego `get_trades(TradeParams(asset_id=token_id))` filtrando por `order_id`, y por último `get_order(order_id)` solo si trae campos explícitos de precio promedio/filled.
+- Si hay fill real, `performance.json` conserva `limit_price`, usa `fill_price` como `price`, actualiza `return_est` con `fill_value`, guarda `fill_source/fill_count/fill_trades` y recalcula PnL cuando tiene `avg_buy_price`.
+- `postmortem` y `trade_lifecycle` propagan `fill_price`, `fill_value`, `fill_source` y `limit_price`.
+- Telegram `[INTRA-SL]` ahora dice `precio límite` y aclara que el precio real puede diferir.
+- `verify_before_deploy.py` suma checks v10.6.41.
+
+### Verificación
+
+- `python tools/check_python_syntax.py bot.py verify_before_deploy.py` OK.
+- Helper `_extract_fill_summary_from_trades()` probado con trade sintético `price=0.99`, `size=4.44` → `fill_value=4.3956`.
+- `python verify_before_deploy.py` → **859/859**.
+- `python -m py_compile bot.py verify_before_deploy.py` sigue fallando solo por el lock conocido de `__pycache__` en Windows (`WinError 5`).
+
+### Siguiente acción
+
+Deploy cuando convenga. En el próximo SELL confirmado, revisar que Telegram de confirmación muestre `$... reales @ $...` si CLOB devuelve trades por `order_id`; si no, quedará marcado como estimado y no bloqueará la reconciliación.
