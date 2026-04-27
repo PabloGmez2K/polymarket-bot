@@ -173,7 +173,7 @@ class SQLiteRecorder:
 
     @contextmanager
     def _conn(self):
-        con = sqlite3.connect(self._db_path, timeout=10)
+        con = sqlite3.connect(self._db_path, timeout=5)
         try:
             yield con
             con.commit()
