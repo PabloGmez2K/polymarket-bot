@@ -25,6 +25,7 @@ from waitress import serve
 load_dotenv()
 
 # =============================================================
+# bot.py v10.6.40 — Guard SL_intra para condition=exact + days<=1 (Opus, sesion 246, 2026-04-26)
 # bot.py v10.6.30 — Dallas al whitelist: degradacion inflada por ghost-position bug (v10.5.12)
 # bot.py v10.6.29 — Busan (RKPK) ICAO-only: WU/RKPK resolution confirmado, NOAA 2026 dead
 # bot.py v10.6.28 — P5 new cities: Moscow, Amsterdam, Jeddah, Istanbul, Helsinki (ICAO-only)
@@ -106,7 +107,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.30"
+BOT_VERSION = "v10.6.40"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -397,6 +398,16 @@ INTRA_REEVAL_PRICE_DRIFT_PP = float(os.getenv("INTRA_REEVAL_PRICE_DRIFT_PP", "10
 INTRA_REEVAL_COOLDOWN_MIN = int(os.getenv("INTRA_REEVAL_COOLDOWN_MIN", "80"))   # minutos entre reevals de misma posición
 INTRA_REEVAL_EDGE_THRESHOLD = float(os.getenv("INTRA_REEVAL_EDGE_THRESHOLD", "-3.0"))  # umbral de venta
 
+# v10.6.40: guard SL_intra para condition=exact con resolución <=1 día (Opus, sesión 246, 2026-04-26).
+# Evidencia 14d post-fix v10.6.28+: SL_intra n=10 WR=10% pnl=-$3.95. Patrón concentrado en exact+days<=1
+# con edges enormes (>40%) y rebote intra-day; SL vende en suelo antes de la resolución.
+# Si guard activo: para condition=exact y days_ahead<=SL_INTRA_GUARD_DAYS_AHEAD_MAX, NO se vende por SL_intra
+# (TP_intra y SL del ciclo principal siguen activos). Cada skip se registra en sl_intra_guard_audit.json.
+SL_INTRA_GUARD_EXACT_NEAR_RESOLUTION = os.getenv("SL_INTRA_GUARD_EXACT_NEAR_RESOLUTION", "1").lower() in ("1", "true", "yes", "on")
+SL_INTRA_GUARD_DAYS_AHEAD_MAX = int(os.getenv("SL_INTRA_GUARD_DAYS_AHEAD_MAX", "1"))
+SL_INTRA_GUARD_REVIEW_MIN_SKIPS = int(os.getenv("SL_INTRA_GUARD_REVIEW_MIN_SKIPS", "5"))
+SL_INTRA_GUARD_TELEGRAM_COOLDOWN_MIN = int(os.getenv("SL_INTRA_GUARD_TELEGRAM_COOLDOWN_MIN", "60"))
+
 MIN_PRICE = 0.20
 MAX_PRICE = 0.80
 PRICE_AGGRESSION = 0.02
@@ -608,6 +619,7 @@ SKIP_LOG_FILE = _data_path("skip_log.jsonl")
 SKIP_LOG_MAX_SIZE_BYTES = 20 * 1024 * 1024  # 20 MB — rotación del contrato R3
 SL_COOLDOWN_FILE = _data_path("sl_city_cooldown.json")
 INTRA_REEVAL_STATE_FILE = _data_path("intra_reeval_state.json")
+SL_INTRA_GUARD_STATE_FILE = _data_path("sl_intra_guard_audit.json")
 AGENT_EVENTS_FILE = _sync_agent_events_seed()
 SIGNALS_FILE = _seed_data_file("signals.json")
 SIGNALS_CROSSCHECK_FILE = _data_path("signals_crosscheck.jsonl")
@@ -1611,6 +1623,61 @@ def save_intra_reeval_state(state):
             json.dump(state, f, indent=2, ensure_ascii=False)
     except Exception as e:
         log.warning(f"Error guardando intra_reeval_state: {e}")
+
+
+def load_sl_intra_guard_state():
+    """v10.6.40: estado persistente del guard SL_intra exact+near-resolution."""
+    default = {
+        "version": 1,
+        "guard_started_at": "",
+        "skips": [],
+        "last_telegram_at": "",
+        "review_alert_sent": False,
+        "review_started_at": "",
+    }
+    if not os.path.exists(SL_INTRA_GUARD_STATE_FILE):
+        return default
+    try:
+        with open(SL_INTRA_GUARD_STATE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return default
+        state = dict(default)
+        state["guard_started_at"] = data.get("guard_started_at", "") or ""
+        skips = data.get("skips", [])
+        state["skips"] = skips if isinstance(skips, list) else []
+        state["last_telegram_at"] = data.get("last_telegram_at", "") or ""
+        state["review_alert_sent"] = bool(data.get("review_alert_sent", False))
+        state["review_started_at"] = data.get("review_started_at", "") or ""
+        return state
+    except Exception:
+        return default
+
+
+def save_sl_intra_guard_state(state):
+    """v10.6.40: persiste estado del guard SL_intra."""
+    try:
+        skips = state.get("skips", [])
+        if isinstance(skips, list) and len(skips) > 500:
+            state["skips"] = skips[-500:]
+        with open(SL_INTRA_GUARD_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        log.warning(f"Error guardando sl_intra_guard_audit: {e}")
+
+
+def _sl_intra_guard_should_skip(condition, days_ahead):
+    """v10.6.40: True si la posición cumple el guard exact+near-resolution."""
+    if not SL_INTRA_GUARD_EXACT_NEAR_RESOLUTION:
+        return False
+    if not condition or str(condition).lower() != "exact":
+        return False
+    if days_ahead is None:
+        return False
+    try:
+        return int(days_ahead) <= SL_INTRA_GUARD_DAYS_AHEAD_MAX
+    except (ValueError, TypeError):
+        return False
 
 
 def _extract_logic_series(value):
@@ -4438,6 +4505,15 @@ def run_observability_alerts():
         logger = globals().get("log")
         if logger:
             logger.warning(f"post intra-SL cooldown review: fallo ({e})")
+
+    # v10.6.40: review del guard SL_intra (exact + days<=N).
+    try:
+        if maybe_run_sl_intra_guard_review(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"sl_intra_guard review: fallo ({e})")
 
     try:
         if maybe_run_sl_retrospective(state):
@@ -8876,6 +8952,191 @@ def maybe_run_post_intra_sl_cooldown_review(state, now=None):
         "intra_sl_count": stats["intra_sl_count"],
         "repeated_extra_closes": repeated,
     }
+    return True
+
+
+def _sl_intra_guard_resolved_outcome(token_id, lifecycle_records):
+    """v10.6.40: localiza un trade cerrado en lifecycle por token_id y devuelve outcome real.
+
+    Devuelve (resolved: bool, pnl_cash: float, close_reason: str) o (False, 0.0, "").
+    """
+    if not token_id:
+        return False, 0.0, ""
+    for r in lifecycle_records:
+        if str(r.get("token_id") or "") != str(token_id):
+            continue
+        cc = r.get("close_context") or {}
+        status = (r.get("status") or "").lower()
+        if not (cc.get("close_reason") or status in ("closed", "resolved")):
+            return False, 0.0, ""
+        try:
+            pnl_cash = float(cc.get("pnl_cash") or 0)
+        except (ValueError, TypeError):
+            pnl_cash = 0.0
+        return True, pnl_cash, str(cc.get("close_reason") or status or "")
+    return False, 0.0, ""
+
+
+def maybe_run_sl_intra_guard_review(state, now=None):
+    """
+    v10.6.40: alerta one-shot del guard SL_intra (exact + days<=N).
+
+    Dispara cuando hay >=SL_INTRA_GUARD_REVIEW_MIN_SKIPS skips registrados
+    y todos los token_ids skipped tienen un cierre en trade_lifecycle.
+    Compara PnL real vs hipotetico (si SL hubiera vendido al momento del skip).
+
+    Idempotencia en alerts_state["sl_intra_guard_review"].
+    Retorna True si state (alerts_state) fue mutado.
+    """
+    if not SL_INTRA_GUARD_EXACT_NEAR_RESOLUTION:
+        return False
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    review = state.setdefault("sl_intra_guard_review", {})
+    if review.get("sent_at"):
+        return False
+
+    try:
+        guard_state = load_sl_intra_guard_state()
+    except Exception:
+        return False
+
+    skips = guard_state.get("skips", []) or []
+    if len(skips) < SL_INTRA_GUARD_REVIEW_MIN_SKIPS:
+        review["last_seen_skips"] = len(skips)
+        if not review.get("started_at") and skips:
+            review["started_at"] = skips[0].get("skipped_at") or now.isoformat()
+        return True if not review.get("started_at") and skips else False
+
+    # Cargar lifecycle para resolver outcomes reales
+    try:
+        lc = load_trade_lifecycle_data() or {}
+    except Exception:
+        return False
+    records = lc.get("records") or []
+
+    # Deduplicar por token_id (un trade puede tener varios skips antes de resolver)
+    skips_by_token = {}
+    for s in skips:
+        tid = str(s.get("token_id") or "")
+        if not tid:
+            continue
+        # Conservar el skip mas reciente por token (el que tiene mejor evidencia del momento previo al cierre)
+        prev = skips_by_token.get(tid)
+        if prev is None or (s.get("skipped_at", "") > prev.get("skipped_at", "")):
+            skips_by_token[tid] = s
+
+    resolved_skips = []
+    pending_skips = []
+    for tid, s in skips_by_token.items():
+        ok, real_pnl, close_reason = _sl_intra_guard_resolved_outcome(tid, records)
+        if ok:
+            resolved_skips.append((s, real_pnl, close_reason))
+        else:
+            pending_skips.append(s)
+
+    if len(resolved_skips) < SL_INTRA_GUARD_REVIEW_MIN_SKIPS:
+        review["last_seen_skips"] = len(skips)
+        review["last_seen_resolved"] = len(resolved_skips)
+        if not review.get("started_at"):
+            review["started_at"] = skips[0].get("skipped_at") or now.isoformat()
+        return True
+
+    # Calcular hipotetico vs real
+    real_total = 0.0
+    hypo_total = 0.0
+    wins = 0
+    losses = 0
+    rows = []
+    for s, real_pnl, close_reason in resolved_skips:
+        # Hipotetico: si SL hubiera disparado, perdida = pct_pnl_at_skip% * current_value_at_skip
+        # current_value_at_skip ~= shares * cur_price; con SELL_AGGRESSION 0.02 la perdida real seria un poco mayor
+        # pero tomamos pct_pnl_at_skip directamente como aproximacion conservadora.
+        try:
+            current_value = float(s.get("current_value") or 0)
+            pct = float(s.get("pct_pnl_at_skip") or 0)
+        except (ValueError, TypeError):
+            current_value, pct = 0.0, 0.0
+        hypo_loss = current_value * (pct / 100.0)
+        real_total += real_pnl
+        hypo_total += hypo_loss
+        if real_pnl > 0:
+            wins += 1
+        else:
+            losses += 1
+        rows.append({
+            "city": s.get("city", "?"),
+            "outcome": s.get("outcome", "?"),
+            "pct_at_skip": pct,
+            "real_pnl": real_pnl,
+            "hypo_loss": hypo_loss,
+            "close_reason": close_reason,
+        })
+
+    delta = real_total - hypo_total
+    if delta > 0:
+        verdict = (
+            f"✅ El guard <b>esta funcionando</b>: real ${real_total:+.2f} vs "
+            f"hipotetico SL ${hypo_total:+.2f} = <b>${delta:+.2f}</b> a favor."
+        )
+    elif delta < 0:
+        verdict = (
+            f"⚠️ El guard <b>esta perjudicando</b>: real ${real_total:+.2f} vs "
+            f"hipotetico SL ${hypo_total:+.2f} = <b>${delta:+.2f}</b>. "
+            f"Considerar revertir o subir threshold."
+        )
+    else:
+        verdict = (
+            f"\U0001f7e1 Resultado <b>neutro</b>: real ${real_total:+.2f} = hipotetico SL ${hypo_total:+.2f}."
+        )
+
+    rows_text = "\n".join(
+        f"• {r['city']} {r['outcome']} pct@skip={r['pct_at_skip']:+.1f}% "
+        f"real=${r['real_pnl']:+.2f} (hipo=${r['hypo_loss']:+.2f})"
+        for r in rows[:8]
+    )
+    if len(rows) > 8:
+        rows_text += f"\n• ... y {len(rows) - 8} mas"
+
+    msg = (
+        f"\U0001f6e1️ <b>Review guard SL_intra v10.6.40</b>\n\n"
+        f"Skips resueltos: <b>{len(resolved_skips)}</b> "
+        f"(W={wins}, L={losses}) | Pendientes: <b>{len(pending_skips)}</b>\n"
+        f"Resueltos PnL real: <b>${real_total:+.2f}</b>\n"
+        f"Hipotetico si SL hubiera disparado: <b>${hypo_total:+.2f}</b>\n\n"
+        f"{verdict}\n\n"
+        f"<b>Detalle</b>:\n{rows_text}\n\n"
+        f"<i>Si delta es claramente negativo, evaluar SL_INTRA_GUARD_EXACT_NEAR_RESOLUTION=0 "
+        f"o subir SL_INTRA_GUARD_DAYS_AHEAD_MAX. Si delta es positivo, mantener.</i>"
+    )
+
+    try:
+        send_telegram(msg)
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"sl_intra_guard review: fallo al enviar Telegram ({e})")
+        review["last_send_error_at"] = now.isoformat()
+        review["last_seen_resolved"] = len(resolved_skips)
+        return True
+
+    review["sent_at"] = now.isoformat()
+    review["summary"] = {
+        "resolved": len(resolved_skips),
+        "pending": len(pending_skips),
+        "wins": wins,
+        "losses": losses,
+        "real_total": round(real_total, 2),
+        "hypo_total": round(hypo_total, 2),
+        "delta": round(delta, 2),
+    }
+    # Marcar tambien en guard_state (idempotencia cruzada)
+    try:
+        guard_state["review_alert_sent"] = True
+        save_sl_intra_guard_state(guard_state)
+    except Exception:
+        pass
     return True
 
 
@@ -15564,6 +15825,14 @@ def intra_cycle_sl_check(client):
 
         n_checked = 0
         n_sold = 0
+        n_guard_skipped = 0
+
+        # v10.6.40: estado del guard SL_intra (cargado una vez por ciclo intra)
+        guard_state = load_sl_intra_guard_state()
+        guard_state_changed = False
+        if SL_INTRA_GUARD_EXACT_NEAR_RESOLUTION and not guard_state.get("guard_started_at"):
+            guard_state["guard_started_at"] = now_utc.isoformat()
+            guard_state_changed = True
 
         for p in observed_positions:
             title_full = p.get("title", "")
@@ -15583,8 +15852,78 @@ def intra_cycle_sl_check(client):
                 except (ValueError, TypeError):
                     _entry_price_intra = None
             effective_tp_intra = effective_tp_pct(_entry_price_intra, _entry_prob_intra)
+
+            # v10.6.40: guard SL_intra para condition=exact + days_ahead<=N.
+            # Se calcula condition y days_ahead aquí; en el peor caso vuelve a parsear el title abajo,
+            # pero el coste es despreciable y mantiene la lógica local al bloque de decisión.
+            _guard_parsed = parse_temperature_question(title_full) or {}
+            _guard_condition = (_guard_parsed.get("condition") or "").lower()
+            _guard_days_ahead = _entry_ctx_intra.get("days_ahead")
+            if _guard_days_ahead is None:
+                _guard_date_str = _guard_parsed.get("date_str")
+                _guard_market_date = date_text_to_iso(_guard_date_str) if _guard_date_str else ""
+                if _guard_market_date:
+                    try:
+                        _guard_days_ahead = (date.fromisoformat(_guard_market_date) - date.today()).days
+                    except (ValueError, TypeError):
+                        _guard_days_ahead = None
+            _guard_skip_sl = (
+                pct_pnl <= STOP_LOSS_PCT
+                and _sl_intra_guard_should_skip(_guard_condition, _guard_days_ahead)
+            )
+
             sell_type = None
-            if pct_pnl <= STOP_LOSS_PCT:
+            if _guard_skip_sl:
+                # Guard activo: NO vender por SL_intra. Registrar skip + telegram (rate-limited).
+                _city_for_skip = parse_city_from_title(title_full[:50]) or ""
+                _outcome_for_skip = p.get("outcome", "?")
+                _entry_pct_pnl_event = {
+                    "skipped_at": now_utc.isoformat(),
+                    "token_id": asset_id,
+                    "city": _city_for_skip,
+                    "outcome": _outcome_for_skip,
+                    "title": title_full[:120],
+                    "condition": _guard_condition,
+                    "days_ahead": _guard_days_ahead,
+                    "pct_pnl_at_skip": round(pct_pnl, 2),
+                    "entry_price": _entry_price_intra,
+                    "cur_price": cur_price,
+                    "current_value": float(p.get("currentValue", 0)),
+                    "shares": float(p.get("size", 0)),
+                    "bot_version": BOT_VERSION,
+                }
+                guard_state.setdefault("skips", []).append(_entry_pct_pnl_event)
+                guard_state_changed = True
+                n_guard_skipped += 1
+                log.info(
+                    f"[INTRA-SL] GUARD skip: {_outcome_for_skip} {_city_for_skip} "
+                    f"cond={_guard_condition} days={_guard_days_ahead} pnl={pct_pnl:+.1f}%"
+                )
+                _last_tg = guard_state.get("last_telegram_at", "")
+                _send_tg = True
+                if _last_tg:
+                    try:
+                        _last_tg_dt = datetime.fromisoformat(_last_tg.replace("Z", "+00:00"))
+                        if (now_utc - _last_tg_dt).total_seconds() < SL_INTRA_GUARD_TELEGRAM_COOLDOWN_MIN * 60:
+                            _send_tg = False
+                    except (ValueError, TypeError):
+                        pass
+                if _send_tg:
+                    try:
+                        send_telegram(
+                            f"\U0001f6e1️ <b>[GUARD SL_intra] skip</b>\n"
+                            f"{_outcome_for_skip} {_city_for_skip} "
+                            f"({_guard_condition}, days={_guard_days_ahead})\n"
+                            f"PnL actual: <b>{pct_pnl:+.1f}%</b> "
+                            f"(${float(p.get('cashPnl', 0)):+.2f})\n"
+                            f"Entry ${(_entry_price_intra or 0):.2f} → ahora ${cur_price:.2f}\n"
+                            f"<i>v10.6.40: SL_intra suspendido para exact+days&le;{SL_INTRA_GUARD_DAYS_AHEAD_MAX}. "
+                            f"Esperamos resolución del mercado.</i>"
+                        )
+                        guard_state["last_telegram_at"] = now_utc.isoformat()
+                    except Exception:
+                        pass
+            elif pct_pnl <= STOP_LOSS_PCT:
                 sell_type = "stop_loss_intra"
                 icon, type_label = "\U0001f53b", "Stop-loss"
             elif pct_pnl >= effective_tp_intra:
@@ -15707,7 +16046,14 @@ def intra_cycle_sl_check(client):
         if reeval_state_changed or INTRA_REEVAL_ENABLED:
             save_intra_reeval_state(reeval_state)
 
-        log.info(f"[INTRA-SL] Check: {n_checked} posiciones, {n_sold} vendidas")
+        # v10.6.40: guardar guard_state si hubo cambios.
+        if guard_state_changed:
+            save_sl_intra_guard_state(guard_state)
+
+        log.info(
+            f"[INTRA-SL] Check: {n_checked} posiciones, {n_sold} vendidas, "
+            f"{n_guard_skipped} skipped por guard"
+        )
 
     except Exception as e:
         log.warning(f"[INTRA-SL] Error: {e}")

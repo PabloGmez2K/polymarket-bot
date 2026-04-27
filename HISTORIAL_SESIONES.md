@@ -3567,3 +3567,45 @@ La alarma era normal para el código previo, pero no para el criterio operativo.
 ### Siguiente acción
 
 Commit/push/deploy urgente para que Railway revierta Beijing a shadow en el siguiente ciclo. Si hay riesgo de BUY antes del deploy, pausar temporalmente con `SHADOW_ONLY_MODE=true` o limpiar `auto_canary_cities.Beijing` en `city_policy_state.json`.
+
+## Sesión 254 — Guard SL_intra exact+near-resolution (v10.6.40, 27 abr 2026)
+
+**Tipo:** Explícita | **Agente:** Opus | **Origen:** brief P/L semanal `docs/opus-bankroll-50-weekly-pl-brief-2026-04-26.md`.
+
+### Contexto
+
+Pablo busca acción concreta antes del domingo 2026-05-03 para mejorar el P/L semanal con bankroll $25. Codex recomendó HOLD $25 + observar SL post-fix con muestra extra. Opus revisa el lifecycle live y encuentra que la muestra post-fix v10.6.28+ ya existe (n=10 en 14d) y es claramente mala: WR=10%, PnL=−$3.95.
+
+### Diagnóstico
+
+Patrón concentrado en 3 condiciones:
+- `condition=exact` con `days_ahead<=1` y edge>40%: 3 trades (Paris/Milan/Munich), 0 wins, −$2.82. Bot dice 80–85% prob, mercado dice 38–40%, SL dispara entre −25% y −46% en 0–5h, vende en suelo. El rebote intra-day o resolución YES son frecuentes; el SL precipita la pérdida.
+- `condition=at_or_above` con our_prob 50–77% pero mkt 20–28%: el bot ve edge donde el mercado nunca valida.
+- `condition=at_or_above` con our_prob 94–97%: confidence ultra-alta no validada.
+
+El cooldown post-fix (sesión 236) evita re-buys (todos buy_count=1) pero no impide que el primer SL dispare en el peor momento. Bankroll $25 perdiendo ~$4/semana solo por esta regla = 16% bankroll/semana.
+
+### Acciones
+
+- `bot.py` v10.6.40: nuevas env vars `SL_INTRA_GUARD_EXACT_NEAR_RESOLUTION` (default 1), `SL_INTRA_GUARD_DAYS_AHEAD_MAX` (default 1), `SL_INTRA_GUARD_REVIEW_MIN_SKIPS` (default 5), `SL_INTRA_GUARD_TELEGRAM_COOLDOWN_MIN` (default 60).
+- Helpers `load_sl_intra_guard_state()`, `save_sl_intra_guard_state()`, `_sl_intra_guard_should_skip(condition, days_ahead)` añadidos junto a los de `intra_reeval_state`.
+- `intra_cycle_sl_check()`: antes de marcar `sell_type="stop_loss_intra"`, calcula `condition` (parse del title) y `days_ahead` (entry_context o cálculo desde market_date). Si guard aplica, NO marca sell_type, persiste evento en `data/sl_intra_guard_audit.json` y manda Telegram inmediato (rate-limited 60min). TP_intra y SL del ciclo principal siguen activos.
+- Nueva función `maybe_run_sl_intra_guard_review(state)` integrada en `run_observability_alerts`. Cuando hay >=5 token_ids skipped y todos resolvieron en lifecycle, envía Telegram one-shot comparando PnL real vs hipotético (perdida si SL hubiera disparado al momento del skip). Veredicto explícito: `funcionando` (delta>0), `perjudicando` (delta<0) o `neutro`.
+- `verify_before_deploy.py` suma 7 checks v10.6.40 (env vars, helpers, archivo de estado, guard logic en intra_cycle_sl_check, función review, hook en run_observability_alerts, BOT_VERSION bump). Test legacy `Version v10.6.30` actualizado a `v10.6.40`.
+
+### Resultado
+
+Patch defensivo, reversible vía env var, instrumentado con Telegram inmediato + review automático one-shot. Kill switch: `SL_INTRA_GUARD_EXACT_NEAR_RESOLUTION=0` revierte sin redeploy. Esperado para la próxima semana: que SL_intra deje de cerrar en suelo trades exact con resolución <24h y que `market_resolved` los lleve a outcome real.
+
+### NO se toca
+
+Trading core, NOAA core, scheduler, MIN_EDGE, sigma, take_profit, sizing, BANKROLL ($25), whitelist, canary lists, BLOCKED_CITIES, shadow lists, reglas de entrada, cooldown SL existente (sesión 236), ICAO-only audit (sesión 251).
+
+### Verificación
+
+- `python tools/check_python_syntax.py bot.py verify_before_deploy.py` OK.
+- `python verify_before_deploy.py` → **855/855**.
+
+### Siguiente acción
+
+Commit + push + deploy. Esperar primer skip live para confirmar que el Telegram dispara con el formato correcto. Si en 7 días hay ≥5 skips resueltos, llegará automático el review one-shot con veredicto.

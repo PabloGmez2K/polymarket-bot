@@ -5297,7 +5297,7 @@ def run_tests():
                 except Exception:
                     pass
 
-    test("Version v10.6.30", 'BOT_VERSION = "v10.6.30"' in code)
+    test("Version v10.6.40", 'BOT_VERSION = "v10.6.40"' in code)
 
     # ---- v10.6.15: Quality-trader canary exact/range ----
     test(
@@ -5989,11 +5989,45 @@ def run_tests():
         and "and not needs_manual_proxy_review" in code
         and "auto_canary_revoked" in code,
     )
-    # ---- v10.6.30: Dallas al whitelist ----
+
+    # ---- v10.6.40: guard SL_intra para condition=exact + days<=N (Opus, sesion 246) ----
     test(
-        "v10.6.30: BOT_VERSION bumped a v10.6.30",
-        'BOT_VERSION = "v10.6.30"' in code,
+        "v10.6.40: BOT_VERSION bumped a v10.6.40",
+        'BOT_VERSION = "v10.6.40"' in code,
     )
+    test(
+        "v10.6.40: env vars del guard SL_intra definidas",
+        "SL_INTRA_GUARD_EXACT_NEAR_RESOLUTION" in code
+        and "SL_INTRA_GUARD_DAYS_AHEAD_MAX" in code
+        and "SL_INTRA_GUARD_REVIEW_MIN_SKIPS" in code
+        and "SL_INTRA_GUARD_TELEGRAM_COOLDOWN_MIN" in code,
+    )
+    test(
+        "v10.6.40: archivo de estado del guard definido",
+        'SL_INTRA_GUARD_STATE_FILE = _data_path("sl_intra_guard_audit.json")' in code,
+    )
+    test(
+        "v10.6.40: helpers load/save/should_skip definidos",
+        "def load_sl_intra_guard_state(" in code
+        and "def save_sl_intra_guard_state(" in code
+        and "def _sl_intra_guard_should_skip(" in code,
+    )
+    test(
+        "v10.6.40: intra_cycle_sl_check aplica el guard antes del SL_intra",
+        "_guard_skip_sl = (" in code
+        and "_sl_intra_guard_should_skip(_guard_condition, _guard_days_ahead)" in code
+        and "[GUARD SL_intra] skip" in code,
+    )
+    test(
+        "v10.6.40: maybe_run_sl_intra_guard_review definida",
+        "def maybe_run_sl_intra_guard_review(" in code,
+    )
+    test(
+        "v10.6.40: review del guard integrada en run_observability_alerts",
+        "maybe_run_sl_intra_guard_review(state)" in code,
+    )
+
+    # ---- v10.6.30: Dallas al whitelist (BOT_VERSION assertion movida a v10.6.40 bump) ----
     test(
         "v10.6.30: whitelist default incluye Dallas",
         "Busan,Dallas" in code,
