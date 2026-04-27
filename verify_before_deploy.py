@@ -5297,7 +5297,7 @@ def run_tests():
                 except Exception:
                     pass
 
-    test("Version v10.6.42", 'BOT_VERSION = "v10.6.42"' in code)
+    test("Version v10.6.43", 'BOT_VERSION = "v10.6.43"' in code)
 
     # ---- v10.6.15: Quality-trader canary exact/range ----
     test(
@@ -6679,6 +6679,43 @@ def run_tests():
     test(
         "fase0.5: phase1_readiness_check busca polymarket.db por defecto",
         "polymarket.db" in readiness_code,
+    )
+
+    # ---- v10.6.43: Fase 0.6 — Recorder Health Alerts ----
+    print("  Checks v10.6.43 Fase 0.6: Recorder Health Alerts")
+
+    test(
+        "v10.6.43: RECORDER_HEALTH_ALERTS_ENABLED definido con default 0",
+        'RECORDER_HEALTH_ALERTS_ENABLED = os.getenv("RECORDER_HEALTH_ALERTS_ENABLED", "0")' in code,
+    )
+    test(
+        "v10.6.43: PHASE1_READINESS_SCRIPT definido en bot.py",
+        "PHASE1_READINESS_SCRIPT" in code and "phase1_readiness_check.py" in code,
+    )
+    test(
+        "v10.6.43: maybe_run_recorder_health_alert definida en bot.py",
+        "def maybe_run_recorder_health_alert(" in code,
+    )
+    test(
+        "v10.6.43: hook recorder health en run_observability_alerts protegido por try/except",
+        "maybe_run_recorder_health_alert(state)" in code
+        and "recorder health alert: fallo" in code,
+    )
+    test(
+        "v10.6.43: alerta readiness one-shot usa milestones",
+        "sqlite_recorder_phase1_ready" in code,
+    )
+    test(
+        "v10.6.43: alerta stale limitada a 1/dia con recorder_stale_last_alert_date",
+        "recorder_stale_last_alert_date" in code,
+    )
+    test(
+        "v10.6.43: recorder health alert guarded por RECORDER_HEALTH_ALERTS_ENABLED",
+        "if not RECORDER_HEALTH_ALERTS_ENABLED" in code,
+    )
+    test(
+        "v10.6.43: recorder health usa subprocess con timeout",
+        "PHASE1_READINESS_SCRIPT" in code and "timeout=15" in code,
     )
 
     # ---- Resultado ----

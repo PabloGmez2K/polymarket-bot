@@ -109,7 +109,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.42"
+BOT_VERSION = "v10.6.43"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -164,6 +164,8 @@ POST_INTRA_SL_COOLDOWN_REVIEW_ENABLED = os.getenv("POST_INTRA_SL_COOLDOWN_REVIEW
 POST_INTRA_SL_COOLDOWN_REVIEW_MIN_CLOSED = int(os.getenv("POST_INTRA_SL_COOLDOWN_REVIEW_MIN_CLOSED", "10"))
 # v10.6.42: SQLite Recorder (Fase 0) — default OFF hasta validación en Railway
 SQLITE_RECORDER_ENABLED = os.getenv("SQLITE_RECORDER_ENABLED", "0").lower() in ("1", "true", "yes", "on")
+# v10.6.43: Recorder Health Alerts (Fase 0.6) — default OFF, activar tras validación inicial
+RECORDER_HEALTH_ALERTS_ENABLED = os.getenv("RECORDER_HEALTH_ALERTS_ENABLED", "0").lower() in ("1", "true", "yes", "on")
 # Cutoff de stats por ciudad: "Dallas=2026-04-06,Chicago=2026-03-01"
 # Trades cerrados ANTES de la fecha indicada se ignoran en get_city_accuracy().
 CITY_STATS_CUTOFF: dict[str, str] = {}
@@ -614,6 +616,11 @@ known_tokens = {}
 PERFORMANCE_FILE = _data_path("performance.json")
 CYCLE_SUMMARY_FILE = _data_path("cycle_summary.json")
 SQLITE_DB_PATH = os.getenv("SQLITE_DB_PATH", _data_path("polymarket.db"))
+PHASE1_READINESS_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "tools",
+    "phase1_readiness_check.py",
+)
 CYCLES_HISTORY_FILE = _data_path("cycles_history.jsonl")
 POSTMORTEM_FILE = _data_path("postmortem.json")
 TRADE_LIFECYCLE_FILE = _data_path("trade_lifecycle.json")
@@ -1026,6 +1033,8 @@ def load_alerts_state():
         "post_intra_sl_cooldown_review": {},
         # v10.6.37: auto-close de posiciones expiradas sin evidencia (daily)
         "legacy_cleanup_last_run": None,
+        # v10.6.43: Recorder Health Alerts — fecha YYYY-MM-DD del último stale alert
+        "recorder_stale_last_alert_date": None,
     }
     if not os.path.exists(ALERTS_FILE):
         return default
@@ -3989,6 +3998,83 @@ def get_city_policy_metrics(audit=None):
     return cities
 
 
+def maybe_run_recorder_health_alert(state: dict) -> bool:
+    """Fase 0.6: alerta Telegram para salud del SQLite Recorder.
+
+    Tipo A — readiness (one-shot): avisa cuando phase1_readiness_check devuelve exit 0.
+    Tipo B — stale (1/día): avisa si el recorder lleva >30h sin escribir.
+
+    Retorna True si el state fue modificado. Completamente fail-safe.
+    """
+    if not RECORDER_HEALTH_ALERTS_ENABLED:
+        return False
+    if not SQLITE_RECORDER_ENABLED:
+        return False
+    if not os.path.exists(PHASE1_READINESS_SCRIPT):
+        log.warning("recorder health: tools/phase1_readiness_check.py no encontrado")
+        return False
+
+    try:
+        result = subprocess.run(
+            [sys.executable, PHASE1_READINESS_SCRIPT, "--db", SQLITE_DB_PATH, "--json"],
+            capture_output=True, text=True, timeout=15, check=False,
+        )
+        raw = result.stdout.strip()
+        if not raw:
+            return False
+        data = json.loads(raw)
+    except Exception as e:
+        log.warning(f"recorder health: error llamando readiness check ({e})")
+        return False
+
+    now_utc = datetime.now(timezone.utc)
+    today = now_utc.strftime("%Y-%m-%d")
+    milestones = state.setdefault("milestones", {})
+    changed = False
+
+    readiness = data.get("readiness", {})
+    cycle_info = data.get("cycle_events", {})
+    market_info = data.get("market_snapshots", {})
+    forecast_info = data.get("forecast_snapshots", {})
+    freshness = data.get("freshness", {})
+
+    # Tipo A — readiness alcanzada (one-shot, nunca se repite)
+    if readiness.get("ready"):
+        milestone_key = "sqlite_recorder_phase1_ready"
+        if milestone_key not in milestones:
+            hours_ago = freshness.get("hours_ago")
+            freshness_str = f"{hours_ago:.1f}h" if hours_ago is not None else "?"
+            send_telegram(
+                f"✅ <b>SQLite Recorder listo para Fase 1</b>\n"
+                f"Ciclos: {cycle_info.get('total', '?')}\n"
+                f"Días: {cycle_info.get('days_span', '?')}\n"
+                f"Market snapshots: {market_info.get('total', '?')}\n"
+                f"Forecast snapshots: {forecast_info.get('total', '?')}\n"
+                f"Última escritura: hace {freshness_str}\n"
+                f"ETA: completada\n\n"
+                f"Puedes pedir diseño de Fase 1: Truth Pipeline."
+            )
+            milestones[milestone_key] = {"sent_at": now_utc.isoformat()}
+            changed = True
+
+    # Tipo B — recorder stale (máximo 1 alerta por día)
+    if freshness.get("is_stale") and state.get("recorder_stale_last_alert_date") != today:
+        hours_ago = freshness.get("hours_ago") or 0
+        send_telegram(
+            f"⚠️ <b>SQLite Recorder sin datos recientes</b>\n"
+            f"Última escritura: hace {hours_ago:.1f}h\n"
+            f"Threshold: {freshness.get('stale_threshold_hours', 30)}h\n\n"
+            f"Verificar:\n"
+            f"- SQLITE_RECORDER_ENABLED=1\n"
+            f"- SQLITE_DB_PATH=/app/data/polymarket.db\n"
+            f"- logs del último ciclo"
+        )
+        state["recorder_stale_last_alert_date"] = today
+        changed = True
+
+    return changed
+
+
 def run_observability_alerts():
     """
     Alertas one-shot de observabilidad y review readiness.
@@ -4584,6 +4670,15 @@ def run_observability_alerts():
         logger = globals().get("log")
         if logger:
             logger.warning(f"daily briefing: fallo ({e})")
+
+    # v10.6.43: Recorder Health Alerts (Fase 0.6)
+    try:
+        if maybe_run_recorder_health_alert(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"recorder health alert: fallo ({e})")
 
     if changed:
         save_alerts_state(state)
