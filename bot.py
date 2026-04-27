@@ -25,6 +25,7 @@ from waitress import serve
 load_dotenv()
 
 # =============================================================
+# bot.py v10.6.42 — SQLite Recorder Fase 0: persistencia pasiva fail-safe (sesion 257, 2026-04-27)
 # bot.py v10.6.41 — Fill-real reconciliation para SELL por order_id + anti-flapping guard legacy (sesion 255, 2026-04-27)
 # bot.py v10.6.40 — Guard SL_intra para condition=exact + days<=1 (Opus, sesion 246, 2026-04-26)
 # bot.py v10.6.30 — Dallas al whitelist: degradacion inflada por ghost-position bug (v10.5.12)
@@ -108,7 +109,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.41"
+BOT_VERSION = "v10.6.42"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -161,6 +162,8 @@ PNL_RECONCILIATION_ENABLED = os.getenv("PNL_RECONCILIATION_ENABLED", "1").lower(
 PNL_RECONCILIATION_HOUR_UTC = int(os.getenv("PNL_RECONCILIATION_HOUR_UTC", str(DAILY_BRIEFING_HOUR_UTC)))
 POST_INTRA_SL_COOLDOWN_REVIEW_ENABLED = os.getenv("POST_INTRA_SL_COOLDOWN_REVIEW_ENABLED", "1").lower() in ("1", "true", "yes", "on")
 POST_INTRA_SL_COOLDOWN_REVIEW_MIN_CLOSED = int(os.getenv("POST_INTRA_SL_COOLDOWN_REVIEW_MIN_CLOSED", "10"))
+# v10.6.42: SQLite Recorder (Fase 0) — default OFF hasta validación en Railway
+SQLITE_RECORDER_ENABLED = os.getenv("SQLITE_RECORDER_ENABLED", "0").lower() in ("1", "true", "yes", "on")
 # Cutoff de stats por ciudad: "Dallas=2026-04-06,Chicago=2026-03-01"
 # Trades cerrados ANTES de la fecha indicada se ignoran en get_city_accuracy().
 CITY_STATS_CUTOFF: dict[str, str] = {}
@@ -610,6 +613,7 @@ known_tokens = {}
 
 PERFORMANCE_FILE = _data_path("performance.json")
 CYCLE_SUMMARY_FILE = _data_path("cycle_summary.json")
+SQLITE_DB_PATH = os.getenv("SQLITE_DB_PATH", _data_path("polymarket.db"))
 CYCLES_HISTORY_FILE = _data_path("cycles_history.jsonl")
 POSTMORTEM_FILE = _data_path("postmortem.json")
 TRADE_LIFECYCLE_FILE = _data_path("trade_lifecycle.json")
@@ -18788,6 +18792,17 @@ def main(client):
         log.info("cycle_summary guardado OK")
     except Exception as e:
         log.warning(f"Error guardando cycle_summary: {e}")
+
+    # --- v10.6.42: SQLite Recorder (Fase 0 — aditivo, fail-safe, no afecta trading) ---
+    if SQLITE_RECORDER_ENABLED:
+        try:
+            import sqlite_recorder as _sr
+            _sr.SQLiteRecorder(SQLITE_DB_PATH).record_cycle(cycle_data)
+            log.info("SQLiteRecorder: ciclo persistido OK")
+        except NameError:
+            log.warning("SQLiteRecorder: cycle_data no disponible (ciclo abortado antes)")
+        except Exception as _sqlite_err:
+            log.warning(f"SQLiteRecorder: error no critico (ciclo continua): {_sqlite_err}")
 
     try:
         run_observability_alerts()

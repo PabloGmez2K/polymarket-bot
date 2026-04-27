@@ -5297,7 +5297,7 @@ def run_tests():
                 except Exception:
                     pass
 
-    test("Version v10.6.40", 'BOT_VERSION = "v10.6.40"' in code)
+    test("Version v10.6.42", 'BOT_VERSION = "v10.6.42"' in code)
 
     # ---- v10.6.15: Quality-trader canary exact/range ----
     test(
@@ -5992,8 +5992,9 @@ def run_tests():
 
     # ---- v10.6.40: guard SL_intra para condition=exact + days<=N (Opus, sesion 246) ----
     test(
-        "v10.6.40: BOT_VERSION bumped a v10.6.40",
-        'BOT_VERSION = "v10.6.40"' in code,
+        "v10.6.40: guard sigue presente tras bumps posteriores",
+        "SL_INTRA_GUARD_EXACT_NEAR_RESOLUTION" in code
+        and "maybe_run_sl_intra_guard_review" in code,
     )
     test(
         "v10.6.40: env vars del guard SL_intra definidas",
@@ -6025,6 +6026,31 @@ def run_tests():
     test(
         "v10.6.40: review del guard integrada en run_observability_alerts",
         "maybe_run_sl_intra_guard_review(state)" in code,
+    )
+
+    # ---- v10.6.41: fill real para ventas confirmadas ----
+    test(
+        "v10.6.41: TradeParams importado para lookup de fills",
+        "TradeParams" in code and "client.get_trades(TradeParams" in code,
+    )
+    test(
+        "v10.6.41: helpers de fill por order_id definidos",
+        "def _fetch_sell_fill_summary(" in code
+        and "def _extract_fill_summary_from_trades(" in code
+        and "def _enrich_pending_sell_with_fill(" in code,
+    )
+    test(
+        "v10.6.41: SELL confirmado usa fill_price/fill_value si existen",
+        'entry["limit_price"] = entry.get("limit_price", entry.get("price"))' in code
+        and 'entry["fill_price"]' in code
+        and 'entry["fill_value"]' in code
+        and 'entry["return_est"] = round(fill_value, 2)' in code,
+    )
+    test(
+        "v10.6.41: Telegram intra-SL aclara precio limite vs real",
+        "[INTRA-SL]" in code
+        and "precio límite" in code
+        and "precio real puede diferir" in code,
     )
 
     # ---- v10.6.30: Dallas al whitelist (BOT_VERSION assertion movida a v10.6.40 bump) ----
@@ -6538,6 +6564,83 @@ def run_tests():
     test(
         "v10.6.31: effective_tp_pct devuelve max(base, TP_HIGH_PRICE_PCT)",
         "max(base, TP_HIGH_PRICE_PCT)" in code,
+    )
+
+    # ---- v10.6.42: SQLite Recorder Fase 0 ----
+    print("  Checks v10.6.42 SQLite Recorder (Fase 0)")
+
+    # 1. El modulo recorder existe en la raiz
+    recorder_path = os.path.join(os.path.dirname(__file__), "sqlite_recorder.py")
+    recorder_code = ""
+    if os.path.exists(recorder_path):
+        with open(recorder_path, "r", encoding="utf-8") as f:
+            recorder_code = f.read()
+    test(
+        "v10.6.42: sqlite_recorder.py existe en la raiz",
+        os.path.exists(recorder_path),
+    )
+
+    # 2. El modulo es importable y tiene la clase SQLiteRecorder
+    test(
+        "v10.6.42: SQLiteRecorder definida en sqlite_recorder.py",
+        "class SQLiteRecorder" in recorder_code,
+    )
+
+    # 3. record_cycle definido
+    test(
+        "v10.6.42: SQLiteRecorder.record_cycle definido",
+        "def record_cycle(" in recorder_code,
+    )
+
+    # 4. Las tres tablas minimas estan en el schema
+    test(
+        "v10.6.42: schema incluye cycle_events, market_snapshots, forecast_snapshots",
+        "cycle_events" in recorder_code
+        and "market_snapshots" in recorder_code
+        and "forecast_snapshots" in recorder_code,
+    )
+
+    # 5. Flag SQLITE_RECORDER_ENABLED definido con default "0" (OFF por defecto)
+    test(
+        "v10.6.42: SQLITE_RECORDER_ENABLED definido con default 0 en bot.py",
+        'SQLITE_RECORDER_ENABLED = os.getenv("SQLITE_RECORDER_ENABLED", "0")' in code,
+    )
+
+    # 6. SQLITE_DB_PATH definido usando _data_path
+    test(
+        "v10.6.42: SQLITE_DB_PATH usa _data_path en bot.py",
+        "SQLITE_DB_PATH" in code and "_data_path(" in code and "polymarket.db" in code,
+    )
+
+    # 7. El hook en main() esta protegido por try/except y usa el flag SQLITE_RECORDER_ENABLED
+    test(
+        "v10.6.42: hook recorder en main() protegido por SQLITE_RECORDER_ENABLED y try/except",
+        "if SQLITE_RECORDER_ENABLED:" in code
+        and "import sqlite_recorder as _sr" in code
+        and "SQLiteRecorder(SQLITE_DB_PATH).record_cycle(cycle_data)" in code,
+    )
+
+    # 8. El except del hook NO relanza la excepcion (no puede cortar el ciclo)
+    test(
+        "v10.6.42: hook recorder captura excepcion sin relanzar (ciclo continua)",
+        "SQLiteRecorder: error no critico (ciclo continua)" in code,
+    )
+
+    # 9. data/polymarket.db esta excluida de git
+    gitignore_path = os.path.join(os.path.dirname(__file__), ".gitignore")
+    gitignore_content = ""
+    if os.path.exists(gitignore_path):
+        with open(gitignore_path, "r", encoding="utf-8") as f:
+            gitignore_content = f.read()
+    test(
+        "v10.6.42: *.db excluido en .gitignore",
+        "*.db" in gitignore_content,
+    )
+
+    # 10. WAL mode activado en el schema
+    test(
+        "v10.6.42: WAL mode activado en sqlite_recorder",
+        "journal_mode=WAL" in recorder_code,
     )
 
     # ---- Resultado ----
