@@ -6643,6 +6643,44 @@ def run_tests():
         "journal_mode=WAL" in recorder_code,
     )
 
+    # ---- v10.6.42: Fase 0.5 — phase1_readiness_check.py ----
+    print("  Checks Fase 0.5: tools/phase1_readiness_check.py")
+
+    readiness_path = os.path.join(os.path.dirname(__file__), "tools", "phase1_readiness_check.py")
+    readiness_code = ""
+    if os.path.exists(readiness_path):
+        with open(readiness_path, "r", encoding="utf-8") as f:
+            readiness_code = f.read()
+
+    test(
+        "fase0.5: tools/phase1_readiness_check.py existe",
+        os.path.exists(readiness_path),
+    )
+    test(
+        "fase0.5: phase1_readiness_check tiene funcion run()",
+        "def run(" in readiness_code,
+    )
+    test(
+        "fase0.5: phase1_readiness_check tiene argumentos min-days y min-cycles",
+        "--min-days" in readiness_code and "--min-cycles" in readiness_code,
+    )
+    test(
+        "fase0.5: phase1_readiness_check define exit codes 0/1/2/3",
+        ("return 0" in readiness_code or "return 0 if" in readiness_code)
+        and ("return 1" in readiness_code or "else 1" in readiness_code)
+        and "return 2" in readiness_code
+        and "return 3" in readiness_code,
+    )
+    test(
+        "fase0.5: phase1_readiness_check no importa modulos externos",
+        "import requests" not in readiness_code
+        and "import bot" not in readiness_code,
+    )
+    test(
+        "fase0.5: phase1_readiness_check busca polymarket.db por defecto",
+        "polymarket.db" in readiness_code,
+    )
+
     # ---- Resultado ----
     print(f"\n{'='*50}")
     total = passed + failed
