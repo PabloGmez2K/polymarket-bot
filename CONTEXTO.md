@@ -3,8 +3,7 @@
 
 **Última actualización:** 27 de abril de 2026 (Sesión 258 - Fase 0.5/0.6 readiness check + Telegram health alerts v10.6.43, Sonnet)
 **Sesión 258 (27 abr 2026, Sonnet):** Cierre de Fase 0/0.5/0.6. Merge y deploy de `feature/sqlite-recorder-phase-0` a `main`. Primer ciclo real con `SQLITE_RECORDER_ENABLED=1` grabado correctamente: 1 ciclo REAL, 5 ciudades (Dallas, London, Lucknow, Paris, Seoul), exit_code=1 (esperando más datos, ETA 2026-05-04). Implementado `tools/phase1_readiness_check.py` (Fase 0.5): script stdlib-only, exit codes 0/1/2/3, 6 criterios de readiness, output JSON. Implementado `maybe_run_recorder_health_alert()` (Fase 0.6): alerta Telegram Tipo A (readiness one-shot via `milestones["sqlite_recorder_phase1_ready"]`) + Tipo B (stale 1/día via `recorder_stale_last_alert_date`). Nueva variable `RECORDER_HEALTH_ALERTS_ENABLED=0` (default off). Constante `PHASE1_READINESS_SCRIPT` apunta a `tools/phase1_readiness_check.py`. Hook en `run_observability_alerts()` protegido por try/except. 8 nuevos checks en `verify_before_deploy.py`. Total: **883/883**. No se toca trading core, NOAA, city modes, sigma, bankroll ni lógica de compra/venta.
-- **Variables Railway activas:** `SQLITE_RECORDER_ENABLED=1`, `SQLITE_DB_PATH=/app/data/polymarket.db`
-- **Variables Railway pendientes (activar cuando queramos alertas):** `RECORDER_HEALTH_ALERTS_ENABLED=1`
+- **Variables Railway activas:** `SQLITE_RECORDER_ENABLED=1`, `SQLITE_DB_PATH=/app/data/polymarket.db`, `RECORDER_HEALTH_ALERTS_ENABLED=1`
 - **ETA Fase 1 (Truth Pipeline):** 2026-05-04 si el recorder sigue activo y sin gaps
 - **Criterio go/no-go Fase 1:** `python tools/phase1_readiness_check.py --db /app/data/polymarket.db` → exit_code=0
 
