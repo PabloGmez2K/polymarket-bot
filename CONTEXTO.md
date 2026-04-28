@@ -2225,3 +2225,12 @@ git push
 - **SL retrospectiva:** RIGHT=5, WRONG=8, UNKNOWN=10 (23 total). WRONG dobla a RIGHT; veredicto `seguir monitorizando`. `maybe_run_sl_retrospective(state)` corre diariamente y envía Telegram automáticamente.
 - **SL retro split por tipo:** `tools/sl_retrospective.py` añade `_summarize_type()` y muestra en el Telegram el desglose separado entre `stop_loss` (ciclo principal) y `stop_loss_intra` (intra-ciclo), para poder evaluar cada mecanismo de forma independiente.
 - `verify_before_deploy.py` → **847/847**.
+
+**Última actualización:** 28 de abril de 2026 (Sesión 259/260 — auditoría blocked signals + Warsaw observación pasiva)
+**Sesión 259 (28 abr 2026, Sonnet):** auditoría read-only de alerta ACTION `blocked signals fuera de whitelist` (105 resueltas, 104W, WR 99%). Top 4 fuera de whitelist: Lucknow 19, Warsaw 17, Beijing 17, Chongqing 17. Confirmado split correcto `bot.py:8441-8442`. Warsaw flaggeada como candidata prioritaria para observación.
+**Sesión 260 (28 abr 2026, Sonnet):** Warsaw confirmada con SSH a Railway. Añadida a `OBSERVED_AUDIT_CITIES`.
+- **Warsaw Railway confirmado:** n=17, WR=100%, 5 traders (Dimpled-Boy×6, Thrifty-Original×4, Entire-Hood×3, Jubilant-Spending×2, Pricey-Score×2), 8/17 has_consensus, exact×17, avg_price=0.677, fechas 2026-04-13..2026-04-21 repartidas.
+- **Cambio:** `Warsaw` añadida a `OBSERVED_AUDIT_CITIES` en `bot.py`. Efecto: observación pasiva de mercados Warsaw en cada ciclo (scanned_markets ledger). Sin compras, sin whitelist, sin canary/active, sin cambio de trading core.
+- **Guardrail anti-auto-canary:** `_city_requires_manual_proxy_canary_review()` retorna True para Warsaw (ICAO-only, sin noaa_station_id) → bloquea auto-promoción.
+- **Guardrail documental (OBJETIVO B):** advertencia añadida al docstring de `tools/blocked_signals_settlement_tracker.py` explicando que su output local es parcial y NO equivale al archivo Railway canónico. Causa de la contradicción: el archivo local y Railway capturan subconjuntos distintos de señales (distintas temperaturas por ciclo operativo vs. snapshot local).
+- **Bloqueadores pendientes Warsaw:** no en whitelist, no en canary/active, falta settlement fidelity formal, falta city_validation_ledger, falta city_promotion_gate, faltan campos schema (market_id, edge_pct, resolution_source, settlement_source, city_mode_at_record_time).

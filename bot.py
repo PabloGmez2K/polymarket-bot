@@ -13697,6 +13697,7 @@ OBSERVED_AUDIT_CITIES = {
     "Busan",
     "Tel Aviv",
     "Tokyo",
+    "Warsaw",
     "Wellington",
 }
 

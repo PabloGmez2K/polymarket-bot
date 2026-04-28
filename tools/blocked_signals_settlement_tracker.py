@@ -8,11 +8,22 @@ that are blocked by the condition_filtered policy in bot.py.
 Purpose: provide empirical data to decide whether condition_filtered should
 be reopened. Does NOT touch bot.py, trading config, or Railway env vars.
 
+ADVERTENCIA — fuente no canónica:
+    La salida local (runtime_import_derived/blocked_signals_resolutions.jsonl)
+    es un derivado basado en el snapshot local de signals.json. NO equivale al
+    archivo de producción en Railway (/app/data/blocked_signals_resolutions.jsonl).
+
+    El bot en Railway rastrea más señales (todos los ciclos operativos) y puede
+    capturar temperaturas/fechas distintas a las del snapshot local. Comparar WR
+    por ciudad entre ambas fuentes puede dar resultados contradictorios.
+
+    Fuente canónica: SSH Railway -> /app/data/blocked_signals_resolutions.jsonl
+
 Usage:
     python tools/blocked_signals_settlement_tracker.py
 
 Outputs:
-    data/runtime_import_derived/blocked_signals_resolutions.jsonl  (append-only)
+    data/runtime_import_derived/blocked_signals_resolutions.jsonl  (append-only, PARCIAL)
     docs/blocked-signals-wr-baseline-2026-04-13.md                 (overwritten)
 """
 

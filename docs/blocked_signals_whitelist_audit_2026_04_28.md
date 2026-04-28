@@ -143,11 +143,23 @@ El WR no es trivial (avg_price 0.64-0.77 = no son apuestas near-certain), pero t
 - Bankroll / MIN_EDGE / sigma / sizing
 - Reglas de entrada/salida
 
-**Warsaw** queda como candidata prioritaria para auditoría futura (no trading):
-- n=17, WR 100%, avg_price 0.677
-- Aparece en `signals_crosscheck_daily_summary_state.json` como `last_stable_trader_only`
-- ICAO EPWA conocido — requiere confirmar settlement fidelity en ledger local
-- No abrir a canary/active sin ese paso
+**Warsaw** — WR confirmada en Railway (Sesión 260). Añadida a `OBSERVED_AUDIT_CITIES`:
+- n=17, WR=100% (verificado en `/app/data/blocked_signals_resolutions.jsonl` Railway SSH)
+- 5 traders: Dimpled-Boy(6), Thrifty-Original(4), Entire-Hood(3), Jubilant-Spending(2), Pricey-Score(2)
+- 8/17 con has_consensus=True; 9/17 sin consenso
+- Condición: exact en 17/17
+- avg_price_entered=0.677 (min=0.2394, max=0.9199 — no trivial)
+- Fechas: 2026-04-13(3), 2026-04-14(7), 2026-04-16(1), 2026-04-17(2), 2026-04-18(1), 2026-04-20(2), 2026-04-21(1)
+- ICAO EPWA configurado; WU URL activa; ISD 12375099999 confirmado
+- Bloqueadores pendientes: no está en whitelist, no en canary/active, falta settlement fidelity,
+  falta city_validation_ledger, falta city_promotion_gate, falta observed coverage formal.
+- Estado: `OBSERVED_AUDIT_CITIES` only — solo auditoría/ledger pasivo, sin compras ni exposición.
+
+**Nota sobre contradicción local vs Railway:** el archivo `runtime_import_derived/blocked_signals_resolutions.jsonl`
+(local, parcial) mostraba Warsaw 4 entradas / 2W / 2L = WR 50%. Esto NO es el archivo canónico.
+El archivo canónico es `/app/data/blocked_signals_resolutions.jsonl` en Railway.
+Las diferencias se deben a que ambos archivos capturan subconjuntos distintos de señales (distintas
+temperaturas y fechas de los ciclos). Ver advertencia en `tools/blocked_signals_settlement_tracker.py`.
 
 **Lucknow, Beijing, Chongqing:** muestra sólida (17-19 señales) pero sin settlement local verificado. Beijing ya está en ICAO-only audit (`OBSERVED_AUDIT_CITIES`). Lucknow también. Chongqing sin infraestructura.
 
