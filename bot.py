@@ -109,7 +109,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.43"
+BOT_VERSION = "v10.6.44"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -8294,6 +8294,121 @@ def maybe_run_daily_briefing(state):
     return True
 
 
+def _classify_city_bucket(city: str) -> str:
+    try:
+        if is_city_blocked(city):
+            return "BLOCKED"
+        if city in ACTIVE_TRADING_CITIES:
+            return "ACTIVE"
+        if city in CANARY_TRADING_CITIES:
+            return "CANARY"
+        if city in OBSERVED_AUDIT_CITIES:
+            return "OBSERVED_AUDIT"
+        if get_effective_city_mode(city) == "shadow":
+            return "SHADOW"
+        return "UNTRACKED"
+    except Exception:
+        return "unknown"
+
+
+def _resolve_observed_coverage_status(city: str) -> str:
+    try:
+        icao_meta = RESOLUTION_ICAO.get(city, {}) if isinstance(RESOLUTION_ICAO, dict) else {}
+        if icao_meta.get("noaa_station_id"):
+            return "noaa_configured"
+        if icao_meta.get("icao") or (isinstance(RESOLUTION_STATIONS, dict) and city in RESOLUTION_STATIONS):
+            return "icao_only"
+        if city in OBSERVED_AUDIT_CITIES:
+            return "open_meteo_proxy_only"
+        return "no_local_station"
+    except Exception:
+        return "unknown"
+
+
+def _build_blocked_signal_canonical_id(signal: dict, outcome: str) -> str:
+    try:
+        city = signal.get("city", "")
+        date_str = signal.get("date", "")
+        condition = signal.get("condition", "")
+        trader = signal.get("trader", "")
+        unit = signal.get("unit", "")
+        low = signal.get("low") if signal.get("low") is not None else signal.get("threshold_low")
+        high = signal.get("high") if signal.get("high") is not None else signal.get("threshold_high")
+        value = signal.get("value") if signal.get("value") is not None else signal.get("threshold")
+        if condition == "range" and low is not None and high is not None:
+            threshold_part = f"{low}-{high}"
+        elif condition in {"exact", "at_or_above", "at_or_below"} and value is not None:
+            threshold_part = str(value)
+        else:
+            mk = signal.get("match_key", "")
+            return f"{mk}|{outcome}|{trader}"
+        return f"{city}|{date_str}|{condition}|{threshold_part}|{unit}|{outcome}|{trader}"
+    except Exception:
+        mk = signal.get("match_key", "") if isinstance(signal, dict) else ""
+        tr = signal.get("trader", "") if isinstance(signal, dict) else ""
+        return f"{mk}|{outcome}|{tr}"
+
+
+def _price_bucket(price) -> str:
+    try:
+        if price is None:
+            return "unknown"
+        p = float(price)
+        if p < 0.2:
+            return "<0.2"
+        if p < 0.4:
+            return "0.2-0.4"
+        if p < 0.6:
+            return "0.4-0.6"
+        if p < 0.8:
+            return "0.6-0.8"
+        return ">0.8"
+    except Exception:
+        return "unknown"
+
+
+def _extract_token_id(market: dict, index: int):
+    try:
+        raw = market.get("clobTokenIds")
+        if raw is None:
+            return None
+        tokens = json.loads(raw) if isinstance(raw, str) else raw
+        if isinstance(tokens, list) and index < len(tokens):
+            return tokens[index]
+        return None
+    except Exception:
+        return None
+
+
+def _resolve_blocked_reason(city: str, condition=None) -> tuple:
+    """Returns (reason_blocked, detail). reason_blocked enum: out_of_whitelist, blocked_city, shadow_only_mode, condition_filtered, settlement_risk, mixed, unknown."""
+    try:
+        reasons = []
+        if is_city_blocked(city):
+            reasons.append("blocked_city")
+        if os.getenv("SHADOW_ONLY_MODE", "").strip().lower() in {"true", "1", "yes"}:
+            reasons.append("shadow_only_mode")
+        if city not in QUALITY_TRADER_CITIES_WHITELIST:
+            reasons.append("out_of_whitelist")
+        if condition is not None and str(condition).lower() not in ALLOWED_CONDITIONS:
+            reasons.append("condition_filtered")
+        if not reasons:
+            return ("unknown", "")
+        if len(reasons) == 1:
+            r = reasons[0]
+            if r == "blocked_city":
+                return ("blocked_city", "city in BLOCKED_CITIES")
+            if r == "shadow_only_mode":
+                return ("shadow_only_mode", "SHADOW_ONLY_MODE=1 at record time")
+            if r == "out_of_whitelist":
+                return ("out_of_whitelist", "city not in QUALITY_TRADER_CITIES_WHITELIST")
+            if r == "condition_filtered":
+                return ("condition_filtered", f"condition={condition} fuera de ALLOWED_CONDITIONS")
+        return ("mixed", "+".join(reasons))
+    except Exception:
+        return ("unknown", "")
+
+
 def maybe_run_blocked_signals_check(state, now=None):
     """
     v10.6.13: mide diariamente la WR de señales exact/range bloqueadas por
@@ -8335,7 +8450,11 @@ def maybe_run_blocked_signals_check(state, now=None):
             return True
 
         # --- Cargar claves ya procesadas ---
-        existing_keys = set()
+        # v10.6.44: dedupe acepta canonical_signal_id (v2) y match_key (v1 fallback).
+        # Registros v1 existentes bloquean re-insercion por match_key.
+        # Registros nuevos usan canonical_signal_id mas granular, permitiendo
+        # capturar multiples traders por mismo match_key v1.
+        existing_canonical_ids = set()
         if os.path.exists(BLOCKED_SIGNALS_FILE):
             try:
                 with open(BLOCKED_SIGNALS_FILE, "r", encoding="utf-8") as f:
@@ -8343,11 +8462,18 @@ def maybe_run_blocked_signals_check(state, now=None):
                         line = line.strip()
                         if line:
                             rec = json.loads(line)
-                            existing_keys.add(rec.get("match_key", ""))
+                            canonical = rec.get("canonical_signal_id")
+                            if canonical:
+                                existing_canonical_ids.add(canonical)
+                            else:
+                                existing_canonical_ids.add(rec.get("match_key", ""))
             except Exception:
                 pass
 
-        new_candidates = [s for s in candidates if s.get("match_key", "") not in existing_keys]
+        new_candidates = [
+            s for s in candidates
+            if _build_blocked_signal_canonical_id(s, s.get("outcome", "")) not in existing_canonical_ids
+        ]
 
         if new_candidates:
             # --- Fetch mercados cerrados (últimas 3 páginas = ~300 eventos = ~1 semana) ---
@@ -8399,12 +8525,18 @@ def maybe_run_blocked_signals_check(state, now=None):
                 else:
                     win = False
 
+                city = signal.get("city", "")
+                condition = signal.get("condition", "")
+                reason_blocked, block_reason_detail = _resolve_blocked_reason(city, condition)
+                canonical_signal_id = _build_blocked_signal_canonical_id(signal, outcome)
                 new_records.append({
+                    "schema_version": 2,
+                    "canonical_signal_id": canonical_signal_id,
                     "checked_at": now.isoformat(),
                     "match_key": signal.get("match_key", ""),
-                    "city": signal.get("city", ""),
+                    "city": city,
                     "date": signal.get("date", ""),
-                    "condition": signal.get("condition", ""),
+                    "condition": condition,
                     "trader": signal.get("trader", ""),
                     "trader_historical_wr": signal.get("trader_win_rate", 0),
                     "outcome": outcome,
@@ -8413,6 +8545,24 @@ def maybe_run_blocked_signals_check(state, now=None):
                     "resolved": resolved,
                     "win_for_trader": bool(win and resolved),
                     "has_consensus": signal.get("has_consensus", False),
+                    "market_id": market.get("id") or None,
+                    "condition_id": market.get("conditionId") or None,
+                    "token_id_yes": _extract_token_id(market, 0),
+                    "token_id_no": _extract_token_id(market, 1),
+                    "market_slug": market.get("slug") or None,
+                    "city_mode_at_record_time": get_effective_city_mode(city) or "unknown",
+                    "whitelist_status_at_record_time": "in" if city in QUALITY_TRADER_CITIES_WHITELIST else "out",
+                    "city_policy_status_at_record_time": _classify_city_bucket(city),
+                    "reason_blocked": reason_blocked,
+                    "block_reason_detail": block_reason_detail,
+                    "resolution_source": "polymarket_market_price",
+                    "observed_coverage_status": _resolve_observed_coverage_status(city),
+                    "settlement_source": "unknown",
+                    "settlement_fidelity_status": "unverified",
+                    "bot_edge_pct_at_signal": None,
+                    "bot_would_have_bought": None,
+                    "bot_evaluation_source": "unknown",
+                    "price_bucket": _price_bucket(signal.get("avg_price", 0)),
                 })
 
             if new_records:

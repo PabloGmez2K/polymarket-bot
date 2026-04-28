@@ -3639,3 +3639,39 @@ La operación fue buena, pero el reporting era conservador/incorrecto: el bot mo
 ### Siguiente acción
 
 Deploy cuando convenga. En el próximo SELL confirmado, revisar que Telegram de confirmación muestre `$... reales @ $...` si CLOB devuelve trades por `order_id`; si no, quedará marcado como estimado y no bloqueará la reconciliación.
+
+## Sesión 261 — blocked_signals schema v2 Fase A (v10.6.44, 28 abr 2026)
+
+**Tipo:** Explícita | **Agente:** Sonnet | **Origen:** prompt-sonnet.md (diseño Opus sesión 260, memory `blocked_signals_v2_design_2026_04_28.md`).
+
+### Contexto
+
+Auditorías previas (sesiones 247, 259, 260) tuvieron que reconstruir manualmente `market_id`, `city_mode`, cobertura observada y fuente de resolución vía SSH. La Fase A elimina ese trabajo manual para futuras alertas, añadiendo logging enriquecido aditivo sin tocar lógica de trading.
+
+### Acciones
+
+- **6 helpers nuevos** añadidos en `bot.py` antes de `maybe_run_blocked_signals_check`:
+  - `_classify_city_bucket(city)`: bucket BLOCKED/ACTIVE/CANARY/OBSERVED_AUDIT/SHADOW/UNTRACKED
+  - `_resolve_observed_coverage_status(city)`: noaa_configured/icao_only/open_meteo_proxy_only/no_local_station
+  - `_build_blocked_signal_canonical_id(signal, outcome)`: ID determinista para dedupe fino
+  - `_price_bucket(price)`: bucket <0.2/0.2-0.4/0.4-0.6/0.6-0.8/>0.8
+  - `_extract_token_id(market, index)`: parsea clobTokenIds (str JSON o lista)
+  - `_resolve_blocked_reason(city, condition)`: enum reason_blocked cerrado con detalle
+- **Enriquecimiento del dict** de 13 campos v1 a 25 campos v2 (12 siempre disponibles + 5 null/unknown hasta Fase C).
+- **Dedupe mejorado**: `existing_canonical_ids` acepta `canonical_signal_id` (v2) y `match_key` fallback (v1). Permite capturar múltiples traders por mismo `match_key` v1.
+- **BOT_VERSION** bumpeado a `v10.6.44`.
+- **13 checks nuevos** en `verify_before_deploy.py` para v10.6.44.
+
+### NO implementado
+
+Fase B (`tools/blocked_signals_audit.py`), cambios en alerta Telegram diaria, backfill v1 existente, Fase C (cruce truth pipeline).
+
+### Verificación
+
+- `python tools/check_python_syntax.py bot.py verify_before_deploy.py` → OK
+- `python verify_before_deploy.py` → **896/896**
+- `rtk git diff --name-only` → solo `bot.py`, `verify_before_deploy.py` (más docs)
+
+### Siguiente acción
+
+Commit + push + deploy. Logs a revisar en Railway: primer ciclo del día siguiente que dispare `maybe_run_blocked_signals_check` — inspeccionar último registro JSONL con `tail -1 /app/data/blocked_signals_resolutions.jsonl` y confirmar `schema_version=2` con los 25 campos.

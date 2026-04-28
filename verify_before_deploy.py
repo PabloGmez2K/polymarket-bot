@@ -5297,7 +5297,7 @@ def run_tests():
                 except Exception:
                     pass
 
-    test("Version v10.6.43", 'BOT_VERSION = "v10.6.43"' in code)
+    test("Version v10.6.44", 'BOT_VERSION = "v10.6.44"' in code)
 
     # ---- v10.6.15: Quality-trader canary exact/range ----
     test(
@@ -6716,6 +6716,104 @@ def run_tests():
     test(
         "v10.6.43: recorder health usa subprocess con timeout",
         "PHASE1_READINESS_SCRIPT" in code and "timeout=15" in code,
+    )
+
+    # ---- v10.6.44: blocked_signals schema v2 (Fase A) ----
+    print("  Checks v10.6.44: blocked_signals schema v2 Fase A")
+
+    test(
+        "v10.6.44: schema_version=2 hardcoded en blocked_signals dict",
+        '"schema_version": 2,' in code,
+    )
+    test(
+        "v10.6.44: 14 campos v2 siempre-disponibles presentes en blocked_signals dict",
+        '"market_id"' in code
+        and '"condition_id"' in code
+        and '"token_id_yes"' in code
+        and '"token_id_no"' in code
+        and '"market_slug"' in code
+        and '"city_mode_at_record_time"' in code
+        and '"whitelist_status_at_record_time"' in code
+        and '"city_policy_status_at_record_time"' in code
+        and '"reason_blocked"' in code
+        and '"block_reason_detail"' in code
+        and '"resolution_source"' in code
+        and '"observed_coverage_status"' in code
+        and '"price_bucket"' in code
+        and '"canonical_signal_id"' in code,
+    )
+    test(
+        "v10.6.44: 5 campos v2 settlement/edge persistidos como null/unknown",
+        '"settlement_source": "unknown"' in code
+        and '"settlement_fidelity_status": "unverified"' in code
+        and '"bot_edge_pct_at_signal": None' in code
+        and '"bot_would_have_bought": None' in code
+        and '"bot_evaluation_source": "unknown"' in code,
+    )
+    test(
+        "v10.6.44: helper _classify_city_bucket presente con 6 buckets canonicos",
+        "def _classify_city_bucket(" in code
+        and '"BLOCKED"' in code
+        and '"ACTIVE"' in code
+        and '"CANARY"' in code
+        and '"OBSERVED_AUDIT"' in code
+        and '"SHADOW"' in code
+        and '"UNTRACKED"' in code,
+    )
+    test(
+        "v10.6.44: helper _resolve_observed_coverage_status presente con 4 estados",
+        "def _resolve_observed_coverage_status(" in code
+        and '"noaa_configured"' in code
+        and '"icao_only"' in code
+        and '"open_meteo_proxy_only"' in code
+        and '"no_local_station"' in code,
+    )
+    test(
+        "v10.6.44: helper _build_blocked_signal_canonical_id presente",
+        "def _build_blocked_signal_canonical_id(" in code,
+    )
+    test(
+        "v10.6.44: helper _price_bucket presente con 5 buckets",
+        "def _price_bucket(" in code
+        and '"<0.2"' in code
+        and '"0.2-0.4"' in code
+        and '"0.4-0.6"' in code
+        and '"0.6-0.8"' in code
+        and '">0.8"' in code,
+    )
+    test(
+        "v10.6.44: helper _extract_token_id presente y fail-safe",
+        "def _extract_token_id(" in code,
+    )
+    test(
+        "v10.6.44: helper _resolve_blocked_reason presente con enum cerrado",
+        "def _resolve_blocked_reason(" in code
+        and '"out_of_whitelist"' in code
+        and '"blocked_city"' in code
+        and '"shadow_only_mode"' in code
+        and '"condition_filtered"' in code
+        and "settlement_risk" in code
+        and '"mixed"' in code
+        and '"unknown"' in code,
+    )
+    test(
+        "v10.6.44: existing_canonical_ids dedupe acepta canonical_signal_id v2 y match_key v1",
+        "existing_canonical_ids" in code
+        and 'rec.get("canonical_signal_id")' in code
+        and 'rec.get("match_key", "")' in code,
+    )
+    test(
+        "v10.6.44: append blocked_signals sigue dentro de try/except fail-safe",
+        "blocked signals check: fallo" in code,
+    )
+    test(
+        "v10.6.44: no se modifican firmas de manage_positions e intra_cycle_sl_check",
+        "def manage_positions(client, dl):" in code
+        and "def intra_cycle_sl_check(client):" in code,
+    )
+    test(
+        "v10.6.44: BOT_VERSION bumpeado a v10.6.44",
+        'BOT_VERSION = "v10.6.44"' in code,
     )
 
     # ---- Resultado ----
