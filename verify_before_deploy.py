@@ -6816,6 +6816,90 @@ def run_tests():
         'BOT_VERSION = "v10.6.45"' in code,
     )
 
+    # ---- v10.6.46: Fase B1 — blocked_signals_audit.py ----
+    print("  Checks Fase B1: tools/blocked_signals_audit.py")
+
+    audit_tool_path = os.path.join(os.path.dirname(__file__), "tools", "blocked_signals_audit.py")
+    audit_tool_code = ""
+    audit_tool_compiles = False
+    audit_tool_compile_detail = ""
+    if os.path.exists(audit_tool_path):
+        with open(audit_tool_path, "r", encoding="utf-8") as _f:
+            audit_tool_code = _f.read()
+        try:
+            py_compile.compile(audit_tool_path, doraise=True)
+            audit_tool_compiles = True
+        except py_compile.PyCompileError as _exc:
+            audit_tool_compile_detail = str(_exc)
+
+    test(
+        "fase_b1: tools/blocked_signals_audit.py existe y compila",
+        os.path.exists(audit_tool_path) and audit_tool_compiles,
+        audit_tool_compile_detail,
+    )
+    test(
+        "fase_b1: blocked_signals_audit tiene función main()",
+        "def main(" in audit_tool_code,
+    )
+    test(
+        "fase_b1: blocked_signals_audit tiene argparse con todos los args requeridos",
+        "--source" in audit_tool_code
+        and "--days" in audit_tool_code
+        and "--json" in audit_tool_code
+        and "--markdown" in audit_tool_code
+        and "--out" in audit_tool_code
+        and "--top" in audit_tool_code,
+    )
+    test(
+        "fase_b1: blocked_signals_audit trata schema_version ausente como v1",
+        'setdefault("schema_version", 1)' in audit_tool_code,
+    )
+    test(
+        "fase_b1: blocked_signals_audit no importa bot.py directamente",
+        "\nimport bot\n" not in audit_tool_code
+        and "\nfrom bot import" not in audit_tool_code,
+    )
+    test(
+        "fase_b1: blocked_signals_audit no escribe archivos salvo con --out",
+        "args.out" in audit_tool_code
+        and "out_path.open" in audit_tool_code,
+    )
+    test(
+        "fase_b1: blocked_signals_audit no contiene llamadas a Telegram ni APIs externas",
+        "send_telegram" not in audit_tool_code
+        and "urllib.request" not in audit_tool_code
+        and "requests" not in audit_tool_code,
+    )
+    test(
+        "fase_b1: blocked_signals_audit usa solo stdlib (no dependencias externas)",
+        "import requests" not in audit_tool_code
+        and "import pandas" not in audit_tool_code
+        and "import numpy" not in audit_tool_code,
+    )
+    test(
+        "fase_b1: blocked_signals_audit implementa secciones A-G del reporte",
+        "def section_a(" in audit_tool_code
+        and "def section_b(" in audit_tool_code
+        and "def section_c(" in audit_tool_code
+        and "def section_d(" in audit_tool_code
+        and "def section_e(" in audit_tool_code
+        and "def section_f(" in audit_tool_code
+        and "def section_g(" in audit_tool_code,
+    )
+    test(
+        "fase_b1: blocked_signals_audit clasificaciones no incluyen trading candidate",
+        "audit_candidate" in audit_tool_code
+        and "needs_settlement_verification" in audit_tool_code
+        and "not_actionable" in audit_tool_code
+        and "trading candidate" not in audit_tool_code
+        and "trading_candidate" not in audit_tool_code,
+    )
+    test(
+        "fase_b1: blocked_signals_audit tiene función build_analysis() y load_records()",
+        "def build_analysis(" in audit_tool_code
+        and "def load_records(" in audit_tool_code,
+    )
+
     # ---- Resultado ----
     print(f"\n{'='*50}")
     total = passed + failed

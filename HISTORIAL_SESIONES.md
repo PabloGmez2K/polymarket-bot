@@ -3675,3 +3675,30 @@ Fase B (`tools/blocked_signals_audit.py`), cambios en alerta Telegram diaria, ba
 ### Siguiente acción
 
 Commit + push + deploy. Logs a revisar en Railway: primer ciclo del día siguiente que dispare `maybe_run_blocked_signals_check` — inspeccionar último registro JSONL con `tail -1 /app/data/blocked_signals_resolutions.jsonl` y confirmar `schema_version=2` con los 25 campos.
+
+## Sesión 262 — Fase B1: blocked_signals_audit.py (28 abr 2026)
+
+**Tipo:** Explícita | **Agente:** Sonnet | **Origen:** prompt directo (continuación Fase B1 post Sesión 261).
+
+### Contexto
+
+Con Fase A cerrada y el JSONL enriquecido a schema v2, se necesitaba una herramienta para auditar `blocked_signals_resolutions.jsonl` sin acceso SSH manual cada vez que saltase una alerta. Fase B1 es la CLI de auditoría read-only.
+
+### Acciones
+
+- **Nuevo archivo `tools/blocked_signals_audit.py`**: herramienta stdlib-only. Secciones A-G: resumen global, split whitelist, top ciudades, concentración, señales de baja accionabilidad, duplicados, candidatos a auditoría. Acepta `--source`, `--days`, `--json`, `--markdown`, `--out`, `--top`. Nunca recomienda abrir trading — clasifica en `ignore`/`monitor`/`audit_candidate`/`needs_settlement_verification`/`not_actionable`.
+- **Documentación `docs/blocked_signals_audit_tool.md`**: uso, secciones, clasificaciones, nota sobre fuente canónica vs local.
+- **11 checks nuevos** en `verify_before_deploy.py` para Fase B1.
+
+### NO implementado
+
+Fase B2 (cambios en alerta Telegram diaria), backfill v1, Fase C (cruce truth pipeline). Sin cambios a `bot.py`, trading core, NOAA, scheduler, whitelist, city modes, sigma, bankroll, reglas de entrada/salida.
+
+### Verificación
+
+- `python -c "import py_compile; py_compile.compile('tools/blocked_signals_audit.py', doraise=True)"` → OK
+- `python verify_before_deploy.py` → **907/907**
+
+### Siguiente acción
+
+Commit + push. Para usar la herramienta: descargar JSONL desde Railway y correr `python tools/blocked_signals_audit.py --source data/blocked_signals_resolutions.jsonl --markdown`.
