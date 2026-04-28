@@ -1,6 +1,17 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
 
+**Última actualización:** 28 de abril de 2026 (Sesión 259 - Auditoría blocked signals fuera de whitelist, Sonnet)
+**Sesión 259 (28 abr 2026, Sonnet):** auditoría read-only de la alerta `Blocked signals fuera de whitelist — 105 resueltas | 104 wins | WR 99.0%`. Sin cambios a bot.py, whitelist, city modes, bankroll, trading core ni reglas de entrada/salida. Fuente: `/app/data/blocked_signals_resolutions.jsonl` en Railway (398 registros, todos `resolved=True`), descargado vía SSH y analizado localmente con Python.
+- **Split confirmado correcto:** `bot.py:8441-8442` separa bien IN whitelist (293 señales, 281 wins, WR 95.9%) vs OUT whitelist (105 señales, 104 wins, 1 loss, WR 99.0%).
+- **4 ciudades dominantes** explican 70/105 señales (66.7%): Lucknow 19, Warsaw 17, Beijing 17, Chongqing 17. Todas WR 100%.
+- **6 traders en out-wl:** Entire-Hood (n=31, hist_wr=84%), Jubilant-Spending (28, 64.9%), Thrifty-Original (20, 80.5%), Dimpled-Boy (19, 81.0%), Kind-Flour (5), Pricey-Score (2). Son distintos a los del ledger de referencia.
+- **Schema tiene gaps:** `resolution_source`, `settlement_source`, `market_id`, `edge_pct` no existen en el schema actual. Las apariciones de "UNKNOWN" en análisis previos eran campos ausentes, no nulls.
+- **Dato no accionable todavía:** avg_price 0.64-0.77 (no trivial) pero sin settlement source verificado para las 4 ciudades dominantes. London WR 100% con n=21 y está bloqueada — refuerza que WR alta ≠ tradeable.
+- **Warsaw:** candidata prioritaria a auditoría futura (no trading): n=17, 100%, avg_price 0.677, aparece en `stable_trader_only`, ICAO EPWA conocido. Pendiente confirmar settlement fidelity en ledger.
+- **Mejora diferida:** enriquecer schema de `blocked_signals_resolutions.jsonl` con `market_id`, `edge_pct`, `resolution_source`, `settlement_source`, `city_mode_at_record_time`.
+- **Readout:** `docs/blocked_signals_whitelist_audit_2026_04_28.md`. verify_before_deploy.py: sin cambios de código, no aplica re-run.
+
 **Última actualización:** 27 de abril de 2026 (Sesión 258 - Fase 0.5/0.6 readiness check + Telegram health alerts v10.6.43, Sonnet)
 **Sesión 258 (27 abr 2026, Sonnet):** Cierre de Fase 0/0.5/0.6. Merge y deploy de `feature/sqlite-recorder-phase-0` a `main`. Primer ciclo real con `SQLITE_RECORDER_ENABLED=1` grabado correctamente: 1 ciclo REAL, 5 ciudades (Dallas, London, Lucknow, Paris, Seoul), exit_code=1 (esperando más datos, ETA 2026-05-04). Implementado `tools/phase1_readiness_check.py` (Fase 0.5): script stdlib-only, exit codes 0/1/2/3, 6 criterios de readiness, output JSON. Implementado `maybe_run_recorder_health_alert()` (Fase 0.6): alerta Telegram Tipo A (readiness one-shot via `milestones["sqlite_recorder_phase1_ready"]`) + Tipo B (stale 1/día via `recorder_stale_last_alert_date`). Nueva variable `RECORDER_HEALTH_ALERTS_ENABLED=0` (default off). Constante `PHASE1_READINESS_SCRIPT` apunta a `tools/phase1_readiness_check.py`. Hook en `run_observability_alerts()` protegido por try/except. 8 nuevos checks en `verify_before_deploy.py`. Total: **883/883**. No se toca trading core, NOAA, city modes, sigma, bankroll ni lógica de compra/venta.
 - **Variables Railway activas:** `SQLITE_RECORDER_ENABLED=1`, `SQLITE_DB_PATH=/app/data/polymarket.db`, `RECORDER_HEALTH_ALERTS_ENABLED=1`
