@@ -5297,7 +5297,7 @@ def run_tests():
                 except Exception:
                     pass
 
-    test("Version v10.6.44", 'BOT_VERSION = "v10.6.44"' in code)
+    test("Version v10.6.45", 'BOT_VERSION = "v10.6.45"' in code)
 
     # ---- v10.6.15: Quality-trader canary exact/range ----
     test(
@@ -6718,15 +6718,15 @@ def run_tests():
         "PHASE1_READINESS_SCRIPT" in code and "timeout=15" in code,
     )
 
-    # ---- v10.6.44: blocked_signals schema v2 (Fase A) ----
-    print("  Checks v10.6.44: blocked_signals schema v2 Fase A")
+    # ---- v10.6.45: blocked_signals schema v2 (Fase A) ----
+    print("  Checks v10.6.45: blocked_signals schema v2 Fase A")
 
     test(
-        "v10.6.44: schema_version=2 hardcoded en blocked_signals dict",
+        "v10.6.45: schema_version=2 hardcoded en blocked_signals dict",
         '"schema_version": 2,' in code,
     )
     test(
-        "v10.6.44: 14 campos v2 siempre-disponibles presentes en blocked_signals dict",
+        "v10.6.45: 15 campos v2 siempre-disponibles cubiertos por schema_version + 14 campos adicionales",
         '"market_id"' in code
         and '"condition_id"' in code
         and '"token_id_yes"' in code
@@ -6743,7 +6743,7 @@ def run_tests():
         and '"canonical_signal_id"' in code,
     )
     test(
-        "v10.6.44: 5 campos v2 settlement/edge persistidos como null/unknown",
+        "v10.6.45: 5 campos v2 settlement/edge persistidos como null/unknown",
         '"settlement_source": "unknown"' in code
         and '"settlement_fidelity_status": "unverified"' in code
         and '"bot_edge_pct_at_signal": None' in code
@@ -6751,7 +6751,7 @@ def run_tests():
         and '"bot_evaluation_source": "unknown"' in code,
     )
     test(
-        "v10.6.44: helper _classify_city_bucket presente con 6 buckets canonicos",
+        "v10.6.45: helper _classify_city_bucket presente con 6 buckets canonicos",
         "def _classify_city_bucket(" in code
         and '"BLOCKED"' in code
         and '"ACTIVE"' in code
@@ -6761,7 +6761,7 @@ def run_tests():
         and '"UNTRACKED"' in code,
     )
     test(
-        "v10.6.44: helper _resolve_observed_coverage_status presente con 4 estados",
+        "v10.6.45: helper _resolve_observed_coverage_status presente con 4 estados",
         "def _resolve_observed_coverage_status(" in code
         and '"noaa_configured"' in code
         and '"icao_only"' in code
@@ -6769,11 +6769,11 @@ def run_tests():
         and '"no_local_station"' in code,
     )
     test(
-        "v10.6.44: helper _build_blocked_signal_canonical_id presente",
+        "v10.6.45: helper _build_blocked_signal_canonical_id presente",
         "def _build_blocked_signal_canonical_id(" in code,
     )
     test(
-        "v10.6.44: helper _price_bucket presente con 5 buckets",
+        "v10.6.45: helper _price_bucket presente con 5 buckets",
         "def _price_bucket(" in code
         and '"<0.2"' in code
         and '"0.2-0.4"' in code
@@ -6782,11 +6782,11 @@ def run_tests():
         and '">0.8"' in code,
     )
     test(
-        "v10.6.44: helper _extract_token_id presente y fail-safe",
+        "v10.6.45: helper _extract_token_id presente y fail-safe",
         "def _extract_token_id(" in code,
     )
     test(
-        "v10.6.44: helper _resolve_blocked_reason presente con enum cerrado",
+        "v10.6.45: helper _resolve_blocked_reason presente con enum cerrado",
         "def _resolve_blocked_reason(" in code
         and '"out_of_whitelist"' in code
         and '"blocked_city"' in code
@@ -6797,23 +6797,23 @@ def run_tests():
         and '"unknown"' in code,
     )
     test(
-        "v10.6.44: existing_canonical_ids dedupe acepta canonical_signal_id v2 y match_key v1",
+        "v10.6.45: existing_canonical_ids dedupe acepta canonical_signal_id v2 y match_key v1",
         "existing_canonical_ids" in code
         and 'rec.get("canonical_signal_id")' in code
         and 'rec.get("match_key", "")' in code,
     )
     test(
-        "v10.6.44: append blocked_signals sigue dentro de try/except fail-safe",
+        "v10.6.45: append blocked_signals sigue dentro de try/except fail-safe",
         "blocked signals check: fallo" in code,
     )
     test(
-        "v10.6.44: no se modifican firmas de manage_positions e intra_cycle_sl_check",
+        "v10.6.45: no se modifican firmas de manage_positions e intra_cycle_sl_check",
         "def manage_positions(client, dl):" in code
         and "def intra_cycle_sl_check(client):" in code,
     )
     test(
-        "v10.6.44: BOT_VERSION bumpeado a v10.6.44",
-        'BOT_VERSION = "v10.6.44"' in code,
+        "v10.6.45: BOT_VERSION bumpeado a v10.6.45",
+        'BOT_VERSION = "v10.6.45"' in code,
     )
 
     # ---- Resultado ----
