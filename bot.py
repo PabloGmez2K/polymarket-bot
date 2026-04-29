@@ -109,7 +109,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.45"
+BOT_VERSION = "v10.6.47"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -8409,6 +8409,234 @@ def _resolve_blocked_reason(city: str, condition=None) -> tuple:
         return ("unknown", "")
 
 
+# =============================================================
+# v10.6.47 — Fase B2: blocked_signals Telegram summary helpers
+# =============================================================
+
+def _bs_normalize(rec):
+    out = dict(rec)
+    out.setdefault("schema_version", 1)
+    out.setdefault("reason_blocked", "unknown")
+    out.setdefault("city_policy_status_at_record_time", "unknown")
+    out.setdefault("whitelist_status_at_record_time", "unknown")
+    out.setdefault("settlement_fidelity_status", "unknown")
+    out.setdefault("observed_coverage_status", "unknown")
+    if "win_for_trader" not in out:
+        out["win_for_trader"] = bool(out.get("win", False))
+    return out
+
+
+def _bs_wr(wins, total):
+    if total == 0:
+        return None
+    return round(wins / total * 100, 1)
+
+
+def _blocked_signals_build_telegram_summary(all_records, whitelist_cities=None):
+    """
+    Build summary dict for the daily Telegram alert from BLOCKED_SIGNALS_FILE records.
+    Works with mixed v1/v2 schema. Returns minimal dict for empty input without raising.
+    """
+    if whitelist_cities is None:
+        whitelist_cities = set()
+    records = [_bs_normalize(r) for r in all_records]
+    total = len(records)
+    if total == 0:
+        return {"total": 0, "level": "INFO", "has_v2": False, "v1_count": 0, "v2_count": 0}
+
+    v1_count = sum(1 for r in records if r["schema_version"] == 1)
+    v2_count = total - v1_count
+    has_v2 = v2_count > 0
+
+    out_wl = [r for r in records if r.get("whitelist_status_at_record_time") == "out"]
+    in_wl = [r for r in records if r.get("whitelist_status_at_record_time") == "in"]
+    unknown_wl = [r for r in records if r.get("whitelist_status_at_record_time") not in ("in", "out")]
+    out_resolved = [r for r in out_wl if r.get("resolved")]
+    out_wins = sum(1 for r in out_resolved if r.get("win_for_trader"))
+
+    fuera_recs = [r for r in records if r.get("city") not in whitelist_cities]
+    fuera_resolved = [r for r in fuera_recs if r.get("resolved")]
+    fuera_wins = sum(1 for r in fuera_resolved if r.get("win_for_trader"))
+    canary_excl = [r for r in records if r.get("city") in whitelist_cities and r.get("resolved")]
+
+    city_map = {}
+    for r in (out_wl if (has_v2 and out_wl) else records):
+        city = r.get("city", "")
+        if city:
+            city_map.setdefault(city, []).append(r)
+    city_stats = []
+    for city, recs in city_map.items():
+        res = [r for r in recs if r.get("resolved")]
+        wins_c = sum(1 for r in res if r.get("win_for_trader"))
+        city_stats.append({
+            "city": city, "n": len(recs), "resolved": len(res),
+            "wins": wins_c, "wr": _bs_wr(wins_c, len(res)),
+        })
+    city_stats.sort(key=lambda x: x["n"], reverse=True)
+    top3 = city_stats[:3]
+    top3_total = sum(c["n"] for c in top3)
+    top3_pct = round(top3_total / total * 100, 1) if total > 0 else 0.0
+
+    n_fid = sum(1 for r in records if r.get("settlement_fidelity_status") in ("unverified", "unknown"))
+    fidelity_pct = round(n_fid / total * 100, 1) if total > 0 else 0.0
+
+    v2_recs = [r for r in records if r["schema_version"] == 2]
+    top_reason = top_policy = None
+    if v2_recs:
+        rc = {}
+        for r in v2_recs:
+            k = r.get("reason_blocked", "unknown")
+            rc[k] = rc.get(k, 0) + 1
+        top_reason = max(rc, key=rc.get)
+        pc = {}
+        for r in v2_recs:
+            k = r.get("city_policy_status_at_record_time", "unknown")
+            pc[k] = pc.get(k, 0) + 1
+        top_policy = max(pc, key=pc.get)
+
+    audit_candidates = []
+    for cs in city_stats:
+        if cs["n"] >= 10 and cs["wr"] is not None and cs["wr"] >= 70:
+            c_recs = city_map[cs["city"]]
+            is_out = any(r.get("whitelist_status_at_record_time") == "out" for r in c_recs)
+            if is_out or has_v2:
+                audit_candidates.append(cs["city"])
+
+    n_fuera_res = len(fuera_resolved)
+    fuera_wr = _bs_wr(fuera_wins, n_fuera_res)
+    out_wr = _bs_wr(out_wins, len(out_resolved))
+    level = "INFO"
+    if has_v2 and len(out_resolved) >= 50 and out_wr is not None:
+        if out_wr >= 70 and top3_pct < 60:
+            level = "ACTION"
+        elif out_wr >= 55:
+            level = "WATCH"
+    elif n_fuera_res >= 50 and fuera_wr is not None and fuera_wr >= 70:
+        level = "ACTION"
+    elif n_fuera_res >= 30 and fuera_wr is not None and fuera_wr >= 55:
+        level = "WATCH"
+
+    return {
+        "total": total,
+        "v1_count": v1_count,
+        "v2_count": v2_count,
+        "has_v2": has_v2,
+        "out_wl_count": len(out_wl),
+        "in_wl_count": len(in_wl),
+        "unknown_wl_count": len(unknown_wl),
+        "out_wl_resolved": len(out_resolved),
+        "out_wl_wins": out_wins,
+        "out_wl_wr": out_wr,
+        "fuera_resolved": n_fuera_res,
+        "fuera_wins": fuera_wins,
+        "fuera_wr": fuera_wr,
+        "canary_excluded_count": len(canary_excl),
+        "top3": top3,
+        "top3_pct": top3_pct,
+        "concentration_warning": top3_pct > 60.0,
+        "fidelity_unverified_pct": fidelity_pct,
+        "top_reason_blocked": top_reason,
+        "top_city_policy": top_policy,
+        "audit_candidate_cities": audit_candidates,
+        "top_cities_source": "out_whitelist" if (has_v2 and out_wl) else "global",
+        "level": level,
+    }
+
+
+def _blocked_signals_format_telegram(summary):
+    """
+    Format blocked signals summary dict as Telegram HTML string (~2000 chars max).
+    Always includes: schema v1/v2, settlement unverified%, 'no accionable para trading'.
+    """
+    if summary.get("total", 0) == 0:
+        return (
+            "📊 <b>Blocked signals — auditoría diaria</b>\n"
+            "Sin registros en el período.\n"
+            "Nivel: <b>INFO</b>"
+        )
+    total = summary["total"]
+    v1 = summary["v1_count"]
+    v2 = summary["v2_count"]
+    has_v2 = summary["has_v2"]
+    level = summary["level"]
+
+    lines = ["📊 <b>Blocked signals — auditoría diaria</b>"]
+    lines.append(f"Total: {total} | v1/v2: {v1}/{v2}")
+
+    if has_v2:
+        out_n = summary.get("out_wl_count", 0)
+        in_n = summary.get("in_wl_count", 0)
+        unk_n = summary.get("unknown_wl_count", 0)
+        lines.append(f"OUT whitelist: {out_n} | IN: {in_n} | Unknown: {unk_n}")
+        out_res = summary.get("out_wl_resolved", 0)
+        out_wins = summary.get("out_wl_wins", 0)
+        out_wr = summary.get("out_wl_wr")
+        if out_res > 0:
+            wr_s = f"{out_wr}%" if out_wr is not None else "n/d"
+            lines.append(f"WR OUT whitelist: {wr_s} ({out_wins}/{out_res})")
+    else:
+        lines.append(f"OUT whitelist: n/d | Unknown: {total}")
+        fuera_res = summary.get("fuera_resolved", 0)
+        fuera_wins = summary.get("fuera_wins", 0)
+        fuera_wr = summary.get("fuera_wr")
+        if fuera_res > 0:
+            wr_s = f"{fuera_wr}%" if fuera_wr is not None else "n/d"
+            lines.append(f"WR global: {wr_s} ({fuera_wins}/{fuera_res})")
+        lines.append("<i>Mayoría registros v1: clasificación limitada.</i>")
+
+    top3 = summary.get("top3", [])
+    if top3:
+        src = "(OUT wl)" if summary.get("top_cities_source") == "out_whitelist" else "(global)"
+        lines.append(f"Top ciudades {src}:")
+        for i, c in enumerate(top3, 1):
+            wr_s = f"{c['wr']}%" if c["wr"] is not None else "n/d"
+            lines.append(f"  {i}. {c['city']} {c['n']} | WR {wr_s}")
+
+    top3_pct = summary.get("top3_pct", 0.0)
+    lines.append(f"Concentración top3: {top3_pct}%")
+    if summary.get("concentration_warning"):
+        lines.append("<i>[alta concentración]</i>")
+
+    fid_pct = summary.get("fidelity_unverified_pct", 0.0)
+    lines.append(f"Settlement unverified/unknown: {fid_pct}%")
+
+    if has_v2:
+        top_r = summary.get("top_reason_blocked")
+        if top_r and top_r != "unknown":
+            lines.append(f"Top reason_blocked: {top_r}")
+        top_p = summary.get("top_city_policy")
+        if top_p and top_p != "unknown":
+            lines.append(f"Top city_policy: {top_p}")
+
+    cands = summary.get("audit_candidate_cities", [])
+    if cands:
+        cand_s = ", ".join(cands[:5])
+        if len(cands) > 5:
+            cand_s += f" (+{len(cands) - 5})"
+        lines.append(f"Candidatos auditoría: {cand_s}")
+
+    excl = summary.get("canary_excluded_count", 0)
+    if excl > 0:
+        lines.append(f"Excluidas (ya en whitelist): {excl}")
+
+    lines.append(f"Nivel: <b>{level}</b>")
+    _lvl_note = {
+        "INFO": "No accionable para trading.",
+        "WATCH": "No accionable para trading. Acumular muestra.",
+        "ACTION": "No accionable para trading. Auditoría recomendada.",
+    }
+    lines.append(_lvl_note.get(level, "No accionable para trading."))
+    lines.append(
+        "<i>Para investigar: python tools/blocked_signals_audit.py "
+        "--source data/blocked_signals_resolutions.jsonl --markdown --top 10</i>"
+    )
+
+    msg = "\n".join(lines)
+    if len(msg) > 2200:
+        msg = msg[:2150] + "…\n<i>[truncado]</i>"
+    return msg
+
+
 def maybe_run_blocked_signals_check(state, now=None):
     """
     v10.6.13: mide diariamente la WR de señales exact/range bloqueadas por
@@ -8594,26 +8822,36 @@ def maybe_run_blocked_signals_check(state, now=None):
         n_win = sum(1 for r in resolved_recs if r.get("win_for_trader"))
         wr_pct = round(n_win / n_resolved * 100, 1) if n_resolved > 0 else 0.0
 
-        # --- Telegram diario ---
-        blocked_action = "INFO"
-        blocked_task = "Sin tarea nueva: usar como baseline de inteligencia, no como permiso automatico de trading."
-        if n_resolved >= 50 and wr_pct >= 70:
-            blocked_action = "ACTION"
-            blocked_task = (
-                "Accion: priorizar auditoria de las ciudades fuera de whitelist con mas muestra "
-                "(whitelist, cobertura observada y fuente de resolucion) antes de tocar reglas core."
+        # --- Telegram diario (Fase B2) ---
+        try:
+            _bs_summary = _blocked_signals_build_telegram_summary(
+                all_records, whitelist_cities=QUALITY_TRADER_CITIES_WHITELIST
             )
-        elif n_resolved >= 30 and wr_pct >= 55:
-            blocked_action = "WATCH"
-            blocked_task = "Accion diferida: acumular muestra o cruzar con gap operativo real por ciudad."
-        send_telegram(
-            f"📊 <b>Blocked signals (fuera de whitelist) - WR diaria</b>\n"
-            f"Baseline fuera de whitelist: {n_resolved} resueltas | Wins: {n_win} | WR: {wr_pct}%\n"
-            f"Excluidas del calculo por estar ya en whitelist: {len(canary_excluded_recs)}\n"
-            f"Nivel: <b>{blocked_action}</b>\n"
-            f"{blocked_task}\n"
-            f"<i>Baseline fuera de QUALITY_TRADER_CITIES_WHITELIST; no mide ejecucion real del bot.</i>"
-        )
+            _bs_msg = _blocked_signals_format_telegram(_bs_summary)
+        except Exception as _bs_e:
+            _log = globals().get("log")
+            if _log:
+                _log.warning(f"blocked signals telegram summary fallo ({_bs_e}), usando fallback")
+            _fallback_action = "INFO"
+            _fallback_task = "Sin tarea nueva: usar como baseline de inteligencia, no como permiso automatico de trading."
+            if n_resolved >= 50 and wr_pct >= 70:
+                _fallback_action = "ACTION"
+                _fallback_task = (
+                    "Accion: priorizar auditoria de las ciudades fuera de whitelist con mas muestra "
+                    "(whitelist, cobertura observada y fuente de resolucion) antes de tocar reglas core."
+                )
+            elif n_resolved >= 30 and wr_pct >= 55:
+                _fallback_action = "WATCH"
+                _fallback_task = "Accion diferida: acumular muestra o cruzar con gap operativo real por ciudad."
+            _bs_msg = (
+                f"📊 <b>Blocked signals (fuera de whitelist) - WR diaria</b>\n"
+                f"Baseline fuera de whitelist: {n_resolved} resueltas | Wins: {n_win} | WR: {wr_pct}%\n"
+                f"Excluidas del calculo por estar ya en whitelist: {len(canary_excluded_recs)}\n"
+                f"Nivel: <b>{_fallback_action}</b>\n"
+                f"{_fallback_task}\n"
+                f"<i>Baseline fuera de QUALITY_TRADER_CITIES_WHITELIST; no mide ejecucion real del bot.</i>"
+            )
+        send_telegram(_bs_msg)
 
         # --- One-shot n>=30/n>=50: suprimir si canary ya abierto (decision tomada en Sesion 175) ---
         if now.date() >= date(2026, 4, 14):

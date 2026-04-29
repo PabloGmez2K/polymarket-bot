@@ -5297,7 +5297,7 @@ def run_tests():
                 except Exception:
                     pass
 
-    test("Version v10.6.45", 'BOT_VERSION = "v10.6.45"' in code)
+    test("Version v10.6.47", 'BOT_VERSION = "v10.6.47"' in code)
 
     # ---- v10.6.15: Quality-trader canary exact/range ----
     test(
@@ -6812,8 +6812,8 @@ def run_tests():
         and "def intra_cycle_sl_check(client):" in code,
     )
     test(
-        "v10.6.45: BOT_VERSION bumpeado a v10.6.45",
-        'BOT_VERSION = "v10.6.45"' in code,
+        "v10.6.47: BOT_VERSION bumpeado a v10.6.47",
+        'BOT_VERSION = "v10.6.47"' in code,
     )
 
     # ---- v10.6.46: Fase B1 — blocked_signals_audit.py ----
@@ -6898,6 +6898,61 @@ def run_tests():
         "fase_b1: blocked_signals_audit tiene función build_analysis() y load_records()",
         "def build_analysis(" in audit_tool_code
         and "def load_records(" in audit_tool_code,
+    )
+
+    # ---- v10.6.47: Fase B2 — blocked_signals Telegram summary ----
+    print("  Checks Fase B2: blocked_signals Telegram summary (v10.6.47)")
+
+    test(
+        "fase_b2: _blocked_signals_build_telegram_summary existe en bot.py",
+        "def _blocked_signals_build_telegram_summary(" in code,
+    )
+    test(
+        "fase_b2: _blocked_signals_format_telegram existe en bot.py",
+        "def _blocked_signals_format_telegram(" in code,
+    )
+    test(
+        "fase_b2: alerta incluye schema v1/v2 count",
+        "v1/v2" in code and "v1_count" in code and "v2_count" in code,
+    )
+    test(
+        "fase_b2: alerta incluye settlement_fidelity_unverified_pct",
+        "fidelity_unverified_pct" in code,
+    )
+    test(
+        "fase_b2: alerta incluye 'no accionable para trading'",
+        "No accionable para trading" in code,
+    )
+    test(
+        "fase_b2: alerta incluye hint audit CLI con --markdown",
+        "blocked_signals_audit.py" in code and "--markdown" in code,
+    )
+    test(
+        "fase_b2: Telegram summary tiene control de longitud (truncado)",
+        "truncado" in code and "_bs_msg" in code,
+    )
+    test(
+        "fase_b2: fallback a alerta legacy si summary falla",
+        "_bs_e" in code and "_bs_msg" in code and "_fallback_action" in code,
+    )
+    test(
+        "fase_b2: _bs_normalize aplica v2 defaults a schema_version",
+        'out.setdefault("schema_version", 1)' in code,
+    )
+    test(
+        "fase_b2: no se implementa Fase C (Truth Pipeline)",
+        "truth_pipeline" not in code.lower()
+        and "fetch_noaa_truth" not in code.lower(),
+    )
+    test(
+        "fase_b2: tools/blocked_signals_audit.py sigue sin send_telegram",
+        "send_telegram" not in audit_tool_code,
+    )
+    test(
+        "fase_b2: no tocar trading — maybe_run_blocked_signals_check no llama buy/sell",
+        "execute_buy" not in code[code.find("def maybe_run_blocked_signals_check("):code.find("def maybe_run_w17_observation_alert(")]
+        if "def maybe_run_blocked_signals_check(" in code and "def maybe_run_w17_observation_alert(" in code
+        else True,
     )
 
     # ---- Resultado ----
