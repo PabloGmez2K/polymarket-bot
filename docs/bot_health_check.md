@@ -21,8 +21,18 @@ Defaults:
 ## Significado
 
 - `OK`: ultimo ciclo reciente, recorder fresco, sin gaps grandes ni errores criticos.
-- `WATCH`: avisos no criticos, datos insuficientes para Fase 1, errores transitorios o archivos opcionales ausentes.
+- `WATCH`: avisos no criticos, datos insuficientes para Fase 1, errores transitorios o archivos opcionales ausentes. La readiness pendiente de Fase 1 es esperada hasta alcanzar umbrales y no implica fallo de trading.
 - `ACTION`: ciclo stale, DB stale mayor a 30h, errores criticos de logs, rejects de ejecucion relevantes o DB ilegible.
+
+Los rechazos normales del funnel (`price_out_of_range`, `date_out_of_range_past`,
+`condition_filtered`, `below_min_edge`, `liquidity_low`, `fuera_allowlist`,
+`parse_fail` y `city_window_skipped`) no elevan el estado por si solos cuando no
+hay edge, seleccion ni compras. En ese caso la interpretacion esperada es que no
+hubo oportunidades operables seleccionadas.
+
+Los tracebacks conocidos de observabilidad en `traders_intelligence` o
+`city-intelligence` se clasifican como `WATCH`, no `ACTION`, salvo que aparezcan
+errores criticos reales de ejecucion, fondos, autenticacion, recorder o ciclo.
 
 ## Cuando usarlo
 

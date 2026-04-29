@@ -7111,6 +7111,81 @@ def run_tests():
         and "eta_date" in bot_health_code
         and "truth_pipeline" not in bot_health_code.lower(),
     )
+    bot_health_ns = {}
+    if bot_health_ast_ok:
+        try:
+            bot_health_ns["__name__"] = "bot_health_verify"
+            exec(compile(bot_health_code, bot_health_path, "exec"), bot_health_ns)
+        except Exception:
+            bot_health_ns = {}
+
+    if bot_health_ns:
+        original_read_json = bot_health_ns["read_json"]
+        original_tail_lines = bot_health_ns["tail_lines"]
+        try:
+            def _fake_cycle_summary(_path):
+                return {
+                    "buys": 0,
+                    "with_edge": 0,
+                    "selected": 0,
+                    "execution_reject_reasons": {},
+                    "reject_reasons": {
+                        "price_out_of_range": 12,
+                        "date_out_of_range_past": 3,
+                        "condition_filtered": 9,
+                        "below_min_edge": 4,
+                        "liquidity_low": 2,
+                        "fuera_allowlist": 7,
+                        "parse_fail": 1,
+                        "city_window_skipped": 1,
+                    },
+                }, None
+
+            bot_health_ns["read_json"] = _fake_cycle_summary
+            trading_issues = []
+            trading_result = bot_health_ns["summarize_trading"](Path("data"), trading_issues)
+            test(
+                "bot_health: reject reasons normales no elevan status",
+                trading_result["status"] == "OK" and not trading_issues,
+                trading_result,
+            )
+            test(
+                "bot_health: sin edge/selected/buys se interpreta como no opportunity",
+                trading_result["interpretation"] == "no buys because no operable opportunities were selected",
+                trading_result.get("interpretation"),
+            )
+
+            def _fake_observability_tail(_path, _limit):
+                return [
+                    "traders intelligence summary: traders_intelligence_daily_summary.py fallo (Traceback...)",
+                    "city-intelligence runtime warning Traceback in observability bridge",
+                ], None
+
+            bot_health_ns["tail_lines"] = _fake_observability_tail
+            log_issues = []
+            log_result = bot_health_ns["summarize_logs"](Path("data"), 200, log_issues)
+            test(
+                "bot_health: observability Traceback conocido no es ACTION",
+                log_result["status"] == "WATCH" and not log_result["critical"],
+                log_result,
+            )
+
+            def _fake_core_tail(_path, _limit):
+                return ["Traceback: core cycle crash while scanning"], None
+
+            bot_health_ns["tail_lines"] = _fake_core_tail
+            core_log_issues = []
+            core_log_result = bot_health_ns["summarize_logs"](Path("data"), 200, core_log_issues)
+            test(
+                "bot_health: Traceback no observability sigue siendo ACTION",
+                core_log_result["status"] == "ACTION" and core_log_result["critical"],
+                core_log_result,
+            )
+        finally:
+            bot_health_ns["read_json"] = original_read_json
+            bot_health_ns["tail_lines"] = original_tail_lines
+    else:
+        test("bot_health: functional checks cargan namespace", False)
 
     # ---- Resultado ----
     print(f"\n{'='*50}")

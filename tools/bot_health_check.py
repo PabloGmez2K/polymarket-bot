@@ -28,10 +28,13 @@ RECENT_CYCLE_WINDOW = 40
 
 NORMAL_REJECT_REASONS = {
     "price_out_of_range",
+    "date_out_of_range_past",
     "condition_filtered",
     "below_min_edge",
     "fuera_allowlist",
     "liquidity_low",
+    "parse_fail",
+    "city_window_skipped",
     "blocked_city",
     "shadow_city",
     "shadow_only_mode",
@@ -47,6 +50,10 @@ CRITICAL_LOG_RE = re.compile(
 )
 WARNING_LOG_RE = re.compile(r"\bWARNING\b|Forecast.*502|city intelligence", re.IGNORECASE)
 AUTH_OK_RE = re.compile(r"Autenticaci[oó]n OK|Authentication OK", re.IGNORECASE)
+OBSERVABILITY_LOG_RE = re.compile(
+    r"traders intelligence summary|traders_intelligence_daily_summary\.py|city[-_ ]intelligence",
+    re.IGNORECASE,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -227,6 +234,14 @@ def counter_from_any(value: Any) -> dict[str, int]:
     elif isinstance(value, str) and value:
         counter[value] += 1
     return dict(counter.most_common(8))
+
+
+def is_normal_reject_reason(reason: str) -> bool:
+    return reason.strip().lower() in NORMAL_REJECT_REASONS
+
+
+def is_observability_log_line(line: str) -> bool:
+    return bool(OBSERVABILITY_LOG_RE.search(line))
 
 
 def add_issue(issues: list[dict[str, str]], status: str, reason: str, detail: str = "") -> None:
@@ -476,7 +491,12 @@ def summarize_db(db_path: Path, issues: list[dict[str, str]]) -> dict[str, Any]:
             add_issue(issues, "WATCH", "SQLiteRecorder large gaps", f"{len(gaps)} gaps > {GAP_THRESHOLD_HOURS}h")
         elif not readiness["ready"]:
             status = "WATCH"
-            add_issue(issues, "WATCH", "DB readable but not ready for Phase 1", "more data needed")
+            add_issue(
+                issues,
+                "WATCH",
+                "Phase 1 readiness pending, expected until threshold is reached",
+                "more recorder data needed",
+            )
 
         result.update(
             {
@@ -519,9 +539,13 @@ def summarize_trading(data_dir: Path, issues: list[dict[str, str]]) -> dict[str,
         interpretation = "selected opportunities but no buys"
         add_issue(issues, "WATCH", "selected>0 but buys=0", f"selected={selected}")
     elif buys == 0 and with_edge == 0 and selected == 0:
-        normal_only = not reject_reasons or all(reason in NORMAL_REJECT_REASONS for reason in reject_reasons)
+        normal_only = not reject_reasons or all(is_normal_reject_reason(reason) for reason in reject_reasons)
         status = "OK" if normal_only else "WATCH"
-        interpretation = "no buys because rules blocked opportunities" if normal_only else "no buys with non-standard rejects"
+        interpretation = (
+            "no buys because no operable opportunities were selected"
+            if normal_only
+            else "no buys with non-standard rejects"
+        )
         if not normal_only:
             add_issue(issues, "WATCH", "non-standard reject reasons", ", ".join(reject_reasons))
     else:
@@ -600,10 +624,14 @@ def summarize_logs(data_dir: Path, log_tail: int, issues: list[dict[str, str]]) 
     forecast_502_count = 0
     for line in combined:
         line_lower = line.lower()
-        if "traceback" in line_lower:
+        observability_line = is_observability_log_line(line)
+        if "traceback" in line_lower and not observability_line:
             traceback_count += 1
         if "sqliterecorder error" in line_lower:
             sqlite_error_count += 1
+        if "traceback" in line_lower and observability_line:
+            result["warnings"].append(line[-220:])
+            continue
         if "forecast" in line_lower and "502" in line_lower:
             forecast_502_count += 1
             result["known_noise"].append(line[-220:])
