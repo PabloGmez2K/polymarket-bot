@@ -6997,6 +6997,121 @@ def run_tests():
         and traders_daily_summary_code.find("md_path.write_text(") > traders_daily_summary_code.find("telegram_result = send_telegram(message)"),
     )
 
+    # ---- Bot health check read-only CLI ----
+    print("  Checks bot_health_check.py read-only CLI")
+    bot_health_path = os.path.join(os.path.dirname(__file__), "tools", "bot_health_check.py")
+    bot_health_doc_path = os.path.join(os.path.dirname(__file__), "docs", "bot_health_check.md")
+    bot_health_code = ""
+    bot_health_doc = ""
+    bot_health_ast_ok = False
+    bot_health_ast_detail = ""
+    if os.path.exists(bot_health_path):
+        with open(bot_health_path, "r", encoding="utf-8") as _f:
+            bot_health_code = _f.read()
+        try:
+            ast.parse(bot_health_code)
+            bot_health_ast_ok = True
+        except SyntaxError as _exc:
+            bot_health_ast_detail = str(_exc)
+    if os.path.exists(bot_health_doc_path):
+        with open(bot_health_doc_path, "r", encoding="utf-8") as _f:
+            bot_health_doc = _f.read()
+
+    bot_health_write_tokens = [
+        ".write(",
+        ".write_text(",
+        ".writelines(",
+        "open(",
+        ".open(",
+    ]
+    bot_health_write_hits = [
+        token for token in bot_health_write_tokens
+        if token in bot_health_code
+        and token not in {".open("}
+    ]
+    bot_health_open_write = bool(re.search(
+        r"\.open\([^)]*['\"](?:w|a|x|\+)",
+        bot_health_code,
+    ) or re.search(
+        r"open\([^)]*['\"](?:w|a|x|\+)",
+        bot_health_code,
+    ))
+
+    test(
+        "bot_health: tools/bot_health_check.py existe y tiene sintaxis valida",
+        os.path.exists(bot_health_path) and bot_health_ast_ok,
+        bot_health_ast_detail,
+    )
+    test(
+        "bot_health: usa argparse",
+        "import argparse" in bot_health_code and "ArgumentParser" in bot_health_code,
+    )
+    test(
+        "bot_health: tiene main()",
+        "def main(" in bot_health_code and 'if __name__ == "__main__"' in bot_health_code,
+    )
+    test(
+        "bot_health: no importa bot.py",
+        "\nimport bot\n" not in bot_health_code and "\nfrom bot import" not in bot_health_code,
+    )
+    test(
+        "bot_health: no contiene send_telegram",
+        "send_telegram" not in bot_health_code,
+    )
+    test(
+        "bot_health: no contiene requests/urlopen",
+        "requests" not in bot_health_code and "urlopen" not in bot_health_code,
+    )
+    test(
+        "bot_health: no escribe archivos",
+        not bot_health_open_write
+        and ".write(" not in bot_health_code
+        and ".write_text(" not in bot_health_code
+        and ".writelines(" not in bot_health_code,
+        ", ".join(bot_health_write_hits),
+    )
+    test(
+        "bot_health: soporta --json y --markdown",
+        "--json" in bot_health_code and "--markdown" in bot_health_code,
+    )
+    test(
+        "bot_health: soporta data-dir/db/max-cycle-age/log-tail",
+        "--data-dir" in bot_health_code
+        and "--db" in bot_health_code
+        and "--max-cycle-age-hours" in bot_health_code
+        and "--log-tail" in bot_health_code,
+    )
+    test(
+        "bot_health: comprueba SQLite read-only con sqlite3",
+        "import sqlite3" in bot_health_code
+        and "mode=ro" in bot_health_code
+        and "uri=True" in bot_health_code,
+    )
+    test(
+        "bot_health: docs/bot_health_check.md existe",
+        os.path.exists(bot_health_doc_path) and "read-only" in bot_health_doc.lower(),
+    )
+    test(
+        "bot_health: no toca trading core",
+        "manage_positions" not in bot_health_code
+        and "intra_cycle_sl_check" not in bot_health_code
+        and "execute_buy" not in bot_health_code
+        and "execute_sell" not in bot_health_code
+        and "BANKROLL" not in bot_health_code
+        and "ACTIVE_TRADING_CITIES" not in bot_health_code
+        and "CANARY_TRADING_CITIES" not in bot_health_code,
+    )
+    test(
+        "bot_health: cubre status global OK/WATCH/ACTION",
+        '"OK"' in bot_health_code and '"WATCH"' in bot_health_code and '"ACTION"' in bot_health_code,
+    )
+    test(
+        "bot_health: cubre readiness Fase 1 sin Truth Pipeline",
+        "DEFAULT_MIN_CYCLES" in bot_health_code
+        and "eta_date" in bot_health_code
+        and "truth_pipeline" not in bot_health_code.lower(),
+    )
+
     # ---- Resultado ----
     print(f"\n{'='*50}")
     total = passed + failed
