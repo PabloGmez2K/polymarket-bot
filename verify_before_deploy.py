@@ -4281,6 +4281,19 @@ def run_tests():
     test("Strategy Review en run_observability", "Strategy Review" in code)
     test("Strategy Signal en run_observability", "Strategy Signal" in code)
 
+    # ---- P2C: Bankroll Scaling Monitor Telegram/read-only ----
+    print("\n P2C: Bankroll Scaling Monitor Telegram")
+    test("bankroll scaling monitor helper definido", "def maybe_run_bankroll_scaling_monitor(" in code)
+    test("bankroll scaling check usa CLI JSON", "BANKROLL_SCALING_CHECK_SCRIPT" in code and "bankroll_scaling_check.py" in code and '"--json"' in code)
+    test("bankroll scaling check usa subprocess timeout fail-safe", "subprocess.run(" in code and "timeout=BANKROLL_SCALING_MONITOR_TIMEOUT_SECONDS" in code and "return None" in code)
+    test("bankroll scaling monitor integrado en observabilidad", "maybe_run_bankroll_scaling_monitor(state)" in code and "bankroll scaling monitor: fallo" in code)
+    test("bankroll scaling comando Telegram existe", "def cmd_bankroll(" in code and '"bankroll": cmd_bankroll' in code and '"bankroll_status": cmd_bankroll' in code)
+    test("bankroll scaling mensaje manual-only", "NO autoriza" in code and "no subir bankroll" in code and "docs/bankroll_scaling_policy.md" in code)
+    test("bankroll scaling no usa increase_now", "increase_now" not in code)
+    test("bankroll scaling no instruye subida directa", "Subir bankroll ahora" not in code and "sube bankroll" not in code)
+    test("bankroll scaling state anti-spam", "bankroll_scaling_last_status" in code and "bankroll_scaling_last_target_tier" in code and "bankroll_scaling_last_digest_date" in code and "bankroll_scaling_last_blockers_hash" in code and "bankroll_scaling_last_alert_cycle" in code)
+    test("bankroll scaling dispara por cambios", "status_changed" in code and "target_changed" in code and "blockers_changed" in code and "eligible_transition" in code and "cycle_summary_due" in code)
+
     # ---- Test v10.5.0: _get_recent_closed_trades funcional ----
     print("\n v10.5.0: _get_recent_closed_trades funcional")
     try:

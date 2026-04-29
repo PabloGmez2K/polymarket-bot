@@ -166,6 +166,10 @@ POST_INTRA_SL_COOLDOWN_REVIEW_MIN_CLOSED = int(os.getenv("POST_INTRA_SL_COOLDOWN
 SQLITE_RECORDER_ENABLED = os.getenv("SQLITE_RECORDER_ENABLED", "0").lower() in ("1", "true", "yes", "on")
 # v10.6.43: Recorder Health Alerts (Fase 0.6) — default OFF, activar tras validación inicial
 RECORDER_HEALTH_ALERTS_ENABLED = os.getenv("RECORDER_HEALTH_ALERTS_ENABLED", "0").lower() in ("1", "true", "yes", "on")
+BANKROLL_SCALING_MONITOR_ENABLED = os.getenv("BANKROLL_SCALING_MONITOR_ENABLED", "1").lower() in ("1", "true", "yes", "on")
+BANKROLL_SCALING_MONITOR_EVERY_CYCLES = int(os.getenv("BANKROLL_SCALING_MONITOR_EVERY_CYCLES", "6"))
+BANKROLL_SCALING_MONITOR_ON_STATUS_CHANGE = os.getenv("BANKROLL_SCALING_MONITOR_ON_STATUS_CHANGE", "1").lower() in ("1", "true", "yes", "on")
+BANKROLL_SCALING_MONITOR_TIMEOUT_SECONDS = int(os.getenv("BANKROLL_SCALING_MONITOR_TIMEOUT_SECONDS", "12"))
 # Cutoff de stats por ciudad: "Dallas=2026-04-06,Chicago=2026-03-01"
 # Trades cerrados ANTES de la fecha indicada se ignoran en get_city_accuracy().
 CITY_STATS_CUTOFF: dict[str, str] = {}
@@ -621,6 +625,11 @@ PHASE1_READINESS_SCRIPT = os.path.join(
     "tools",
     "phase1_readiness_check.py",
 )
+BANKROLL_SCALING_CHECK_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "tools",
+    "bankroll_scaling_check.py",
+)
 CYCLES_HISTORY_FILE = _data_path("cycles_history.jsonl")
 POSTMORTEM_FILE = _data_path("postmortem.json")
 TRADE_LIFECYCLE_FILE = _data_path("trade_lifecycle.json")
@@ -1035,6 +1044,12 @@ def load_alerts_state():
         "legacy_cleanup_last_run": None,
         # v10.6.43: Recorder Health Alerts — fecha YYYY-MM-DD del último stale alert
         "recorder_stale_last_alert_date": None,
+        "bankroll_scaling_last_status": None,
+        "bankroll_scaling_last_target_tier": None,
+        "bankroll_scaling_last_digest_date": None,
+        "bankroll_scaling_last_blockers_hash": None,
+        "bankroll_scaling_last_alert_cycle": 0,
+        "bankroll_scaling_last_eligible_for_manual_review": False,
     }
     if not os.path.exists(ALERTS_FILE):
         return default
@@ -1065,6 +1080,12 @@ def load_alerts_state():
         state.setdefault("intra_reeval_review_alert_sent", False)
         state.setdefault("post_intra_sl_cooldown_review", {})
         state.setdefault("legacy_cleanup_last_run", None)
+        state.setdefault("bankroll_scaling_last_status", None)
+        state.setdefault("bankroll_scaling_last_target_tier", None)
+        state.setdefault("bankroll_scaling_last_digest_date", None)
+        state.setdefault("bankroll_scaling_last_blockers_hash", None)
+        state.setdefault("bankroll_scaling_last_alert_cycle", 0)
+        state.setdefault("bankroll_scaling_last_eligible_for_manual_review", False)
         return state
     except Exception:
         return default
@@ -1587,6 +1608,217 @@ def save_alerts_state(state):
             json.dump(state, f, indent=2, ensure_ascii=False)
     except Exception as e:
         log.warning(f"Error guardando alerts_state: {e}")
+
+
+def _html_escape(value):
+    return (
+        str(value)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
+def _bankroll_scaling_runtime_args():
+    data_dir = DATA_DIR or "data"
+    db_path = SQLITE_DB_PATH if DATA_DIR else os.path.join(data_dir, "polymarket.db")
+    return data_dir, db_path
+
+
+def run_bankroll_scaling_check_json():
+    """
+    Ejecuta el check read-only de scaling y devuelve su contrato JSON.
+    Fail-safe: no escribe estado, no manda Telegram y no interrumpe ciclos.
+    """
+    data_dir, db_path = _bankroll_scaling_runtime_args()
+    command = [
+        sys.executable,
+        BANKROLL_SCALING_CHECK_SCRIPT,
+        "--data-dir",
+        data_dir,
+        "--db",
+        db_path,
+        "--json",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            capture_output=True,
+            text=True,
+            timeout=BANKROLL_SCALING_MONITOR_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except Exception as exc:
+        log.warning(f"bankroll scaling check: fallo ejecutando CLI read-only ({exc})")
+        return None
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()[:500]
+        log.warning(f"bankroll scaling check: exit={result.returncode} detail={detail}")
+        return None
+    try:
+        payload = json.loads(result.stdout)
+    except Exception as exc:
+        log.warning(f"bankroll scaling check: JSON invalido ({exc})")
+        return None
+    if not isinstance(payload, dict) or not payload.get("status"):
+        log.warning("bankroll scaling check: contrato JSON incompleto")
+        return None
+    return payload
+
+
+def _bankroll_scaling_item_codes(items):
+    if not isinstance(items, list):
+        return []
+    codes = []
+    for item in items:
+        if isinstance(item, dict) and item.get("code"):
+            codes.append(str(item.get("code")))
+    return codes
+
+
+def _bankroll_scaling_blockers_hash(report):
+    codes = sorted(_bankroll_scaling_item_codes(report.get("hard_blockers")))
+    return "|".join(codes)
+
+
+def _bankroll_scaling_criterion(report, name):
+    for item in report.get("criteria", []) or []:
+        if isinstance(item, dict) and item.get("name") == name:
+            return item
+    return {}
+
+
+def _bankroll_scaling_format_value(value, kind):
+    if value is None:
+        return "n/d"
+    try:
+        number = float(value)
+    except Exception:
+        return _html_escape(value)
+    if kind == "money":
+        return f"${number:+.2f}"
+    if kind == "pct":
+        return f"{number:.1f}%"
+    return f"{number:g}"
+
+
+def format_bankroll_scaling_telegram(report):
+    status = str(report.get("status", "UNKNOWN"))
+    current = report.get("current_bankroll", "?")
+    target = report.get("target_tier", "?")
+    evidence = report.get("evidence", {}) if isinstance(report.get("evidence"), dict) else {}
+    pnl = evidence.get("pnl_drawdown", {}) if isinstance(evidence.get("pnl_drawdown"), dict) else {}
+    sqlite = evidence.get("sqlite_recorder", {}) if isinstance(evidence.get("sqlite_recorder"), dict) else {}
+    positions = evidence.get("positions", {}) if isinstance(evidence.get("positions"), dict) else {}
+    phase1 = evidence.get("phase1", {}) if isinstance(evidence.get("phase1"), dict) else {}
+
+    decision = "eligible for manual review" if report.get("eligible_for_manual_review") else "no subir bankroll"
+    lines = [
+        "📊 <b>Bankroll Scaling Monitor</b>",
+        "",
+        f"${current} → ${target}: <b>{_html_escape(status)}</b>",
+        f"Decisión: {_html_escape(decision)}.",
+        "NO autoriza subida automática ni cambiar BANKROLL.",
+        "",
+    ]
+
+    blockers = _bankroll_scaling_item_codes(report.get("hard_blockers"))
+    if blockers:
+        lines.append("<b>Bloqueantes</b>")
+        for code in blockers[:6]:
+            if code == "pnl_negative":
+                detail = f"PnL negativo: {_bankroll_scaling_format_value(pnl.get('pnl_total'), 'money')}"
+            elif code == "win_rate_below_threshold":
+                detail = f"WR bajo: {_bankroll_scaling_format_value(pnl.get('win_rate_pct'), 'pct')}"
+            elif code == "recent_drawdown_exceeded":
+                detail = f"Drawdown reciente: {_bankroll_scaling_format_value(pnl.get('drawdown_last_5'), 'money')}"
+            elif code == "sqlite_recorder_stale":
+                detail = f"SQLite stale: age_hours={sqlite.get('last_write_age_hours')}"
+            else:
+                detail = code.replace("_", " ")
+            lines.append(f"❌ {_html_escape(detail)}")
+        if len(blockers) > 6:
+            lines.append(f"❌ ... y {len(blockers) - 6} mas")
+        lines.append("")
+
+    watch = _bankroll_scaling_item_codes(report.get("watch_items"))
+    missing = _bankroll_scaling_item_codes(report.get("missing_evidence"))
+    if watch or missing:
+        lines.append("<b>Vigilancia</b>")
+        for code in (watch + missing)[:5]:
+            lines.append(f"⏳ {_html_escape(code.replace('_', ' '))}")
+        lines.append("")
+
+    favorable = []
+    if sqlite.get("readable") and sqlite.get("last_write_age_hours") is not None:
+        favorable.append("SQLite fresh")
+    if not sqlite.get("large_gaps"):
+        favorable.append("Sin gaps")
+    if int(positions.get("stale_pending_exits", 0) or 0) == 0:
+        favorable.append("Sin pending exits")
+    if _bankroll_scaling_criterion(report, "cycles_minimum").get("status") == "pass":
+        favorable.append("Ciclos suficientes")
+    if phase1.get("status") == "ready":
+        favorable.append("Phase 1 ready")
+    if favorable:
+        lines.append("<b>A favor</b>")
+        for item in favorable[:5]:
+            lines.append(f"✅ {_html_escape(item)}")
+        lines.append("")
+
+    lines.extend(
+        [
+            "<b>Acción</b>",
+            f"Mantener bankroll ${current}. No cambiar BANKROLL.",
+            "La politica exige revision manual:",
+            "docs/bankroll_scaling_policy.md",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def maybe_run_bankroll_scaling_monitor(state):
+    """
+    Monitor read-only de scaling: alerta solo por cambios o resumen anti-spam.
+    Devuelve True si muta alerts_state. Si el check falla, no alerta ni rompe ciclo.
+    """
+    if not BANKROLL_SCALING_MONITOR_ENABLED:
+        return False
+    report = run_bankroll_scaling_check_json()
+    if not report:
+        return False
+
+    status = str(report.get("status", "UNKNOWN"))
+    target_tier = report.get("target_tier")
+    blockers_hash = _bankroll_scaling_blockers_hash(report)
+    eligible = bool(report.get("eligible_for_manual_review"))
+    cycle = int(bot_state.get("cycle_count", 0) or 0)
+    every_cycles = max(1, int(BANKROLL_SCALING_MONITOR_EVERY_CYCLES or 6))
+    last_cycle = int(state.get("bankroll_scaling_last_alert_cycle", 0) or 0)
+
+    status_changed = status != state.get("bankroll_scaling_last_status")
+    target_changed = target_tier != state.get("bankroll_scaling_last_target_tier")
+    blockers_changed = blockers_hash != state.get("bankroll_scaling_last_blockers_hash")
+    eligible_transition = eligible and not state.get("bankroll_scaling_last_eligible_for_manual_review", False)
+    cycle_summary_due = cycle > 0 and (cycle - last_cycle) >= every_cycles
+
+    should_alert = (
+        eligible_transition
+        or (BANKROLL_SCALING_MONITOR_ON_STATUS_CHANGE and (status_changed or target_changed or blockers_changed))
+        or cycle_summary_due
+    )
+
+    state["bankroll_scaling_last_status"] = status
+    state["bankroll_scaling_last_target_tier"] = target_tier
+    state["bankroll_scaling_last_blockers_hash"] = blockers_hash
+    state["bankroll_scaling_last_eligible_for_manual_review"] = eligible
+    state["bankroll_scaling_last_digest_date"] = datetime.now(timezone.utc).date().isoformat()
+
+    if should_alert:
+        send_telegram(format_bankroll_scaling_telegram(report))
+        state["bankroll_scaling_last_alert_cycle"] = cycle
+    return True
 
 
 def load_intra_reeval_state(observed_token_ids=None):
@@ -4465,6 +4697,14 @@ def run_observability_alerts():
             changed = True
 
     # v10.6.14 (M2): degrada ciudades Active→Canary si performance baja; antes de notify_active_candidates.
+    try:
+        if maybe_run_bankroll_scaling_monitor(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"bankroll scaling monitor: fallo ({e})")
+
     try:
         if maybe_run_active_degradation(state):
             changed = True
@@ -15327,12 +15567,21 @@ def cmd_noaa():
     send_telegram_paged("\n".join(lines), with_menu=True)
 
 
+def cmd_bankroll():
+    report = run_bankroll_scaling_check_json()
+    if not report:
+        send_telegram("No pude calcular bankroll scaling check ahora; revisa logs.", with_menu=True)
+        return
+    send_telegram_paged(format_bankroll_scaling_telegram(report), with_menu=True)
+
+
 COMMANDS = {
     "focus": cmd_focus, "estado": cmd_estado, "cartera": cmd_cartera, "ordenes": cmd_ordenes,
     "log": cmd_log, "logfull": cmd_logfull, "forzar": cmd_forzar,
     "modo": cmd_modo, "traders": cmd_traders, "rendimiento": cmd_rendimiento,
     "info": cmd_info, "postmortem": cmd_postmortem, "accuracy": cmd_accuracy,
     "noaa": cmd_noaa, "observabilidad": cmd_noaa,
+    "bankroll": cmd_bankroll, "bankroll_status": cmd_bankroll,
     "confirmar_real": cmd_confirmar_real, "confirmar_dry": cmd_confirmar_dry,
     "cancelar_modo": cmd_cancelar_modo,
 }

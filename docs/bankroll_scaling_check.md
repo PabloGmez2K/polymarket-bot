@@ -105,3 +105,15 @@ When evidence cannot be evaluated, the tool adds it to `missing_evidence` instea
 `eligible_for_manual_review: true` means only that a human may open a review.
 
 It does not mean "increase bankroll now". The only possible positive decision is `manual_review_required`; the tool never emits an automatic scaling authorization.
+
+## Telegram Observability
+
+`bot.py` can now surface the same read-only check from Telegram:
+
+- manual commands: `/bankroll` and `/bankroll_status`;
+- automatic monitor: `maybe_run_bankroll_scaling_monitor(state)` inside observability;
+- anti-spam state: `alerts_state.json` keys prefixed with `bankroll_scaling_last_*`.
+
+The monitor sends Telegram only when status, target tier, or hard blockers change; when the result first becomes `ELIGIBLE_FOR_MANUAL_REVIEW`; or after `BANKROLL_SCALING_MONITOR_EVERY_CYCLES` cycles as a compact digest. If the CLI fails, the bot logs a warning and sends no alert.
+
+The Telegram copy is intentionally manual-only: it can say `BLOCKED`, `NOT_ELIGIBLE`, `eligible for manual review`, or `no subir bankroll`. It also states that the alert does not authorize automatic scaling or changing `BANKROLL`.
