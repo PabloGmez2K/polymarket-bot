@@ -25,6 +25,14 @@ TARGET_SAMPLE_SIZE = 16
 PRELIMINARY_THRESHOLD = 8
 FINAL_THRESHOLD = 12
 SL_REASONS = {"stop_loss", "stop_loss_intra"}
+# F1: pre-cooldown stop_loss_intra.
+# F2: post-cooldown, pre-guard.
+# F3: post-guard v10.6.40+, configuracion operativa actual.
+PHASE_F1_CUTOFF = "2026-04-24T21:22:53+00:00"
+PHASE_F2_CUTOFF = "2026-04-27T08:00:41+00:00"
+MIN_CURRENT_CONFIG_SAMPLE = 5
+DEFAULT_GUARD_FILE = REPO_ROOT / "data" / "sl_intra_guard_audit.json"
+DEFAULT_GUARD_FALLBACK = REPO_ROOT / "data" / "runtime_import" / "sl_intra_guard_audit.json"
 
 
 def parse_args():
@@ -631,7 +639,150 @@ def summarize(rows: list[dict]):
     }
 
 
-def build_message(summary: dict):
+def _load_guard_state(path=None) -> dict:
+    paths = [Path(path)] if path is not None else [DEFAULT_GUARD_FILE, DEFAULT_GUARD_FALLBACK]
+    for candidate in paths:
+        try:
+            if not candidate.exists():
+                continue
+            raw = candidate.read_text(encoding="utf-8-sig").strip()
+            if not raw:
+                return {}
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                rows = []
+                for line in raw.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(row, dict):
+                        rows.append(row)
+                return {"skips": rows} if rows else {}
+            if isinstance(payload, dict):
+                normalized = dict(payload)
+                if "skips" in normalized and not isinstance(normalized.get("skips"), list):
+                    normalized["skips"] = []
+                return normalized
+            if isinstance(payload, list):
+                return {"skips": [row for row in payload if isinstance(row, dict)]}
+            return {}
+        except Exception:
+            continue
+    return {}
+
+
+def _phase_iso(value: str | None) -> str:
+    return str(value or "").strip().replace("Z", "+00:00")
+
+
+def _rows_in_phase(rows, lo, hi) -> list:
+    lo_key = _phase_iso(lo) if lo else ""
+    hi_key = _phase_iso(hi) if hi else ""
+    selected = []
+    for row in rows:
+        closed_at = _phase_iso(row.get("closed_at"))
+        if not closed_at:
+            continue
+        if lo_key and closed_at < lo_key:
+            continue
+        if hi_key and closed_at >= hi_key:
+            continue
+        selected.append(row)
+    return selected
+
+
+def _phase_summaries(rows) -> dict:
+    return {
+        "F1": summarize(_rows_in_phase(rows, None, PHASE_F1_CUTOFF)),
+        "F2": summarize(_rows_in_phase(rows, PHASE_F1_CUTOFF, PHASE_F2_CUTOFF)),
+        "F3": summarize(_rows_in_phase(rows, PHASE_F2_CUTOFF, None)),
+    }
+
+
+def _guard_skip_rows(guard_state: dict | None) -> list:
+    skips = (guard_state or {}).get("skips") if isinstance(guard_state, dict) else []
+    if not isinstance(skips, list):
+        skips = []
+    return [row for row in skips if isinstance(row, dict)]
+
+
+def _fmt_guard_ts(value) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return text[:19].replace("T", " ")
+
+
+def _build_current_config_block(phase_summaries: dict | None, guard_state: dict | None) -> list[str]:
+    phases = phase_summaries or {}
+    f3 = phases.get("F3") or {
+        "n_right": 0,
+        "n_wrong": 0,
+        "n_unknown": 0,
+        "n_resolved": 0,
+        "accuracy_pct": None,
+    }
+    f3_right = f3.get("n_right", 0)
+    f3_wrong = f3.get("n_wrong", 0)
+    f3_unknown = f3.get("n_unknown", 0)
+    f3_resolved = f3.get("n_resolved", f3_right + f3_wrong)
+    total_f3 = f3_right + f3_wrong + f3_unknown
+    min_sample = globals().get("MIN_CURRENT_CONFIG_SAMPLE", 5)
+    skips = _guard_skip_rows(guard_state)
+    skip_times = sorted(str(row.get("skipped_at") or "") for row in skips if row.get("skipped_at"))
+
+    lines = [
+        "──────────────────────────",
+        f"📦 Config actual (post-guard v10.6.40, desde {PHASE_F2_CUTOFF[:10]}):",
+        (
+            f"  • n={total_f3} | falsas={f3_right} | correctos={f3_wrong} | "
+            f"pendientes={f3_unknown} | resueltos={f3_resolved}"
+        ),
+    ]
+    if f3_resolved < min_sample:
+        lines.append(
+            f"  ⚠️ Muestra insuficiente (n={f3_resolved}/{min_sample} mín) — sin veredicto config actual"
+        )
+    lines.extend(
+        [
+            "",
+            "🛡️ Guard SL_intra:",
+            f"  • {len(skips)} skip(s) registrados",
+        ]
+    )
+    if skip_times:
+        lines.append(f"  • desde {_fmt_guard_ts(skip_times[0])}")
+    else:
+        lines.append("  • sin skips registrados o sin datos suficientes")
+    lines.append("──────────────────────────")
+    return lines
+
+
+def _current_config_verdict_lines(phase_summaries: dict | None) -> list[str]:
+    f3 = (phase_summaries or {}).get("F3") or {}
+    f3_resolved = f3.get("n_resolved", 0)
+    f3_acc = f3.get("accuracy_pct")
+    min_sample = globals().get("MIN_CURRENT_CONFIG_SAMPLE", 5)
+    if f3_resolved < min_sample:
+        return ["⚠️ Config actual post-guard: muestra insuficiente — seguir monitorizando"]
+    if f3_acc is not None and f3_acc < 30:
+        return ["✅ Config actual post-guard: funcionando correctamente"]
+    if f3_acc is not None and f3_acc >= 60:
+        return ["⚠️ Config actual: tasa de falsas alta — revisar"]
+    return ["📊 Config actual: zona gris — seguir monitorizando"]
+
+
+def build_message(
+    summary: dict,
+    *,
+    phase_summaries: dict | None = None,
+    guard_state: dict | None = None,
+):
     n_resolved = summary["n_resolved"]
     n_right = summary["n_right"]
     n_wrong = summary["n_wrong"]
@@ -702,9 +853,16 @@ def build_message(summary: dict):
         )
         lines.append(f"  • Pérdida adicional evitada por el SL: {protected_saved:+.2f}$")
         for row in summary["protected_rows"]:
+            peak_note = ""
+            if (
+                row.get("pnl_without_sl_best") is not None
+                and row.get("pnl_cash_with_sl") is not None
+                and row["pnl_without_sl_best"] > row["pnl_cash_with_sl"]
+            ):
+                peak_note = " ⚠️ pico temporal"
             lines.append(
                 f"  • {row['label']}: con SL {row['pnl_cash_with_sl']:+.2f}$ → "
-                f"sin SL {row['pnl_without_sl_best']:+.2f}$"
+                f"sin SL {row['pnl_without_sl_best']:+.2f}${peak_note}"
             )
         lines.append("")
 
@@ -722,10 +880,17 @@ def build_message(summary: dict):
             nu = t.get("n_unknown", 0)
             acc = t.get("accuracy_pct")
             acc_str = f" → {acc:.0f}% falsas salidas" if acc is not None else ""
-            lines.append(f"  • {label}: n={n_t}, falsas={nr}, correctos={nw}, pend={nu}{acc_str}")
+            gray_note = " ⚠️ zona gris" if acc is not None and 30 <= acc <= 60 else ""
+            lines.append(f"  • {label}: n={n_t}, falsas={nr}, correctos={nw}, pend={nu}{acc_str}{gray_note}")
+        lines.append("")
+
+    block_builder = globals().get("_build_current_config_block")
+    if callable(block_builder):
+        lines.extend(block_builder(phase_summaries, guard_state))
         lines.append("")
 
     conclusive = False
+    verdict_brief = summary.get("preliminary_verdict") or "acumulando datos"
     if accuracy_pct is not None and accuracy_pct >= 60 and summary["threshold_preliminary"]:
         lines.append("⚠️ VEREDICTO PRELIMINAR: EL SL ESTÁ CORTANDO POSICIONES CORRECTAS")
         lines.append("→ Revisar gestión de posiciones en checkpoint Apr 28")
@@ -740,12 +905,16 @@ def build_message(summary: dict):
 
     if summary["threshold_final"] and conclusive:
         lines.append("")
-        lines.append("🚨 CONCLUSIÓN FIRME — tenemos datos suficientes para tomar acción")
+        lines.append(f"📊 Veredicto histórico: {verdict_brief.upper()}")
+        lines.append(f"   ({n_resolved} SLs — histórico mezclado F1+F2+F3)")
+        current_verdict = globals().get("_current_config_verdict_lines")
+        if callable(current_verdict):
+            lines.extend(current_verdict(phase_summaries))
     elif summary["threshold_final"]:
         lines.append("")
-        lines.append(
-            "🔁 Muestra completa pero señal aún no concluyente — alerta seguirá llegando con cada nuevo SL"
-        )
+        lines.append(f"📊 Veredicto histórico: {verdict_brief.upper()}")
+        lines.append(f"   ({n_resolved} SLs — histórico mezclado F1+F2+F3)")
+        lines.append("🔁 Muestra completa pero señal no concluyente — seguir monitorizando")
 
     return "\n".join(lines)
 
@@ -820,7 +989,9 @@ def main():
     lifecycle_path = resolve_lifecycle_path(args.lifecycle_file)
     rows = load_sl_rows(lifecycle_path)
     summary = summarize(rows)
-    message = build_message(summary)
+    phases = _phase_summaries(rows)
+    guard = _load_guard_state()
+    message = build_message(summary, phase_summaries=phases, guard_state=guard)
     state_path = Path(args.state_file)
     state = load_json(state_path, required=False) or {}
     now = datetime.now(timezone.utc).replace(microsecond=0)
