@@ -7332,7 +7332,16 @@ def run_tests():
     test(
         "bankroll_scaling_check: markdown muestra Performance windows",
         "## Performance windows" in scaling_check_code
-        and "Used for decision" in scaling_check_code,
+        and "Used for decision" in scaling_check_code
+        and "window_rows" in scaling_check_code
+        and "lines.extend(window_rows)" in scaling_check_code,
+    )
+    test(
+        "bankroll_scaling_check: NOT_ELIGIBLE para evidencia policy faltante",
+        "unknown_missing_codes" in scaling_check_code
+        and "bankroll_readiness_score_unavailable" in scaling_check_code
+        and 'status = "NOT_ELIGIBLE"' in scaling_check_code
+        and 'status = "UNKNOWN"' in scaling_check_code,
     )
     test(
         "bankroll_scaling_check: phase1 pending no sale como pass false",

@@ -783,12 +783,19 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         "bankroll_readiness_score_unavailable",
         "recent_core_change_observation_unknown",
     }
+    unknown_missing_codes = {
+        "closed_trades_unavailable",
+        "pnl_unavailable",
+        "win_rate_unavailable",
+        "drawdown_unavailable",
+    }
     important_missing = any(item["code"] in important_missing_codes for item in missing_evidence)
+    unknown_missing = any(item["code"] in unknown_missing_codes for item in missing_evidence)
     eligible = not hard_blockers and not important_missing
     if hard_blockers:
         status = "BLOCKED"
         decision = "do_not_increase"
-    elif important_missing:
+    elif unknown_missing:
         status = "UNKNOWN"
         decision = "do_not_increase"
     elif eligible:
@@ -882,17 +889,19 @@ def render_markdown(report: dict[str, Any]) -> str:
             "|---|---:|---:|---:|---:|---:|---:|:---:|:---:|",
         ]
     )
+    window_rows = []
     for name in ("historical_all", "current_logic_series", "last_20_closed", "last_30_clean_closed"):
         item = windows.get(name, {}) if isinstance(windows, dict) else {}
         used = "yes" if report.get("evaluation_window") == name else "no"
         wr = item.get("win_rate_pct")
         pnl_total = item.get("pnl_total")
         dd5 = item.get("drawdown_last_5")
-        lines.append(
+        window_rows.append(
             f"| {name} | {item.get('closed', 0)} | {item.get('wins', 0)} | {item.get('losses', 0)} | "
             f"{'' if wr is None else wr} | {'' if pnl_total is None else pnl_total} | "
             f"{'' if dd5 is None else dd5} | {bool(item.get('sample_ok'))} | {used} |"
         )
+    lines.extend(window_rows)
     evidence = report["evidence"]
     lines.extend(
         [

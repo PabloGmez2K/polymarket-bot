@@ -77,9 +77,9 @@ The tool does not:
 ## Status Meaning
 
 - `ELIGIBLE_FOR_MANUAL_REVIEW`: no hard blockers were detected and important evidence is present. The decision is still manual.
-- `NOT_ELIGIBLE`: evaluated evidence is insufficient for manual review.
+- `NOT_ELIGIBLE`: evaluated evidence is insufficient for manual review, including missing policy evidence that does not prevent basic calculation.
 - `BLOCKED`: one or more hard blockers were detected.
-- `UNKNOWN`: important evidence is missing or unreadable, so the tool refuses to mark the system eligible.
+- `UNKNOWN`: basic trade/PnL/WR/drawdown data is missing or unreadable, so the tool cannot evaluate performance.
 
 ## Policy Relationship
 
