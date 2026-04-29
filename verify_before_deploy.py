@@ -7303,6 +7303,38 @@ def run_tests():
         and "missing_evidence" in scaling_check_code,
     )
     test(
+        "bankroll_scaling_check: performance_windows expone ventanas",
+        "performance_windows" in scaling_check_code
+        and "historical_all" in scaling_check_code
+        and "current_logic_series" in scaling_check_code
+        and "last_20_closed" in scaling_check_code
+        and "last_30_clean_closed" in scaling_check_code,
+    )
+    test(
+        "bankroll_scaling_check: evaluation_window definido",
+        '"evaluation_window"' in scaling_check_code
+        and "preferred" not in scaling_check_code.lower()
+        and "last_30_clean_closed" in scaling_check_code,
+    )
+    test(
+        "bankroll_scaling_check: limpia legacy con integrity flags",
+        "analysis_ready" in scaling_check_code
+        and "partial_historical_record" in scaling_check_code
+        and "missing_buy_history" in scaling_check_code
+        and "close_only_record" in scaling_check_code,
+    )
+    test(
+        "bankroll_scaling_check: historical_all no bloquea si hay ventana limpia",
+        "historical_all_legacy_context" in scaling_check_code
+        and "historical_all_used_for_decision" in scaling_check_code
+        and 'evaluation_window == "historical_all"' in scaling_check_code,
+    )
+    test(
+        "bankroll_scaling_check: markdown muestra Performance windows",
+        "## Performance windows" in scaling_check_code
+        and "Used for decision" in scaling_check_code,
+    )
+    test(
         "bankroll_scaling_check: phase1 pending no sale como pass false",
         'phase1_status = "pass" if phase1_ready else "pending" if phase1_pending_allowed else "fail"'
         in scaling_check_code

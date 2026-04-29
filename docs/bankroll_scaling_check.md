@@ -90,15 +90,35 @@ For `$25 -> $35`, it checks at least:
 - stable cycles threshold;
 - SQLiteRecorder freshness and large gaps;
 - Phase 1 readiness as a conservative gate. Pending Phase 1 is shown as `pending`, not `pass`, until readiness is actually true;
-- PnL non-negative;
-- win rate threshold;
-- drawdown over the last five closes above `-$3`;
+- PnL non-negative on the selected evaluation window;
+- win rate threshold on the selected evaluation window;
+- drawdown over the last five closes above `-$3` on the selected evaluation window;
 - bankroll readiness score threshold;
 - absence of critical execution errors and stuck pending exits.
 
 For `$35 -> $50` and above, Phase 1 readiness must be ready. Higher tiers add conservative checks for Truth Pipeline, settlement fidelity, and replay/shadow evidence where applicable.
 
 When evidence cannot be evaluated, the tool adds it to `missing_evidence` instead of inventing a pass.
+
+## Performance Windows
+
+The JSON output includes `performance_windows` to separate legacy context from the current evaluation sample:
+
+- `historical_all`: all closed trades with PnL, kept as legacy context.
+- `current_logic_series`: closed trades whose opened or closed bot version belongs to the inferred current logic series, for example `10.6`.
+- `last_20_closed`: most recent 20 closed trades with PnL, ordered by `closed_at`.
+- `last_30_clean_closed`: most recent 30 closed trades with `integrity.analysis_ready=true` and without `partial_historical_record`, `missing_buy_history`, or `close_only_record` when those fields exist.
+
+Each window reports `closed`, `wins`, `losses`, `win_rate_pct`, `pnl_total`, `drawdown_last_5`, and `sample_ok`.
+
+The selected `evaluation_window` is:
+
+1. `last_30_clean_closed` if it has at least 30 closed trades.
+2. `current_logic_series` if it has at least 30 closed trades.
+3. `last_20_closed` if it has at least 20 closed trades.
+4. `historical_all` as a conservative fallback.
+
+`historical_all` is not used as the primary hard blocker when a cleaner/current window has enough sample. In that case the tool adds `historical_all_legacy_context` as a watch item.
 
 ## Manual-Only Rule
 

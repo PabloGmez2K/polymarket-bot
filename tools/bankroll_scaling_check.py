@@ -374,7 +374,100 @@ def closed_trades_from_lifecycle(trade_lifecycle: Any) -> list[dict[str, Any]]:
     return closed
 
 
-def pnl_metrics(trade_lifecycle: Any, performance: Any) -> dict[str, Any]:
+def extract_logic_series(value: Any) -> str | None:
+    text = str(value or "").strip()
+    match = re.search(r"v?(\d+\.\d+)", text)
+    return match.group(1) if match else None
+
+
+def infer_logic_series(cycle_summary: Any, cycles_history: list[dict[str, Any]]) -> str | None:
+    candidates: list[Any] = []
+    if isinstance(cycle_summary, dict):
+        candidates.extend([cycle_summary.get("logic_series"), cycle_summary.get("version")])
+    for row in reversed(cycles_history[-20:]):
+        if isinstance(row, dict):
+            candidates.extend([row.get("logic_series"), row.get("version")])
+    for candidate in candidates:
+        series = extract_logic_series(candidate)
+        if series:
+            return series
+    return None
+
+
+def trade_logic_series_values(row: dict[str, Any]) -> set[str]:
+    raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+    close_context = raw.get("close_context") if isinstance(raw.get("close_context"), dict) else {}
+    candidates = [
+        raw.get("bot_version_opened"),
+        raw.get("bot_version_closed"),
+        close_context.get("bot_version"),
+    ]
+    for key in ("entry_context", "latest_entry_context"):
+        ctx = raw.get(key) if isinstance(raw.get(key), dict) else {}
+        candidates.append(ctx.get("bot_version"))
+    values: set[str] = set()
+    for candidate in candidates:
+        series = extract_logic_series(candidate)
+        if series:
+            values.add(series)
+    return values
+
+
+def is_integrity_clean(row: dict[str, Any]) -> bool:
+    raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+    integrity = raw.get("integrity")
+    if not isinstance(integrity, dict):
+        return False
+    if integrity.get("analysis_ready") is not True:
+        return False
+    legacy_flags = ("partial_historical_record", "missing_buy_history", "close_only_record")
+    return not any(bool(integrity.get(flag)) for flag in legacy_flags)
+
+
+def performance_window_stats(name: str, rows: list[dict[str, Any]], min_sample: int) -> dict[str, Any]:
+    values = [row["pnl"] for row in rows if row.get("pnl") is not None]
+    dated = sorted(
+        [row for row in rows if row.get("closed_at") is not None and row.get("pnl") is not None],
+        key=lambda row: row["closed_at"],
+    )
+    recent_5 = dated[-5:]
+    wins = sum(1 for value in values if value > 0)
+    losses = sum(1 for value in values if value <= 0)
+    return {
+        "window": name,
+        "closed": len(values),
+        "wins": wins,
+        "losses": losses,
+        "win_rate_pct": round(wins / len(values) * 100, 1) if values else None,
+        "pnl_total": round(sum(values), 2) if values else None,
+        "drawdown_last_5": round(sum(row["pnl"] for row in recent_5), 2) if recent_5 else None,
+        "sample_min": min_sample,
+        "sample_ok": len(values) >= min_sample,
+    }
+
+
+def legacy_pnl_summary(stats: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "source": stats.get("source"),
+        "evaluation_window": stats.get("evaluation_window"),
+        "closed_trades": stats.get("closed"),
+        "wins": stats.get("wins"),
+        "losses": stats.get("losses"),
+        "win_rate_pct": stats.get("win_rate_pct"),
+        "pnl_total": stats.get("pnl_total"),
+        "drawdown_last_5": stats.get("drawdown_last_5"),
+        "sample_ok": stats.get("sample_ok"),
+        "sample_min": stats.get("sample_min"),
+        "recent_closed": stats.get("recent_closed", []),
+    }
+
+
+def pnl_metrics(
+    trade_lifecycle: Any,
+    performance: Any,
+    cycle_summary: Any = None,
+    cycles_history: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     closed = closed_trades_from_lifecycle(trade_lifecycle)
     source = "trade_lifecycle"
     if not closed and isinstance(performance, dict):
@@ -385,26 +478,58 @@ def pnl_metrics(trade_lifecycle: Any, performance: Any) -> dict[str, Any]:
                     pnl = as_float(first_present(row, ["pnl", "pnl_cash", "profit_loss", "realized_pnl"]))
                     closed.append({"pnl": pnl, "closed_at": parse_ts(first_present(row, ["closed_at", "ts_utc"])), "raw": row})
             source = "performance"
-    pnl_values = [row["pnl"] for row in closed if row["pnl"] is not None]
-    recent = sorted(
-        [row for row in closed if row["closed_at"] is not None and row["pnl"] is not None],
+    closed_with_pnl = [row for row in closed if row.get("pnl") is not None]
+    closed_sorted = sorted(
+        [row for row in closed_with_pnl if row.get("closed_at") is not None],
         key=lambda row: row["closed_at"],
-    )[-5:]
-    return {
-        "source": source if closed else None,
-        "closed_trades": len(pnl_values),
-        "wins": sum(1 for value in pnl_values if value > 0),
-        "win_rate_pct": round(sum(1 for value in pnl_values if value > 0) / len(pnl_values) * 100, 1)
-        if pnl_values else None,
-        "pnl_total": round(sum(pnl_values), 2) if pnl_values else None,
-        "drawdown_last_5": round(sum(row["pnl"] for row in recent), 2) if recent else None,
-        "recent_closed": [
+    )
+    logic_series = infer_logic_series(cycle_summary, cycles_history or [])
+    current_logic_rows = [
+        row for row in closed_with_pnl
+        if logic_series and logic_series in trade_logic_series_values(row)
+    ]
+    clean_rows = [row for row in closed_sorted if is_integrity_clean(row)]
+
+    windows = {
+        "historical_all": performance_window_stats("historical_all", closed_with_pnl, 30),
+        "current_logic_series": performance_window_stats("current_logic_series", current_logic_rows, 30),
+        "last_20_closed": performance_window_stats("last_20_closed", closed_sorted[-20:], 20),
+        "last_30_clean_closed": performance_window_stats("last_30_clean_closed", clean_rows[-30:], 30),
+    }
+    windows["current_logic_series"]["logic_series"] = logic_series
+    windows["last_30_clean_closed"]["clean_filter"] = {
+        "analysis_ready": True,
+        "excluded_flags": ["partial_historical_record", "missing_buy_history", "close_only_record"],
+        "requires_integrity_fields": True,
+    }
+
+    if windows["last_30_clean_closed"]["closed"] >= 30:
+        evaluation_window = "last_30_clean_closed"
+    elif windows["current_logic_series"]["closed"] >= 30:
+        evaluation_window = "current_logic_series"
+    elif windows["last_20_closed"]["closed"] >= 20:
+        evaluation_window = "last_20_closed"
+    else:
+        evaluation_window = "historical_all"
+
+    evaluation = dict(windows[evaluation_window])
+    evaluation["source"] = source if closed else None
+    evaluation["evaluation_window"] = evaluation_window
+    recent = closed_sorted[-5:]
+    evaluation["recent_closed"] = [
             {
                 "closed_at": row["closed_at"].isoformat() if row["closed_at"] else None,
                 "pnl": row["pnl"],
             }
             for row in recent
-        ],
+        ]
+    return {
+        **legacy_pnl_summary(evaluation),
+        "performance_windows": windows,
+        "legacy_context": {
+            "historical_all": windows["historical_all"],
+            "historical_all_used_for_decision": evaluation_window == "historical_all",
+        },
     }
 
 
@@ -529,7 +654,7 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
     db = inspect_db(db_path)
     phase1 = infer_phase1(db)
     cycles = extract_cycle_metrics(cycle_summary, cycles_history)
-    pnl = pnl_metrics(trade_lifecycle, performance)
+    pnl = pnl_metrics(trade_lifecycle, performance, cycle_summary, cycles_history)
     score = inspect_bankroll_score(bankroll_state, bankroll_paths_checked)
     logs = inspect_logs(data_dir, args.log_tail)
     positions = inspect_positions(trade_lifecycle)
@@ -619,6 +744,11 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         add_item(watch_items, "sqlite_recorder_error_single", "One SQLiteRecorder error detected in inspected logs")
     if logs["warnings"]:
         add_item(watch_items, "observability_warnings", "Warnings or isolated forecast/city-intelligence issues found in logs")
+    if (
+        pnl.get("evaluation_window") != "historical_all"
+        and pnl.get("performance_windows", {}).get("historical_all", {}).get("closed", 0) > 0
+    ):
+        add_item(watch_items, "historical_all_legacy_context", "Historical all-trades performance is reported as legacy context, not the primary scaling blocker")
 
     criterion(criteria, "pending_exits_clear", "pass" if positions["stale_pending_exits"] == 0 else "fail", positions)
     if positions["stale_pending_exits"]:
@@ -678,6 +808,8 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         "hard_blockers": hard_blockers,
         "watch_items": watch_items,
         "missing_evidence": missing_evidence,
+        "evaluation_window": pnl.get("evaluation_window"),
+        "performance_windows": pnl.get("performance_windows", {}),
         "criteria": criteria,
         "evidence": {
             "phase1": phase1,
@@ -740,6 +872,27 @@ def render_markdown(report: dict[str, Any]) -> str:
     for item in report["criteria"]:
         value = json.dumps(item["value"], ensure_ascii=True) if isinstance(item["value"], (dict, list)) else item["value"]
         lines.append(f"| {item['name']} | {item['status']} | {value} | {item.get('notes', '')} |")
+    windows = report.get("performance_windows", {})
+    lines.extend(
+        [
+            "",
+            "## Performance windows",
+            "",
+            "| Window | Closed | Wins | Losses | WR | PnL | Drawdown last 5 | Sample ok | Used for decision |",
+            "|---|---:|---:|---:|---:|---:|---:|:---:|:---:|",
+        ]
+    )
+    for name in ("historical_all", "current_logic_series", "last_20_closed", "last_30_clean_closed"):
+        item = windows.get(name, {}) if isinstance(windows, dict) else {}
+        used = "yes" if report.get("evaluation_window") == name else "no"
+        wr = item.get("win_rate_pct")
+        pnl_total = item.get("pnl_total")
+        dd5 = item.get("drawdown_last_5")
+        lines.append(
+            f"| {name} | {item.get('closed', 0)} | {item.get('wins', 0)} | {item.get('losses', 0)} | "
+            f"{'' if wr is None else wr} | {'' if pnl_total is None else pnl_total} | "
+            f"{'' if dd5 is None else dd5} | {bool(item.get('sample_ok'))} | {used} |"
+        )
     evidence = report["evidence"]
     lines.extend(
         [
@@ -749,6 +902,7 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"- SQLite recorder: readable={evidence['sqlite_recorder'].get('readable')} age_hours={evidence['sqlite_recorder'].get('last_write_age_hours')} gaps={len(evidence['sqlite_recorder'].get('large_gaps') or [])}",
             f"- Phase1 readiness: exit_code={evidence['phase1'].get('exit_code')} status={evidence['phase1'].get('status')}",
             f"- Bankroll readiness score: {score_line}",
+            f"- Evaluation window: {report.get('evaluation_window')}",
             f"- PnL / drawdown: pnl_total={evidence['pnl_drawdown'].get('pnl_total')} drawdown_last_5={evidence['pnl_drawdown'].get('drawdown_last_5')} win_rate={evidence['pnl_drawdown'].get('win_rate_pct')}",
             f"- Recent trades: closed={evidence['pnl_drawdown'].get('closed_trades')} wins={evidence['pnl_drawdown'].get('wins')}",
             "",
