@@ -160,6 +160,9 @@ DAILY_BRIEFING_ENABLED = os.getenv("DAILY_BRIEFING_ENABLED", "1").lower() in ("1
 DAILY_BRIEFING_HOUR_UTC = int(os.getenv("DAILY_BRIEFING_HOUR_UTC", "8"))
 PNL_RECONCILIATION_ENABLED = os.getenv("PNL_RECONCILIATION_ENABLED", "1").lower() in ("1", "true", "yes", "on")
 PNL_RECONCILIATION_HOUR_UTC = int(os.getenv("PNL_RECONCILIATION_HOUR_UTC", str(DAILY_BRIEFING_HOUR_UTC)))
+WALLET_SNAPSHOT_ENABLED = os.getenv("WALLET_SNAPSHOT_ENABLED", "1").lower() in ("1", "true", "yes", "on")
+WALLET_SNAPSHOT_HOUR_UTC = int(os.getenv("WALLET_SNAPSHOT_HOUR_UTC", str(PNL_RECONCILIATION_HOUR_UTC)))
+WALLET_SNAPSHOT_TIMEOUT_SECONDS = int(os.getenv("WALLET_SNAPSHOT_TIMEOUT_SECONDS", "45"))
 POST_INTRA_SL_COOLDOWN_REVIEW_ENABLED = os.getenv("POST_INTRA_SL_COOLDOWN_REVIEW_ENABLED", "1").lower() in ("1", "true", "yes", "on")
 POST_INTRA_SL_COOLDOWN_REVIEW_MIN_CLOSED = int(os.getenv("POST_INTRA_SL_COOLDOWN_REVIEW_MIN_CLOSED", "10"))
 # v10.6.42: SQLite Recorder (Fase 0) — default OFF hasta validación en Railway
@@ -630,6 +633,11 @@ BANKROLL_SCALING_CHECK_SCRIPT = os.path.join(
     "tools",
     "bankroll_scaling_check.py",
 )
+WALLET_SNAPSHOT_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "tools",
+    "wallet_snapshot.py",
+)
 CYCLES_HISTORY_FILE = _data_path("cycles_history.jsonl")
 POSTMORTEM_FILE = _data_path("postmortem.json")
 TRADE_LIFECYCLE_FILE = _data_path("trade_lifecycle.json")
@@ -1050,6 +1058,13 @@ def load_alerts_state():
         "bankroll_scaling_last_blockers_hash": None,
         "bankroll_scaling_last_alert_cycle": 0,
         "bankroll_scaling_last_eligible_for_manual_review": False,
+        "wallet_snapshot_last_run_date": None,
+        "wallet_snapshot_last_phase2_ready": False,
+        "wallet_snapshot_last_ready_reason": None,
+        "wallet_snapshot_last_valid_snapshot_days": 0,
+        "wallet_snapshot_last_valid_snapshot_at": None,
+        "wallet_snapshot_last_error_date": None,
+        "wallet_snapshot_phase2_ready_alert_sent": False,
     }
     if not os.path.exists(ALERTS_FILE):
         return default
@@ -1086,6 +1101,13 @@ def load_alerts_state():
         state.setdefault("bankroll_scaling_last_blockers_hash", None)
         state.setdefault("bankroll_scaling_last_alert_cycle", 0)
         state.setdefault("bankroll_scaling_last_eligible_for_manual_review", False)
+        state.setdefault("wallet_snapshot_last_run_date", None)
+        state.setdefault("wallet_snapshot_last_phase2_ready", False)
+        state.setdefault("wallet_snapshot_last_ready_reason", None)
+        state.setdefault("wallet_snapshot_last_valid_snapshot_days", 0)
+        state.setdefault("wallet_snapshot_last_valid_snapshot_at", None)
+        state.setdefault("wallet_snapshot_last_error_date", None)
+        state.setdefault("wallet_snapshot_phase2_ready_alert_sent", False)
         return state
     except Exception:
         return default
@@ -1776,6 +1798,148 @@ def format_bankroll_scaling_telegram(report):
         ]
     )
     return "\n".join(lines)
+
+
+def run_wallet_snapshot_json():
+    """
+    Ejecuta la captura read-only de wallet y devuelve el contrato JSON.
+    Fail-safe: no manda Telegram, no toca trading y no interrumpe ciclos.
+    """
+    data_dir = DATA_DIR or "data"
+    command = [
+        sys.executable,
+        WALLET_SNAPSHOT_SCRIPT,
+        "--data-dir",
+        data_dir,
+        "--json",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            capture_output=True,
+            text=True,
+            timeout=WALLET_SNAPSHOT_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except Exception as exc:
+        log.warning(f"wallet snapshot: fallo ejecutando CLI read-only ({exc})")
+        return None
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()[:500]
+        log.warning(f"wallet snapshot: exit={result.returncode} detail={detail}")
+        return None
+    try:
+        payload = json.loads(result.stdout)
+    except Exception as exc:
+        log.warning(f"wallet snapshot: JSON invalido ({exc})")
+        return None
+    if not isinstance(payload, dict) or not isinstance(payload.get("phase2_readiness"), dict):
+        log.warning("wallet snapshot: contrato JSON incompleto")
+        return None
+    return payload
+
+
+def _wallet_snapshot_format_time(value):
+    dt = None
+    try:
+        text = str(value or "").strip()
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        if text:
+            dt = datetime.fromisoformat(text)
+    except Exception:
+        dt = None
+    if dt is None:
+        return "n/d"
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def format_wallet_snapshot_phase2_ready_telegram(report):
+    readiness = report.get("phase2_readiness", {}) if isinstance(report.get("phase2_readiness"), dict) else {}
+    history = report.get("history", {}) if isinstance(report.get("history"), dict) else {}
+    pnl = report.get("wallet_pnl", {}) if isinstance(report.get("wallet_pnl"), dict) else {}
+    wallet_pnl = pnl.get("wallet_pnl_7d")
+    try:
+        pnl_text = f"${float(wallet_pnl):+.2f}" if wallet_pnl is not None else "n/d"
+    except Exception:
+        pnl_text = "n/d"
+    valid_days = readiness.get("valid_snapshot_days", history.get("valid_snapshot_days", "n/d"))
+    required_days = readiness.get("required_snapshot_days", 7)
+    return "\n".join(
+        [
+            "✅ <b>Wallet Snapshot listo para Fase 2</b>",
+            "",
+            "phase2_ready=true",
+            f"P/L wallet 7d: {pnl_text}",
+            f"Confianza: {_html_escape(pnl.get('wallet_pnl_confidence', 'n/d'))}",
+            f"Snapshots válidos: {valid_days} días / {required_days}",
+            f"Baseline: {_wallet_snapshot_format_time(history.get('baseline_snapshot_at'))}",
+            f"Último snapshot: {_wallet_snapshot_format_time(history.get('latest_snapshot_at'))}",
+            "",
+            "Siguiente paso: preparar integración con pnl_reconciliation_alert.py.",
+            "No cambiar BANKROLL automáticamente ni sizing.",
+        ]
+    )
+
+
+def maybe_run_wallet_snapshot(state, now=None):
+    """
+    Captura wallet/portfolio una vez al dia como observabilidad read-only.
+    No envia Telegram durante ACUMULANDO; solo alerta one-shot al phase2_ready.
+    """
+    logger = globals().get("log")
+    if not WALLET_SNAPSHOT_ENABLED:
+        if logger:
+            logger.info("wallet snapshot: skip (WALLET_SNAPSHOT_ENABLED=0)")
+        return False
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    target_hour = WALLET_SNAPSHOT_HOUR_UTC % 24
+    if now.hour < target_hour:
+        if logger:
+            logger.info(
+                "wallet snapshot: skip "
+                f"(before target hour: now_hour={now.hour} target_hour={target_hour})"
+            )
+        return False
+
+    today = now.date().isoformat()
+    if state.get("wallet_snapshot_last_run_date") == today:
+        if logger:
+            logger.info(f"wallet snapshot: skip (already ran today: {today})")
+        return False
+
+    state["wallet_snapshot_last_run_date"] = today
+    report = run_wallet_snapshot_json()
+    if not report:
+        state["wallet_snapshot_last_error_date"] = today
+        return True
+
+    readiness = report.get("phase2_readiness", {}) if isinstance(report.get("phase2_readiness"), dict) else {}
+    history = report.get("history", {}) if isinstance(report.get("history"), dict) else {}
+    phase2_ready = bool(readiness.get("phase2_ready"))
+    state["wallet_snapshot_last_phase2_ready"] = phase2_ready
+    state["wallet_snapshot_last_ready_reason"] = readiness.get("phase2_ready_reason")
+    state["wallet_snapshot_last_valid_snapshot_days"] = readiness.get(
+        "valid_snapshot_days",
+        history.get("valid_snapshot_days", 0),
+    )
+    state["wallet_snapshot_last_valid_snapshot_at"] = history.get("latest_snapshot_at")
+
+    if phase2_ready and not state.get("wallet_snapshot_phase2_ready_alert_sent"):
+        send_telegram(format_wallet_snapshot_phase2_ready_telegram(report))
+        state["wallet_snapshot_phase2_ready_alert_sent"] = True
+
+    if logger:
+        logger.info(
+            "wallet snapshot: OK "
+            f"(phase2_ready={phase2_ready}, reason={state.get('wallet_snapshot_last_ready_reason')})"
+        )
+    return True
 
 
 def maybe_run_bankroll_scaling_monitor(state):
@@ -4896,6 +5060,14 @@ def run_observability_alerts():
         logger = globals().get("log")
         if logger:
             logger.warning(f"pnl reconciliation: fallo ({e})")
+
+    try:
+        if maybe_run_wallet_snapshot(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"wallet snapshot: fallo ({e})")
 
     # v10.6.37: cierra posiciones expiradas sin evidencia antes del briefing.
     try:

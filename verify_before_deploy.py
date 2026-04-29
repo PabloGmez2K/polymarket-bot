@@ -7446,6 +7446,75 @@ def run_tests():
         "wallet_snapshot: no referencia BANKROLL",
         "BANKROLL" not in wallet_snapshot_code,
     )
+    wallet_snapshot_integration_source = ""
+    wallet_snapshot_execution_source = ""
+    try:
+        wallet_snapshot_execution_source = (
+            get_function_source(module_ast, code_lines, "run_wallet_snapshot_json")
+            + "\n"
+            + get_function_source(module_ast, code_lines, "maybe_run_wallet_snapshot")
+        )
+        wallet_snapshot_integration_source = (
+            wallet_snapshot_execution_source
+            + "\n"
+            + get_function_source(module_ast, code_lines, "format_wallet_snapshot_phase2_ready_telegram")
+        )
+    except Exception:
+        wallet_snapshot_integration_source = ""
+        wallet_snapshot_execution_source = ""
+    test(
+        "wallet_snapshot observability: script y env vars definidos en bot.py",
+        "WALLET_SNAPSHOT_SCRIPT" in code
+        and "wallet_snapshot.py" in code
+        and "WALLET_SNAPSHOT_ENABLED" in code
+        and "WALLET_SNAPSHOT_HOUR_UTC" in code
+        and "WALLET_SNAPSHOT_TIMEOUT_SECONDS" in code,
+    )
+    test(
+        "wallet_snapshot observability: default diario sin tocar scheduler trading",
+        'WALLET_SNAPSHOT_ENABLED = os.getenv("WALLET_SNAPSHOT_ENABLED", "1")' in code
+        and 'WALLET_SNAPSHOT_HOUR_UTC = int(os.getenv("WALLET_SNAPSHOT_HOUR_UTC", str(PNL_RECONCILIATION_HOUR_UTC)))' in code
+        and "SCHEDULE_HOURS_UTC" not in wallet_snapshot_integration_source,
+    )
+    test(
+        "wallet_snapshot observability: helper JSON subprocess fail-safe",
+        "def run_wallet_snapshot_json(" in code
+        and "subprocess.run(" in wallet_snapshot_integration_source
+        and '"--json"' in wallet_snapshot_integration_source
+        and "timeout=WALLET_SNAPSHOT_TIMEOUT_SECONDS" in wallet_snapshot_integration_source
+        and "return None" in wallet_snapshot_integration_source,
+    )
+    test(
+        "wallet_snapshot observability: state anti-spam en alerts_state",
+        "wallet_snapshot_last_run_date" in code
+        and "wallet_snapshot_last_phase2_ready" in code
+        and "wallet_snapshot_last_ready_reason" in code
+        and "wallet_snapshot_last_valid_snapshot_days" in code
+        and "wallet_snapshot_last_valid_snapshot_at" in code
+        and "wallet_snapshot_last_error_date" in code
+        and "wallet_snapshot_phase2_ready_alert_sent" in code,
+    )
+    test(
+        "wallet_snapshot observability: phase2_ready one-shot sin autorizacion bankroll",
+        "def maybe_run_wallet_snapshot(" in code
+        and "phase2_ready" in wallet_snapshot_integration_source
+        and "wallet_snapshot_phase2_ready_alert_sent" in wallet_snapshot_integration_source
+        and "No cambiar BANKROLL" in wallet_snapshot_integration_source,
+    )
+    test(
+        "wallet_snapshot observability: integrada en run_observability_alerts",
+        "maybe_run_wallet_snapshot(state)" in code
+        and "wallet snapshot: fallo" in code,
+    )
+    test(
+        "wallet_snapshot observability: no integra pnl_reconciliation_alert.py ni trading primitives",
+        "PNL_RECONCILIATION_SCRIPT" not in wallet_snapshot_execution_source
+        and "OrderArgs" not in wallet_snapshot_execution_source
+        and "post_order" not in wallet_snapshot_execution_source
+        and "create_order" not in wallet_snapshot_execution_source
+        and "cancel_order" not in wallet_snapshot_execution_source
+        and "execute_trade" not in wallet_snapshot_execution_source,
+    )
 
     # ---- Resultado ----
     print(f"\n{'='*50}")

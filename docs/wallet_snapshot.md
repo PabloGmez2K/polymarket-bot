@@ -29,6 +29,14 @@ python tools/wallet_snapshot.py --report-only --json
 
 Por defecto appendea en `data/wallet_portfolio_snapshots.jsonl`. Con `--dry-run` imprime el snapshot calculado sin escribir. Con `--report-only` no llama a APIs y solo resume el historico existente.
 
+## Automatizacion diaria en Railway
+
+`bot.py` ejecuta `tools/wallet_snapshot.py --json` desde `run_observability_alerts()` una vez al dia, en el mismo contenedor Railway del bot. Es una tarea de observabilidad read-only: no cambia el scheduler de trading, no envia ordenes y no se integra todavia con `tools/pnl_reconciliation_alert.py`.
+
+Durante `ACUMULANDO` no envia Telegram diario; solo guarda snapshots para llegar al baseline de 7 dias/168h. Cuando `phase2_ready=true`, envia una alerta Telegram one-shot indicando que ya se puede preparar la Fase 2 manual.
+
+La Fase 2 sera disenar la integracion con `pnl_reconciliation_alert.py`. Esta automatizacion no autoriza subir bankroll, cambiar sizing ni tocar reglas de trading.
+
 ## Cash flows manuales
 
 Si hubo una recarga o retiro manual, se puede anotar en `data/wallet_cash_flows.jsonl`:
