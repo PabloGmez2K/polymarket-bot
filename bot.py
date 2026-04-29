@@ -4316,7 +4316,9 @@ def run_observability_alerts():
                 send_telegram(
                     f"📈 <b>Scaling Readiness</b>\n"
                     f"PnL acumulado de últimos {SCALING_WINDOW} trades: <b>${scaling_pnl:+.2f}</b>.\n"
-                    f"Considerar subir bankroll de ${BANKROLL:.0f} a ${next_tier:.0f}."
+                    f"Señal auxiliar de scaling: abrir revisión manual de bankroll ${BANKROLL:.0f} → ${next_tier:.0f}.\n"
+                    f"NO autoriza subida automática ni cambiar BANKROLL solo por esta alerta.\n"
+                    f"Requiere cumplir docs/bankroll_scaling_policy.md y validar health/readiness/PnL antes de decidir."
                 )
                 state["scaling_alerted_tier"] = next_tier
                 changed = True
@@ -4325,7 +4327,7 @@ def run_observability_alerts():
             send_telegram(
                 f"⚠ <b>Scaling Warning</b>\n"
                 f"PnL acumulado de últimos {SCALING_WINDOW} trades: <b>${scaling_pnl:+.2f}</b>.\n"
-                f"No subir de escalón hasta recuperar."
+                f"Señal auxiliar: no subir bankroll; revisar PnL/drawdown antes de cualquier revisión manual."
             )
             state["scaling_negative_alerted"] = True
             changed = True

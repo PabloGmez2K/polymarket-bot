@@ -1,6 +1,9 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
 
+**Última actualización:** 29 de abril de 2026 (Sesión 268 - P2A copy scaling manual-only, Codex)
+**Sesión 268 (29 abr 2026, Codex):** P2A mínimo de observabilidad: se corrige únicamente el copy de las alertas Telegram `Scaling Readiness` y `Scaling Warning` en `bot.py` para alinearlas con `docs/bankroll_scaling_policy.md`. `Scaling Readiness` deja de decir "Considerar subir bankroll" y ahora se declara señal auxiliar, exige revisión manual, aclara que NO autoriza subida automática ni cambiar `BANKROLL` solo por esa alerta, y pide validar health/readiness/PnL antes de decidir. `Scaling Warning` conserva el bloqueo y añade lectura de señal auxiliar con revisión de PnL/drawdown. `verify_before_deploy.py` suma checks de contrato para este copy y para conservar `SCALING_TIERS`/`BANKROLL_LEVELS`. No se cambia lógica de trigger, trading core, compras/ventas, sizing, bankroll real, whitelist, city modes, scheduler ni reglas de riesgo.
+
 **Última actualización:** 29 de abril de 2026 (Sesión 267 - política canónica de escalado de bankroll, Sonnet)
 **Sesión 267 (29 abr 2026, Sonnet):** Documentación-only. Creado `docs/bankroll_scaling_policy.md`: política canónica manual para escalar bankroll $25→$35→$50→$75→$100. Define hard blockers globales, soft blockers/WATCH, criterios por nivel (incluyendo phase1_readiness, bot_health_check, SQLiteRecorder, PnL, WR, drawdown, ciclos estables), regla anti-subida por euforia, fuentes de datos, relación con alertas Telegram actuales (`Scaling Readiness`/`Scaling Warning` como señales auxiliares no autoritativas) y próximo paso P2 (herramienta read-only de elegibilidad). Decisión actual: no subir bankroll — continuar acumulando datos hasta phase1_readiness exit_code=0 o Bankroll Readiness Score ≥ 40% con PnL no negativo. No se toca código, bot.py, trading core, NOAA, scheduler, whitelist, city modes, bankroll real ni variables de entorno.
 

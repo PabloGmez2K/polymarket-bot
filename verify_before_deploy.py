@@ -4272,6 +4272,12 @@ def run_tests():
     test("Drawdown Alert en run_observability", "Drawdown Alert" in code)
     test("Scaling Readiness en run_observability", "Scaling Readiness" in code)
     test("Scaling Warning en run_observability", "Scaling Warning" in code)
+    test("Scaling Readiness no recomienda subir sin matiz", "Considerar subir bankroll" not in code)
+    test("Scaling Readiness exige revisión manual", "revisión manual" in code and "docs/bankroll_scaling_policy.md" in code)
+    test("Scaling Readiness aclara NO autoriza", "NO autoriza" in code and "cambiar BANKROLL solo por esta alerta" in code)
+    test("Scaling Warning conserva bloqueo auxiliar", "Señal auxiliar: no subir bankroll" in code and "revisar PnL/drawdown" in code)
+    test("SCALING_TIERS conserva escalones canónicos", "SCALING_TIERS = [25, 35, 50, 75, 100]" in code)
+    test("BANKROLL_LEVELS conserva default canónico", '"BANKROLL_LEVELS", "25,35,50,75,100"' in code)
     test("Strategy Review en run_observability", "Strategy Review" in code)
     test("Strategy Signal en run_observability", "Strategy Signal" in code)
 
