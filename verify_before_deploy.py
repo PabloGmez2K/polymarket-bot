@@ -7193,6 +7193,120 @@ def run_tests():
     else:
         test("bot_health: functional checks cargan namespace", False)
 
+    # ---- Bankroll scaling check read-only CLI ----
+    print("  Checks bankroll_scaling_check.py read-only CLI")
+    scaling_check_path = os.path.join(os.path.dirname(__file__), "tools", "bankroll_scaling_check.py")
+    scaling_check_doc_path = os.path.join(os.path.dirname(__file__), "docs", "bankroll_scaling_check.md")
+    scaling_check_code = ""
+    scaling_check_doc = ""
+    scaling_check_ast_ok = False
+    scaling_check_ast_detail = ""
+    if os.path.exists(scaling_check_path):
+        with open(scaling_check_path, "r", encoding="utf-8") as _f:
+            scaling_check_code = _f.read()
+        try:
+            ast.parse(scaling_check_code)
+            scaling_check_ast_ok = True
+        except SyntaxError as _exc:
+            scaling_check_ast_detail = str(_exc)
+    if os.path.exists(scaling_check_doc_path):
+        with open(scaling_check_doc_path, "r", encoding="utf-8") as _f:
+            scaling_check_doc = _f.read()
+
+    scaling_open_write = bool(re.search(
+        r"\.open\([^)]*['\"](?:w|a|x|\+)",
+        scaling_check_code,
+    ) or re.search(
+        r"open\([^)]*['\"](?:w|a|x|\+)",
+        scaling_check_code,
+    ))
+    scaling_sql_write = bool(re.search(
+        r"\b(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|VACUUM|PRAGMA\s+journal_mode)\b",
+        scaling_check_code,
+    ))
+
+    test(
+        "bankroll_scaling_check: tools/bankroll_scaling_check.py existe y tiene sintaxis valida",
+        os.path.exists(scaling_check_path) and scaling_check_ast_ok,
+        scaling_check_ast_detail,
+    )
+    test(
+        "bankroll_scaling_check: usa argparse",
+        "import argparse" in scaling_check_code and "ArgumentParser" in scaling_check_code,
+    )
+    test(
+        "bankroll_scaling_check: tiene main()",
+        "def main(" in scaling_check_code and 'if __name__ == "__main__"' in scaling_check_code,
+    )
+    test(
+        "bankroll_scaling_check: soporta --json y --markdown",
+        "--json" in scaling_check_code and "--markdown" in scaling_check_code,
+    )
+    test(
+        "bankroll_scaling_check: soporta data-dir/db/current/target/log-tail",
+        "--data-dir" in scaling_check_code
+        and "--db" in scaling_check_code
+        and "--current-bankroll" in scaling_check_code
+        and "--target-tier" in scaling_check_code
+        and "--log-tail" in scaling_check_code,
+    )
+    test(
+        "bankroll_scaling_check: no importa bot.py",
+        "\nimport bot\n" not in scaling_check_code and "\nfrom bot import" not in scaling_check_code,
+    )
+    test(
+        "bankroll_scaling_check: no contiene send_telegram",
+        "send_telegram" not in scaling_check_code,
+    )
+    test(
+        "bankroll_scaling_check: no contiene requests/urlopen",
+        "requests" not in scaling_check_code and "urlopen" not in scaling_check_code,
+    )
+    test(
+        "bankroll_scaling_check: no escribe archivos",
+        not scaling_open_write
+        and ".write(" not in scaling_check_code
+        and ".write_text(" not in scaling_check_code
+        and ".writelines(" not in scaling_check_code,
+    )
+    test(
+        "bankroll_scaling_check: SQLite read-only y sin writes DB",
+        "import sqlite3" in scaling_check_code
+        and "mode=ro" in scaling_check_code
+        and "uri=True" in scaling_check_code
+        and not scaling_sql_write,
+    )
+    test(
+        "bankroll_scaling_check: contrato eligible/decision/manual-only",
+        "eligible_for_manual_review" in scaling_check_code
+        and "do_not_increase" in scaling_check_code
+        and "manual_review_required" in scaling_check_code
+        and "increase_now" not in scaling_check_code,
+    )
+    test(
+        "bankroll_scaling_check: estructura blockers/watch/missing",
+        "hard_blockers" in scaling_check_code
+        and "watch_items" in scaling_check_code
+        and "missing_evidence" in scaling_check_code,
+    )
+    test(
+        "bankroll_scaling_check: docs/bankroll_scaling_check.md existe",
+        os.path.exists(scaling_check_doc_path)
+        and "read-only" in scaling_check_doc.lower()
+        and "manual" in scaling_check_doc.lower(),
+    )
+    test(
+        "bankroll_scaling_check: no toca trading core",
+        "manage_positions" not in scaling_check_code
+        and "intra_cycle_sl_check" not in scaling_check_code
+        and "execute_buy" not in scaling_check_code
+        and "execute_sell" not in scaling_check_code
+        and "BANKROLL_LEVELS" not in scaling_check_code
+        and "SCALING_TIERS" not in scaling_check_code
+        and "ACTIVE_TRADING_CITIES" not in scaling_check_code
+        and "CANARY_TRADING_CITIES" not in scaling_check_code,
+    )
+
     # ---- Resultado ----
     print(f"\n{'='*50}")
     total = passed + failed
