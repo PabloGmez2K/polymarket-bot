@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,6 +17,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_INTELLIGENCE_PATH = REPO_ROOT / "data" / "traders_intelligence.json"
 DEFAULT_STATE_PATH = REPO_ROOT / "data" / "traders_intelligence_daily_summary_state.json"
 DEFAULT_MD_OUTPUT = REPO_ROOT / "docs" / "traders_intelligence_daily_summary_latest.md"
+TELEGRAM_SAFE_CHUNK_CHARS = 3800
+TELEGRAM_SEND_RETRIES = 1
+TELEGRAM_TIMEOUT_SECONDS = 10
 
 
 def parse_args():
@@ -93,19 +98,87 @@ def ensure_parent(path_str):
     return path
 
 
-def send_telegram(message: str):
-    token = os.getenv("TELEGRAM_TOKEN", "")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
-    if not token or not chat_id:
-        return {"sent": False, "reason": "missing_telegram_env"}
-    payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
+def chunk_message(message: str, limit: int = TELEGRAM_SAFE_CHUNK_CHARS):
+    text = str(message or "")
+    if len(text) <= limit:
+        return [text]
+
+    chunks = []
+    current = []
+    current_len = 0
+    for line in text.splitlines(keepends=True):
+        if len(line) > limit:
+            if current:
+                chunks.append("".join(current).rstrip())
+                current = []
+                current_len = 0
+            for idx in range(0, len(line), limit):
+                chunks.append(line[idx:idx + limit].rstrip())
+            continue
+        if current and current_len + len(line) > limit:
+            chunks.append("".join(current).rstrip())
+            current = [line]
+            current_len = len(line)
+        else:
+            current.append(line)
+            current_len += len(line)
+    if current:
+        chunks.append("".join(current).rstrip())
+    return [chunk for chunk in chunks if chunk]
+
+
+def telegram_failure(reason: str, exc=None, sent_chunks: int = 0):
+    result = {
+        "sent": False,
+        "reason": reason,
+        "sent_chunks": sent_chunks,
+    }
+    if exc is not None:
+        result["error"] = f"{type(exc).__name__}: {exc}"
+    return result
+
+
+def post_telegram_chunk(token: str, chat_id: str, chunk: str):
+    # Intentionally omit parse_mode: this keeps the alert non-fatal even if
+    # dynamic trader/city text contains characters that would break Telegram HTML.
+    payload = {"chat_id": chat_id, "text": chunk}
     req = urllib.request.Request(
         f"https://api.telegram.org/bot{token}/sendMessage",
         data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
     )
-    urllib.request.urlopen(req, timeout=10)
-    return {"sent": True, "reason": "sent"}
+    urllib.request.urlopen(req, timeout=TELEGRAM_TIMEOUT_SECONDS)
+
+
+def send_telegram(message: str):
+    token = os.getenv("TELEGRAM_TOKEN", "")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+    if not token or not chat_id:
+        return {"sent": False, "reason": "missing_telegram_env"}
+
+    chunks = chunk_message(message)
+    sent_chunks = 0
+    for chunk in chunks:
+        for attempt in range(TELEGRAM_SEND_RETRIES + 1):
+            try:
+                post_telegram_chunk(token, chat_id, chunk)
+                sent_chunks += 1
+                break
+            except urllib.error.HTTPError as exc:
+                if attempt >= TELEGRAM_SEND_RETRIES:
+                    return telegram_failure("telegram_http_error", exc, sent_chunks)
+            except urllib.error.URLError as exc:
+                if attempt >= TELEGRAM_SEND_RETRIES:
+                    return telegram_failure("telegram_url_error", exc, sent_chunks)
+            except TimeoutError as exc:
+                if attempt >= TELEGRAM_SEND_RETRIES:
+                    return telegram_failure("telegram_timeout", exc, sent_chunks)
+            except Exception as exc:
+                if attempt >= TELEGRAM_SEND_RETRIES:
+                    return telegram_failure("telegram_exception", exc, sent_chunks)
+            time.sleep(1)
+
+    return {"sent": True, "reason": "sent", "sent_chunks": sent_chunks}
 
 
 def get_active_now(trader):

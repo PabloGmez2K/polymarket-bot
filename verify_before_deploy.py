@@ -166,6 +166,7 @@ def run_tests():
     dashboard_css_path = os.path.join(os.path.dirname(__file__), "static", "dashboard.css")
     dashboard_js_path = os.path.join(os.path.dirname(__file__), "static", "dashboard.js")
     agent_events_path = os.path.join(os.path.dirname(__file__), "agent_events.jsonl")
+    traders_daily_summary_path = os.path.join(os.path.dirname(__file__), "tools", "traders_intelligence_daily_summary.py")
     trader_code = ""
     finder_code = ""
     requirements_code = ""
@@ -177,6 +178,7 @@ def run_tests():
     dashboard_template_code = ""
     dashboard_css_code = ""
     dashboard_js_code = ""
+    traders_daily_summary_code = ""
     agent_event_rows = []
     if os.path.exists(trader_analyzer_path):
         with open(trader_analyzer_path, "r", encoding="utf-8") as f:
@@ -220,6 +222,9 @@ def run_tests():
                         agent_event_rows.append(json.loads(line))
         except Exception:
             agent_event_rows = []
+    if os.path.exists(traders_daily_summary_path):
+        with open(traders_daily_summary_path, "r", encoding="utf-8") as f:
+            traders_daily_summary_code = f.read()
 
     # ---- Test 0: Sintaxis válida ----
     print("\n Sintaxis")
@@ -6953,6 +6958,43 @@ def run_tests():
         "execute_buy" not in code[code.find("def maybe_run_blocked_signals_check("):code.find("def maybe_run_w17_observation_alert(")]
         if "def maybe_run_blocked_signals_check(" in code and "def maybe_run_w17_observation_alert(" in code
         else True,
+    )
+
+    # ---- v10.6.47: traders_intelligence Telegram hardening ----
+    print("  Checks traders_intelligence Telegram hardening (observability)")
+    test(
+        "traders_intelligence: daily summary tool existe",
+        bool(traders_daily_summary_code),
+    )
+    test(
+        "traders_intelligence: send_telegram captura errores HTTP/red/timeout",
+        "urllib.error.HTTPError" in traders_daily_summary_code
+        and "urllib.error.URLError" in traders_daily_summary_code
+        and "TimeoutError" in traders_daily_summary_code
+        and "telegram_exception" in traders_daily_summary_code,
+    )
+    test(
+        "traders_intelligence: send_telegram no usa parse_mode HTML",
+        '"parse_mode"' not in traders_daily_summary_code
+        and "'parse_mode'" not in traders_daily_summary_code,
+    )
+    test(
+        "traders_intelligence: Telegram largo se parte en chunks seguros",
+        "TELEGRAM_SAFE_CHUNK_CHARS = 3800" in traders_daily_summary_code
+        and "def chunk_message(" in traders_daily_summary_code
+        and "post_telegram_chunk(" in traders_daily_summary_code,
+    )
+    test(
+        "traders_intelligence: fallo Telegram devuelve resultado no fatal",
+        "def telegram_failure(" in traders_daily_summary_code
+        and '"sent": False' in traders_daily_summary_code
+        and "return telegram_failure(" in traders_daily_summary_code,
+    )
+    test(
+        "traders_intelligence: state/markdown se escriben tras send_telegram",
+        traders_daily_summary_code.find("telegram_result = send_telegram(message)") != -1
+        and traders_daily_summary_code.find("state_path.write_text(") > traders_daily_summary_code.find("telegram_result = send_telegram(message)")
+        and traders_daily_summary_code.find("md_path.write_text(") > traders_daily_summary_code.find("telegram_result = send_telegram(message)"),
     )
 
     # ---- Resultado ----
