@@ -159,6 +159,34 @@ def data_path(data_dir: Path, name: str) -> Path:
     return direct
 
 
+def bankroll_state_paths(data_dir: Path) -> list[Path]:
+    candidates = [
+        data_dir / "bankroll_readiness_state.json",
+        Path("data") / "bankroll_readiness_state.json",
+        Path("bankroll_readiness_state.json"),
+    ]
+    seen: set[str] = set()
+    result: list[Path] = []
+    for path in candidates:
+        key = str(path)
+        if key not in seen:
+            seen.add(key)
+            result.append(path)
+    return result
+
+
+def read_bankroll_state(data_dir: Path) -> tuple[Any, str | None, list[str]]:
+    paths = bankroll_state_paths(data_dir)
+    last_error = "missing"
+    for path in paths:
+        data, err = read_json(path)
+        if err is None:
+            return data, None, [str(item) for item in paths]
+        if err != "missing":
+            last_error = err
+    return None, last_error, [str(item) for item in paths]
+
+
 def first_present(data: dict[str, Any], keys: list[str]) -> Any:
     for key in keys:
         if key in data and data[key] not in (None, ""):
@@ -380,9 +408,17 @@ def pnl_metrics(trade_lifecycle: Any, performance: Any) -> dict[str, Any]:
     }
 
 
-def inspect_bankroll_score(state: Any) -> dict[str, Any]:
+def inspect_bankroll_score(state: Any, paths_checked: list[str]) -> dict[str, Any]:
     if not isinstance(state, dict):
-        return {"available": False, "score_pct": None, "stage": None, "updated_at": None}
+        return {
+            "available": False,
+            "score": None,
+            "score_pct": None,
+            "stage": None,
+            "updated_at": None,
+            "paths_checked": paths_checked,
+            "message": "Bankroll readiness score state file not found; run/readiness score has not produced persistent state in this environment.",
+        }
     score = first_present(state, ["composite", "score_pct", "bankroll_readiness_score", "readiness_score", "score"])
     if score is None:
         score = find_nested(state, {"composite", "score_pct", "bankroll_readiness_score", "readiness_score"})
@@ -392,9 +428,12 @@ def inspect_bankroll_score(state: Any) -> dict[str, Any]:
     updated_at = find_nested(state, {"updated_at", "generated_at", "timestamp"})
     return {
         "available": as_float(score) is not None,
+        "score": as_float(score),
         "score_pct": as_float(score),
         "stage": stage,
         "updated_at": updated_at,
+        "paths_checked": paths_checked,
+        "message": None,
     }
 
 
@@ -481,7 +520,7 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
     trade_lifecycle, trade_lifecycle_err = read_json(data_path(data_dir, "trade_lifecycle.json"))
     postmortem, postmortem_err = read_json(data_path(data_dir, "postmortem.json"))
     performance, performance_err = read_json(data_path(data_dir, "performance.json"))
-    bankroll_state, bankroll_state_err = read_json(data_path(data_dir, "bankroll_readiness_state.json"))
+    bankroll_state, bankroll_state_err, bankroll_paths_checked = read_bankroll_state(data_dir)
 
     current = infer_current_bankroll(bankroll_state, args.current_bankroll)
     target = infer_target_tier(current, args.target_tier)
@@ -491,7 +530,7 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
     phase1 = infer_phase1(db)
     cycles = extract_cycle_metrics(cycle_summary, cycles_history)
     pnl = pnl_metrics(trade_lifecycle, performance)
-    score = inspect_bankroll_score(bankroll_state)
+    score = inspect_bankroll_score(bankroll_state, bankroll_paths_checked)
     logs = inspect_logs(data_dir, args.log_tail)
     positions = inspect_positions(trade_lifecycle)
 
@@ -508,12 +547,17 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         add_item(hard_blockers, "large_cycle_gaps", "Large gaps detected in SQLite cycle_events")
 
     phase1_allowed = int(thresholds["phase1_exit"])
-    phase1_ok = phase1["exit_code"] <= phase1_allowed
-    criterion(criteria, "phase1_ready", "pass" if phase1_ok else "fail", phase1.get("ready"), f"exit_code={phase1['exit_code']}")
-    if not phase1_ok:
+    phase1_ready = bool(phase1.get("ready"))
+    phase1_pending_allowed = phase1["exit_code"] == 1 and phase1_allowed >= 1
+    phase1_status = "pass" if phase1_ready else "pending" if phase1_pending_allowed else "fail"
+    phase1_notes = f"exit_code={phase1['exit_code']}"
+    if phase1_pending_allowed:
+        phase1_notes += "; Phase 1 readiness pending; expected until thresholds are met"
+    criterion(criteria, "phase1_ready", phase1_status, phase1_ready, phase1_notes)
+    if not phase1_ready and not phase1_pending_allowed:
         add_item(hard_blockers, "phase1_not_ready", "Phase 1 readiness is not ready enough for this tier")
-    elif phase1["exit_code"] == 1:
-        add_item(watch_items, "phase1_pending", "Phase 1 readiness is still pending; manual review must justify this for $25->$35")
+    elif phase1_pending_allowed:
+        add_item(watch_items, "phase1_pending", "Phase 1 readiness pending; expected until thresholds are met")
 
     cycles_available = max(cycles["cycles_available"], db["cycle_count"] or 0)
     cycles_ok = cycles_available >= int(thresholds["cycles"])
@@ -552,7 +596,11 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
     score_ok = score["score_pct"] is not None and score["score_pct"] >= float(thresholds["score"])
     criterion(criteria, "bankroll_readiness_score", "pass" if score_ok else "fail" if score["score_pct"] is not None else "unknown", score["score_pct"])
     if score["score_pct"] is None:
-        add_item(missing_evidence, "bankroll_readiness_score_unavailable", "Bankroll readiness score is unavailable")
+        add_item(
+            missing_evidence,
+            "bankroll_readiness_score_unavailable",
+            "Bankroll readiness score state file not found; run/readiness score has not produced persistent state in this environment.",
+        )
     elif not score_ok:
         add_item(watch_items, "score_low", "Bankroll readiness score is below threshold")
 
@@ -652,6 +700,15 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def render_markdown(report: dict[str, Any]) -> str:
+    score_evidence = report["evidence"]["bankroll_score"]
+    if score_evidence.get("available"):
+        score_line = (
+            f"{score_evidence.get('score_pct')} stage={score_evidence.get('stage')}"
+        )
+    else:
+        score_line = "unavailable (state file not found)"
+        if score_evidence.get("paths_checked"):
+            score_line += f" paths_checked={json.dumps(score_evidence.get('paths_checked'), ensure_ascii=True)}"
     lines = [
         "# Bankroll Scaling Check",
         "",
@@ -691,7 +748,7 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"- Last cycle: {evidence['cycle_summary'].get('last_cycle_ts')} age_hours={evidence['cycle_summary'].get('last_cycle_age_hours')}",
             f"- SQLite recorder: readable={evidence['sqlite_recorder'].get('readable')} age_hours={evidence['sqlite_recorder'].get('last_write_age_hours')} gaps={len(evidence['sqlite_recorder'].get('large_gaps') or [])}",
             f"- Phase1 readiness: exit_code={evidence['phase1'].get('exit_code')} status={evidence['phase1'].get('status')}",
-            f"- Bankroll readiness score: {evidence['bankroll_score'].get('score_pct')} stage={evidence['bankroll_score'].get('stage')}",
+            f"- Bankroll readiness score: {score_line}",
             f"- PnL / drawdown: pnl_total={evidence['pnl_drawdown'].get('pnl_total')} drawdown_last_5={evidence['pnl_drawdown'].get('drawdown_last_5')} win_rate={evidence['pnl_drawdown'].get('win_rate_pct')}",
             f"- Recent trades: closed={evidence['pnl_drawdown'].get('closed_trades')} wins={evidence['pnl_drawdown'].get('wins')}",
             "",

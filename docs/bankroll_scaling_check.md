@@ -52,6 +52,14 @@ If present, the tool reads:
 
 It also checks `data/runtime_import/` as a fallback for runtime files when the direct path under `--data-dir` is missing.
 
+For `bankroll_readiness_state.json`, it checks these locations:
+
+- `--data-dir/bankroll_readiness_state.json`
+- `./data/bankroll_readiness_state.json`
+- `./bankroll_readiness_state.json`
+
+If none exists, the score is reported as unavailable with `paths_checked`. That is not treated as a script bug; it means the readiness score tool has not produced persistent state in that environment. Because the scaling policy requires a score threshold, missing score evidence still blocks eligibility.
+
 ## What It Does Not Do
 
 The tool does not:
@@ -81,7 +89,7 @@ For `$25 -> $35`, it checks at least:
 
 - stable cycles threshold;
 - SQLiteRecorder freshness and large gaps;
-- Phase 1 readiness as a conservative gate;
+- Phase 1 readiness as a conservative gate. Pending Phase 1 is shown as `pending`, not `pass`, until readiness is actually true;
 - PnL non-negative;
 - win rate threshold;
 - drawdown over the last five closes above `-$3`;

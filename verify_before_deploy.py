@@ -7290,6 +7290,18 @@ def run_tests():
         and "missing_evidence" in scaling_check_code,
     )
     test(
+        "bankroll_scaling_check: phase1 pending no sale como pass false",
+        'phase1_status = "pass" if phase1_ready else "pending" if phase1_pending_allowed else "fail"'
+        in scaling_check_code
+        and "Phase 1 readiness pending; expected until thresholds are met" in scaling_check_code,
+    )
+    test(
+        "bankroll_scaling_check: bankroll score missing explica paths_checked",
+        "paths_checked" in scaling_check_code
+        and "state file not found" in scaling_check_code
+        and "read_bankroll_state" in scaling_check_code,
+    )
+    test(
         "bankroll_scaling_check: docs/bankroll_scaling_check.md existe",
         os.path.exists(scaling_check_doc_path)
         and "read-only" in scaling_check_doc.lower()
