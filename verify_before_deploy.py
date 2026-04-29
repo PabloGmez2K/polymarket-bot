@@ -7373,6 +7373,80 @@ def run_tests():
         and "CANARY_TRADING_CITIES" not in scaling_check_code,
     )
 
+    # ---- Wallet snapshot read-only CLI ----
+    print("  Checks wallet_snapshot.py read-only CLI")
+    wallet_snapshot_path = os.path.join(os.path.dirname(__file__), "tools", "wallet_snapshot.py")
+    wallet_snapshot_doc_path = os.path.join(os.path.dirname(__file__), "docs", "wallet_snapshot.md")
+    wallet_snapshot_code = ""
+    wallet_snapshot_doc = ""
+    wallet_snapshot_ast_ok = False
+    wallet_snapshot_ast_detail = ""
+    if os.path.exists(wallet_snapshot_path):
+        with open(wallet_snapshot_path, "r", encoding="utf-8") as _f:
+            wallet_snapshot_code = _f.read()
+        try:
+            ast.parse(wallet_snapshot_code)
+            wallet_snapshot_ast_ok = True
+        except SyntaxError as _exc:
+            wallet_snapshot_ast_detail = str(_exc)
+    if os.path.exists(wallet_snapshot_doc_path):
+        with open(wallet_snapshot_doc_path, "r", encoding="utf-8") as _f:
+            wallet_snapshot_doc = _f.read()
+
+    test(
+        "wallet_snapshot: tools/wallet_snapshot.py existe y tiene sintaxis valida",
+        os.path.exists(wallet_snapshot_path) and wallet_snapshot_ast_ok,
+        wallet_snapshot_ast_detail,
+    )
+    test(
+        "wallet_snapshot: docs/wallet_snapshot.md existe",
+        os.path.exists(wallet_snapshot_doc_path)
+        and "phase2_ready" in wallet_snapshot_doc
+        and "wallet_cash_flows.jsonl" in wallet_snapshot_doc,
+    )
+    test(
+        "wallet_snapshot: no importa bot.py",
+        "import bot" not in wallet_snapshot_code and "from bot" not in wallet_snapshot_code,
+    )
+    test(
+        "wallet_snapshot: flags CLI requeridos",
+        "--dry-run" in wallet_snapshot_code
+        and "--json" in wallet_snapshot_code
+        and "--markdown" in wallet_snapshot_code
+        and "--report-only" in wallet_snapshot_code,
+    )
+    test(
+        "wallet_snapshot: schema snapshot requerido",
+        "schema_version" in wallet_snapshot_code
+        and "snapshot_at" in wallet_snapshot_code
+        and "total_value" in wallet_snapshot_code
+        and "api_ok" in wallet_snapshot_code
+        and "wallet_portfolio_snapshots.jsonl" in wallet_snapshot_code,
+    )
+    test(
+        "wallet_snapshot: contrato PnL/readiness requerido",
+        "phase2_ready" in wallet_snapshot_code
+        and "wallet_pnl_available" in wallet_snapshot_code
+        and "wallet_pnl_confidence" in wallet_snapshot_code
+        and "required_history_hours" in wallet_snapshot_code
+        and "snapshot_delta" in wallet_snapshot_code,
+    )
+    test(
+        "wallet_snapshot: no contiene primitivas de trading",
+        "post_order" not in wallet_snapshot_code
+        and "create_order" not in wallet_snapshot_code
+        and "cancel_order" not in wallet_snapshot_code
+        and "OrderArgs" not in wallet_snapshot_code
+        and "BUY" not in wallet_snapshot_code
+        and "SELL" not in wallet_snapshot_code
+        and "manage_positions" not in wallet_snapshot_code
+        and "maybe_buy" not in wallet_snapshot_code,
+    )
+    test(
+        "wallet_snapshot: no referencia BANKROLL",
+        "BANKROLL" not in wallet_snapshot_code,
+    )
+
     # ---- Resultado ----
     print(f"\n{'='*50}")
     total = passed + failed
