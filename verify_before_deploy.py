@@ -6236,6 +6236,53 @@ def run_tests():
         "priorizar auditoria de las ciudades fuera de whitelist" in code
         and "antes de tocar reglas core" in code,
     )
+    try:
+        crosscheck_temporal_src = code.split("def maybe_run_daily_crosscheck_temporal_summary(", 1)[1].split(
+            "def maybe_run_traders_intelligence_summary(", 1
+        )[0]
+    except IndexError:
+        crosscheck_temporal_src = ""
+    test(
+        "v10.6.48: crosscheck summary recibe paths live del bot",
+        '"--signals"' in crosscheck_temporal_src
+        and "SIGNALS_FILE" in crosscheck_temporal_src
+        and '"--shadow"' in crosscheck_temporal_src
+        and "SHADOW_TRACKING_FILE" in crosscheck_temporal_src
+        and '"--policy"' in crosscheck_temporal_src
+        and "CITY_POLICY_FILE" in crosscheck_temporal_src,
+    )
+    test(
+        "v10.6.48: crosscheck summary usa evidencia live si no reconstruye detalle",
+        "latest_operational_count(summary) > 0" in signals_summary_code
+        and "Gap operativo detectado por cross-check live" in signals_summary_code
+        and "Hoy aparece gap operativo real" in signals_summary_code,
+    )
+    test(
+        "v10.6.48: crosscheck summary no recomienda abrir whitelist/canary automaticamente",
+        "No abrir whitelist/canary automaticamente" in signals_summary_code
+        and "preparar whitelist/canary" not in signals_summary_code,
+    )
+    test(
+        "v10.6.48: SCHEDULE_HOURS_UTC intacto",
+        "SCHEDULE_HOURS_UTC = [hour for hour in _SCHEDULE_HOURS_BASE if hour not in _SCHEDULE_HOURS_DISABLED] or list(_SCHEDULE_HOURS_BASE)" in code,
+    )
+    default_whitelist_src = code.split("QUALITY_TRADER_CITIES_WHITELIST = {", 1)[1].split(
+        "MIN_EDGE_EXACT_RANGE_BUFFER_PP", 1
+    )[0]
+    active_src = code.split("ACTIVE_TRADING_CITIES = {", 1)[1].split("CANARY_TRADING_CITIES = {", 1)[0]
+    canary_src = code.split("CANARY_TRADING_CITIES = {", 1)[1].split("CANARY_POSITION_SCALE", 1)[0]
+    resolution_src = code.split("RESOLUTION_ICAO = {", 1)[1].split("OBSERVED_AUDIT_CITIES = {", 1)[0]
+    observed_src = code.split("OBSERVED_AUDIT_CITIES = {", 1)[1].split("CITY_TIMEZONES = {", 1)[0]
+    test(
+        "v10.6.48: Los Angeles no entra en whitelist/canary/active",
+        '"Los Angeles"' not in default_whitelist_src
+        and '"Los Angeles"' not in active_src
+        and '"Los Angeles"' not in canary_src,
+    )
+    test(
+        "v10.6.48: Los Angeles no entra en RESOLUTION_ICAO ni OBSERVED_AUDIT_CITIES",
+        '"Los Angeles"' not in resolution_src and '"Los Angeles"' not in observed_src,
+    )
 
     # ---- v10.6.25: low-price MIN_EDGE buffer + alarma Steps 2+3 ----
     test(

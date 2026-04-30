@@ -268,6 +268,11 @@ def summarize_runs(records: list[dict], min_runs: int):
     return summary
 
 
+def latest_operational_count(summary: dict) -> int:
+    latest = summary.get("latest_record", {}) or {}
+    return int(latest.get("operational_trader_only_count", 0) or 0)
+
+
 def build_message(summary: dict, today_operational_sample: list[dict]):
     latest = summary["latest_record"]
     stable = summary["stable_trader_only"][:8]
@@ -316,15 +321,24 @@ def build_message(summary: dict, today_operational_sample: list[dict]):
             f"<code>{', '.join(recurring)}</code>."
         )
 
+    live_operational_count = latest_operational_count(summary)
     action = classify_action_level(summary, today_operational_sample)
 
     lines.extend(["", "<b>Lectura del sistema</b>", f"- {progress_sentence(summary['gap_state'])}"])
     if today_operational_sample:
         sample_text = "; ".join(
-            f"{row['city']} ({row['allowed']} sen, consenso={row['consensus']}, WR max {row['max_wr']:.0f}%)"
+            f"{row['city']} ({row['allowed']} señales, consenso)"
             for row in today_operational_sample
         )
-        lines.append(f"- Gap operativo hoy fuera de blocked: <code>{sample_text}</code>.")
+        lines.append(
+            f"- Hoy aparece gap operativo real: <code>{sample_text}</code>. "
+            "Accion: auditoria de fuente/cobertura; no cambio de trading."
+        )
+    elif live_operational_count > 0:
+        lines.append(
+            "- Gap operativo detectado por cross-check live, pero detalle no reconstruible "
+            "con snapshots disponibles."
+        )
     else:
         lines.append("- Hoy no aparece un gap operativo fuerte fuera de blocked con consenso y condicion operable.")
 
@@ -362,8 +376,19 @@ def classify_action_level(summary: dict, today_operational_sample: list[dict]) -
             "task": (
                 f"Auditar <code>{top_city}</code> primero: whitelist, RESOLUTION_ICAO/estacion, "
                 "OBSERVED_AUDIT_CITIES/cobertura NOAA y ultimas señales trader. Cerrar con decision: "
-                "<code>sin cambio</code>, <code>preparar whitelist/canary</code> o <code>bloqueo por fuente</code>. "
-                "No tocar reglas de entrada ni trading core en esta tarea."
+                "<code>sin cambio</code>, <code>backlog whitelist/canary para revision humana</code> o "
+                "<code>bloqueo por fuente</code>. No tocar reglas de entrada, whitelist, canary ni trading core "
+                "en esta tarea."
+            ),
+        }
+
+    if latest_operational_count(summary) > 0:
+        return {
+            "label": "ACTION",
+            "reason": "el cross-check live detecto gap operativo real, aunque el detalle no se pudo reconstruir.",
+            "task": (
+                "Auditar fuente/cobertura con los archivos live del bot antes de cualquier decision. "
+                "No abrir whitelist/canary automaticamente ni tocar reglas de entrada o trading core."
             ),
         }
 
