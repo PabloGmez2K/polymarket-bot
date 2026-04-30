@@ -1782,7 +1782,7 @@ def format_bankroll_scaling_telegram(report):
     if _bankroll_scaling_criterion(report, "cycles_minimum").get("status") == "pass":
         favorable.append("Ciclos suficientes")
     if phase1.get("status") == "ready":
-        favorable.append("Phase 1 ready")
+        favorable.append("Phase 1 proxy OK - canonical check pending/no evaluado")
     if favorable:
         lines.append("<b>A favor</b>")
         for item in favorable[:5]:
@@ -1793,6 +1793,8 @@ def format_bankroll_scaling_telegram(report):
         [
             "<b>Acción</b>",
             f"Mantener bankroll ${current}. No cambiar BANKROLL.",
+            "Phase 1 canonica: validar con tools/phase1_readiness_check.py.",
+            "No autoriza Truth Pipeline/Fase C.",
             "La politica exige revision manual:",
             "docs/bankroll_scaling_policy.md",
         ]
