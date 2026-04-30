@@ -15,8 +15,12 @@ DEFAULT_SIGNALS_PATH = REPO_ROOT / "data" / "runtime_import" / "signals.json"
 DEFAULT_CENSUS_PATH = REPO_ROOT / "data" / "directional_trader_census.json"
 DEFAULT_ENRICHMENT_PATH = REPO_ROOT / "data" / "directional_trader_enrichment.json"
 DEFAULT_CITY_CROSS_PATH = REPO_ROOT / "data" / "reference_trader_city_market_cross.json"
-DEFAULT_CROSSCHECK_PATH = REPO_ROOT / "data" / "runtime_import_derived" / "signals_crosscheck.jsonl"
-DEFAULT_BLOCKED_PATH = REPO_ROOT / "data" / "runtime_import_derived" / "blocked_signals_resolutions.jsonl"
+DEFAULT_CROSSCHECK_LIVE_PATH = REPO_ROOT / "data" / "signals_crosscheck.jsonl"
+DEFAULT_CROSSCHECK_LEGACY_PATH = REPO_ROOT / "data" / "runtime_import_derived" / "signals_crosscheck.jsonl"
+DEFAULT_CROSSCHECK_PATH = DEFAULT_CROSSCHECK_LIVE_PATH
+DEFAULT_BLOCKED_LIVE_PATH = REPO_ROOT / "data" / "blocked_signals_resolutions.jsonl"
+DEFAULT_BLOCKED_LEGACY_PATH = REPO_ROOT / "data" / "runtime_import_derived" / "blocked_signals_resolutions.jsonl"
+DEFAULT_BLOCKED_PATH = DEFAULT_BLOCKED_LIVE_PATH
 DEFAULT_LIFECYCLE_PATH = REPO_ROOT / "data" / "runtime_import" / "trade_lifecycle.json"
 DEFAULT_JSON_OUTPUT = REPO_ROOT / "data" / "traders_intelligence.json"
 DEFAULT_MD_OUTPUT = REPO_ROOT / "docs" / "traders_intelligence_latest.md"
@@ -56,6 +60,21 @@ def ensure_parent(path_str):
     return path
 
 
+def resolve_existing_path(path_str, fallback_paths=()):
+    checked = []
+    for candidate in [Path(path_str), *[Path(path) for path in fallback_paths]]:
+        if candidate in checked:
+            continue
+        checked.append(candidate)
+        if candidate.exists():
+            return candidate, checked
+    return checked[0], checked
+
+
+def format_paths_checked(paths):
+    return ", ".join(str(path) for path in paths)
+
+
 def load_json_file(path_str, label, warnings):
     path = Path(path_str)
     if not path.exists():
@@ -68,10 +87,11 @@ def load_json_file(path_str, label, warnings):
         return None
 
 
-def load_jsonl_file(path_str, label, warnings):
+def load_jsonl_file(path_str, label, warnings, paths_checked=None):
     path = Path(path_str)
     if not path.exists():
-        warnings.append(f"{label} missing: {path}")
+        checked = paths_checked or [path]
+        warnings.append(f"{label} missing: paths_checked=[{format_paths_checked(checked)}]")
         return []
     rows = []
     try:
@@ -755,12 +775,31 @@ def main():
     args = parse_args()
     warnings = []
 
+    crosscheck_path, crosscheck_paths_checked = resolve_existing_path(
+        args.crosscheck_series,
+        fallback_paths=[DEFAULT_CROSSCHECK_LEGACY_PATH],
+    )
+    blocked_path, blocked_paths_checked = resolve_existing_path(
+        args.blocked_resolutions,
+        fallback_paths=[DEFAULT_BLOCKED_LEGACY_PATH],
+    )
+
     signals_payload = load_json_file(args.signals, "signals", warnings)
     census_payload = load_json_file(args.census, "census", warnings)
     enrichment_payload = load_json_file(args.enrichment, "enrichment", warnings)
     city_cross_payload = load_json_file(args.city_cross, "city_cross", warnings)
-    crosscheck_rows = load_jsonl_file(args.crosscheck_series, "crosscheck_series", warnings)
-    blocked_rows = load_jsonl_file(args.blocked_resolutions, "blocked_resolutions", warnings)
+    crosscheck_rows = load_jsonl_file(
+        crosscheck_path,
+        "crosscheck_series",
+        warnings,
+        paths_checked=crosscheck_paths_checked,
+    )
+    blocked_rows = load_jsonl_file(
+        blocked_path,
+        "blocked_resolutions",
+        warnings,
+        paths_checked=blocked_paths_checked,
+    )
     lifecycle_payload = load_json_file(args.trade_lifecycle, "trade_lifecycle", warnings)
 
     signals_by_trader, consensus_mentions, signal_rows = build_signals_lookup(signals_payload)
@@ -890,8 +929,8 @@ def main():
             "census": str(Path(args.census)),
             "enrichment": str(Path(args.enrichment)),
             "city_cross": str(Path(args.city_cross)),
-            "crosscheck_series": str(Path(args.crosscheck_series)),
-            "blocked_resolutions": str(Path(args.blocked_resolutions)),
+            "crosscheck_series": str(crosscheck_path),
+            "blocked_resolutions": str(blocked_path),
             "trade_lifecycle": str(Path(args.trade_lifecycle)),
         },
         "integrity": {

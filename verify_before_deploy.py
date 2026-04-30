@@ -167,6 +167,7 @@ def run_tests():
     dashboard_js_path = os.path.join(os.path.dirname(__file__), "static", "dashboard.js")
     agent_events_path = os.path.join(os.path.dirname(__file__), "agent_events.jsonl")
     traders_daily_summary_path = os.path.join(os.path.dirname(__file__), "tools", "traders_intelligence_daily_summary.py")
+    traders_report_path = os.path.join(os.path.dirname(__file__), "tools", "traders_intelligence_report.py")
     trader_code = ""
     finder_code = ""
     requirements_code = ""
@@ -179,6 +180,7 @@ def run_tests():
     dashboard_css_code = ""
     dashboard_js_code = ""
     traders_daily_summary_code = ""
+    traders_report_code = ""
     agent_event_rows = []
     if os.path.exists(trader_analyzer_path):
         with open(trader_analyzer_path, "r", encoding="utf-8") as f:
@@ -225,6 +227,9 @@ def run_tests():
     if os.path.exists(traders_daily_summary_path):
         with open(traders_daily_summary_path, "r", encoding="utf-8") as f:
             traders_daily_summary_code = f.read()
+    if os.path.exists(traders_report_path):
+        with open(traders_report_path, "r", encoding="utf-8") as f:
+            traders_report_code = f.read()
 
     # ---- Test 0: Sintaxis válida ----
     print("\n Sintaxis")
@@ -7089,6 +7094,45 @@ def run_tests():
         traders_daily_summary_code.find("telegram_result = send_telegram(message)") != -1
         and traders_daily_summary_code.find("state_path.write_text(") > traders_daily_summary_code.find("telegram_result = send_telegram(message)")
         and traders_daily_summary_code.find("md_path.write_text(") > traders_daily_summary_code.find("telegram_result = send_telegram(message)"),
+    )
+    test(
+        "traders_intelligence: report prefiere signals_crosscheck live",
+        'DEFAULT_CROSSCHECK_LIVE_PATH = REPO_ROOT / "data" / "signals_crosscheck.jsonl"' in traders_report_code
+        and "DEFAULT_CROSSCHECK_PATH = DEFAULT_CROSSCHECK_LIVE_PATH" in traders_report_code,
+    )
+    test(
+        "traders_intelligence: report mantiene fallback crosscheck legacy",
+        'DEFAULT_CROSSCHECK_LEGACY_PATH = REPO_ROOT / "data" / "runtime_import_derived" / "signals_crosscheck.jsonl"' in traders_report_code
+        and "fallback_paths=[DEFAULT_CROSSCHECK_LEGACY_PATH]" in traders_report_code,
+    )
+    test(
+        "traders_intelligence: report contempla blocked signals live",
+        'DEFAULT_BLOCKED_LIVE_PATH = REPO_ROOT / "data" / "blocked_signals_resolutions.jsonl"' in traders_report_code
+        and "DEFAULT_BLOCKED_PATH = DEFAULT_BLOCKED_LIVE_PATH" in traders_report_code,
+    )
+    test(
+        "traders_intelligence: report mantiene fallback blocked legacy",
+        'DEFAULT_BLOCKED_LEGACY_PATH = REPO_ROOT / "data" / "runtime_import_derived" / "blocked_signals_resolutions.jsonl"' in traders_report_code
+        and "fallback_paths=[DEFAULT_BLOCKED_LEGACY_PATH]" in traders_report_code,
+    )
+    test(
+        "traders_intelligence: missing input reporta paths_checked",
+        "paths_checked=[" in traders_report_code
+        and "format_paths_checked(" in traders_report_code,
+    )
+    try:
+        traders_summary_src = code.split("def maybe_run_traders_intelligence_summary(", 1)[1].split(
+            "def maybe_run_city_intelligence_runtime_summary(", 1
+        )[0]
+    except IndexError:
+        traders_summary_src = ""
+    test(
+        "traders_intelligence: no abre v1 ni toca scheduler/trading",
+        "Abrir v1 minimo" not in traders_report_code
+        and "SCHEDULE_HOURS_UTC" not in traders_summary_src
+        and "execute_buy" not in traders_summary_src
+        and "execute_sell" not in traders_summary_src
+        and "BANKROLL" not in traders_summary_src,
     )
 
     # ---- Bot health check read-only CLI ----

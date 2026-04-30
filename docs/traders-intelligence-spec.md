@@ -147,8 +147,10 @@ tag no se emite.
 - `data/directional_trader_census.json`
 - `data/directional_trader_enrichment.json`
 - `data/reference_trader_city_market_cross.json`
-- `data/runtime_import_derived/signals_crosscheck.jsonl`
-- `data/runtime_import_derived/blocked_signals_resolutions.jsonl`
+- `data/signals_crosscheck.jsonl` (fuente live canónica; fallback legacy:
+  `data/runtime_import_derived/signals_crosscheck.jsonl`)
+- `data/blocked_signals_resolutions.jsonl` (fuente live canónica; fallback
+  legacy: `data/runtime_import_derived/blocked_signals_resolutions.jsonl`)
 - `data/runtime_import/trade_lifecycle.json` (contexto comparativo agregado; no se
   cruza a nivel match_key en v0)
 
@@ -211,8 +213,8 @@ Qué agrega:
     "census": "data/directional_trader_census.json",
     "enrichment": "data/directional_trader_enrichment.json",
     "city_cross": "data/reference_trader_city_market_cross.json",
-    "crosscheck_series": "data/runtime_import_derived/signals_crosscheck.jsonl",
-    "blocked_resolutions": "data/runtime_import_derived/blocked_signals_resolutions.jsonl"
+    "crosscheck_series": "data/signals_crosscheck.jsonl",
+    "blocked_resolutions": "data/blocked_signals_resolutions.jsonl"
   },
   "integrity": {
     "signals_generated_at": "...",
