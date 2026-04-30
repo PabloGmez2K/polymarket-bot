@@ -5487,6 +5487,34 @@ def run_tests():
         "maybe_run_pnl_reconciliation(state)" in code,
     )
     try:
+        with open(daily_briefing_script, "r", encoding="utf-8") as f:
+            daily_briefing_code = f.read()
+        daily_briefing_ast = ast.parse(daily_briefing_code)
+        daily_sl_ns = {
+            "Path": Path,
+            "TARGET_SAMPLE_SIZE": 16,
+            "load_json": lambda path, required=False: {
+                "n_resolved_last": 18,
+                "final_verdict": "SL funciona correctamente (firme)",
+            },
+        }
+        exec(get_function_source(daily_briefing_ast, daily_briefing_code.splitlines(), "build_sl_retro_line"), daily_sl_ns)
+        daily_sl_line = daily_sl_ns["build_sl_retro_line"](Path("dummy-state.json"))
+        test(
+            "v10.6.48: daily briefing marca verdict SL retro firme como histórico",
+            "SL funciona correctamente (firme)" not in daily_sl_line
+            and "veredicto histórico" in daily_sl_line
+            and "phase-aware" in daily_sl_line,
+            daily_sl_line,
+        )
+        test(
+            "v10.6.48: daily briefing conserva contador SL retro",
+            "18/16 resueltos" in daily_sl_line,
+            daily_sl_line,
+        )
+    except Exception as exc:
+        test("v10.6.48: daily briefing SL retro phase-aware test ejecuta sin excepción", False, str(exc))
+    try:
         with open(sl_retro_script, "r", encoding="utf-8") as f:
             sl_retro_code = f.read()
         sl_retro_ast = ast.parse(sl_retro_code)

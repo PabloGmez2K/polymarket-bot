@@ -233,6 +233,23 @@ def build_sl_retro_line(state_path: Path):
     if n_resolved is None:
         return "🔍 SL Retro: sin datos aún"
     verdict = state.get("final_verdict") or state.get("preliminary_verdict") or "acumulando datos"
+    verdict_text = str(verdict or "").strip()
+    conclusive_markers = (
+        "(firme)",
+        "SL funciona correctamente",
+        "SL corta posiciones correctas",
+    )
+    if any(marker in verdict_text for marker in conclusive_markers):
+        clean_verdict = verdict_text.replace(" (firme)", "").replace("(firme)", "").strip()
+        if clean_verdict:
+            return (
+                f"🔍 SL Retro: {int(n_resolved)}/{TARGET_SAMPLE_SIZE} resueltos — "
+                f"veredicto histórico: {clean_verdict}; config actual requiere detalle phase-aware"
+            )
+        return (
+            f"🔍 SL Retro: {int(n_resolved)}/{TARGET_SAMPLE_SIZE} resueltos — "
+            "veredicto histórico; revisar alerta SL Retro para detalle phase-aware"
+        )
     return f"🔍 SL Retro: {int(n_resolved)}/{TARGET_SAMPLE_SIZE} resueltos — {verdict}"
 
 
