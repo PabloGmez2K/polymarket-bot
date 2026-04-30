@@ -273,6 +273,9 @@ QUALITY_TRADER_CITIES_WHITELIST = {
 MIN_EDGE_EXACT_RANGE_BUFFER_PP = float(os.getenv("MIN_EDGE_EXACT_RANGE_BUFFER_PP", "5.0"))
 EXACT_RANGE_SIZE_SCALE = float(os.getenv("EXACT_RANGE_SIZE_SCALE", "0.50"))
 EXACT_RANGE_MIN_AMOUNT = float(os.getenv("EXACT_RANGE_MIN_AMOUNT", "2.50"))
+UNSELLABLE_GUARD_ENABLED = os.getenv("UNSELLABLE_GUARD_ENABLED", "0").lower() in ("1", "true", "yes", "on")
+UNSELLABLE_GUARD_LOG_ONLY = os.getenv("UNSELLABLE_GUARD_LOG_ONLY", "1").lower() in ("1", "true", "yes", "on")
+UNSELLABLE_GUARD_VERSION = "unsellable_v1"
 # v10.6.24: low-price buffer — posiciones especulativas (<LOW_PRICE_THRESHOLD) exigen más edge
 # porque el ratio riesgo/recompensa es peor y el modelo es más sensible a errores en our_prob
 MIN_EDGE_LOW_PRICE_BUFFER_PP = float(os.getenv("MIN_EDGE_LOW_PRICE_BUFFER_PP", "5.0"))
@@ -749,6 +752,8 @@ SKIP_REASONS_VALID = frozenset({
     "sl_city_cooldown",
     "existing_position",
     "low_exact_gap_risk",
+    "unsellable_guard_candidate",
+    "unsellable_liquidity_guard",
     # Grupo B — datos parciales (Loop A, pre-edge)
     "blocked_city",
     "timezone_filter",
@@ -761,6 +766,58 @@ SKIP_REASONS_VALID = frozenset({
     # Grupo C — parse fail
     "parse_fail",
 })
+
+
+def _unsellable_guard_match_zone_bucket(price_at_guard):
+    try:
+        price = float(price_at_guard)
+    except (TypeError, ValueError):
+        return "unknown"
+    if price < 0.10:
+        return "below_0_10"
+    if price <= 0.35:
+        return "0_10_to_0_35"
+    if price <= 0.65:
+        return "0_35_to_0_65"
+    return "above_0_65"
+
+
+def _unsellable_guard_decision(
+    *,
+    enabled,
+    log_only,
+    condition,
+    days_ahead,
+    price_at_guard,
+    amount,
+    effective_bankroll,
+):
+    try:
+        bankroll = float(effective_bankroll)
+        amount_value = float(amount)
+        price_value = float(price_at_guard)
+        days_value = int(days_ahead)
+    except (TypeError, ValueError):
+        return {"active": False, "triggered": False, "size_ratio": None}
+
+    if not enabled or bankroll <= 0:
+        return {"active": False, "triggered": False, "size_ratio": None}
+
+    size_ratio = amount_value / bankroll
+    triggered = (
+        str(condition or "").lower() in {"exact", "range"}
+        and days_value == 0
+        and 0.10 <= price_value <= 0.65
+        and size_ratio >= 0.15
+    )
+    return {
+        "active": True,
+        "triggered": triggered,
+        "size_ratio": size_ratio,
+        "guard_action": "would_skip" if log_only else "skipped",
+        "skip_reason": "unsellable_guard_candidate" if log_only else "unsellable_liquidity_guard",
+        "match_zone_bucket": _unsellable_guard_match_zone_bucket(price_value),
+    }
 
 
 def _make_skip_entry(
@@ -19470,6 +19527,64 @@ def main(client):
                         f"  AJUSTE BUY MIN NOTIONAL: {trade['city']} {trade['side']} "
                         f"{original_size:.2f}sh -> {normalized_size:.2f}sh @ ${execution_price:.2f}"
                     )
+
+            price_at_guard = round(trade["position"].get("aggressive_price", trade["mkt_price"] / 100.0), 2)
+            amount_at_guard = round(float(trade.get("position", {}).get("amount", 0) or 0), 2)
+            # price_raw is forensics only; trigger uses price_at_guard exclusively.
+            price_raw = trade.get("position", {}).get("market_price")
+            unsellable_guard = _unsellable_guard_decision(
+                enabled=UNSELLABLE_GUARD_ENABLED,
+                log_only=UNSELLABLE_GUARD_LOG_ONLY,
+                condition=trade.get("condition"),
+                days_ahead=trade.get("days_ahead"),
+                price_at_guard=price_at_guard,
+                amount=amount_at_guard,
+                effective_bankroll=effective_bankroll,
+            )
+            if unsellable_guard.get("triggered"):
+                guard_skip_reason = unsellable_guard["skip_reason"]
+                skip_log_entries.append(_make_skip_entry(
+                    guard_skip_reason, cycle_id=cycle_id,
+                    city=trade.get("city"), date_iso=trade.get("date"), side=trade.get("side"),
+                    days_ahead=trade.get("days_ahead"), city_mode=trade.get("city_mode"),
+                    allowlisted=True, edge_pct=trade.get("edge_pct"),
+                    our_prob=trade.get("our_prob"), mkt_prob=trade.get("mkt_price"),
+                    min_edge=MIN_EDGE, forecast_max=trade.get("forecast_max"),
+                    threshold=trade.get("threshold"), threshold_high=trade.get("threshold_high"),
+                    unit=trade.get("unit"), condition=trade.get("condition"),
+                    question=trade.get("question"),
+                    extras={
+                        "guard_version": UNSELLABLE_GUARD_VERSION,
+                        "guard_action": unsellable_guard["guard_action"],
+                        "trigger_reason": "micro_position_unsellable",
+                        "match_zone_bucket": unsellable_guard["match_zone_bucket"],
+                        "price_at_guard": price_at_guard,
+                        "price_raw": price_raw,
+                        "amount": amount_at_guard,
+                        "effective_bankroll": effective_bankroll,
+                        "size_ratio": round(unsellable_guard["size_ratio"], 6),
+                        "edge_pct": trade.get("edge_pct"),
+                        "city_mode": trade.get("city_mode"),
+                        "label": trade.get("label"),
+                        "question": trade.get("question"),
+                        "side": trade.get("side"),
+                        "counterfactual_resolved": None,
+                    },
+                ))
+                dl.append(
+                    f"  UNSELLABLE GUARD {unsellable_guard['guard_action']}: "
+                    f"{trade.get('city')} {trade.get('side')} price=${price_at_guard:.2f} "
+                    f"amount=${amount_at_guard:.2f} ratio={unsellable_guard['size_ratio']:.3f}"
+                )
+                # DORMANT until LOG_ONLY="0" — promotion requires Opus signoff
+                if UNSELLABLE_GUARD_ENABLED and not UNSELLABLE_GUARD_LOG_ONLY:
+                    results.append({"ok": False, "msg": "unsellable_liquidity_guard"})
+                    execution_failures.append({
+                        "reason": guard_skip_reason,
+                        "days_ahead": trade.get("days_ahead"),
+                        "city": trade.get("city"),
+                    })
+                    continue
 
             # Guardar en known_tokens para que /ordenes lo encuentre
             known_tokens[trade["token_id"]] = {

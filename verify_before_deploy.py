@@ -6088,6 +6088,107 @@ def run_tests():
         "maybe_run_sl_intra_guard_review(state)" in code,
     )
 
+    # ---- Unsellable Liquidity Guard v1: Fase 1 LOG_ONLY (Opus, 2026-04-30) ----
+    print("  Checks Unsellable Liquidity Guard v1 LOG_ONLY")
+    test(
+        "unsellable_v1: defaults OFF y LOG_ONLY",
+        'UNSELLABLE_GUARD_ENABLED = os.getenv("UNSELLABLE_GUARD_ENABLED", "0")' in code
+        and 'UNSELLABLE_GUARD_LOG_ONLY = os.getenv("UNSELLABLE_GUARD_LOG_ONLY", "1")' in code
+        and 'UNSELLABLE_GUARD_VERSION = "unsellable_v1"' in code,
+    )
+    test(
+        "unsellable_v1: skip_reason separado para LOG_ONLY vs SKIP",
+        '"unsellable_guard_candidate"' in code
+        and '"unsellable_liquidity_guard"' in code
+        and '"would_skip" if log_only else "skipped"' in code,
+    )
+    test(
+        "unsellable_v1: size_ratio es amount / bankroll",
+        "size_ratio = amount_value / bankroll" in code
+        and "size_ratio >= 0.15" in code,
+    )
+    test(
+        "unsellable_v1: trigger exact/range same-day price 0.10-0.65",
+        'str(condition or "").lower() in {"exact", "range"}' in code
+        and "days_value == 0" in code
+        and "0.10 <= price_value <= 0.65" in code,
+    )
+    unsellable_decision_src = ""
+    try:
+        unsellable_match_src = get_function_source(module_ast, code_lines, "_unsellable_guard_match_zone_bucket")
+        unsellable_decision_src = get_function_source(module_ast, code_lines, "_unsellable_guard_decision")
+        unsellable_ns = {}
+        exec(unsellable_match_src, unsellable_ns)
+        exec(unsellable_decision_src, unsellable_ns)
+        decide = unsellable_ns["_unsellable_guard_decision"]
+        base_guard_case = {
+            "enabled": True,
+            "log_only": True,
+            "condition": "exact",
+            "days_ahead": 0,
+            "price_at_guard": 0.35,
+            "amount": 3.75,
+            "effective_bankroll": 25.0,
+        }
+        off_case = decide(**dict(base_guard_case, enabled=False))
+        log_case = decide(**base_guard_case)
+        skip_case = decide(**dict(base_guard_case, log_only=False))
+        test("unsellable_v1 funcional: ENABLED=0 bypass total", off_case.get("active") is False and off_case.get("triggered") is False)
+        test("unsellable_v1 funcional: LOG_ONLY trigger candidate/would_skip", log_case.get("triggered") is True and log_case.get("skip_reason") == "unsellable_guard_candidate" and log_case.get("guard_action") == "would_skip")
+        test("unsellable_v1 funcional: LOG_ONLY=0 trigger skipped real", skip_case.get("triggered") is True and skip_case.get("skip_reason") == "unsellable_liquidity_guard" and skip_case.get("guard_action") == "skipped")
+        test("unsellable_v1 funcional: price=0.09 no trigger", decide(**dict(base_guard_case, price_at_guard=0.09)).get("triggered") is False)
+        test("unsellable_v1 funcional: price=0.66 no trigger", decide(**dict(base_guard_case, price_at_guard=0.66)).get("triggered") is False)
+        test("unsellable_v1 funcional: size_ratio=0.149 no trigger", decide(**dict(base_guard_case, amount=3.725)).get("triggered") is False)
+        test("unsellable_v1 funcional: condition fuera exact/range no trigger", decide(**dict(base_guard_case, condition="at_or_above")).get("triggered") is False)
+        test("unsellable_v1 funcional: days_ahead=1 no trigger", decide(**dict(base_guard_case, days_ahead=1)).get("triggered") is False)
+        test("unsellable_v1 funcional: effective_bankroll=0 no trigger", decide(**dict(base_guard_case, effective_bankroll=0)).get("triggered") is False)
+    except Exception as exc:
+        test("unsellable_v1 funcional: helper ejecutable", False, str(exc))
+    test(
+        "unsellable_v1: price_raw defensivo y solo forensics",
+        'price_raw = trade.get("position", {}).get("market_price")' in code
+        and "price_raw is forensics only; trigger uses price_at_guard exclusively." in code
+        and "price_raw" not in unsellable_decision_src,
+    )
+    test(
+        "unsellable_v1: price_raw se registra sin afectar trigger",
+        '"price_raw": price_raw' in code
+        and '"price_at_guard": price_at_guard' in code
+        and "price_at_guard=price_at_guard" in code,
+    )
+    test(
+        "unsellable_v1: no reusa execution_price como price_at_guard",
+        "execution_price = price_at_guard" not in code
+        and "price_at_guard = round(" in code
+        and "price_at_guard=price_at_guard" in code,
+    )
+    test(
+        "unsellable_v1: SKIP path dormido requiere LOG_ONLY=0",
+        'if UNSELLABLE_GUARD_ENABLED and not UNSELLABLE_GUARD_LOG_ONLY:' in code
+        and 'DORMANT until LOG_ONLY="0" — promotion requires Opus signoff' in code
+        and 'continue' in code.split('DORMANT until LOG_ONLY="0" — promotion requires Opus signoff', 1)[1].split("# Guardar en known_tokens", 1)[0],
+    )
+    try:
+        unsellable_hook_src = code.split("unsellable_guard = _unsellable_guard_decision(", 1)[1].split("# Guardar en known_tokens", 1)[0]
+    except IndexError:
+        unsellable_hook_src = ""
+    test(
+        "unsellable_v1: no Telegram por candidato",
+        "send_telegram" not in unsellable_hook_src
+        and "send_telegram_paged" not in unsellable_hook_src,
+    )
+    test(
+        "unsellable_v1: skip_log extras forensics completos",
+        all(item in code for item in [
+            '"guard_version": UNSELLABLE_GUARD_VERSION',
+            '"trigger_reason": "micro_position_unsellable"',
+            '"match_zone_bucket": unsellable_guard["match_zone_bucket"]',
+            '"amount": amount_at_guard',
+            '"effective_bankroll": effective_bankroll',
+            '"counterfactual_resolved": None',
+        ]),
+    )
+
     # ---- v10.6.41: fill real para ventas confirmadas ----
     test(
         "v10.6.41: TradeParams importado para lookup de fills",
