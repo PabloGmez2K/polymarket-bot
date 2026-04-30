@@ -57,3 +57,34 @@ El path de SKIP queda dormido. Solo puede hacer `continue` si:
 - el trigger se cumple
 
 Promocionar de LOG_ONLY a SKIP requiere signoff explicito de Opus.
+
+## Monitor diario
+
+`tools/unsellable_guard_monitor.py` es una herramienta read-only para resumir el
+guard sin revisar manualmente `skip_log`.
+
+Lee `data/skip_log.jsonl` y rotados `skip_log.YYYY-MM-DD.jsonl` si existen. Para
+candidatos LOG_ONLY exige:
+
+- `skip_reason == "unsellable_guard_candidate"`
+- `extras.guard_version == "unsellable_v1"`
+- `extras.guard_action == "would_skip"`
+
+Tambien vigila el caso de seguridad: cualquier `skip_reason ==
+"unsellable_liquidity_guard"` o `extras.guard_action == "skipped"` se marca como
+SKIP real inesperado mientras `LOG_ONLY=1`.
+
+Niveles:
+
+- `OK`: 0 candidatos en 24h y 0 skips reales.
+- `WATCH`: 1-2 candidatos en 24h.
+- `ACTION_REVIEW`: >=3 candidatos en 24h o >=5 acumulados en `skip_log`.
+- `ACTION_SAFETY`: aparece algun skip real inesperado.
+
+`ACTION_REVIEW` significa que hay evidencia suficiente para abrir revision
+manual. No autoriza cambiar `UNSELLABLE_GUARD_LOG_ONLY`, ni activar SKIP, ni
+tocar sizing/BANKROLL/reglas de riesgo.
+
+La promocion de LOG_ONLY a SKIP sigue requiriendo revision manual / Opus. El
+monitor solo envia Telegram para `WATCH`, `ACTION_REVIEW` o `ACTION_SAFETY`, con
+anti-spam diario en `alerts_state.json`.

@@ -18,6 +18,7 @@ v5 añade tests para:
 import sys
 import os
 import ast
+import importlib.util
 import math
 import py_compile
 import re
@@ -6188,6 +6189,132 @@ def run_tests():
             '"counterfactual_resolved": None',
         ]),
     )
+    print("  Checks Unsellable Guard Monitor diario")
+    unsellable_monitor_path = os.path.join(os.path.dirname(__file__), "tools", "unsellable_guard_monitor.py")
+    test(
+        "unsellable monitor: tool existe",
+        os.path.exists(unsellable_monitor_path),
+    )
+    try:
+        py_compile.compile(unsellable_monitor_path, doraise=True)
+        monitor_compiles = True
+        monitor_compile_detail = ""
+    except Exception as exc:
+        monitor_compiles = False
+        monitor_compile_detail = str(exc)
+    test(
+        "unsellable monitor: tool tiene sintaxis valida",
+        monitor_compiles,
+        monitor_compile_detail,
+    )
+    test(
+        "unsellable monitor: env vars y script definidos",
+        "UNSELLABLE_GUARD_MONITOR_ENABLED" in code
+        and "UNSELLABLE_GUARD_MONITOR_HOUR_UTC" in code
+        and "UNSELLABLE_GUARD_MONITOR_TIMEOUT_SECONDS" in code
+        and "UNSELLABLE_GUARD_MONITOR_SCRIPT" in code,
+    )
+    test(
+        "unsellable monitor: wrapper JSON subprocess fail-safe",
+        "def run_unsellable_guard_monitor_json(" in code
+        and "UNSELLABLE_GUARD_MONITOR_SCRIPT" in code
+        and "subprocess.run(" in code
+        and "timeout=UNSELLABLE_GUARD_MONITOR_TIMEOUT_SECONDS" in code
+        and "return None" in code,
+    )
+    test(
+        "unsellable monitor: formatter y daily hook definidos",
+        "def format_unsellable_guard_monitor_telegram(" in code
+        and "def maybe_run_unsellable_guard_monitor(" in code
+        and "maybe_run_unsellable_guard_monitor(state)" in code,
+    )
+    test(
+        "unsellable monitor: estado anti-spam en alerts_state",
+        all(key in code for key in [
+            "unsellable_guard_monitor_last_run_date",
+            "unsellable_guard_last_status",
+            "unsellable_guard_candidate_total",
+            "unsellable_guard_first_candidate_at",
+            "unsellable_guard_last_candidate_at",
+            "unsellable_guard_last_alert_date",
+            "unsellable_guard_action_review_sent",
+            "unsellable_guard_safety_alert_sent",
+            "unsellable_guard_safety_last_seen_at",
+        ]),
+    )
+    test(
+        "unsellable monitor: no recomienda promocion automatica",
+        "Revisión manual / Opus requerida antes de promoción. No activar SKIP automáticamente." in code,
+    )
+    test(
+        "unsellable monitor: no altera defaults del guard",
+        'UNSELLABLE_GUARD_ENABLED = os.getenv("UNSELLABLE_GUARD_ENABLED", "0")' in code
+        and 'UNSELLABLE_GUARD_LOG_ONLY = os.getenv("UNSELLABLE_GUARD_LOG_ONLY", "1")' in code,
+    )
+    test(
+        "unsellable monitor: SKIP real sigue dormido tras LOG_ONLY=0",
+        'if UNSELLABLE_GUARD_ENABLED and not UNSELLABLE_GUARD_LOG_ONLY:' in code
+        and 'results.append({"ok": False, "msg": "unsellable_liquidity_guard"})' in code,
+    )
+    try:
+        spec = importlib.util.spec_from_file_location("unsellable_guard_monitor_verify", unsellable_monitor_path)
+        monitor_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(monitor_module)
+        now_for_monitor = datetime(2026, 5, 1, 12, 0, tzinfo=timezone.utc)
+
+        def _monitor_entry(ts, reason="unsellable_guard_candidate", guard_action="would_skip", city="Dallas"):
+            return {
+                "ts_utc": ts,
+                "cycle_id": ts[:16],
+                "city": city,
+                "date_iso": "2026-05-01",
+                "side": "YES",
+                "skip_reason": reason,
+                "condition": "exact",
+                "extras": {
+                    "guard_version": "unsellable_v1",
+                    "guard_action": guard_action,
+                    "price_at_guard": 0.42,
+                    "amount": 4.2,
+                    "size_ratio": 0.168,
+                    "edge_pct": 8.1,
+                    "question": "Dallas high temperature exact test",
+                },
+            }
+
+        def _monitor_report(rows):
+            tmp_dir = tempfile.mkdtemp(prefix="unsellable_monitor_", dir=_verify_tmp_dir())
+            try:
+                skip_path = Path(tmp_dir) / "skip_log.jsonl"
+                with skip_path.open("w", encoding="utf-8") as fh:
+                    for row in rows:
+                        fh.write(json.dumps(row) + "\n")
+                return monitor_module.build_report(skip_path, now_for_monitor, 24)
+            finally:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+
+        ok_report = _monitor_report([])
+        watch_report = _monitor_report([
+            _monitor_entry("2026-05-01T10:00:00+00:00", city="Dallas")
+        ])
+        review_report = _monitor_report([
+            _monitor_entry(f"2026-05-01T0{idx}:00:00+00:00", city=f"City{idx}")
+            for idx in range(5)
+        ])
+        safety_report = _monitor_report([
+            _monitor_entry(
+                "2026-05-01T10:00:00+00:00",
+                reason="unsellable_liquidity_guard",
+                guard_action="skipped",
+                city="Paris",
+            )
+        ])
+        test("unsellable monitor fixture: 0 candidates -> OK", ok_report.get("status") == "OK")
+        test("unsellable monitor fixture: 1 candidate -> WATCH", watch_report.get("status") == "WATCH")
+        test("unsellable monitor fixture: 5 candidates -> ACTION_REVIEW", review_report.get("status") == "ACTION_REVIEW")
+        test("unsellable monitor fixture: skipped real -> ACTION_SAFETY", safety_report.get("status") == "ACTION_SAFETY")
+    except Exception as exc:
+        test("unsellable monitor fixtures ejecutables", False, str(exc))
 
     # ---- v10.6.41: fill real para ventas confirmadas ----
     test(

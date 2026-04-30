@@ -163,6 +163,9 @@ PNL_RECONCILIATION_HOUR_UTC = int(os.getenv("PNL_RECONCILIATION_HOUR_UTC", str(D
 WALLET_SNAPSHOT_ENABLED = os.getenv("WALLET_SNAPSHOT_ENABLED", "1").lower() in ("1", "true", "yes", "on")
 WALLET_SNAPSHOT_HOUR_UTC = int(os.getenv("WALLET_SNAPSHOT_HOUR_UTC", str(PNL_RECONCILIATION_HOUR_UTC)))
 WALLET_SNAPSHOT_TIMEOUT_SECONDS = int(os.getenv("WALLET_SNAPSHOT_TIMEOUT_SECONDS", "45"))
+UNSELLABLE_GUARD_MONITOR_ENABLED = os.getenv("UNSELLABLE_GUARD_MONITOR_ENABLED", "1").lower() in ("1", "true", "yes", "on")
+UNSELLABLE_GUARD_MONITOR_HOUR_UTC = int(os.getenv("UNSELLABLE_GUARD_MONITOR_HOUR_UTC", str(PNL_RECONCILIATION_HOUR_UTC)))
+UNSELLABLE_GUARD_MONITOR_TIMEOUT_SECONDS = int(os.getenv("UNSELLABLE_GUARD_MONITOR_TIMEOUT_SECONDS", "30"))
 POST_INTRA_SL_COOLDOWN_REVIEW_ENABLED = os.getenv("POST_INTRA_SL_COOLDOWN_REVIEW_ENABLED", "1").lower() in ("1", "true", "yes", "on")
 POST_INTRA_SL_COOLDOWN_REVIEW_MIN_CLOSED = int(os.getenv("POST_INTRA_SL_COOLDOWN_REVIEW_MIN_CLOSED", "10"))
 # v10.6.42: SQLite Recorder (Fase 0) — default OFF hasta validación en Railway
@@ -640,6 +643,11 @@ WALLET_SNAPSHOT_SCRIPT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "tools",
     "wallet_snapshot.py",
+)
+UNSELLABLE_GUARD_MONITOR_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "tools",
+    "unsellable_guard_monitor.py",
 )
 CYCLES_HISTORY_FILE = _data_path("cycles_history.jsonl")
 POSTMORTEM_FILE = _data_path("postmortem.json")
@@ -1122,6 +1130,15 @@ def load_alerts_state():
         "wallet_snapshot_last_valid_snapshot_at": None,
         "wallet_snapshot_last_error_date": None,
         "wallet_snapshot_phase2_ready_alert_sent": False,
+        "unsellable_guard_monitor_last_run_date": None,
+        "unsellable_guard_last_status": None,
+        "unsellable_guard_candidate_total": 0,
+        "unsellable_guard_first_candidate_at": None,
+        "unsellable_guard_last_candidate_at": None,
+        "unsellable_guard_last_alert_date": None,
+        "unsellable_guard_action_review_sent": False,
+        "unsellable_guard_safety_alert_sent": False,
+        "unsellable_guard_safety_last_seen_at": None,
     }
     if not os.path.exists(ALERTS_FILE):
         return default
@@ -1165,6 +1182,15 @@ def load_alerts_state():
         state.setdefault("wallet_snapshot_last_valid_snapshot_at", None)
         state.setdefault("wallet_snapshot_last_error_date", None)
         state.setdefault("wallet_snapshot_phase2_ready_alert_sent", False)
+        state.setdefault("unsellable_guard_monitor_last_run_date", None)
+        state.setdefault("unsellable_guard_last_status", None)
+        state.setdefault("unsellable_guard_candidate_total", 0)
+        state.setdefault("unsellable_guard_first_candidate_at", None)
+        state.setdefault("unsellable_guard_last_candidate_at", None)
+        state.setdefault("unsellable_guard_last_alert_date", None)
+        state.setdefault("unsellable_guard_action_review_sent", False)
+        state.setdefault("unsellable_guard_safety_alert_sent", False)
+        state.setdefault("unsellable_guard_safety_last_seen_at", None)
         return state
     except Exception:
         return default
@@ -1942,6 +1968,208 @@ def format_wallet_snapshot_phase2_ready_telegram(report):
             "No cambiar BANKROLL automáticamente ni sizing.",
         ]
     )
+
+
+def run_unsellable_guard_monitor_json():
+    """
+    Ejecuta el monitor read-only del Unsellable Guard y devuelve su contrato JSON.
+    Fail-safe: no manda Telegram, no toca trading y no interrumpe ciclos.
+    """
+    data_dir = DATA_DIR or "data"
+    command = [
+        sys.executable,
+        UNSELLABLE_GUARD_MONITOR_SCRIPT,
+        "--data-dir",
+        data_dir,
+        "--skip-log",
+        SKIP_LOG_FILE,
+        "--json",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            capture_output=True,
+            text=True,
+            timeout=UNSELLABLE_GUARD_MONITOR_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except Exception as exc:
+        log.warning(f"unsellable guard monitor: fallo ejecutando CLI read-only ({exc})")
+        return None
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()[:500]
+        log.warning(f"unsellable guard monitor: exit={result.returncode} detail={detail}")
+        return None
+    try:
+        payload = json.loads(result.stdout)
+    except Exception as exc:
+        log.warning(f"unsellable guard monitor: JSON invalido ({exc})")
+        return None
+    if not isinstance(payload, dict) or not payload.get("status"):
+        log.warning("unsellable guard monitor: contrato JSON incompleto")
+        return None
+    return payload
+
+
+def _unsellable_guard_monitor_pct(value):
+    if value is None:
+        return "n/d"
+    try:
+        return f"{float(value) * 100:.1f}%"
+    except Exception:
+        return "n/d"
+
+
+def _unsellable_guard_monitor_money(value):
+    if value is None:
+        return "n/d"
+    try:
+        return f"${float(value):.2f}"
+    except Exception:
+        return "n/d"
+
+
+def format_unsellable_guard_monitor_telegram(report):
+    status = str(report.get("status", "UNKNOWN"))
+    lines = [
+        "<b>Unsellable Guard Monitor</b>",
+        f"Nivel: <b>{_html_escape(status)}</b>",
+        "",
+        f"Ventana: ultimas {report.get('window_hours', 24)}h",
+        f"Candidatos LOG_ONLY: {int(report.get('total_candidates_24h', 0) or 0)}",
+        f"Acumulado 7d: {int(report.get('total_candidates_7d', 0) or 0)}",
+        f"Acumulado total: {int(report.get('total_candidates_all_time', 0) or 0)}",
+        f"Skipped real inesperado: {int(report.get('unexpected_real_skips_count', 0) or 0)}",
+        "",
+    ]
+
+    cities = report.get("top_cities") if isinstance(report.get("top_cities"), list) else []
+    if cities:
+        lines.append("<b>Top ciudades</b>")
+        for item in cities[:5]:
+            if isinstance(item, dict):
+                lines.append(f"- {_html_escape(item.get('city', '?'))}: {item.get('count', 0)}")
+        lines.append("")
+
+    conditions = report.get("conditions") if isinstance(report.get("conditions"), list) else []
+    if conditions:
+        lines.append("<b>Condiciones</b>")
+        for item in conditions[:5]:
+            if isinstance(item, dict):
+                lines.append(f"- {_html_escape(item.get('condition', '?'))}: {item.get('count', 0)}")
+        lines.append("")
+
+    lines.extend([
+        "<b>Promedios</b>",
+        f"- size_ratio: {_unsellable_guard_monitor_pct(report.get('avg_size_ratio'))}",
+        f"- price_at_guard: {_unsellable_guard_monitor_money(report.get('avg_price_at_guard'))}",
+        "",
+    ])
+
+    examples = report.get("examples") if isinstance(report.get("examples"), list) else []
+    if examples:
+        lines.append("<b>Ejemplos</b>")
+        for idx, item in enumerate(examples[:3], start=1):
+            if not isinstance(item, dict):
+                continue
+            lines.append(
+                f"{idx}. {_html_escape(item.get('city', '?'))} {_html_escape(item.get('side', '?'))} "
+                f"{_html_escape(item.get('condition', '?'))} | "
+                f"price={_unsellable_guard_monitor_money(item.get('price_at_guard'))} | "
+                f"size={_unsellable_guard_monitor_pct(item.get('size_ratio'))} | "
+                f"amount={_unsellable_guard_monitor_money(item.get('amount'))}"
+            )
+        lines.append("")
+
+    if status == "ACTION_SAFETY":
+        lines.extend([
+            "<b>Accion</b>",
+            "Aparecio SKIP real del guard mientras LOG_ONLY debe estar activo.",
+            "Revisar Railway env: UNSELLABLE_GUARD_ENABLED=1 y UNSELLABLE_GUARD_LOG_ONLY=1.",
+            "Revisión manual / Opus requerida antes de promoción. No activar SKIP automáticamente.",
+        ])
+    else:
+        lines.extend([
+            "<b>Accion</b>",
+            "Revisión manual / Opus requerida antes de promoción. No activar SKIP automáticamente.",
+        ])
+    return "\n".join(lines)
+
+
+def maybe_run_unsellable_guard_monitor(state, now=None):
+    """
+    Monitor diario read-only del Unsellable Guard v1 LOG_ONLY.
+    No activa SKIP ni cambia trading; solo resume skip_log y alerta si hay senales.
+    """
+    logger = globals().get("log")
+    if not UNSELLABLE_GUARD_MONITOR_ENABLED:
+        if logger:
+            logger.info("unsellable guard monitor: skip (UNSELLABLE_GUARD_MONITOR_ENABLED=0)")
+        return False
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    target_hour = UNSELLABLE_GUARD_MONITOR_HOUR_UTC % 24
+    if now.hour < target_hour:
+        if logger:
+            logger.info(
+                "unsellable guard monitor: skip "
+                f"(before target hour: now_hour={now.hour} target_hour={target_hour})"
+            )
+        return False
+
+    today = now.date().isoformat()
+    if state.get("unsellable_guard_monitor_last_run_date") == today:
+        if logger:
+            logger.info(f"unsellable guard monitor: skip (already ran today: {today})")
+        return False
+
+    previous_status = state.get("unsellable_guard_last_status")
+    previous_total = int(state.get("unsellable_guard_candidate_total", 0) or 0)
+    previous_safety_at = state.get("unsellable_guard_safety_last_seen_at")
+
+    state["unsellable_guard_monitor_last_run_date"] = today
+    report = run_unsellable_guard_monitor_json()
+    if not report:
+        return True
+
+    status = str(report.get("status", "UNKNOWN"))
+    total_all = int(report.get("total_candidates_all_time", 0) or 0)
+    total_24h = int(report.get("total_candidates_24h", 0) or 0)
+    last_safety_at = report.get("last_safety_at")
+
+    state["unsellable_guard_last_status"] = status
+    state["unsellable_guard_candidate_total"] = total_all
+    state["unsellable_guard_first_candidate_at"] = report.get("first_candidate_at")
+    state["unsellable_guard_last_candidate_at"] = report.get("last_candidate_at")
+
+    should_alert = False
+    if status == "ACTION_SAFETY":
+        should_alert = bool(last_safety_at and last_safety_at != previous_safety_at)
+        if should_alert:
+            state["unsellable_guard_safety_alert_sent"] = True
+            state["unsellable_guard_safety_last_seen_at"] = last_safety_at
+    elif status == "ACTION_REVIEW":
+        should_alert = (
+            previous_status != "ACTION_REVIEW"
+            or total_all > previous_total
+            or not state.get("unsellable_guard_action_review_sent")
+        )
+        if should_alert:
+            state["unsellable_guard_action_review_sent"] = True
+    elif status == "WATCH":
+        should_alert = total_24h > 0 and state.get("unsellable_guard_last_alert_date") != today
+
+    if should_alert:
+        send_telegram(format_unsellable_guard_monitor_telegram(report))
+        state["unsellable_guard_last_alert_date"] = today
+    elif logger:
+        logger.info(
+            "unsellable guard monitor: OK "
+            f"(status={status}, candidates_24h={total_24h}, total={total_all})"
+        )
+    return True
 
 
 def maybe_run_wallet_snapshot(state, now=None):
@@ -5119,6 +5347,14 @@ def run_observability_alerts():
         logger = globals().get("log")
         if logger:
             logger.warning(f"pnl reconciliation: fallo ({e})")
+
+    try:
+        if maybe_run_unsellable_guard_monitor(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"unsellable guard monitor: fallo ({e})")
 
     try:
         if maybe_run_wallet_snapshot(state):
