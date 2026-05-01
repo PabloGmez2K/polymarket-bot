@@ -896,7 +896,7 @@ def build_message(
         lines.append("→ Revisar gestión de posiciones en checkpoint Apr 28")
         conclusive = True
     elif accuracy_pct is not None and accuracy_pct < 30 and summary["threshold_preliminary"]:
-        lines.append("✅ VEREDICTO PRELIMINAR: EL SL ESTÁ FUNCIONANDO CORRECTAMENTE")
+        lines.append("✅ VEREDICTO PRELIMINAR: EL SL NO MUESTRA FALLOS RELEVANTES EN ESTA FASE")
         conclusive = True
     else:
         lines.append(

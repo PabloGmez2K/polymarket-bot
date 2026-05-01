@@ -5918,11 +5918,18 @@ def run_tests():
             {"verdict": "WRONG", "pnl_cash_with_sl": None, "pnl_without_sl_best": None,
              "upside_left_cash_peak": None} for _ in range(12)
         ])
+        clean_message = sl_ns["build_message"](clean_summary)
         test(
             "v10.6.35: SL retro con 25% falsas salidas sigue cerrando verdict 'funciona correctamente'",
             clean_summary.get("preliminary_verdict") == "SL funciona correctamente"
             and clean_summary.get("final_verdict") == "SL funciona correctamente (firme)",
             clean_summary,
+        )
+        test(
+            "v10.6.49: mensaje SL retro clean suaviza verdict preliminar phase-aware",
+            "EL SL ESTÁ FUNCIONANDO CORRECTAMENTE" not in clean_message
+            and "EL SL NO MUESTRA FALLOS RELEVANTES EN ESTA FASE" in clean_message,
+            {"message": clean_message},
         )
 
         for tmp_file in [tmp_sl_lifecycle, tmp_sl_forecast, tmp_sl_audit]:
