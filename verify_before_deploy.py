@@ -7476,6 +7476,13 @@ def run_tests():
         "No accionable para trading" in code,
     )
     test(
+        "fase_b2: v2 baja muestra + fallback v1 baja fidelidad no genera ACTION",
+        "v2_low_sample_legacy_fallback" in code
+        and 'level = "WATCH_AUDIT"' in code
+        and "_fallback_low_fidelity_v2" in code
+        and "and not _fallback_low_fidelity_v2" in code,
+    )
+    test(
         "fase_b2: alerta incluye hint audit CLI con --markdown",
         "blocked_signals_audit.py" in code and "--markdown" in code,
     )

@@ -9423,12 +9423,23 @@ def _blocked_signals_build_telegram_summary(all_records, whitelist_cities=None):
     n_fuera_res = len(fuera_resolved)
     fuera_wr = _bs_wr(fuera_wins, n_fuera_res)
     out_wr = _bs_wr(out_wins, len(out_resolved))
+    v2_low_sample_legacy_fallback = (
+        has_v2
+        and len(out_resolved) < 50
+        and n_fuera_res >= 50
+        and fuera_wr is not None
+        and fuera_wr >= 70
+        and fidelity_pct >= 50.0
+    )
     level = "INFO"
-    if has_v2 and len(out_resolved) >= 50 and out_wr is not None:
-        if out_wr >= 70 and top3_pct < 60:
-            level = "ACTION"
-        elif out_wr >= 55:
-            level = "WATCH"
+    if has_v2:
+        if len(out_resolved) >= 50 and out_wr is not None:
+            if out_wr >= 70 and top3_pct < 60:
+                level = "ACTION"
+            elif out_wr >= 55:
+                level = "WATCH"
+        elif v2_low_sample_legacy_fallback:
+            level = "WATCH_AUDIT"
     elif n_fuera_res >= 50 and fuera_wr is not None and fuera_wr >= 70:
         level = "ACTION"
     elif n_fuera_res >= 30 and fuera_wr is not None and fuera_wr >= 55:
@@ -9453,6 +9464,7 @@ def _blocked_signals_build_telegram_summary(all_records, whitelist_cities=None):
         "top3_pct": top3_pct,
         "concentration_warning": top3_pct > 60.0,
         "fidelity_unverified_pct": fidelity_pct,
+        "v2_low_sample_legacy_fallback": v2_low_sample_legacy_fallback,
         "top_reason_blocked": top_reason,
         "top_city_policy": top_policy,
         "audit_candidate_cities": audit_candidates,
@@ -9517,6 +9529,8 @@ def _blocked_signals_format_telegram(summary):
 
     fid_pct = summary.get("fidelity_unverified_pct", 0.0)
     lines.append(f"Settlement unverified/unknown: {fid_pct}%")
+    if summary.get("v2_low_sample_legacy_fallback"):
+        lines.append("<i>v2 OUT resolved &lt;50: fallback v1 queda solo como auditoria de datos.</i>")
 
     if has_v2:
         top_r = summary.get("top_reason_blocked")
@@ -9541,6 +9555,7 @@ def _blocked_signals_format_telegram(summary):
     _lvl_note = {
         "INFO": "No accionable para trading.",
         "WATCH": "No accionable para trading. Acumular muestra.",
+        "WATCH_AUDIT": "No accionable para trading. Auditoría de datos — sin cambios en whitelist ni city modes sin revisión separada.",
         "ACTION": "No accionable para trading. Auditoría de datos — sin cambios en whitelist ni city modes sin revisión separada.",
     }
     lines.append(_lvl_note.get(level, "No accionable para trading."))
@@ -9752,11 +9767,27 @@ def maybe_run_blocked_signals_check(state, now=None):
                 _log.warning(f"blocked signals telegram summary fallo ({_bs_e}), usando fallback")
             _fallback_action = "INFO"
             _fallback_task = "Sin tarea nueva: usar como baseline de inteligencia, no como permiso automatico de trading."
-            if n_resolved >= 50 and wr_pct >= 70:
+            _fallback_v2_recs = [r for r in all_records if r.get("schema_version") == 2]
+            _fallback_v2_out_resolved = [
+                r for r in _fallback_v2_recs
+                if r.get("resolved") and r.get("whitelist_status_at_record_time") == "out"
+            ]
+            _fallback_low_fidelity_v2 = (
+                bool(_fallback_v2_recs)
+                and len(_fallback_v2_out_resolved) < 50
+                and any(r.get("settlement_fidelity_status") in (None, "unknown", "unverified") for r in all_records)
+            )
+            if n_resolved >= 50 and wr_pct >= 70 and not _fallback_low_fidelity_v2:
                 _fallback_action = "ACTION"
                 _fallback_task = (
                     "Accion: priorizar auditoria de las ciudades fuera de whitelist con mas muestra "
                     "(whitelist, cobertura observada y fuente de resolucion) antes de tocar reglas core."
+                )
+            elif n_resolved >= 50 and wr_pct >= 70 and _fallback_low_fidelity_v2:
+                _fallback_action = "WATCH_AUDIT"
+                _fallback_task = (
+                    "No accionable para trading. Auditoría de datos — sin cambios en whitelist "
+                    "ni city modes sin revisión separada."
                 )
             elif n_resolved >= 30 and wr_pct >= 55:
                 _fallback_action = "WATCH"
