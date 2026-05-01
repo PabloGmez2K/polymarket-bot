@@ -10649,7 +10649,42 @@ def maybe_evaluate_slot_monetization(state, now=None):
         }
     signature = json.dumps(signature_payload, sort_keys=True, ensure_ascii=False)
 
-    if signature != state.get("slot_monetization_last_signature"):
+    benign_execution_reasons = {"buy_min_size", "buy_min_notional"}
+    execution_reasons_04 = slot_04.get("execution_reject_reasons") if isinstance(slot_04, dict) else {}
+    if not isinstance(execution_reasons_04, dict):
+        execution_reasons_04 = {}
+    relevant_execution_04 = {
+        reason: count
+        for reason, count in execution_reasons_04.items()
+        if reason not in benign_execution_reasons and int(count or 0) > 0
+    }
+    benign_execution_total_04 = sum(
+        int(count or 0)
+        for reason, count in execution_reasons_04.items()
+        if reason in benign_execution_reasons
+    )
+    same_day_buys_04 = int(slot_04.get("same_day_buys", 0) or 0)
+    healthy_validated_04 = (
+        slot_04.get("decision") == "validated"
+        and slot_04.get("status") == "keep"
+        and same_day_buys_04 > 0
+        and float(slot_04.get("buy_rate", 0.0) or 0.0) > 0.0
+        and float(slot_04.get("same_day_buy_rate", 0.0) or 0.0) > 0.0
+        and not relevant_execution_04
+        and benign_execution_total_04 <= max(1, same_day_buys_04)
+    )
+    slot_04_actionable = not healthy_validated_04
+    slot_23_actionable = (
+        slot_23_enabled
+        and isinstance(slot_23, dict)
+        and slot_23.get("decision") in {"disable_candidate", "low_value", "weak_signal", "observe_post_edge", "not_validated_yet"}
+    )
+    should_send = (
+        signature != state.get("slot_monetization_last_signature")
+        and (slot_04_actionable or slot_23_actionable)
+    )
+
+    if should_send:
         lines = [
             "🎯 <b>Slot monetization review</b>",
             f"Ventana leída: 04h {slot_04.get('cycles', 0)} ciclos | 23h {slot_23.get('cycles', 0)} ciclos",
@@ -10688,6 +10723,10 @@ def maybe_evaluate_slot_monetization(state, now=None):
 
         lines.append("• Esta alerta está diseñada para abrir sesión Codex con salida accionable, no solo documental.")
         send_telegram("\n".join(lines))
+    elif signature != state.get("slot_monetization_last_signature") and healthy_validated_04:
+        logger = globals().get("log")
+        if logger:
+            logger.info("slot monetization review: NO_ACTION 04h validated/keep healthy; Telegram suppressed")
 
     state["slot_monetization_last_date"] = today
     state["slot_monetization_last_signature"] = signature

@@ -4634,6 +4634,34 @@ def run_tests():
          slot_result_idem is False and len(slot_review_messages) == 1,
          {"result": slot_result_idem, "messages_count": len(slot_review_messages)})
 
+    slot_review_messages.clear()
+    slot_review_ns["load_cycle_history"] = lambda: [
+        {"timestamp_utc": "2026-04-18T04:00:45+00:00", "scan": {"slot_metrics": {"slot_hour_utc": 4, "same_day_candidates": 26, "same_day_edges": 2, "same_day_selected": 2, "same_day_buys": 1, "edges": 2, "selected": 2, "buys": 1, "buy_rate": 0.5, "same_day_buy_rate": 0.5, "same_day_reject_reasons": {"price_out_of_range": 226, "condition_filtered": 42, "blocked_city": 22}, "execution_reject_reasons": {"buy_min_size": 1}}}},
+        {"timestamp_utc": "2026-04-19T04:00:45+00:00", "scan": {"slot_metrics": {"slot_hour_utc": 4, "same_day_candidates": 40, "same_day_edges": 1, "same_day_selected": 1, "same_day_buys": 1, "edges": 1, "selected": 1, "buys": 1, "buy_rate": 1.0, "same_day_buy_rate": 1.0, "same_day_reject_reasons": {"price_out_of_range": 120}, "execution_reject_reasons": {}}}},
+        {"timestamp_utc": "2026-04-20T04:00:45+00:00", "scan": {"slot_metrics": {"slot_hour_utc": 4, "same_day_candidates": 40, "same_day_edges": 0, "same_day_selected": 0, "same_day_buys": 0, "edges": 0, "selected": 0, "buys": 0, "buy_rate": 0.0, "same_day_buy_rate": 0.0, "same_day_reject_reasons": {"price_out_of_range": 80}, "execution_reject_reasons": {}}}},
+    ]
+    healthy_slot_state = {"slot_monetization_last_date": None, "slot_monetization_last_signature": None}
+    healthy_slot_result = slot_review_ns["maybe_evaluate_slot_monetization"](healthy_slot_state, now=datetime(2026, 4, 20, 8, 5, tzinfo=timezone.utc))
+    test("slot monetization alert: 04h validated/keep sano queda NO_ACTION silencioso",
+         healthy_slot_result is True
+         and len(slot_review_messages) == 0
+         and healthy_slot_state["slot_monetization_last_date"] == "2026-04-20"
+         and healthy_slot_state["slot_monetization_last_signature"],
+         {"result": healthy_slot_result, "messages": slot_review_messages, "state": healthy_slot_state})
+
+    slot_review_messages.clear()
+    slot_review_ns["load_cycle_history"] = lambda: [
+        {"timestamp_utc": "2026-04-18T04:00:45+00:00", "scan": {"slot_metrics": {"slot_hour_utc": 4, "same_day_candidates": 26, "same_day_edges": 2, "same_day_selected": 2, "same_day_buys": 1, "edges": 2, "selected": 2, "buys": 1, "buy_rate": 0.5, "same_day_buy_rate": 0.5, "same_day_reject_reasons": {"price_out_of_range": 226}, "execution_reject_reasons": {"clob_reject": 1}}}},
+        {"timestamp_utc": "2026-04-19T04:00:45+00:00", "scan": {"slot_metrics": {"slot_hour_utc": 4, "same_day_candidates": 40, "same_day_edges": 1, "same_day_selected": 1, "same_day_buys": 1, "edges": 1, "selected": 1, "buys": 1, "buy_rate": 1.0, "same_day_buy_rate": 1.0, "same_day_reject_reasons": {"price_out_of_range": 120}, "execution_reject_reasons": {}}}},
+        {"timestamp_utc": "2026-04-20T04:00:45+00:00", "scan": {"slot_metrics": {"slot_hour_utc": 4, "same_day_candidates": 40, "same_day_edges": 0, "same_day_selected": 0, "same_day_buys": 0, "edges": 0, "selected": 0, "buys": 0, "buy_rate": 0.0, "same_day_buy_rate": 0.0, "same_day_reject_reasons": {"price_out_of_range": 80}, "execution_reject_reasons": {}}}},
+    ]
+    risky_slot_result = slot_review_ns["maybe_evaluate_slot_monetization"]({"slot_monetization_last_date": None, "slot_monetization_last_signature": None}, now=datetime(2026, 4, 20, 9, 5, tzinfo=timezone.utc))
+    test("slot monetization alert: 04h validated/keep con execution_reject relevante sigue alertando",
+         risky_slot_result is True
+         and len(slot_review_messages) == 1
+         and "clob_reject" in slot_review_messages[0],
+         {"result": risky_slot_result, "messages": slot_review_messages})
+
     insufficient_slot_ns = {
         "datetime": datetime,
         "timezone": timezone,
