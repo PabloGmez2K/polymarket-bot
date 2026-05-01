@@ -9541,7 +9541,7 @@ def _blocked_signals_format_telegram(summary):
     _lvl_note = {
         "INFO": "No accionable para trading.",
         "WATCH": "No accionable para trading. Acumular muestra.",
-        "ACTION": "No accionable para trading. Auditoría recomendada.",
+        "ACTION": "No accionable para trading. Auditoría de datos — sin cambios en whitelist ni city modes sin revisión separada.",
     }
     lines.append(_lvl_note.get(level, "No accionable para trading."))
     lines.append(
