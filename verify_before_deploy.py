@@ -169,6 +169,8 @@ def run_tests():
     agent_events_path = os.path.join(os.path.dirname(__file__), "agent_events.jsonl")
     traders_daily_summary_path = os.path.join(os.path.dirname(__file__), "tools", "traders_intelligence_daily_summary.py")
     traders_report_path = os.path.join(os.path.dirname(__file__), "tools", "traders_intelligence_report.py")
+    traders_snapshot_path = os.path.join(os.path.dirname(__file__), "tools", "traders_intelligence_snapshot.py")
+    traders_snapshot_doc_path = os.path.join(os.path.dirname(__file__), "docs", "traders-intelligence-v1-snapshots.md")
     trader_code = ""
     finder_code = ""
     requirements_code = ""
@@ -182,6 +184,8 @@ def run_tests():
     dashboard_js_code = ""
     traders_daily_summary_code = ""
     traders_report_code = ""
+    traders_snapshot_code = ""
+    traders_snapshot_doc = ""
     agent_event_rows = []
     if os.path.exists(trader_analyzer_path):
         with open(trader_analyzer_path, "r", encoding="utf-8") as f:
@@ -231,6 +235,12 @@ def run_tests():
     if os.path.exists(traders_report_path):
         with open(traders_report_path, "r", encoding="utf-8") as f:
             traders_report_code = f.read()
+    if os.path.exists(traders_snapshot_path):
+        with open(traders_snapshot_path, "r", encoding="utf-8") as f:
+            traders_snapshot_code = f.read()
+    if os.path.exists(traders_snapshot_doc_path):
+        with open(traders_snapshot_doc_path, "r", encoding="utf-8") as f:
+            traders_snapshot_doc = f.read()
 
     # ---- Test 0: Sintaxis válida ----
     print("\n Sintaxis")
@@ -7571,6 +7581,69 @@ def run_tests():
         and "execute_buy" not in traders_summary_src
         and "execute_sell" not in traders_summary_src
         and "BANKROLL" not in traders_summary_src,
+    )
+    print("  Checks traders_intelligence v1 snapshots manual-only")
+    traders_snapshot_forbidden = [
+        "import bot",
+        "from bot",
+        "execute_trade",
+        "execute_buy",
+        "execute_sell",
+        "create_order",
+        "post_order",
+        "cancel_order",
+        "OrderArgs",
+        "BANKROLL",
+        "QUALITY_TRADER_CITIES_WHITELIST",
+        "ACTIVE_TRADING_CITIES",
+        "CANARY_TRADING_CITIES",
+        "BLOCKED_CITIES",
+        "SCHEDULE_HOURS_UTC",
+    ]
+    test(
+        "traders_intelligence v1: snapshot tool existe",
+        bool(traders_snapshot_code)
+        and "schema_version" in traders_snapshot_code
+        and "traders_intelligence_signal_snapshot_v1" in traders_snapshot_code,
+    )
+    test(
+        "traders_intelligence v1: scope acotado traders/cities",
+        "Thrifty-Original" in traders_snapshot_code
+        and "Entire-Hood" in traders_snapshot_code
+        and "Houston" in traders_snapshot_code
+        and "Los Angeles" in traders_snapshot_code
+        and "Manila" in traders_snapshot_code
+        and "Miami" in traders_snapshot_code,
+    )
+    test(
+        "traders_intelligence v1: lifecycle minimo observado",
+        "appeared" in traders_snapshot_code
+        and "still_present" in traders_snapshot_code
+        and "disappeared_apparent" in traders_snapshot_code
+        and "reappeared" in traders_snapshot_code
+        and "not_a_trading_signal" in traders_snapshot_code,
+    )
+    test(
+        "traders_intelligence v1: CLI manual dry-run e idempotente",
+        "--dry-run" in traders_snapshot_code
+        and "--run-id" in traders_snapshot_code
+        and "write_jsonl_idempotent" in traders_snapshot_code,
+    )
+    test(
+        "traders_intelligence v1: falla limpio si falta signals.json",
+        "Missing required input signals.json" in traders_snapshot_code
+        and "return 2" in traders_snapshot_code,
+    )
+    test(
+        "traders_intelligence v1: no toca trading core/policy",
+        all(token not in traders_snapshot_code for token in traders_snapshot_forbidden)
+        and "traders_intelligence_snapshot.py" not in code,
+    )
+    test(
+        "traders_intelligence v1: doc de uso existe",
+        bool(traders_snapshot_doc)
+        and "python tools/traders_intelligence_snapshot.py --dry-run" in traders_snapshot_doc
+        and "`disappeared_apparent` is not a confirmed exit" in traders_snapshot_doc,
     )
 
     # ---- Bot health check read-only CLI ----

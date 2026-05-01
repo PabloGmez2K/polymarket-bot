@@ -167,14 +167,20 @@ tag no se emite.
 - No inventa pseudo-lifecycle. Cualquier pregunta de SL/TP/hold time devuelve
   `confidence: insufficient_data` con mensaje claro.
 
-### v1 — snapshots periódicos + pseudo-lifecycle (POSPUESTO)
+### v1 — snapshots periódicos + pseudo-lifecycle (MINIMO ACTIVADO 2026-05-01)
+
+Nota 2026-05-01: se activa solo el minimo observacional via
+`tools/traders_intelligence_snapshot.py`, sin scheduler ni integracion con
+trading. El alcance queda limitado a `Thrifty-Original` y `Entire-Hood` en
+`Houston`, `Los Angeles`, `Manila` y `Miami`. La salida vive bajo
+`data/traders_intelligence/` como artefacto runtime/regenerable.
 
 **Gatillo**: sólo si una pregunta operativa concreta lo justifica (ej. "¿copiamos
 la señal de salida de X?"). Si no hay esa pregunta, no se construye.
 
 Componentes previstos cuando se active:
 1. `traders_intelligence_snapshot.py` archivando `signals.json` recortado a
-   `data/traders_signals_archive/YYYY-MM-DDTHH.jsonl`.
+   `data/traders_intelligence/snapshots/<run_id>.json`.
 2. Builder de pseudo-lifecycle por `(trader, match_key)` con `first_seen_at`,
    `last_seen_at`, `avg_price_trajectory`, `cur_price_trajectory`,
    `disappeared_before_resolution`, `apparent_exit_label`.
