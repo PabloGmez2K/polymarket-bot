@@ -6124,6 +6124,178 @@ def run_tests():
         "maybe_run_sl_intra_guard_review(state)" in code,
     )
 
+    # ---- SL_intra Hazard Monitor L2: LOG_ONLY default OFF (Opus/Sonnet, sesion 285) ----
+    print("  Checks SL_intra Hazard Monitor L2 LOG_ONLY")
+    test(
+        "sl_intra_l2: defaults seguros OFF y LOG_ONLY",
+        'SL_INTRA_HAZARD_MONITOR_ENABLED = os.getenv("SL_INTRA_HAZARD_MONITOR_ENABLED", "0")' in code
+        and 'SL_INTRA_HAZARD_MONITOR_LOG_ONLY = os.getenv("SL_INTRA_HAZARD_MONITOR_LOG_ONLY", "1")' in code
+        and 'SL_INTRA_HAZARD_DETERIORATING_PNL_PCT = float(os.getenv("SL_INTRA_HAZARD_DETERIORATING_PNL_PCT", "-50.0"))' in code
+        and 'SL_INTRA_HAZARD_DEEP_PNL_PCT = float(os.getenv("SL_INTRA_HAZARD_DEEP_PNL_PCT", "-70.0"))' in code
+        and 'SL_INTRA_HAZARD_TERMINAL_PNL_PCT = float(os.getenv("SL_INTRA_HAZARD_TERMINAL_PNL_PCT", "-85.0"))' in code
+        and 'SL_INTRA_HAZARD_TERMINAL_CURRENT_VALUE = float(os.getenv("SL_INTRA_HAZARD_TERMINAL_CURRENT_VALUE", "0.30"))' in code
+        and 'SL_INTRA_HAZARD_COLLAPSED_PRICE = float(os.getenv("SL_INTRA_HAZARD_COLLAPSED_PRICE", "0.05"))' in code
+        and 'SL_INTRA_HAZARD_COLLAPSED_MIN_CYCLES = int(os.getenv("SL_INTRA_HAZARD_COLLAPSED_MIN_CYCLES", "2"))' in code
+        and 'SL_INTRA_HAZARD_TELEGRAM_COOLDOWN_MIN = int(os.getenv("SL_INTRA_HAZARD_TELEGRAM_COOLDOWN_MIN", "60"))' in code
+        and 'SL_INTRA_HAZARD_MAX_EVENTS = int(os.getenv("SL_INTRA_HAZARD_MAX_EVENTS", "1000"))' in code,
+    )
+    test(
+        "sl_intra_l2: audit independiente del guard L1",
+        'SL_INTRA_HAZARD_MONITOR_STATE_FILE = _data_path("sl_intra_hazard_monitor_audit.json")' in code
+        and 'SL_INTRA_GUARD_STATE_FILE = _data_path("sl_intra_guard_audit.json")' in code,
+    )
+    test(
+        "sl_intra_l2: helpers definidos",
+        "def load_sl_intra_hazard_monitor_state(" in code
+        and "def save_sl_intra_hazard_monitor_state(" in code
+        and "def _sl_intra_hazard_monitor_tier(" in code
+        and "def maybe_record_sl_intra_hazard_event(" in code,
+    )
+    sl_hazard_src = ""
+    sl_hazard_hook_src = ""
+    try:
+        sl_hazard_src = get_function_source(module_ast, code_lines, "maybe_record_sl_intra_hazard_event")
+        intra_sl_src_for_l2 = code.split("def intra_cycle_sl_check(", 1)[1].split("def intra_sl_loop(", 1)[0]
+        sl_hazard_hook_src = intra_sl_src_for_l2.split("maybe_record_sl_intra_hazard_event(", 1)[1].split("_guard_skip_sl = (", 1)[0]
+    except Exception:
+        pass
+    test(
+        "sl_intra_l2: scope literal bajo L1",
+        "if not _sl_intra_guard_should_skip(condition, days_ahead):" in sl_hazard_src,
+    )
+    test(
+        "sl_intra_l2: hook integrado antes del guard skip",
+        "condition=_guard_condition" in sl_hazard_hook_src
+        and "days_ahead=_guard_days_ahead" in sl_hazard_hook_src
+        and "now_utc=now_utc" in sl_hazard_hook_src,
+    )
+    test(
+        "sl_intra_l2: hook sin side-effects ejecutables",
+        all(forbidden not in sl_hazard_hook_src for forbidden in [
+            "execute_trade",
+            "track_trade",
+            "sell_type =",
+            "save_trade_lifecycle_data",
+            "sell_lock",
+            "SL_INTRA_GUARD_STATE_FILE",
+            "UNSELLABLE_GUARD",
+        ]),
+    )
+    test(
+        "sl_intra_l2: helper sin ventas ni lifecycle",
+        all(forbidden not in sl_hazard_src for forbidden in [
+            "execute_trade",
+            "track_trade",
+            "sell_type =",
+            "save_trade_lifecycle_data",
+            "sell_lock",
+            "SL_INTRA_GUARD_STATE_FILE",
+            "UNSELLABLE_GUARD",
+        ]),
+    )
+    test(
+        "sl_intra_l2: Telegram LOG_ONLY y cooldown independiente",
+        "⚠️ <b>[SL_intra L2 Hazard Monitor]</b>" in code
+        and "LOG_ONLY: no venta, no lifecycle, no accion ejecutable" in code
+        and "SL_INTRA_HAZARD_TELEGRAM_COOLDOWN_MIN" in code
+        and "last_telegram_at" in sl_hazard_src,
+    )
+    try:
+        sl_l2_ns = {
+            "os": os,
+            "json": json,
+            "datetime": datetime,
+            "timezone": timezone,
+            "SL_INTRA_HAZARD_MONITOR_VERSION": "sl_intra_hazard_l2_v1",
+            "SL_INTRA_HAZARD_MONITOR_STATE_FILE": "unused_in_tests.json",
+            "SL_INTRA_HAZARD_MAX_EVENTS": 1000,
+            "SL_INTRA_HAZARD_DETERIORATING_PNL_PCT": -50.0,
+            "SL_INTRA_HAZARD_DEEP_PNL_PCT": -70.0,
+            "SL_INTRA_HAZARD_TERMINAL_PNL_PCT": -85.0,
+            "SL_INTRA_HAZARD_TERMINAL_CURRENT_VALUE": 0.30,
+            "SL_INTRA_HAZARD_COLLAPSED_PRICE": 0.05,
+            "SL_INTRA_HAZARD_COLLAPSED_MIN_CYCLES": 2,
+            "SL_INTRA_HAZARD_TELEGRAM_COOLDOWN_MIN": 60,
+            "BOT_VERSION": "test",
+            "log": types.SimpleNamespace(info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None),
+            "parse_city_from_title": lambda title: "Paris",
+        }
+        for fn_name in [
+            "_sl_intra_hazard_monitor_default_state",
+            "load_sl_intra_hazard_monitor_state",
+            "save_sl_intra_hazard_monitor_state",
+            "_sl_intra_hazard_monitor_tier",
+            "_sl_intra_hazard_telegram_allowed",
+            "maybe_record_sl_intra_hazard_event",
+        ]:
+            exec(get_function_source(module_ast, code_lines, fn_name), sl_l2_ns)
+        tier_fn = sl_l2_ns["_sl_intra_hazard_monitor_tier"]
+        test("sl_intra_l2 funcional: tier deteriorating", tier_fn(-50.0, 0.40, 1.00, 0) == "deteriorating")
+        test("sl_intra_l2 funcional: tier deep", tier_fn(-70.0, 0.40, 1.00, 0) == "deep")
+        test("sl_intra_l2 funcional: tier terminal por PnL", tier_fn(-85.0, 0.40, 1.00, 0) == "terminal")
+        test("sl_intra_l2 funcional: tier terminal por current_value", tier_fn(-10.0, 0.40, 0.30, 0) == "terminal")
+        test("sl_intra_l2 funcional: collapsed requiere 2 ciclos", tier_fn(-10.0, 0.05, 1.00, 1) == "" and tier_fn(-10.0, 0.05, 1.00, 2) == "collapsed")
+
+        calls = {"scope": 0, "load": 0, "save": 0, "send": 0}
+        sl_l2_ns["SL_INTRA_HAZARD_MONITOR_ENABLED"] = False
+        sl_l2_ns["SL_INTRA_HAZARD_MONITOR_LOG_ONLY"] = True
+        sl_l2_ns["_sl_intra_guard_should_skip"] = lambda condition, days_ahead: calls.__setitem__("scope", calls["scope"] + 1) or True
+        sl_l2_ns["load_sl_intra_hazard_monitor_state"] = lambda: calls.__setitem__("load", calls["load"] + 1) or {}
+        sl_l2_ns["save_sl_intra_hazard_monitor_state"] = lambda state: calls.__setitem__("save", calls["save"] + 1)
+        sl_l2_ns["send_telegram"] = lambda msg: calls.__setitem__("send", calls["send"] + 1)
+        off_result = sl_l2_ns["maybe_record_sl_intra_hazard_event"](
+            {"asset": "tok-off", "curPrice": 0.05, "percentPnl": -90, "currentValue": 0.10, "size": 1},
+            condition="exact",
+            days_ahead=0,
+            entry_price=0.50,
+        )
+        test(
+            "sl_intra_l2 funcional: ENABLED=0 no load/save/send",
+            off_result is False and calls == {"scope": 0, "load": 0, "save": 0, "send": 0},
+            str(calls),
+        )
+
+        state_holder = {"state": sl_l2_ns["_sl_intra_hazard_monitor_default_state"]()}
+        sends = []
+        sl_l2_ns["SL_INTRA_HAZARD_MONITOR_ENABLED"] = True
+        sl_l2_ns["SL_INTRA_HAZARD_MONITOR_LOG_ONLY"] = True
+        sl_l2_ns["_sl_intra_guard_should_skip"] = lambda condition, days_ahead: condition == "exact" and int(days_ahead) <= 1
+        sl_l2_ns["load_sl_intra_hazard_monitor_state"] = lambda: state_holder["state"]
+        sl_l2_ns["save_sl_intra_hazard_monitor_state"] = lambda state: state_holder.__setitem__("state", state)
+        sl_l2_ns["send_telegram"] = lambda msg: sends.append(msg)
+        position = {
+            "asset": "tok-l2",
+            "title": "Will the temperature in Paris be exactly 20C on May 1?",
+            "outcome": "YES",
+            "curPrice": 0.20,
+            "percentPnl": -70.0,
+            "currentValue": 1.00,
+            "size": 2,
+        }
+        first = sl_l2_ns["maybe_record_sl_intra_hazard_event"](position, condition="exact", days_ahead=0, entry_price=0.50, now_utc=datetime(2026, 5, 1, tzinfo=timezone.utc))
+        second = sl_l2_ns["maybe_record_sl_intra_hazard_event"](position, condition="exact", days_ahead=0, entry_price=0.50, now_utc=datetime(2026, 5, 1, 0, 1, tzinfo=timezone.utc))
+        test(
+            "sl_intra_l2 funcional: idempotencia token+tier",
+            first is True and second is False and len(state_holder["state"].get("events", [])) == 1,
+        )
+        test(
+            "sl_intra_l2 funcional: Telegram solo evento nuevo",
+            len(sends) == 1 and "LOG_ONLY" in sends[0],
+            str(sends),
+        )
+        state_holder["state"] = sl_l2_ns["_sl_intra_hazard_monitor_default_state"]()
+        collapsed_position = dict(position, asset="tok-collapsed", curPrice=0.05, percentPnl=-10.0, currentValue=1.00)
+        collapsed_first = sl_l2_ns["maybe_record_sl_intra_hazard_event"](collapsed_position, condition="exact", days_ahead=0, entry_price=0.50, now_utc=datetime(2026, 5, 1, tzinfo=timezone.utc))
+        collapsed_second = sl_l2_ns["maybe_record_sl_intra_hazard_event"](collapsed_position, condition="exact", days_ahead=0, entry_price=0.50, now_utc=datetime(2026, 5, 1, 0, 20, tzinfo=timezone.utc))
+        test(
+            "sl_intra_l2 funcional: collapsed persiste 2 ciclos",
+            collapsed_first is False
+            and collapsed_second is True
+            and state_holder["state"]["events"][-1]["tier"] == "collapsed",
+        )
+    except Exception as exc:
+        test("sl_intra_l2 funcional: helpers ejecutables", False, str(exc))
+
     # ---- Unsellable Liquidity Guard v1: Fase 1 LOG_ONLY (Opus, 2026-04-30) ----
     print("  Checks Unsellable Liquidity Guard v1 LOG_ONLY")
     test(

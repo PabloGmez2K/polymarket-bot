@@ -426,6 +426,18 @@ SL_INTRA_GUARD_EXACT_NEAR_RESOLUTION = os.getenv("SL_INTRA_GUARD_EXACT_NEAR_RESO
 SL_INTRA_GUARD_DAYS_AHEAD_MAX = int(os.getenv("SL_INTRA_GUARD_DAYS_AHEAD_MAX", "1"))
 SL_INTRA_GUARD_REVIEW_MIN_SKIPS = int(os.getenv("SL_INTRA_GUARD_REVIEW_MIN_SKIPS", "5"))
 SL_INTRA_GUARD_TELEGRAM_COOLDOWN_MIN = int(os.getenv("SL_INTRA_GUARD_TELEGRAM_COOLDOWN_MIN", "60"))
+# SL_intra Hazard Monitor L2: observador puro bajo L1, LOG_ONLY y default OFF.
+SL_INTRA_HAZARD_MONITOR_ENABLED = os.getenv("SL_INTRA_HAZARD_MONITOR_ENABLED", "0").lower() in ("1", "true", "yes", "on")
+SL_INTRA_HAZARD_MONITOR_LOG_ONLY = os.getenv("SL_INTRA_HAZARD_MONITOR_LOG_ONLY", "1").lower() in ("1", "true", "yes", "on")
+SL_INTRA_HAZARD_MONITOR_VERSION = "sl_intra_hazard_l2_v1"
+SL_INTRA_HAZARD_DETERIORATING_PNL_PCT = float(os.getenv("SL_INTRA_HAZARD_DETERIORATING_PNL_PCT", "-50.0"))
+SL_INTRA_HAZARD_DEEP_PNL_PCT = float(os.getenv("SL_INTRA_HAZARD_DEEP_PNL_PCT", "-70.0"))
+SL_INTRA_HAZARD_TERMINAL_PNL_PCT = float(os.getenv("SL_INTRA_HAZARD_TERMINAL_PNL_PCT", "-85.0"))
+SL_INTRA_HAZARD_TERMINAL_CURRENT_VALUE = float(os.getenv("SL_INTRA_HAZARD_TERMINAL_CURRENT_VALUE", "0.30"))
+SL_INTRA_HAZARD_COLLAPSED_PRICE = float(os.getenv("SL_INTRA_HAZARD_COLLAPSED_PRICE", "0.05"))
+SL_INTRA_HAZARD_COLLAPSED_MIN_CYCLES = int(os.getenv("SL_INTRA_HAZARD_COLLAPSED_MIN_CYCLES", "2"))
+SL_INTRA_HAZARD_TELEGRAM_COOLDOWN_MIN = int(os.getenv("SL_INTRA_HAZARD_TELEGRAM_COOLDOWN_MIN", "60"))
+SL_INTRA_HAZARD_MAX_EVENTS = int(os.getenv("SL_INTRA_HAZARD_MAX_EVENTS", "1000"))
 
 MIN_PRICE = 0.20
 MAX_PRICE = 0.80
@@ -660,6 +672,7 @@ SKIP_LOG_MAX_SIZE_BYTES = 20 * 1024 * 1024  # 20 MB — rotación del contrato R
 SL_COOLDOWN_FILE = _data_path("sl_city_cooldown.json")
 INTRA_REEVAL_STATE_FILE = _data_path("intra_reeval_state.json")
 SL_INTRA_GUARD_STATE_FILE = _data_path("sl_intra_guard_audit.json")
+SL_INTRA_HAZARD_MONITOR_STATE_FILE = _data_path("sl_intra_hazard_monitor_audit.json")
 AGENT_EVENTS_FILE = _sync_agent_events_seed()
 SIGNALS_FILE = _seed_data_file("signals.json")
 SIGNALS_CROSSCHECK_FILE = _data_path("signals_crosscheck.jsonl")
@@ -2383,6 +2396,196 @@ def _extract_logic_series(value):
         return None
     match = re.search(r"(\d+\.\d+)", value)
     return match.group(1) if match else None
+
+
+def _sl_intra_hazard_monitor_default_state():
+    return {
+        "version": 1,
+        "monitor_version": SL_INTRA_HAZARD_MONITOR_VERSION,
+        "monitor_started_at": "",
+        "last_telegram_at": "",
+        "seen": {},
+        "collapsed_candidates": {},
+        "events": [],
+    }
+
+
+def load_sl_intra_hazard_monitor_state():
+    """L2 Hazard Monitor: auditoria independiente, separada del guard SL_intra."""
+    default = _sl_intra_hazard_monitor_default_state()
+    if not os.path.exists(SL_INTRA_HAZARD_MONITOR_STATE_FILE):
+        return default
+    try:
+        with open(SL_INTRA_HAZARD_MONITOR_STATE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return default
+        state = dict(default)
+        state["monitor_started_at"] = data.get("monitor_started_at", "") or ""
+        state["last_telegram_at"] = data.get("last_telegram_at", "") or ""
+        seen = data.get("seen", {})
+        state["seen"] = seen if isinstance(seen, dict) else {}
+        collapsed_candidates = data.get("collapsed_candidates", {})
+        state["collapsed_candidates"] = collapsed_candidates if isinstance(collapsed_candidates, dict) else {}
+        events = data.get("events", [])
+        state["events"] = events if isinstance(events, list) else []
+        return state
+    except Exception:
+        return default
+
+
+def save_sl_intra_hazard_monitor_state(state):
+    """L2 Hazard Monitor: persiste solo observabilidad LOG_ONLY."""
+    try:
+        events = state.get("events", [])
+        if isinstance(events, list) and len(events) > SL_INTRA_HAZARD_MAX_EVENTS:
+            state["events"] = events[-SL_INTRA_HAZARD_MAX_EVENTS:]
+        with open(SL_INTRA_HAZARD_MONITOR_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        log.warning(f"Error guardando sl_intra_hazard_monitor_audit: {e}")
+
+
+def _sl_intra_hazard_monitor_tier(pct_pnl, cur_price, current_value, collapsed_cycles=0):
+    """Clasifica riesgo L2 sin accion ejecutable."""
+    try:
+        pct_value = float(pct_pnl)
+        price_value = float(cur_price)
+        current_value_float = float(current_value)
+        collapsed_cycles_value = int(collapsed_cycles or 0)
+    except (ValueError, TypeError):
+        return ""
+    if (
+        price_value <= SL_INTRA_HAZARD_COLLAPSED_PRICE
+        and collapsed_cycles_value >= SL_INTRA_HAZARD_COLLAPSED_MIN_CYCLES
+    ):
+        return "collapsed"
+    if (
+        pct_value <= SL_INTRA_HAZARD_TERMINAL_PNL_PCT
+        or current_value_float <= SL_INTRA_HAZARD_TERMINAL_CURRENT_VALUE
+    ):
+        return "terminal"
+    if pct_value <= SL_INTRA_HAZARD_DEEP_PNL_PCT:
+        return "deep"
+    if pct_value <= SL_INTRA_HAZARD_DETERIORATING_PNL_PCT:
+        return "deteriorating"
+    return ""
+
+
+def _sl_intra_hazard_telegram_allowed(state, now_utc):
+    last_telegram = state.get("last_telegram_at", "")
+    if not last_telegram:
+        return True
+    try:
+        last_dt = datetime.fromisoformat(last_telegram.replace("Z", "+00:00"))
+        return (now_utc - last_dt).total_seconds() >= SL_INTRA_HAZARD_TELEGRAM_COOLDOWN_MIN * 60
+    except (ValueError, TypeError):
+        return True
+
+
+def maybe_record_sl_intra_hazard_event(position, *, condition, days_ahead, entry_price, now_utc=None):
+    """L2 Hazard Monitor LOG_ONLY: observa solo posiciones que L1 protegeria."""
+    if not SL_INTRA_HAZARD_MONITOR_ENABLED:
+        return False
+    if not SL_INTRA_HAZARD_MONITOR_LOG_ONLY:
+        return False
+    if not _sl_intra_guard_should_skip(condition, days_ahead):
+        return False
+
+    token_id = str(position.get("asset", "") or "").strip()
+    if not token_id:
+        return False
+    now = now_utc or datetime.now(timezone.utc)
+    state = load_sl_intra_hazard_monitor_state()
+    state_changed = False
+    if not state.get("monitor_started_at"):
+        state["monitor_started_at"] = now.isoformat()
+        state_changed = True
+
+    try:
+        cur_price = float(position.get("curPrice", 0))
+        pct_pnl = float(position.get("percentPnl", 0))
+        current_value = float(position.get("currentValue", 0))
+    except (ValueError, TypeError):
+        return False
+
+    collapsed_candidates = state.setdefault("collapsed_candidates", {})
+    collapsed_meta = collapsed_candidates.get(token_id, {}) if isinstance(collapsed_candidates.get(token_id), dict) else {}
+    if cur_price <= SL_INTRA_HAZARD_COLLAPSED_PRICE:
+        collapsed_cycles = int(collapsed_meta.get("consecutive_cycles", 0) or 0) + 1
+        collapsed_candidates[token_id] = {
+            "first_seen_at": collapsed_meta.get("first_seen_at") or now.isoformat(),
+            "last_seen_at": now.isoformat(),
+            "consecutive_cycles": collapsed_cycles,
+        }
+        state_changed = True
+    else:
+        collapsed_cycles = 0
+        if token_id in collapsed_candidates:
+            collapsed_candidates.pop(token_id, None)
+            state_changed = True
+
+    tier = _sl_intra_hazard_monitor_tier(
+        pct_pnl,
+        cur_price,
+        current_value,
+        collapsed_cycles=collapsed_cycles,
+    )
+    if not tier:
+        if state_changed:
+            save_sl_intra_hazard_monitor_state(state)
+        return False
+
+    seen = state.setdefault("seen", {})
+    token_seen = set(seen.get(token_id, [])) if isinstance(seen.get(token_id, []), list) else set()
+    if tier in token_seen:
+        if state_changed:
+            save_sl_intra_hazard_monitor_state(state)
+        return False
+
+    title_full = str(position.get("title", "") or "")
+    city = parse_city_from_title(title_full[:50]) or ""
+    outcome = position.get("outcome", "?")
+    event = {
+        "timestamp": now.isoformat(),
+        "token_id": token_id,
+        "city": city,
+        "outcome": outcome,
+        "title": title_full[:120],
+        "tier": tier,
+        "condition": condition,
+        "days_ahead": days_ahead,
+        "entry_price": entry_price,
+        "cur_price": cur_price,
+        "pct_pnl": round(pct_pnl, 2),
+        "current_value": current_value,
+        "shares": float(position.get("size", 0)),
+        "bot_version": BOT_VERSION,
+        "monitor_version": SL_INTRA_HAZARD_MONITOR_VERSION,
+        "log_only": True,
+    }
+    state.setdefault("events", []).append(event)
+    seen[token_id] = sorted(token_seen | {tier})
+    log.info(
+        f"[SL-INTRA-L2] hazard {tier}: {outcome} {city} "
+        f"pnl={pct_pnl:+.1f}% value=${current_value:.2f}"
+    )
+
+    if _sl_intra_hazard_telegram_allowed(state, now):
+        try:
+            send_telegram(
+                f"⚠️ <b>[SL_intra L2 Hazard Monitor]</b>\n"
+                f"{tier}: {outcome} {city}\n"
+                f"PnL: <b>{pct_pnl:+.1f}%</b> | value=${current_value:.2f}\n"
+                f"Entry ${float(entry_price or 0):.2f} → ahora ${cur_price:.2f}\n"
+                f"<i>LOG_ONLY: no venta, no lifecycle, no accion ejecutable.</i>"
+            )
+            state["last_telegram_at"] = now.isoformat()
+        except Exception:
+            pass
+
+    save_sl_intra_hazard_monitor_state(state)
+    return True
 
 
 def _load_cycle_counts():
@@ -17181,6 +17384,13 @@ def intra_cycle_sl_check(client):
                         _guard_days_ahead = (date.fromisoformat(_guard_market_date) - date.today()).days
                     except (ValueError, TypeError):
                         _guard_days_ahead = None
+            maybe_record_sl_intra_hazard_event(
+                p,
+                condition=_guard_condition,
+                days_ahead=_guard_days_ahead,
+                entry_price=_entry_price_intra,
+                now_utc=now_utc,
+            )
             _guard_skip_sl = (
                 pct_pnl <= STOP_LOSS_PCT
                 and _sl_intra_guard_should_skip(_guard_condition, _guard_days_ahead)
