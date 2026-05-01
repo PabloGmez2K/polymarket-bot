@@ -7577,10 +7577,18 @@ def run_tests():
     test(
         "traders_intelligence: no abre v1 ni toca scheduler/trading",
         "Abrir v1 minimo" not in traders_report_code
+        and "Abrir v1 minimo" not in traders_daily_summary_code
         and "SCHEDULE_HOURS_UTC" not in traders_summary_src
         and "execute_buy" not in traders_summary_src
         and "execute_sell" not in traders_summary_src
         and "BANKROLL" not in traders_summary_src,
+    )
+    test(
+        "traders_intelligence: ready copy reconoce v1 minima existente",
+        "V1 minima implementada" in traders_daily_summary_code
+        and "traders_intelligence_snapshot.py" in traders_daily_summary_code
+        and "signals.json fresco" in traders_daily_summary_code
+        and "v1_minimal_available" in traders_daily_summary_code,
     )
     print("  Checks traders_intelligence v1 snapshots manual-only")
     traders_snapshot_forbidden = [

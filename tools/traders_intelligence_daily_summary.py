@@ -17,6 +17,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_INTELLIGENCE_PATH = REPO_ROOT / "data" / "traders_intelligence.json"
 DEFAULT_STATE_PATH = REPO_ROOT / "data" / "traders_intelligence_daily_summary_state.json"
 DEFAULT_MD_OUTPUT = REPO_ROOT / "docs" / "traders_intelligence_daily_summary_latest.md"
+V1_SNAPSHOT_TOOL_PATH = REPO_ROOT / "tools" / "traders_intelligence_snapshot.py"
+V1_SNAPSHOT_DOC_PATH = REPO_ROOT / "docs" / "traders-intelligence-v1-snapshots.md"
 TELEGRAM_SAFE_CHUNK_CHARS = 3800
 TELEGRAM_SEND_RETRIES = 1
 TELEGRAM_TIMEOUT_SECONDS = 10
@@ -198,6 +200,10 @@ def get_trader_only_cities(trader):
     return list(trader.get("vs_bot", {}).get("trader_only_cities_now", []) or [])
 
 
+def v1_minimal_available():
+    return V1_SNAPSHOT_TOOL_PATH.exists() and V1_SNAPSHOT_DOC_PATH.exists()
+
+
 def classify_strong_traders(traders, args):
     lead_traders = []
     strong_traders = []
@@ -290,7 +296,13 @@ def build_readiness_checks(payload, args):
     blockers = [check for check in checks if not check["passed"]]
     focus_traders = [trader.get("pseudonym") for trader in (lead_traders[:2] or strong_traders[:2])]
     focus_cities = candidate_cities[:4]
-    if ready:
+    if ready and v1_minimal_available():
+        question = (
+            "V1 minima implementada. Siguiente paso: ejecutar "
+            "`python tools/traders_intelligence_snapshot.py` con signals.json fresco "
+            "para acumular snapshots."
+        )
+    elif ready:
         question = (
             "Seguir snapshots de señales para inferir salidas aparentes de "
             f"{', '.join(focus_traders)} en {', '.join(focus_cities)}."
@@ -318,6 +330,8 @@ def build_daily_summary(payload):
 
 def progress_sentence(readiness):
     if readiness["ready"]:
+        if v1_minimal_available():
+            return "Los checks minimos estan completos y la v1 minima ya existe; ahora toca acumular snapshots frescos con la CLI manual."
         return "Los checks minimos ya estan completos; ya merece pasar a v1 para seguir lifecycle externo."
     blockers = [check["id"] for check in readiness["blockers"]]
     if "crosscheck_series_deep_enough" in blockers:
@@ -329,11 +343,18 @@ def progress_sentence(readiness):
 
 def build_instruction(readiness):
     if readiness["ready"]:
+        if v1_minimal_available():
+            return (
+                "<b>Instruccion para Codex</b>\n"
+                "V1 minima implementada. Siguiente paso: ejecutar "
+                "<code>python tools/traders_intelligence_snapshot.py</code> con signals.json fresco para acumular snapshots. "
+                "No tocar trading core, NOAA ni policy."
+            )
         traders = ", ".join(readiness["lead_traders"][:2] or readiness["strong_traders"][:2])
         cities = ", ".join(readiness["candidate_cities"][:4])
         return (
             "<b>Instruccion para Codex</b>\n"
-            f"Abrir v1 minimo de traders_intelligence. Alcance: archivar snapshots de signals.json y construir pseudo-lifecycle "
+            f"Preparar v1 minimo de traders_intelligence. Alcance: archivar snapshots de signals.json y construir pseudo-lifecycle "
             f"solo para {traders} en {cities}. No tocar trading core, NOAA ni policy."
         )
     blocker = readiness["blockers"][0] if readiness["blockers"] else None
