@@ -342,13 +342,19 @@ def build_message(summary: dict, today_operational_sample: list[dict]):
     else:
         lines.append("- Hoy no aparece un gap operativo fuerte fuera de blocked con consenso y condicion operable.")
 
+    next_step_header = {
+        "ACTION": "Tarea para Codex",
+        "WATCH": "Próximo paso (WATCH)",
+        "INFO": "Próximo paso",
+    }.get(action["label"], "Próximo paso")
+
     lines.extend(
         [
             "",
             "<b>Nivel de accion</b>",
             f"{action['label']}: {action['reason']}",
             "",
-            "<b>Tarea para Codex</b>",
+            f"<b>{next_step_header}</b>",
             action["task"],
         ]
     )

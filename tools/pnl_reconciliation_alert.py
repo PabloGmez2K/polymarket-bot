@@ -369,7 +369,7 @@ def build_message(summary: dict) -> str:
         f"- Condicion: {worst_condition.get('key', 'n/d')} {money(worst_condition.get('pnl'))} n={worst_condition.get('n', 0)} WR={worst_condition.get('wr', 0.0):.1f}%",
         f"- Exit: {worst_exit.get('key', 'n/d')} {money(worst_exit.get('pnl'))} n={worst_exit.get('n', 0)} WR={worst_exit.get('wr', 0.0):.1f}%",
         "",
-        "<b>Tarea para Codex</b>",
+        "<b>Tarea para Codex</b>" if status == "needs_wallet_reconciliation" else "<b>Seguimiento</b>",
     ]
     if status == "needs_wallet_reconciliation":
         lines += [

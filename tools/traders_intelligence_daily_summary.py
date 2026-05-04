@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
 import time
@@ -140,10 +141,27 @@ def telegram_failure(reason: str, exc=None, sent_chunks: int = 0):
     return result
 
 
-def post_telegram_chunk(token: str, chat_id: str, chunk: str):
-    # Intentionally omit parse_mode: this keeps the alert non-fatal even if
-    # dynamic trader/city text contains characters that would break Telegram HTML.
+def html_text(value) -> str:
+    return html.escape(str(value), quote=False)
+
+
+def plain_text_message(message: str) -> str:
+    replacements = (
+        ("<b>", ""),
+        ("</b>", ""),
+        ("<code>", ""),
+        ("</code>", ""),
+    )
+    text = message
+    for old, new in replacements:
+        text = text.replace(old, new)
+    return html.unescape(text)
+
+
+def post_telegram_chunk(token: str, chat_id: str, chunk: str, parse_mode: str | None = None):
     payload = {"chat_id": chat_id, "text": chunk}
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
     req = urllib.request.Request(
         f"https://api.telegram.org/bot{token}/sendMessage",
         data=json.dumps(payload).encode("utf-8"),
@@ -163,10 +181,18 @@ def send_telegram(message: str):
     for chunk in chunks:
         for attempt in range(TELEGRAM_SEND_RETRIES + 1):
             try:
-                post_telegram_chunk(token, chat_id, chunk)
+                post_telegram_chunk(token, chat_id, chunk, parse_mode="HTML")
                 sent_chunks += 1
                 break
             except urllib.error.HTTPError as exc:
+                if exc.code == 400:
+                    try:
+                        post_telegram_chunk(token, chat_id, plain_text_message(chunk))
+                        sent_chunks += 1
+                        break
+                    except Exception as fallback_exc:
+                        if attempt >= TELEGRAM_SEND_RETRIES:
+                            return telegram_failure("telegram_plain_text_fallback_error", fallback_exc, sent_chunks)
                 if attempt >= TELEGRAM_SEND_RETRIES:
                     return telegram_failure("telegram_http_error", exc, sent_chunks)
             except urllib.error.URLError as exc:
@@ -355,7 +381,7 @@ def build_instruction(readiness):
         return (
             "<b>Instruccion para Codex</b>\n"
             f"Preparar v1 minimo de traders_intelligence. Alcance: archivar snapshots de signals.json y construir pseudo-lifecycle "
-            f"solo para {traders} en {cities}. No tocar trading core, NOAA ni policy."
+            f"solo para {html_text(traders)} en {html_text(cities)}. No tocar trading core, NOAA ni policy."
         )
     blocker = readiness["blockers"][0] if readiness["blockers"] else None
     if not blocker:
@@ -392,11 +418,11 @@ def build_instruction(readiness):
 def build_message(payload, readiness, top_active):
     lines = [
         "<b>TRADERS INTELLIGENCE - resumen diario</b>",
-        f"Health: <code>{payload.get('health_status', 'unknown')}</code> | Traders: <code>{payload.get('integrity', {}).get('n_traders_profiled')}</code>",
-        f"Census stale days: <code>{payload.get('integrity', {}).get('census_stale_days')}</code>",
+        f"Health: <code>{html_text(payload.get('health_status', 'unknown'))}</code> | Traders: <code>{html_text(payload.get('integrity', {}).get('n_traders_profiled'))}</code>",
+        f"Census stale days: <code>{html_text(payload.get('integrity', {}).get('census_stale_days'))}</code>",
         "",
         "<b>Lectura del sistema</b>",
-        f"- {progress_sentence(readiness)}",
+        f"- {html_text(progress_sentence(readiness))}",
     ]
 
     if top_active:
@@ -406,21 +432,21 @@ def build_message(payload, readiness, top_active):
             blocked_wr = blocked.get("wr_pct")
             blocked_n = blocked.get("n_resolved")
             lines.append(
-                f"- {trader.get('pseudonym')}: active_now={get_active_now(trader)}, "
-                f"blocked_wr={blocked_wr if blocked_wr is not None else 'n/d'} "
-                f"(n={blocked_n if blocked_n is not None else 'n/d'})"
+                f"- {html_text(trader.get('pseudonym'))}: active_now={html_text(get_active_now(trader))}, "
+                f"blocked_wr={html_text(blocked_wr if blocked_wr is not None else 'n/d')} "
+                f"(n={html_text(blocked_n if blocked_n is not None else 'n/d')})"
             )
 
     lines.extend(["", "<b>Checks para v1</b>"])
     for check in readiness["checks"]:
         badge = "OK" if check["passed"] else "WAIT"
-        lines.append(f"- {badge} {check['label']} ({check['detail']})")
+        lines.append(f"- {badge} {html_text(check['label'])} ({html_text(check['detail'])})")
 
     if readiness["ready"]:
         lines.extend([
             "",
             "<b>V1 readiness</b>",
-            f"- READY: {readiness['question_for_v1']}",
+            f"- READY: {html_text(readiness['question_for_v1'])}",
         ])
     else:
         lines.extend([
@@ -437,7 +463,7 @@ def build_message(payload, readiness, top_active):
     if warnings:
         lines.extend(["", "<b>Warnings</b>"])
         for warning in warnings[:3]:
-            lines.append(f"- {warning}")
+            lines.append(f"- {html_text(warning)}")
 
     return "\n".join(lines)
 

@@ -239,6 +239,19 @@ def build_sl_retro_line(state_path: Path):
         "SL funciona correctamente",
         "SL corta posiciones correctas",
     )
+    if int(n_resolved) >= TARGET_SAMPLE_SIZE:
+        if any(marker in verdict_text for marker in conclusive_markers):
+            clean_verdict = verdict_text.replace(" (firme)", "").replace("(firme)", "").strip()
+            if clean_verdict:
+                return (
+                    f"\U0001f50d SL Retro: {int(n_resolved)} resueltos \u2014 "
+                    f"veredicto hist\u00f3rico: {clean_verdict}; config actual requiere detalle phase-aware"
+                )
+            return (
+                f"\U0001f50d SL Retro: {int(n_resolved)} resueltos \u2014 "
+                "veredicto hist\u00f3rico; revisar alerta SL Retro para detalle phase-aware"
+            )
+        return f"\U0001f50d SL Retro: {int(n_resolved)} resueltos \u2014 {verdict}"
     if any(marker in verdict_text for marker in conclusive_markers):
         clean_verdict = verdict_text.replace(" (firme)", "").replace("(firme)", "").strip()
         if clean_verdict:

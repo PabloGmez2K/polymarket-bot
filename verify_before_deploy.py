@@ -5556,7 +5556,8 @@ def run_tests():
         )
         test(
             "v10.6.48: daily briefing conserva contador SL retro",
-            "18/16 resueltos" in daily_sl_line,
+            "18 resueltos" in daily_sl_line
+            and "18/16 resueltos" not in daily_sl_line,
             daily_sl_line,
         )
     except Exception as exc:
@@ -6698,7 +6699,9 @@ def run_tests():
         "v10.6.37: crosscheck summary clasifica nivel de accion",
         "def classify_action_level(" in signals_summary_code
         and "<b>Nivel de accion</b>" in signals_summary_code
-        and "<b>Tarea para Codex</b>" in signals_summary_code,
+        and '"ACTION": "Tarea para Codex"' in signals_summary_code
+        and '"WATCH": "Próximo paso (WATCH)"' in signals_summary_code
+        and '"INFO": "Próximo paso"' in signals_summary_code,
     )
     test(
         "v10.6.37: crosscheck legacy incluye ACTION/WATCH/INFO",
@@ -7528,9 +7531,10 @@ def run_tests():
         and "telegram_exception" in traders_daily_summary_code,
     )
     test(
-        "traders_intelligence: send_telegram no usa parse_mode HTML",
-        '"parse_mode"' not in traders_daily_summary_code
-        and "'parse_mode'" not in traders_daily_summary_code,
+        "traders_intelligence: send_telegram usa HTML con fallback texto plano",
+        'parse_mode="HTML"' in traders_daily_summary_code
+        and "plain_text_message" in traders_daily_summary_code
+        and "telegram_plain_text_fallback_error" in traders_daily_summary_code,
     )
     test(
         "traders_intelligence: Telegram largo se parte en chunks seguros",
