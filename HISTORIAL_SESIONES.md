@@ -3730,3 +3730,50 @@ Fase B2 (cambios en alerta Telegram diaria), backfill v1, Fase C (cruce truth pi
 ### Siguiente acción
 
 Commit + push. Para usar la herramienta: descargar JSONL desde Railway y correr `python tools/blocked_signals_audit.py --source data/blocked_signals_resolutions.jsonl --markdown`.
+
+## Sesión 263 — Revisión operativa post-ausencia (4 may 2026)
+
+**Tipo:** Implícita (handoff) | **Agente:** Claude Code Sonnet | **Origen:** `docs/handoffs/2026-05-04_prompt_claude_sonnet.md`.
+
+### Contexto
+
+Pablo estuvo fuera varios días. Esta sesión es read-only + documentación. Se revisaron logs Railway 2026-05-01 a 2026-05-04, estado del repo y alarmas pendientes.
+
+### Comandos ejecutados
+
+- `python verify_before_deploy.py` → **1074/1074** ✅
+- `python tools/phase1_readiness_check.py` → sin DB local (Railway-only, esperado)
+- `python tools/system_alignment_check.py --decision-mode operational` → ERROR stale snapshot (167h, 2026-04-27); 0 blocking collisions; 3 documented_drift
+- `python tools/runtime_policy_effective_view.py` → OK, regenerado; 0 blocking_collisions; canary=10, shadow=12, blocked=1
+- `python tools/blocked_signals_audit.py --source data/blocked_signals_resolutions.jsonl --markdown --top 10` → JSONL local vacío (datos canónicos en Railway)
+- `tools/railway_safe.ps1 logs` (read-only Railway)
+
+### Hallazgos
+
+- **403 Cloudflare (2026-05-01): CERRADO.** Transitorio de arranque del deploy. Logs desde 10:11 UTC en adelante sin un solo 403. Todos los ciclos del periodo con `cycle_summary guardado OK`. → Clasificación baja de WATCH_TECH a WATCH.
+- **Bankroll: $19.61** (era $17.68). Shanghai NO TP_intra +112.2% a las 05:11 UTC del 2026-05-04 generó ~$1.93 de PnL. Sigue BLOCKED respecto al tope de $25.
+- **400 "size below minimum" (2026-05-04 00:01 UTC): WATCH_TECH nuevo.** Intento de BUY Shanghai NO 2.49sh×$0.71 rechazado por CLOB (`status=400, "Size (2.49) lower than the minimum: 5"`). Bot recuperó automáticamente en ciclo 04:00 UTC (4.48sh×$0.40 aceptado). Sin pérdida económica. El pre-check de tamaño mínimo no garantiza aceptación CLOB.
+- **L2 Hazard Monitor: confirmado implementado.** Commit 81b7586, `SL_INTRA_HAZARD_MONITOR_ENABLED=0` default OFF. Backlog item cerrado.
+- **SL retro muestra post-guard:** n≈2, insuficiente. tracked_stop_losses=14. No nuevo SL desde 2026-05-01T12:00.
+- **Ciclos 0 BUYs 2026-05-01/03:** confirmado. Sin BUYs hasta el 2026-05-04 (Shanghai trade).
+- **PnL reconciliation 2026-05-04 08:01:** fallo urllib timeout al enviar Telegram. Benign (network blip). No afecta trading.
+- **Copy confuso SL Retro ("20/16 SLs"):** `TARGET_SAMPLE_SIZE=16` fijo en `tools/sl_retrospective.py:24`; cuando `n_resolved > 16` la línea 827 muestra "20/16 SLs". Prompt Codex preparado.
+
+### NO se tocó
+
+Trading core, bot.py, BANKROLL, sizing, whitelist, city modes, scheduler, reglas de riesgo, env vars, servicios Railway, Truth Pipeline.
+
+### Documentos actualizados
+
+- `CONTEXTO.md`: nota sesión 263 añadida.
+- `HISTORIAL_SESIONES.md`: esta entrada.
+- `docs/codex_prompt_sl_retro_copy_2026_05_04.md`: prompt Codex para fix copy SL Retrospective.
+
+### Archivos eliminados
+
+- `docs/handoffs/2026-05-04_alarmas_y_backlog.md`
+- `docs/handoffs/2026-05-04_prompt_claude_sonnet.md`
+
+### Commit
+
+Commit documental, no push, no deploy.

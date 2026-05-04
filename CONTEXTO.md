@@ -2331,3 +2331,15 @@ git push
 - **Guardrail anti-auto-canary:** `_city_requires_manual_proxy_canary_review()` retorna True para Warsaw (ICAO-only, sin noaa_station_id) → bloquea auto-promoción.
 - **Guardrail documental (OBJETIVO B):** advertencia añadida al docstring de `tools/blocked_signals_settlement_tracker.py` explicando que su output local es parcial y NO equivale al archivo Railway canónico. Causa de la contradicción: el archivo local y Railway capturan subconjuntos distintos de señales (distintas temperaturas por ciclo operativo vs. snapshot local).
 - **Bloqueadores pendientes Warsaw:** no en whitelist, no en canary/active, falta settlement fidelity formal, falta city_validation_ledger, falta city_promotion_gate, faltan campos schema (market_id, edge_pct, resolution_source, settlement_source, city_mode_at_record_time).
+
+**Última actualización:** 4 de mayo de 2026 (Sesión 263 — revisión operativa post-ausencia 2026-05-01/04)
+**Sesión 263 (4 may 2026, Claude Code Sonnet):** revisión read-only post-ausencia. Sin cambios de código.
+- **Bankroll:** $19.61 (subió desde $17.68 por Shanghai NO `take_profit_intra` +112.2% a las 05:11 UTC del 2026-05-04). Sigue BLOCKED respecto a $25 tope.
+- **403 Cloudflare (2026-05-01):** cerrado. El error fue transitorio de arranque del deploy. Desde 10:11 UTC en adelante, cero 403. Todos los ciclos 2026-05-01 → 2026-05-04 con `cycle_summary guardado OK`.
+- **WATCH_TECH nuevo — 400 size below min (2026-05-04 00:01 UTC):** intento de BUY Shanghai NO 2.49sh×$0.71 rechazado por CLOB con `status=400 "Size (2.49) lower than the minimum: 5"`. Bot recuperó en ciclo 04:00 UTC (4.48sh×$0.40 aceptado, TP a las 05:11). No hubo pérdida económica. El pre-check de tamaño no garantiza aceptación CLOB en todos los casos.
+- **L2 Hazard Monitor:** confirmado implementado en `bot.py` (commit 81b7586), default OFF (`SL_INTRA_HAZARD_MONITOR_ENABLED=0`).
+- **SL retro:** 14 stop_losses tracked, no nuevo SL desde 2026-05-01T12:00. Muestra post-guard n≈2, insuficiente.
+- **Ciclos 2026-05-01/03:** 0 BUYs confirmado. Patrón roto el 2026-05-04 con Shanghai trade.
+- **PnL reconciliation 2026-05-04 08:01:** fallo urllib timeout al enviar Telegram (benign, network blip).
+- **verify_before_deploy.py:** 1074/1074. runtime_policy_effective_view regenerado con 0 blocking_collisions.
+- **Copy fix pendiente (ACTION_COPY):** `tools/sl_retrospective.py` línea 827 muestra "20/16 SLs" cuando `n_resolved > TARGET_SAMPLE_SIZE=16`. Prompt Codex preparado en `docs/codex_prompt_sl_retro_copy_2026_05_04.md`.
