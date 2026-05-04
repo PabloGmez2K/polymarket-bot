@@ -8165,6 +8165,94 @@ def run_tests():
         and "execute_trade" not in wallet_snapshot_execution_source,
     )
 
+    # ---- Truth Pipeline 1A.1 ----
+    print("\n Truth Pipeline 1A.1 — schema v2 + aislamiento")
+    _tp_sql_path = os.path.join(os.path.dirname(__file__), "sql", "002_truth_pipeline.sql")
+    _tp_schema_path = os.path.join(os.path.dirname(__file__), "tools", "truth_pipeline_schema.py")
+    _tp_sql_exists = os.path.exists(_tp_sql_path)
+    _tp_schema_exists = os.path.exists(_tp_schema_path)
+    test(
+        "truth_pipeline: sql/002_truth_pipeline.sql existe",
+        _tp_sql_exists,
+    )
+    test(
+        "truth_pipeline: tools/truth_pipeline_schema.py existe",
+        _tp_schema_exists,
+    )
+    if _tp_schema_exists:
+        with open(_tp_schema_path, "r", encoding="utf-8") as _f:
+            _tp_schema_src = _f.read()
+        test(
+            "truth_pipeline_schema: no importa bot.py",
+            "import bot" not in _tp_schema_src and "from bot" not in _tp_schema_src,
+        )
+        test(
+            "truth_pipeline_schema: solo stdlib (sin requests/httpx)",
+            "import requests" not in _tp_schema_src
+            and "import httpx" not in _tp_schema_src
+            and "import aiohttp" not in _tp_schema_src,
+        )
+        test(
+            "truth_pipeline_schema: contiene --dry-run",
+            "--dry-run" in _tp_schema_src,
+        )
+        test(
+            "truth_pipeline_schema: no contiene primitivas de trading",
+            "execute_trade" not in _tp_schema_src
+            and "manage_positions" not in _tp_schema_src
+            and "intra_cycle_sl_check" not in _tp_schema_src,
+        )
+    else:
+        for _msg in [
+            "truth_pipeline_schema: no importa bot.py",
+            "truth_pipeline_schema: solo stdlib (sin requests/httpx)",
+            "truth_pipeline_schema: contiene --dry-run",
+            "truth_pipeline_schema: no contiene primitivas de trading",
+        ]:
+            test(_msg, False, "archivo no encontrado")
+    if _tp_sql_exists:
+        with open(_tp_sql_path, "r", encoding="utf-8") as _f:
+            _tp_sql_src = _f.read()
+        _tp_sql_lower = _tp_sql_src.lower()
+        test(
+            "truth_pipeline: sql contiene truth_records y truth_revisions",
+            "truth_records" in _tp_sql_lower and "truth_revisions" in _tp_sql_lower,
+        )
+        test(
+            "truth_pipeline: sql registra schema_version=2",
+            "schema_version" in _tp_sql_lower
+            and ("values (2," in _tp_sql_lower or "values(2," in _tp_sql_lower),
+        )
+        test(
+            "truth_pipeline: sql no hace DROP TABLE sobre tablas v1",
+            "drop table cycle_events" not in _tp_sql_lower
+            and "drop table market_snapshots" not in _tp_sql_lower
+            and "drop table forecast_snapshots" not in _tp_sql_lower,
+        )
+        # Comprobar que ningún .py en el repo fuerza TRUTH_PIPELINE_ENABLED=1
+        import glob as _glob
+        _py_files = _glob.glob(os.path.join(os.path.dirname(__file__), "*.py")) + \
+                    _glob.glob(os.path.join(os.path.dirname(__file__), "tools", "*.py"))
+        _excluded = {"truth_pipeline_schema.py", "verify_before_deploy.py"}
+        _tp_forced_on = any(
+            'TRUTH_PIPELINE_ENABLED", "1"' in open(p, encoding="utf-8", errors="ignore").read()
+            or "TRUTH_PIPELINE_ENABLED=1" in open(p, encoding="utf-8", errors="ignore").read()
+            for p in _py_files
+            if os.path.basename(p) not in _excluded
+        )
+        test(
+            "truth_pipeline: TRUTH_PIPELINE_ENABLED no hardcodeado como 1 en Python",
+            not _tp_forced_on,
+        )
+    else:
+        for _msg in [
+            "truth_pipeline: sql contiene truth_records y truth_revisions",
+            "truth_pipeline: sql registra schema_version=2",
+            "truth_pipeline: sql no hace DROP TABLE sobre tablas v1",
+            "truth_pipeline: TRUTH_PIPELINE_ENABLED no hardcodeado como 1 en Python",
+        ]:
+            test(_msg, False, "sql file not found")
+
     # ---- Resultado ----
     print(f"\n{'='*50}")
     total = passed + failed

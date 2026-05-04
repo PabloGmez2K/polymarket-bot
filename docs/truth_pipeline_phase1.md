@@ -71,6 +71,14 @@ CREATE INDEX IF NOT EXISTS idx_truth_outcome ON truth_records (resolution_outcom
 CREATE INDEX IF NOT EXISTS idx_truth_revisions_rec ON truth_revisions (truth_record_id);
 ```
 
+**Vistas de análisis** (implementadas en 1A.1, no en el diseño Opus original):
+
+- **`forecast_truth_join`** (VIEW): cruza `truth_records` con `forecast_snapshots` por `(city, date_iso)`. Implementada como VIEW — no como tabla — porque en 1A.1 no hay runner que la pueble; como VIEW se actualiza automáticamente cuando 1A.3 escribe en `truth_records`. Hacerla tabla en esta fase dejaría una tabla vacía sin ningún valor.
+
+- **`v_decision_truth`** (VIEW): proyección de calibración sobre `truth_records` — calcula `forecast_correct` (1/0/NULL) y `position_correct` (1/0/NULL) usando `condition`, `threshold_c`, `resolution_outcome` y `bot_side`. No acopla a `bot.py` ni a trading core; es puramente relacional sobre tablas del schema SQLite.
+
+**Nota de alineación:** el diseño Opus (`truth_pipeline_phase1.md`) solo especificaba `truth_records` y `truth_revisions`. Las dos vistas se añadieron por instrucción explícita del usuario en la tarea 1A.1. Ambas son `IF NOT EXISTS`, idempotentes y no alteran tablas v1.
+
 ### 2.2 Fetcher de resoluciones (subfase 1A.2)
 
 Script standalone `tools/truth_pipeline_fetcher.py`:
