@@ -76,10 +76,24 @@
     {
       "id": "legacy_services_delete_readiness_2026_05_03",
       "due_date": "2026-05-03",
-      "status": "pending",
+      "status": "resolved",
+      "resolved_at": "2026-05-04T12:30:00Z",
       "label": "Alarma para borrar servicios/volumenes legacy",
       "reminder": "Si desde la pausa no hubo perdida funcional, no reaparecio runtime_inputs_missing legacy, el bridge in-bot envio summaries utiles y nadie echo en falta Phase5, preparar borrado definitivo de city-intelligence y phase5-visibility.",
       "decision": "Borrar servicios/volumenes legacy solo si los artefactos utiles ya estan preservados en repo o runtime canonico y la funcionalidad viva esta cubierta por polymarket-bot.",
+      "resources_deleted": {
+        "services": ["city-intelligence", "phase5-visibility"],
+        "volumes": ["city-intelligence-volume", "phase5-visibility-volume"],
+        "method": "Servicios borrados via Railway Dashboard. Volumenes borrados via Railway Agent/API (volumenes huerfanos con serviceName=null).",
+        "caveat": "railway volume list --json persiste mostrando ghost records de los volumenes legacy tras el borrado (CLI/API inconsistencia conocida de Railway). Railway Dashboard no los muestra. polymarket-bot y polymarket-bot-volume intactos."
+      },
+      "post_checks": {
+        "polymarket_bot_status": "SUCCESS",
+        "polymarket_bot_volume_intact": true,
+        "verify_before_deploy": "PASS 1074/1074",
+        "logs_clean": true,
+        "checked_at": "2026-05-04T12:30:00Z"
+      },
       "runbook": [
         "1. Verificar Railway: solo polymarket-bot debe tener deployment activo; city-intelligence y phase5-visibility deben seguir sin deployment.",
         "2. Confirmar que polymarket-bot sigue generando runtime_import, city_validation_ledger, city_promotion_gate, city_intelligence_pipeline y daily summary con runtime_inputs_status=available.",
