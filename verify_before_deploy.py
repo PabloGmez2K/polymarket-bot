@@ -8302,6 +8302,71 @@ def run_tests():
         ]:
             test(_msg, False, "archivo no encontrado")
 
+    # ---- Truth Pipeline 1A.3 ----
+    print("\n Truth Pipeline 1A.3 — runner writer")
+    _tp_runner_path = os.path.join(os.path.dirname(__file__), "tools", "truth_pipeline_runner.py")
+    _tp_runner_exists = os.path.exists(_tp_runner_path)
+    test(
+        "truth_pipeline_runner: tools/truth_pipeline_runner.py existe",
+        _tp_runner_exists,
+    )
+    if _tp_runner_exists:
+        with open(_tp_runner_path, encoding="utf-8") as _f:
+            _tp_runner_src = _f.read()
+        test(
+            "truth_pipeline_runner: no importa bot.py ni trading core",
+            "import bot" not in _tp_runner_src
+            and "from bot" not in _tp_runner_src
+            and "execute_trade" not in _tp_runner_src
+            and "manage_positions" not in _tp_runner_src,
+        )
+        test(
+            "truth_pipeline_runner: soporta --dry-run",
+            "--dry-run" in _tp_runner_src and "dry_run" in _tp_runner_src,
+        )
+        test(
+            "truth_pipeline_runner: verifica TRUTH_PIPELINE_ENABLED",
+            "TRUTH_PIPELINE_ENABLED" in _tp_runner_src,
+        )
+        test(
+            "truth_pipeline_runner: no hace INSERT en tablas v1",
+            "INSERT INTO cycle_events" not in _tp_runner_src
+            and "INSERT INTO market_snapshots" not in _tp_runner_src
+            and "INSERT INTO forecast_snapshots" not in _tp_runner_src,
+        )
+        test(
+            "truth_pipeline_runner: solo stdlib + truth_pipeline_schema/fetcher (sin requests/httpx)",
+            "import requests" not in _tp_runner_src
+            and "import httpx" not in _tp_runner_src
+            and "import aiohttp" not in _tp_runner_src,
+        )
+        _excluded_runner = {
+            "truth_pipeline_schema.py", "truth_pipeline_fetcher.py",
+            "truth_pipeline_runner.py", "verify_before_deploy.py",
+        }
+        _tp_runner_forced_on = any(
+            'TRUTH_PIPELINE_ENABLED", "1"' in open(p, encoding="utf-8", errors="ignore").read()
+            for p in (
+                _glob.glob(os.path.join(os.path.dirname(__file__), "*.py"))
+                + _glob.glob(os.path.join(os.path.dirname(__file__), "tools", "*.py"))
+            )
+            if os.path.basename(p) not in _excluded_runner
+        )
+        test(
+            "truth_pipeline_runner: TRUTH_PIPELINE_ENABLED no hardcodeado como 1",
+            not _tp_runner_forced_on,
+        )
+    else:
+        for _msg in [
+            "truth_pipeline_runner: no importa bot.py ni trading core",
+            "truth_pipeline_runner: soporta --dry-run",
+            "truth_pipeline_runner: verifica TRUTH_PIPELINE_ENABLED",
+            "truth_pipeline_runner: no hace INSERT en tablas v1",
+            "truth_pipeline_runner: solo stdlib + truth_pipeline_schema/fetcher (sin requests/httpx)",
+            "truth_pipeline_runner: TRUTH_PIPELINE_ENABLED no hardcodeado como 1",
+        ]:
+            test(_msg, False, "archivo no encontrado")
+
     # ---- Resultado ----
     print(f"\n{'='*50}")
     total = passed + failed
