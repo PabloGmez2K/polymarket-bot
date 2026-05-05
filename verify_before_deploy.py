@@ -8367,6 +8367,125 @@ def run_tests():
         ]:
             test(_msg, False, "archivo no encontrado")
 
+    # ---- Truth Pipeline 1A.4 ----
+    print("\n Truth Pipeline 1A.4 — reporter + alarms")
+    _tp_report_path = os.path.join(os.path.dirname(__file__), "tools", "truth_pipeline_report.py")
+    _tp_alarms_path = os.path.join(os.path.dirname(__file__), "tools", "truth_pipeline_alarms.py")
+    _tp_report_exists = os.path.exists(_tp_report_path)
+    _tp_alarms_exists = os.path.exists(_tp_alarms_path)
+
+    test("truth_pipeline_report: tools/truth_pipeline_report.py existe", _tp_report_exists)
+    test("truth_pipeline_alarms: tools/truth_pipeline_alarms.py existe", _tp_alarms_exists)
+
+    if _tp_report_exists:
+        with open(_tp_report_path, encoding="utf-8") as _f:
+            _tp_report_src = _f.read()
+        test(
+            "truth_pipeline_report: no importa bot.py ni trading core",
+            "import bot" not in _tp_report_src
+            and "from bot" not in _tp_report_src
+            and "execute_trade" not in _tp_report_src
+            and "manage_positions" not in _tp_report_src,
+        )
+        test(
+            "truth_pipeline_report: usa URI read-only (mode=ro)",
+            "mode=ro" in _tp_report_src,
+        )
+        test(
+            "truth_pipeline_report: no escribe en DB (sin INSERT/UPDATE/DELETE)",
+            "INSERT INTO" not in _tp_report_src
+            and "UPDATE " not in _tp_report_src
+            and "DELETE FROM" not in _tp_report_src,
+        )
+        test(
+            "truth_pipeline_report: solo stdlib (sin requests/httpx/aiohttp)",
+            "import requests" not in _tp_report_src
+            and "import httpx" not in _tp_report_src
+            and "import aiohttp" not in _tp_report_src,
+        )
+        test(
+            "truth_pipeline_report: soporta schema_missing sin crash",
+            "schema_missing" in _tp_report_src,
+        )
+    else:
+        for _msg in [
+            "truth_pipeline_report: no importa bot.py ni trading core",
+            "truth_pipeline_report: usa URI read-only (mode=ro)",
+            "truth_pipeline_report: no escribe en DB (sin INSERT/UPDATE/DELETE)",
+            "truth_pipeline_report: solo stdlib (sin requests/httpx/aiohttp)",
+            "truth_pipeline_report: soporta schema_missing sin crash",
+        ]:
+            test(_msg, False, "archivo no encontrado")
+
+    if _tp_alarms_exists:
+        with open(_tp_alarms_path, encoding="utf-8") as _f:
+            _tp_alarms_src = _f.read()
+        test(
+            "truth_pipeline_alarms: no importa bot.py ni trading core",
+            "import bot" not in _tp_alarms_src
+            and "from bot" not in _tp_alarms_src
+            and "execute_trade" not in _tp_alarms_src
+            and "manage_positions" not in _tp_alarms_src,
+        )
+        test(
+            "truth_pipeline_alarms: TRUTH_PIPELINE_TELEGRAM_ENABLED default 0",
+            "TRUTH_PIPELINE_TELEGRAM_ENABLED" in _tp_alarms_src
+            and ('"0"' in _tp_alarms_src or "'0'" in _tp_alarms_src),
+        )
+        test(
+            "truth_pipeline_alarms: TRUTH_PIPELINE_TG_CHAT_ID separado del canal operativo",
+            "TRUTH_PIPELINE_TG_CHAT_ID" in _tp_alarms_src,
+        )
+        test(
+            "truth_pipeline_alarms: solo stdlib (sin requests/httpx/aiohttp)",
+            "import requests" not in _tp_alarms_src
+            and "import httpx" not in _tp_alarms_src
+            and "import aiohttp" not in _tp_alarms_src,
+        )
+        test(
+            "truth_pipeline_alarms: mensajes no contienen instrucciones de trading",
+            "comprar" not in _tp_alarms_src.lower()
+            and "vender" not in _tp_alarms_src.lower(),
+        )
+        test(
+            "truth_pipeline_alarms: anti-spam stateful (state file configurable)",
+            "already_sent_today" in _tp_alarms_src
+            and "state_file" in _tp_alarms_src,
+        )
+        test(
+            "truth_pipeline_alarms: dry_run soportado",
+            "dry_run" in _tp_alarms_src,
+        )
+        _excluded_alarms = {
+            "truth_pipeline_schema.py", "truth_pipeline_fetcher.py",
+            "truth_pipeline_runner.py", "truth_pipeline_report.py",
+            "truth_pipeline_alarms.py", "verify_before_deploy.py",
+        }
+        _tp_alarms_tg_forced = any(
+            'TRUTH_PIPELINE_TELEGRAM_ENABLED", "1"' in open(p, encoding="utf-8", errors="ignore").read()
+            for p in (
+                _glob.glob(os.path.join(os.path.dirname(__file__), "*.py"))
+                + _glob.glob(os.path.join(os.path.dirname(__file__), "tools", "*.py"))
+            )
+            if os.path.basename(p) not in _excluded_alarms
+        )
+        test(
+            "truth_pipeline_alarms: TRUTH_PIPELINE_TELEGRAM_ENABLED no hardcodeado como 1",
+            not _tp_alarms_tg_forced,
+        )
+    else:
+        for _msg in [
+            "truth_pipeline_alarms: no importa bot.py ni trading core",
+            "truth_pipeline_alarms: TRUTH_PIPELINE_TELEGRAM_ENABLED default 0",
+            "truth_pipeline_alarms: TRUTH_PIPELINE_TG_CHAT_ID separado del canal operativo",
+            "truth_pipeline_alarms: solo stdlib (sin requests/httpx/aiohttp)",
+            "truth_pipeline_alarms: mensajes no contienen instrucciones de trading",
+            "truth_pipeline_alarms: anti-spam stateful (state file configurable)",
+            "truth_pipeline_alarms: dry_run soportado",
+            "truth_pipeline_alarms: TRUTH_PIPELINE_TELEGRAM_ENABLED no hardcodeado como 1",
+        ]:
+            test(_msg, False, "archivo no encontrado")
+
     # ---- Resultado ----
     print(f"\n{'='*50}")
     total = passed + failed
