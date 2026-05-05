@@ -3783,3 +3783,54 @@ Trading core, bot.py, BANKROLL, sizing, whitelist, city modes, scheduler, reglas
 ### Commit
 
 Commit documental, no push, no deploy.
+
+## Sesión 296 — Truth Pipeline 1L: cierre Fase 1 observacional mínima (5 may 2026)
+
+**Tipo:** Read-only + cierre documental | **Agente:** Claude Code Sonnet | **Origen:** prompt directo (observación cohorte ampliada y decisión de cierre Fase 1).
+
+### Contexto
+
+Cohorte ampliada a `truth_records=24` en sesión 295 / 1K-B. Esta sesión observa la cohorte end-to-end (reporter + alarm preview + bot logs) y decide si cerrar Fase 1 observacional mínima o requerir más datos.
+
+### Comandos ejecutados
+
+- `python verify_before_deploy.py` → **1112/1112** ✅
+- `railway_safe.ps1 status` → `enchanting-respect / production / polymarket-bot` ✅
+- `railway_safe.ps1 ssh "ls -lh /app/data/polymarket.db ..."` → 4 backups confirmados ✅
+- `railway_safe.ps1 ssh "printenv TRUTH_PIPELINE_ENABLED || true; ..."` → no definidas ✅
+- `railway_safe.ps1 ssh "python tools/truth_pipeline_report.py --db /app/data/polymarket.db --json"` → `status=no_action`, `truth_records=24`, `n_resolved=19`, `calibration_global=0.789` ✅
+- `railway_safe.ps1 ssh "python tools/truth_pipeline_report.py --db /app/data/polymarket.db"` → reporte humano OK ✅
+- Alarm preview vía base64 + import programático (`run_alarm(dry_run=True, force=True)`) → `level=NO_ACTION`, `would_send=false` ✅
+- `railway_safe.ps1 logs -s polymarket-bot -n 100` → bot sano ✅
+
+### Hallazgos
+
+- **Status: NO_ACTION** — calibración 78.9%, por encima del umbral WATCH (<50%).
+- **Calibración por ciudad:** London 100% (n=4), Tokyo 100% (n=3), Paris 67% (n=3), Seoul 67% (n=3); 6 ciudades con n=1.
+- **Madrid y Wellington: 0% con n=1** — sin valor estadístico; un solo error en n=1 no es conclusivo.
+- **drift_alert_cities: []** — sin drift sistemático detectado.
+- **Alarm preview limpia:** `level=NO_ACTION`, `would_send=false`, mensaje conforme (sin instrucciones de trading).
+- **Nota técnica:** `truth_pipeline_alarms.py` no tiene bloque `__main__`; el flag `--dry-run` como argumento CLI no produce output. Solución validada: base64-encode de script Python que importa el módulo y llama `run_alarm(dry_run=True, force=True)`.
+- **Bot sano:** v10.6.47, Modo REAL, próximo ciclo 20:00 UTC. Ruido conocido `py_clob_client_v2 400` no relacionado.
+
+### Decisión
+
+**A — Cerrar Fase 1 observacional mínima como completada.**
+
+Pipeline validado end-to-end: escritura ✅ · resolución automática ✅ · calibración ✅ · reporter JSON/humano ✅ · alarm preview ✅ · status correcto ✅ · sin drift ✅ · sin revisiones ✅.
+
+Matiz: `calibration_global=0.789` con `n_resolved=19` es primera lectura, no conclusión operativa. Distribución desigual: 8 ciudades con n=1, estadísticamente insuficientes. Umbral mínimo para cualquier uso operativo posterior: `n_resolved>=30` total, varias ciudades con `n>=5`; ideal `n_resolved>=50`.
+
+### NO se tocó
+
+Código runtime, bot.py, trading core, BANKROLL, sizing, whitelist, city modes, scheduler, reglas de riesgo, env vars persistentes, Railway (solo read-only/preview), tools del Truth Pipeline, schema SQL, tablas v1.
+
+### Documentos actualizados
+
+- `CONTEXTO.md`: entrada sesión 296 añadida al inicio.
+- `HISTORIAL_SESIONES.md`: esta entrada.
+- `agent_events.jsonl`: entrada sesión 296.
+
+### Commit
+
+`docs: close truth pipeline phase 1 observational` — push sí, deploy no.
