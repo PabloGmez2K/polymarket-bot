@@ -8253,6 +8253,55 @@ def run_tests():
         ]:
             test(_msg, False, "sql file not found")
 
+    # ---- Truth Pipeline 1A.2 ----
+    print("\n Truth Pipeline 1A.2 — fetcher Open-Meteo archive")
+    _tp_fetcher_path = os.path.join(os.path.dirname(__file__), "tools", "truth_pipeline_fetcher.py")
+    _tp_fetcher_exists = os.path.exists(_tp_fetcher_path)
+    test(
+        "truth_pipeline_fetcher: tools/truth_pipeline_fetcher.py existe",
+        _tp_fetcher_exists,
+    )
+    if _tp_fetcher_exists:
+        with open(_tp_fetcher_path, "r", encoding="utf-8") as _f:
+            _tp_fetcher_src = _f.read()
+        test(
+            "truth_pipeline_fetcher: no importa bot.py ni trading core",
+            "import bot" not in _tp_fetcher_src
+            and "from bot" not in _tp_fetcher_src
+            and "execute_trade" not in _tp_fetcher_src
+            and "manage_positions" not in _tp_fetcher_src,
+        )
+        test(
+            "truth_pipeline_fetcher: solo stdlib (sin requests/httpx/aiohttp)",
+            "import requests" not in _tp_fetcher_src
+            and "import httpx" not in _tp_fetcher_src
+            and "import aiohttp" not in _tp_fetcher_src,
+        )
+        test(
+            "truth_pipeline_fetcher: soporta --dry-run",
+            "--dry-run" in _tp_fetcher_src and "dry_run" in _tp_fetcher_src,
+        )
+        test(
+            "truth_pipeline_fetcher: usa archive-api.open-meteo.com/v1/archive",
+            "archive-api.open-meteo.com/v1/archive" in _tp_fetcher_src,
+        )
+        test(
+            "truth_pipeline_fetcher: no escribe en DB ni archivos runtime",
+            "import sqlite3" not in _tp_fetcher_src
+            and "with open(" not in _tp_fetcher_src
+            and ".write_text(" not in _tp_fetcher_src
+            and ".write_bytes(" not in _tp_fetcher_src,
+        )
+    else:
+        for _msg in [
+            "truth_pipeline_fetcher: no importa bot.py ni trading core",
+            "truth_pipeline_fetcher: solo stdlib (sin requests/httpx/aiohttp)",
+            "truth_pipeline_fetcher: soporta --dry-run",
+            "truth_pipeline_fetcher: usa archive-api.open-meteo.com/v1/archive",
+            "truth_pipeline_fetcher: no escribe en DB ni archivos runtime",
+        ]:
+            test(_msg, False, "archivo no encontrado")
+
     # ---- Resultado ----
     print(f"\n{'='*50}")
     total = passed + failed
