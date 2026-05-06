@@ -8486,6 +8486,73 @@ def run_tests():
         ]:
             test(_msg, False, "archivo no encontrado")
 
+    # ---- Daily Kanban Digest dry-run ----
+    print("\n Daily Kanban Digest dry-run")
+    _daily_kanban_path = os.path.join(os.path.dirname(__file__), "tools", "daily_kanban_digest.py")
+    _daily_kanban_exists = os.path.exists(_daily_kanban_path)
+    _daily_kanban_src = ""
+    _daily_kanban_ast_ok = False
+    _daily_kanban_ast_detail = ""
+    if _daily_kanban_exists:
+        with open(_daily_kanban_path, encoding="utf-8") as _f:
+            _daily_kanban_src = _f.read()
+        try:
+            ast.parse(_daily_kanban_src)
+            _daily_kanban_ast_ok = True
+        except SyntaxError as _exc:
+            _daily_kanban_ast_detail = str(_exc)
+
+    test(
+        "daily_kanban_digest: tool existe y tiene sintaxis valida",
+        _daily_kanban_exists and _daily_kanban_ast_ok,
+        _daily_kanban_ast_detail,
+    )
+    test(
+        "daily_kanban_digest: soporta --dry-run",
+        "--dry-run" in _daily_kanban_src and "dry_run" in _daily_kanban_src,
+    )
+    test(
+        "daily_kanban_digest: no importa bot.py ni trading core",
+        "import bot" not in _daily_kanban_src
+        and "from bot" not in _daily_kanban_src
+        and "execute_trade" not in _daily_kanban_src
+        and "manage_positions" not in _daily_kanban_src
+        and "intra_cycle_sl_check" not in _daily_kanban_src,
+    )
+    test(
+        "daily_kanban_digest: no contiene envio Telegram real",
+        "send_telegram" not in _daily_kanban_src
+        and "api.telegram.org" not in _daily_kanban_src
+        and "TELEGRAM_TOKEN" not in _daily_kanban_src
+        and "TELEGRAM_CHAT_ID" not in _daily_kanban_src
+        and "urllib.request" not in _daily_kanban_src,
+    )
+    test(
+        "daily_kanban_digest: no hardcodea env enabled a 1",
+        'KANBAN_DIGEST_ENABLED", "1"' not in _daily_kanban_src
+        and "KANBAN_DIGEST_ENABLED=1" not in _daily_kanban_src,
+    )
+    test(
+        "daily_kanban_digest: contiene disclaimer no trading",
+        "Esta alerta no autoriza cambios de trading." in _daily_kanban_src,
+    )
+    test(
+        "daily_kanban_digest: contrato JSON read-only",
+        "would_send" in _daily_kanban_src
+        and "generated_at_utc" in _daily_kanban_src
+        and "sections" in _daily_kanban_src
+        and "next_step" in _daily_kanban_src
+        and "disclaimers" in _daily_kanban_src,
+    )
+    test(
+        "daily_kanban_digest: no escribe archivos de estado",
+        "write_text(" not in _daily_kanban_src
+        and "write_bytes(" not in _daily_kanban_src
+        and ".write(" not in _daily_kanban_src
+        and "alerts_state.json" not in _daily_kanban_src
+        and 'kanban_state.json").write' not in _daily_kanban_src,
+    )
+
     # ---- Resultado ----
     print(f"\n{'='*50}")
     total = passed + failed
