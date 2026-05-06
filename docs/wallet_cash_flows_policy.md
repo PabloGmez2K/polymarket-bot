@@ -91,4 +91,4 @@ Patch B, if approved separately, should update `tools/wallet_snapshot.py` to rea
 
 Patch B should gate readiness on `attested_full_7d`, not `present`.
 
-Patch C, if approved separately, may introduce a manual CLI such as `tools/wallet_cash_flow_log.py` to append validated rows. That CLI must remain manual-only and reject examples, inferred rows, auto rows, reconstructed rows, and estimated rows.
+Patch C, if approved separately, may introduce a manual CLI such as `tools/wallet_cash_flow_log.py` to append validated rows. That CLI must remain manual-only and reject examples, inferred rows, auto rows, reconstructed rows, and estimated rows. The canonical design specification for Patch C is in `docs/wallet_cash_flow_log_design.md` (ACTION_DESIGN, not implemented).

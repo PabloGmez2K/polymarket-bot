@@ -3971,3 +3971,107 @@ Código, `bot.py`, trading core, BANKROLL, sizing, whitelist, city modes, schedu
 ### Commit
 
 `docs: record pnl sources railway verification` — push sí, deploy no.
+
+---
+
+## Sesión 306 — Patch C wallet_cash_flow_log diseño canónico (6 may 2026, Sonnet)
+
+**Tipo:** Documentación / diseño
+**Clasificación:** ACTION_DESIGN / WATCH_RISK
+
+### Contexto
+
+Sesión de diseño documental de Patch C para `tools/wallet_cash_flow_log.py`. Patch A (política antifalsificación), Patch B (gate `wallet_cash_flows` en digest), y Patch B' (schema v2 en `wallet_snapshot`) están cerrados y verificados en Railway. Opus clasificó Patch C como ACTION_DESIGN: el diseño puede documentarse ahora; la implementación requiere signoff explícito de Pablo y revisión de diff antes de merge.
+
+### Estado invariante al inicio de sesión
+
+| Campo | Valor |
+|---|---|
+| `data/wallet_cash_flows.jsonl` local | no existe |
+| `/app/data/wallet_cash_flows.jsonl` Railway | no existe |
+| `cash_flows.status` | `missing` |
+| `cash_flows.coverage_days_7d` | 0 |
+| `wallet_pnl_available` | `false` |
+| `phase2_ready` | `false` |
+| `phase2_ready_reason` | `cash_flow_unknown` |
+| `wallet_pnl_confidence` | `low` |
+| `wallet_pnl_7d` | `null` |
+| `canonical_source` | `none` |
+| `bankroll_readiness` | `blocked` |
+| `would_send` | `false` |
+
+### Diseño canónico — `docs/wallet_cash_flow_log_design.md`
+
+Documento creado con especificación completa para `tools/wallet_cash_flow_log.py`:
+
+**Propósito:** CLI manual para appending de filas validadas de cash flow a `data/wallet_cash_flows.jsonl`, en cumplimiento de la política de atestación (`docs/wallet_cash_flows_policy.md`).
+
+**Interfaz CLI:**
+
+```
+python tools/wallet_cash_flow_log.py \
+    --type <type> \
+    --period-start <ISO-8601 UTC> \
+    --period-end <ISO-8601 UTC> \
+    [--note <free text>] \
+    [--write] \
+    [--init] \
+    [--data-dir <path>] \
+    [--entry-id <uuid4-override>]
+```
+
+`actor` hardcodeado a `pablo_manual`. `recorded_at` = `utcnow`. `schema_version` = `2`. Ninguno de estos es argumento CLI. `entry_id` es auto-generado como UUID4 por la CLI — no es argumento requerido del usuario. `--entry-id` existe solo como override de testing, no para flujos productivos. Sin `--write`, la CLI corre siempre en dry-run y no escribe nada.
+
+**Tipos permitidos:** `deposit`, `withdrawal`, `no_cash_flow_attestation`, `adjustment`.
+
+**Tipos prohibidos (rechazo explícito):** `inferred`, `auto`, `reconstructed`, `estimated`.
+
+**Validaciones anti-falsificación:**
+1. `type` debe estar en la allow-list.
+2. `period_start` y `period_end` deben ser ISO-8601 parseable.
+3. `period_end` >= `period_start`.
+4. `type == "adjustment"` requiere `--note` no vacío.
+5. Si se usa `--entry-id` override (testing only), el valor no puede empezar con `EXAMPLE-`.
+6. El `entry_id` auto-generado (o override) no puede duplicar un ID existente en el archivo.
+7. Antes de cualquier append, la CLI re-lee y valida **cada fila existente** del archivo contra schema v2. Si cualquier fila falla validación → **abortar sin escribir**. Filas inválidas son un hard stop; el archivo debe repararse manualmente.
+
+**Comportamiento por defecto (sin `--write`):** dry-run — valida todo, imprime la fila que se escribiría, no escribe, zero side-effects.
+
+**Write mode (`--write`):** si el archivo no existe → abortar salvo que `--init` también esté presente. Si existe → valida filas existentes (hard stop si inválidas), append de una línea JSON, imprime confirmación.
+
+**Init mode (`--write --init`):** permite crear el archivo si no existe; requiere confirmación textual explícita (`YES I CONFIRM`) antes de crear. `--init` sin `--write` es rechazado.
+
+**Constraints:** stdlib-only. No importa `bot.py`. No Railway. No Telegram. No `alerts_state`. No trading core.
+
+**verify_before_deploy.py:** cuando Codex implemente, debe sumar checks de: no import trading core, no Telegram, no Railway, actor hardcodeado, `entry_id` auto-generado UUID4 (no argumento requerido), tipos prohibidos rechazados, `--entry-id` override con `EXAMPLE-*` rechazado, sin `--write` → zero escrituras, `--init` sin `--write` rechazado, `--write --init` requiere confirmación textual, filas existentes inválidas → abortar, adjustment sin note rechazado.
+
+**Criterios de handoff para Codex:** solo tras signoff explícito de Pablo → diff proposal Codex → revisión Pablo → `verify_before_deploy.py` verde → dry-run local confirmado.
+
+### Referencia mínima en policy
+
+`docs/wallet_cash_flows_policy.md` actualizado: la mención de Patch C en la sección "Future Patch Interaction" ahora referencia `docs/wallet_cash_flow_log_design.md` como especificación canónica (ACTION_DESIGN, not implemented).
+
+### Estado invariante al cierre de sesión
+
+Idéntico al estado al inicio. Nada cambió en runtime.
+
+- `data/wallet_cash_flows.jsonl` sigue sin existir (local y Railway).
+- `canonical_source=none` sin cambios.
+- `bankroll_readiness=blocked` sin cambios.
+- `wallet_pnl_available=false` sin cambios.
+
+### NO se tocó
+
+`tools/wallet_cash_flow_log.py` (no existe), `bot.py`, trading core, BANKROLL, sizing, whitelist, city modes, scheduler, reglas de riesgo, env vars, Railway, DB, Telegram real, Fase C. No deploy. No commit/push todavía (pendiente signoff Pablo).
+
+### Documentos actualizados
+
+- `docs/wallet_cash_flow_log_design.md`: creado (diseño canónico Patch C).
+- `docs/wallet_cash_flows_policy.md`: referencia mínima al design doc.
+- `CONTEXTO.md`: entrada sesión 306 añadida al inicio.
+- `HISTORIAL_SESIONES.md`: esta entrada.
+- `agent_events.jsonl`: entrada sesión 306.
+
+### Siguiente paso posible
+
+Codex diff proposal de `tools/wallet_cash_flow_log.py` solo tras signoff explícito de Pablo. Sin signoff: Patch C permanece ACTION_DESIGN / NOT_IMPLEMENTED.
