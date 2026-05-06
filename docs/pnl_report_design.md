@@ -403,6 +403,14 @@ Los siguientes tests deben existir antes de considerar la implementación de `to
 - Los fixtures deben cubrir los casos de borde documentados en secciones 6 y 7.
 - Si algún test requiere datos reales de `wallet_cash_flows.jsonl`, requiere decisión explícita de Pablo antes de implementar.
 
+### Hook determinista de testing
+
+- `--generated-at` existe solo como testing hook para fixtures deterministas.
+- Acepta ISO-8601 UTC.
+- No cambia source data, status, confidence, `canonical_source`, `bankroll_readiness` ni `operational_use`.
+- No permite emitir `canonical` ni simular promocion canonica.
+- No debe usarse para simular rendimiento real.
+
 ---
 
 ## 10. Imports permitidos
