@@ -4260,3 +4260,47 @@ HEAD final: `0506782`. `main` alineado con `origin/main`. Working tree limpio.
 ### Siguiente paso posible
 
 Diseño B3 `tools/pnl_report.py` read-only. No Patch D todavía.
+
+## Sesión B3 — 7 de mayo de 2026 (Sonnet 4.6)
+
+**Clasificación:** ACTION_DESIGN / WATCH_RISK / NOT_CANONICAL
+**Bloque:** B3 — diseño documental `tools/pnl_report.py`
+**Veredicto:** DOCUMENTO_CREADO / NO_IMPLEMENTACIÓN
+
+### Contexto
+
+Diseño canónico de `tools/pnl_report.py` como herramienta CLI read-only / LOG_ONLY. Se crea `docs/pnl_report_design.md`.
+
+### Artefactos
+
+- **Creado:** `docs/pnl_report_design.md` — contrato completo para implementación futura.
+
+### Contenido del contrato
+
+- Propósito read-only / LOG_ONLY, horizontes 1D/1W/1M/ALL.
+- Inputs: `wallet_portfolio_snapshots.jsonl` + `wallet_cash_flows.jsonl` + `trade_lifecycle.json` (non_canonical_telemetry).
+- Schema JSON completo con todos los campos requeridos por horizonte.
+- Máquina de estados: 5 estados documentados; 4 emitibles en B3 (`unavailable` → `blocked` → `provisional` → `canonical_candidate`). `canonical` documentado como estado futuro pero no emitible en B3 — requiere B5+B6.
+- Confidence capado a `medium` en B3. `high` nunca automático.
+- Ausencia de `wallet_cash_flows.jsonl` → exit 0, todos los horizontes `blocked`, `reason` explícito.
+- 14 tests mínimos T1–T14 definidos.
+- Stdlib-only (argparse, json, pathlib, datetime, decimal, typing, sys, dataclasses).
+- Exit codes: 0 (éxito/datos ausentes) y 2 (input corrupto).
+- Lista negra explícita: no trading, no Telegram, no DB, no Railway, no bot.py, no scheduler, no BANKROLL, no Fase C, no BUY/SELL/SKIP, no promover readiness, no Patch D.
+- Guardrails G1–G6 adicionales.
+
+### Invariantes confirmados
+
+- `data/wallet_cash_flows.jsonl` no existe.
+- `tools/pnl_report.py` no existe (no implementado).
+- `canonical_source=none` sin cambios.
+- `bankroll_readiness=blocked` sin cambios.
+- `wallet_pnl_available=false` sin cambios.
+
+### NO se tocó
+
+`tools/`, `bot.py`, trading core, BANKROLL, sizing, whitelist, city modes, scheduler, reglas de riesgo, Fase C, runtime, Railway, DB, env vars, Telegram real. No commit/push.
+
+### Siguiente paso posible
+
+Signoff de Pablo sobre `docs/pnl_report_design.md`. Después: Codex implementa `tools/pnl_report.py` y `tests/test_pnl_report.py` siguiendo el contrato. No Patch D todavía.
