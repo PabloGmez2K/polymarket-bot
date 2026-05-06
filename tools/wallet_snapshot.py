@@ -14,9 +14,11 @@ from typing import Any
 
 
 SCHEMA_VERSION = 1
+CASH_FLOW_SCHEMA_VERSION = 2
 DATA_API_URL = os.getenv("DATA_API_URL", "https://data-api.polymarket.com").rstrip("/")
 CLOB_HOST = os.getenv("CLOB_HOST", "https://clob.polymarket.com")
 REQUIRED_HISTORY_HOURS = 168
+CASH_FLOW_TYPES = {"deposit", "withdrawal", "no_cash_flow_attestation", "adjustment"}
 
 
 def parse_args() -> argparse.Namespace:
@@ -144,6 +146,32 @@ def read_jsonl(path: Path) -> tuple[list[dict[str, Any]], list[str]]:
     return rows, warnings
 
 
+def read_cash_flow_jsonl(path: Path) -> tuple[bool, int, list[dict[str, Any]], list[str]]:
+    if not path.exists():
+        return False, 0, [], []
+    rows: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    total = 0
+    try:
+        with path.open("r", encoding="utf-8-sig") as fh:
+            for idx, line in enumerate(fh, start=1):
+                if not line.strip():
+                    continue
+                total += 1
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError:
+                    warnings.append(f"{path.name}:{idx}: json_decode")
+                    continue
+                if isinstance(item, dict):
+                    rows.append(item)
+                else:
+                    warnings.append(f"{path.name}:{idx}: not_object")
+    except Exception as exc:
+        warnings.append(f"{path.name}: read_error: {compact_error(str(exc))}")
+    return True, total, rows, warnings
+
+
 def valid_snapshot(row: dict[str, Any]) -> bool:
     return bool(
         row.get("schema_version") == SCHEMA_VERSION
@@ -157,35 +185,256 @@ def sorted_valid_snapshots(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted([row for row in rows if valid_snapshot(row)], key=lambda row: parse_dt(row["snapshot_at"]) or datetime.min.replace(tzinfo=timezone.utc))
 
 
-def load_cash_flows(path: Path) -> tuple[list[dict[str, Any]], list[str]]:
-    rows, warnings = read_jsonl(path)
-    flows: list[dict[str, Any]] = []
-    for idx, row in enumerate(rows, start=1):
-        flow_date = parse_day(row.get("date"))
-        amount = as_float(row.get("amount"))
-        flow_type = str(row.get("type") or "").strip().lower()
-        if flow_date is None or amount is None or amount < 0 or flow_type not in {"deposit", "withdrawal"}:
-            warnings.append(f"{path.name}:{idx}: ignored invalid cash-flow row")
+def unique_short(values: list[str], limit: int = 12) -> list[str]:
+    seen: list[str] = []
+    for value in values:
+        if value not in seen:
+            seen.append(value)
+        if len(seen) >= limit:
+            break
+    return seen
+
+
+def parse_cash_flow_ts(value: Any) -> tuple[datetime | None, str | None]:
+    if not isinstance(value, str) or not value.strip():
+        return None, "period_format"
+    text = value.strip()
+    if len(text) == 10 and text[4] == "-" and text[7] == "-":
+        return None, "period_format"
+    if "T" not in text:
+        return None, "period_format"
+    normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None, "period_format"
+    if parsed.tzinfo is None or parsed.utcoffset() != timedelta(0):
+        return None, "period_format"
+    return parsed.astimezone(timezone.utc), None
+
+
+def row_has_example_marker(row: dict[str, Any]) -> bool:
+    marker = row.get("marker")
+    return marker is not None and "EXAMPLE_ONLY" in str(marker).upper()
+
+
+def adjustment_review_required(row: dict[str, Any]) -> bool:
+    adjustment = row.get("adjustment") if isinstance(row.get("adjustment"), dict) else {}
+    return row.get("review_required") is True or adjustment.get("review_required") is True
+
+
+def validate_cash_flow_row(row: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
+    reasons: list[str] = []
+    entry_id = row.get("entry_id")
+    if row.get("schema_version") != CASH_FLOW_SCHEMA_VERSION:
+        reasons.append("schema_version")
+        if {"date", "amount"}.issubset(row):
+            reasons.append("legacy_v1_row_rejected")
+    if not isinstance(entry_id, str) or not entry_id.strip():
+        reasons.append("entry_id")
+    elif entry_id.startswith("EXAMPLE-"):
+        reasons.append("example_id")
+    if row_has_example_marker(row):
+        reasons.append("example_marker")
+    if row.get("actor") != "pablo_manual":
+        reasons.append("actor_mismatch")
+    flow_type = row.get("type")
+    if flow_type not in CASH_FLOW_TYPES:
+        reasons.append("type")
+
+    recorded_at, recorded_reason = parse_cash_flow_ts(row.get("recorded_at"))
+    period_start, start_reason = parse_cash_flow_ts(row.get("period_start"))
+    period_end, end_reason = parse_cash_flow_ts(row.get("period_end"))
+    for reason in (recorded_reason, start_reason, end_reason):
+        if reason:
+            reasons.append(reason)
+    if period_start and period_end and period_start > period_end:
+        reasons.append("period_order")
+
+    amount = None
+    if flow_type in {"deposit", "withdrawal", "adjustment"}:
+        amount = as_float(row.get("amount_usdc"))
+        if amount is None or amount < 0:
+            reasons.append("amount_usdc")
+
+    if reasons:
+        return None, reasons
+    return {
+        "entry_id": entry_id.strip(),
+        "type": flow_type,
+        "recorded_at": recorded_at,
+        "period_start": period_start,
+        "period_end": period_end,
+        "amount_usdc": amount,
+        "review_required": flow_type == "adjustment" and adjustment_review_required(row),
+    }, []
+
+
+def interval_overlaps(start: datetime, end: datetime, window_start: datetime, window_end: datetime) -> bool:
+    return start <= window_end and end >= window_start
+
+
+def merged_coverage_seconds(intervals: list[tuple[datetime, datetime]]) -> tuple[float, bool]:
+    if not intervals:
+        return 0.0, False
+    ordered = sorted(intervals, key=lambda item: item[0])
+    merged: list[list[datetime]] = []
+    for start, end in ordered:
+        if start >= end:
             continue
-        flows.append({"date": flow_date.isoformat(), "amount": round(amount, 2), "type": flow_type})
-    return flows, warnings
+        if not merged:
+            merged.append([start, end])
+            continue
+        last = merged[-1]
+        if start <= last[1]:
+            if end > last[1]:
+                last[1] = end
+        else:
+            merged.append([start, end])
+    seconds = sum((end - start).total_seconds() for start, end in merged)
+    return seconds, len(merged) == 1
+
+
+def cash_flows_summary(path: Path, valid_snapshots: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any], list[str]]:
+    exists, total_rows, rows, read_warnings = read_cash_flow_jsonl(path)
+    latest = valid_snapshots[-1] if valid_snapshots else None
+    latest_at = parse_dt(latest.get("snapshot_at")) if latest else None
+    window_start = latest_at - timedelta(hours=REQUIRED_HISTORY_HOURS) if latest_at else None
+    coverage_window = (
+        {
+            "start": window_start.isoformat().replace("+00:00", "Z"),
+            "end": latest_at.isoformat().replace("+00:00", "Z"),
+        }
+        if latest_at and window_start
+        else None
+    )
+    summary: dict[str, Any] = {
+        "source": path.name,
+        "schema_version": CASH_FLOW_SCHEMA_VERSION,
+        "status": "missing",
+        "n_records": 0,
+        "n_records_total": 0,
+        "n_valid": 0,
+        "n_records_valid": 0,
+        "n_records_rejected": 0,
+        "rejected": 0,
+        "warnings": [],
+        "rejection_reasons": [],
+        "adjustments_pending": 0,
+        "coverage_days_7d": 0,
+        "coverage_window": coverage_window,
+        "attestation_count": 0,
+        "last_attestation_at": None,
+    }
+    if not exists:
+        return [], summary, read_warnings
+    summary["n_records"] = total_rows
+    summary["n_records_total"] = total_rows
+    if total_rows == 0:
+        summary["status"] = "empty_unattested"
+        return [], summary, read_warnings
+
+    valid_rows: list[dict[str, Any]] = []
+    rejection_reasons: list[str] = []
+    example_rejections = 0
+    for row in rows:
+        valid_row, reasons = validate_cash_flow_row(row)
+        if valid_row is None:
+            rejection_reasons.extend(reasons)
+            if "example_id" in reasons or "example_marker" in reasons:
+                example_rejections += 1
+            continue
+        valid_rows.append(valid_row)
+
+    rejected = total_rows - len(valid_rows)
+    summary["n_valid"] = len(valid_rows)
+    summary["n_records_valid"] = len(valid_rows)
+    summary["n_records_rejected"] = rejected
+    summary["rejected"] = rejected
+    summary["rejection_reasons"] = unique_short(rejection_reasons)
+    summary["warnings"] = unique_short(read_warnings + rejection_reasons)
+
+    if not valid_rows:
+        summary["status"] = "rejected_examples_only" if example_rejections == total_rows else "invalid"
+        return [], summary, read_warnings
+
+    attestations = [row for row in valid_rows if row["type"] == "no_cash_flow_attestation"]
+    summary["attestation_count"] = len(attestations)
+    if attestations:
+        last = max(row["recorded_at"] for row in attestations if row["recorded_at"])
+        summary["last_attestation_at"] = last.isoformat().replace("+00:00", "Z")
+
+    if latest_at is None or window_start is None:
+        summary["status"] = "attested_partial"
+        return valid_rows, summary, read_warnings
+
+    coverage_intervals: list[tuple[datetime, datetime]] = []
+    explaining_intervals: list[tuple[datetime, datetime]] = []
+    for row in valid_rows:
+        start = row["period_start"]
+        end = row["period_end"]
+        if interval_overlaps(start, end, window_start, latest_at):
+            if row["type"] in {"deposit", "withdrawal", "adjustment"}:
+                explaining_intervals.append((start, end))
+            if row["review_required"]:
+                summary["adjustments_pending"] += 1
+            if row["type"] == "no_cash_flow_attestation":
+                coverage_intervals.append((max(start, window_start), min(end, latest_at)))
+
+    coverage_seconds, contiguous = merged_coverage_seconds(coverage_intervals)
+    full_seconds = REQUIRED_HISTORY_HOURS * 3600
+    coverage_days = min(7.0, coverage_seconds / 86400)
+    summary["coverage_days_7d"] = int(coverage_days) if coverage_days.is_integer() else round(coverage_days, 3)
+    full_coverage = (
+        contiguous
+        and coverage_seconds >= full_seconds
+        and bool(coverage_intervals)
+        and min(start for start, _ in coverage_intervals) <= window_start
+        and max(end for _, end in coverage_intervals) >= latest_at
+    )
+
+    possible_unexplained = False
+    for row in valid_snapshots:
+        row_at = parse_dt(row.get("snapshot_at"))
+        if row.get("possible_deposit") is not True or row_at is None:
+            continue
+        if row_at < window_start or row_at > latest_at:
+            continue
+        if not any(start <= row_at <= end for start, end in explaining_intervals):
+            possible_unexplained = True
+            break
+    if possible_unexplained:
+        summary["possible_deposits_unreconciled"] = 1
+
+    if summary["adjustments_pending"] or possible_unexplained:
+        summary["status"] = "unreconciled"
+    elif full_coverage:
+        summary["status"] = "attested_full_7d"
+    else:
+        summary["status"] = "attested_partial"
+    return valid_rows, summary, read_warnings
+
+
+def load_cash_flows(path: Path, valid_snapshots: list[dict[str, Any]] | None = None) -> tuple[list[dict[str, Any]], dict[str, Any], list[str]]:
+    return cash_flows_summary(path, valid_snapshots or [])
 
 
 def flows_between(flows: list[dict[str, Any]], start: datetime, end: datetime) -> list[dict[str, Any]]:
     selected = []
     for flow in flows:
-        flow_day = parse_day(flow.get("date"))
-        if flow_day is None:
+        if flow.get("type") not in {"deposit", "withdrawal"}:
             continue
-        flow_at = day_start(flow_day)
+        flow_at = flow.get("period_start")
+        if not isinstance(flow_at, datetime):
+            continue
         if start <= flow_at <= end:
             selected.append(flow)
     return selected
 
 
 def flow_totals(flows: list[dict[str, Any]]) -> tuple[float, float]:
-    deposits = sum(float(flow["amount"]) for flow in flows if flow.get("type") == "deposit")
-    withdrawals = sum(float(flow["amount"]) for flow in flows if flow.get("type") == "withdrawal")
+    deposits = sum(float(flow["amount_usdc"]) for flow in flows if flow.get("type") == "deposit")
+    withdrawals = sum(float(flow["amount_usdc"]) for flow in flows if flow.get("type") == "withdrawal")
     return round(deposits, 2), round(withdrawals, 2)
 
 
@@ -329,7 +578,14 @@ def append_snapshot(path: Path, snapshot: dict[str, Any]) -> None:
         fh.write(json.dumps(snapshot, sort_keys=True, ensure_ascii=False) + "\n")
 
 
-def build_report(snapshot: dict[str, Any] | None, history_rows: list[dict[str, Any]], flows: list[dict[str, Any]], warnings: list[str], now: datetime) -> dict[str, Any]:
+def build_report(
+    snapshot: dict[str, Any] | None,
+    history_rows: list[dict[str, Any]],
+    flows: list[dict[str, Any]],
+    cash_flows: dict[str, Any],
+    warnings: list[str],
+    now: datetime,
+) -> dict[str, Any]:
     valid = sorted_valid_snapshots(history_rows)
     latest = valid[-1] if valid else None
     latest_at = parse_dt(latest.get("snapshot_at")) if latest else None
@@ -357,32 +613,39 @@ def build_report(snapshot: dict[str, Any] | None, history_rows: list[dict[str, A
             and (parse_dt(row.get("snapshot_at")) or latest_at) >= recent_cutoff
         )
 
-    window_flows: list[dict[str, Any]] = []
-    wallet_pnl_available = False
-    wallet_pnl_7d = None
-    wallet_pnl_method = "insufficient_history"
-    confidence = "unavailable"
-    if latest is None:
-        wallet_pnl_method = "api_unavailable"
-    elif baseline is not None and baseline_at is not None and latest_at is not None:
-        window_flows = flows_between(flows, baseline_at, latest_at)
-        deposits, withdrawals = flow_totals(window_flows)
-        baseline_total = as_float(baseline.get("total_value"))
-        latest_total = as_float(latest.get("total_value"))
-        if baseline_total is not None and latest_total is not None:
-            wallet_pnl_available = True
-            wallet_pnl_7d = round((latest_total - baseline_total) - deposits + withdrawals, 2)
-            if possible_recent:
-                wallet_pnl_method = "cash_flow_unknown"
-                confidence = "low"
-            else:
-                wallet_pnl_method = "snapshot_delta"
-                confidence = "medium" if window_flows else "high"
-
+    flow_window_start = latest_at - timedelta(hours=REQUIRED_HISTORY_HOURS) if latest_at else None
+    window_flows = flows_between(flows, flow_window_start, latest_at) if flow_window_start and latest_at else []
     deposits_7d, withdrawals_7d = flow_totals(window_flows)
     cash_flows_total = round(deposits_7d - withdrawals_7d, 2)
+    cash_status = str(cash_flows.get("status") or "missing")
 
-    if latest is None:
+    wallet_pnl_available = False
+    wallet_pnl_7d = None
+    wallet_pnl_method = "cash_flow_unknown" if cash_status != "attested_full_7d" else "insufficient_history"
+    confidence = "low"
+    if latest is None and cash_status == "attested_full_7d":
+        wallet_pnl_method = "api_unavailable"
+    elif baseline is not None and baseline_at is not None and latest_at is not None:
+        baseline_flows = flows_between(flows, baseline_at, latest_at)
+        deposits, withdrawals = flow_totals(baseline_flows)
+        baseline_total = as_float(baseline.get("total_value"))
+        latest_total = as_float(latest.get("total_value"))
+        if baseline_total is not None and latest_total is not None and cash_status == "attested_full_7d":
+            wallet_pnl_available = True
+            wallet_pnl_7d = round((latest_total - baseline_total) - deposits + withdrawals, 2)
+            wallet_pnl_method = "snapshot_delta"
+            confidence = "high"
+
+    enough_snapshot_count = len(valid) >= 14
+    enough_snapshot_days = valid_days >= 7
+    if cash_status != "attested_full_7d":
+        ready = False
+        reason = "cash_flow_unknown"
+        wallet_pnl_available = False
+        wallet_pnl_7d = None
+        wallet_pnl_method = "cash_flow_unknown"
+        confidence = "low"
+    elif latest is None:
         ready = False
         reason = "api_unavailable"
     elif baseline is None:
@@ -391,9 +654,9 @@ def build_report(snapshot: dict[str, Any] | None, history_rows: list[dict[str, A
     elif not wallet_pnl_available:
         ready = False
         reason = "need_7d_baseline"
-    elif possible_recent:
+    elif not enough_snapshot_count or not enough_snapshot_days:
         ready = False
-        reason = "cash_flow_unknown"
+        reason = "need_more_history"
     else:
         ready = True
         reason = "valid_7d_baseline_available"
@@ -419,11 +682,14 @@ def build_report(snapshot: dict[str, Any] | None, history_rows: list[dict[str, A
             "cash_flows_7d_count": len(window_flows),
             "possible_deposits_7d_count": possible_recent,
         },
+        "cash_flows": cash_flows,
         "phase2_readiness": {
             "phase2_ready": ready,
             "phase2_ready_reason": reason,
             "valid_snapshot_days": valid_days,
             "required_snapshot_days": 7,
+            "valid_snapshots": len(valid),
+            "required_snapshots": 14,
             "required_history_hours": REQUIRED_HISTORY_HOURS,
             "wallet_pnl_available": wallet_pnl_available,
         },
@@ -527,13 +793,12 @@ def main() -> int:
     now = utc_now()
 
     history_rows, history_warnings = read_jsonl(snapshot_file)
-    flows, flow_warnings = load_cash_flows(flows_file)
-    warnings = history_warnings + flow_warnings
+    previous_valid = sorted_valid_snapshots(history_rows)
+    flows_for_snapshot, _, _ = load_cash_flows(flows_file, previous_valid)
 
     snapshot: dict[str, Any] | None = None
     if not args.report_only:
-        previous_valid = sorted_valid_snapshots(history_rows)
-        snapshot = take_snapshot(now, previous_valid[-1] if previous_valid else None, flows, args.deposit_threshold)
+        snapshot = take_snapshot(now, previous_valid[-1] if previous_valid else None, flows_for_snapshot, args.deposit_threshold)
         history_for_report = history_rows + [snapshot]
         if not args.dry_run:
             append_snapshot(snapshot_file, snapshot)
@@ -542,7 +807,10 @@ def main() -> int:
         valid = sorted_valid_snapshots(history_rows)
         snapshot = valid[-1] if valid else empty_snapshot(now, "no valid snapshots in history")
 
-    report = build_report(snapshot, history_for_report, flows, warnings, now)
+    report_valid = sorted_valid_snapshots(history_for_report)
+    flows, cash_flows, flow_warnings = load_cash_flows(flows_file, report_valid)
+    warnings = history_warnings + flow_warnings
+    report = build_report(snapshot, history_for_report, flows, cash_flows, warnings, now)
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False))
     elif args.markdown:
