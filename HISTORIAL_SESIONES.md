@@ -31,6 +31,9 @@ Comandos útiles:
 
 | Fecha | Tipo | Referencia | Commits clave | Resumen |
 |------|------|------------|---------------|---------|
+| 2026-05-07 | Explícita | Sesión 311 | feat: add pnl report tool | Sonnet documenta micro-cierre B3 implementación. Clasificación ACTION_TOOLING / PATCH_MEMORY / NOT_CANONICAL / WATCH_RISK. Commits locales: `082e02d` (`feat: add pnl report tool`), `420e4b8` (`docs: add pnl report design`). Archivos commit `082e02d`: creado `tools/pnl_report.py` (CLI read-only, stdlib-only, horizontes 1D/1W/1M/ALL), creado `tests/test_pnl_report.py` (14 tests T1–T14), modificado `docs/pnl_report_design.md` (campo `--generated-at` testing-only). Validación Codex: syntax OK; 14 tests passed; missing cashflow exit 0 / JSON válido / horizontes blocked / value_usdc=null / reason explícito; guardrails would_send=false / operational_use=forbidden / promotes_canonical_source=false. Herramienta read-only/LOG_ONLY. No promueve readiness. No cambia canonical_source ni bankroll_readiness. No Telegram. No DB/Railway/runtime/trading core/bot.py/env vars/BANKROLL/Fase C/Patch D. data/wallet_cash_flows.jsonl no existe; git ls-files vacío. canonical_source=none, bankroll_readiness=blocked, wallet_pnl_available=false sin cambios. main...origin/main [ahead 1]; no push todavía. Siguiente paso: push controlado del commit 082e02d; después B3.1 Polymarket API source strategy o B4 diseño, pero no integración automática. No Patch D. |
+| 2026-05-07 | Explícita | Sesión B3 | docs: add pnl report design | Sonnet documenta diseño canónico ACTION_DESIGN / WATCH_RISK / NOT_CANONICAL de tools/pnl_report.py. Se crea docs/pnl_report_design.md: propósito read-only/LOG_ONLY, horizontes 1D/1W/1M/ALL, schema JSON completo, máquina de estados 4 emitibles en B3 (unavailable/blocked/provisional/canonical_candidate), confidence capado a medium, ausencia de wallet_cash_flows.jsonl = exit 0 + horizontes blocked, 14 tests T1–T14, stdlib-only, exit codes 0/2, lista negra explícita (no trading/no Telegram/no DB/no Railway/no bot.py/no BANKROLL/no Fase C/no BUY-SELL-SKIP/no Patch D), guardrails G1–G6. HISTORIAL_SESIONES.md y agent_events.jsonl actualizados. data/wallet_cash_flows.jsonl no existe. tools/pnl_report.py no existe (no implementado). canonical_source=none, bankroll_readiness=blocked, wallet_pnl_available=false sin cambios. No tools/, no bot.py, no trading core, no BANKROLL, no Fase C, no Railway, no DB, no env vars, no Telegram real. No commit/push. |
+| 2026-05-06 | Explícita | Sesión 310 | docs: record wallet cash flow log deployment | Codex documenta push controlado bd4830a..0506782 + Railway auto-deploy SUCCESS. Clasificación ACTION_DOCUMENTATION / PATCH_MEMORY / WATCH_RISK. Commits pusheados: 81e7346 (feat: add wallet cash flow log tool) y 0506782 (docs: record wallet cash flow log implementation). main alineado con origin/main. Working tree limpio. Railway auto-deploy SUCCESS, deployment 6849b187-61c9-4a4e-82d3-04372cb1bbcd, proyecto enchanting-respect, environment production, service polymarket-bot. Sin deploy manual. Sin env vars. Sin DB. data/wallet_cash_flows.jsonl no existe. git ls-files vacío. canonical_source=none, bankroll_readiness=blocked, wallet_pnl_available=false sin cambios. Siguiente paso: diseño B3 tools/pnl_report.py read-only. No Patch D. |
 | 2026-05-06 | Explícita | Sesión 309 | feat: add wallet cash flow log tool | Codex implementa Patch C `tools/wallet_cash_flow_log.py`. Clasificación ACTION_TOOLING / PATCH_MEMORY / WATCH_RISK. Commit `81e7346`. Archivos: creado `tools/wallet_cash_flow_log.py` (CLI manual-only, stdlib-only, append-only, dry-run default), creado `tests/test_wallet_cash_flow_log.py`, modificado `verify_before_deploy.py` con guardrails Patch C. Validación: syntax OK, 24 tests passed, verify_before_deploy.py 1139/1139 OK, git diff --check OK (solo warnings LF/CRLF Windows). Herramienta subordinada a docs/wallet_cash_flow_log_design.md, docs/wallet_cash_flows_policy.md y docs/pnl_observability.md. No calcula P&L. No promueve readiness. No cambia canonical_source ni bankroll_readiness. No manda Telegram. No toca DB/Railway/runtime/trading core/bot.py/BANKROLL/Fase C. data/wallet_cash_flows.jsonl no existe y no fue creado. git ls-files vacío. Herramienta no usada con datos reales. canonical_source=none, bankroll_readiness=blocked, wallet_pnl_available=false sin cambios. main...origin/main [ahead 1]; no push todavía. Patch C sigue sin activar P&L Observability canónico; solo crea la vía segura de registro manual. Siguiente paso: push controlado del commit 81e7346; después planificar B3 tools/pnl_report.py read-only; no Patch D todavía. |
 | 2026-05-06 | Explícita | Sesión 308 | docs: add pnl observability contract | Sonnet documenta contrato P&L Observability 1D/1W/1M/ALL. Clasificación ACTION_DESIGN / WATCH_RISK. Se crea `docs/pnl_observability.md`: propósito read-only/LOG_ONLY, 6 capas de P&L (realized/wallet-adjusted/open/net/operational/data-quality), contrato por horizonte con criterios Opus (divergencia ≤±$0.50/±$1.50/±$3.00), definición `t0 ALL` post-Patch C, mapa de componentes (wallet_snapshot/cash_flow_log/pnl_report.py futuro/daily_digest/trade_lifecycle non_canonical), Daily Digest reglas LOG_ONLY/WATCH_AUDIT, clasificación Lean/Kanban, lista negra operativa, roadmap B1–B6, guardrails transversales (falsa canonización/backfill/drift/confusión realized vs wallet-adjusted/bankroll pequeño/etiquetas obligatorias). Se actualizan referencias mínimas en `docs/wallet_cash_flows_policy.md` y `docs/wallet_cash_flow_log_design.md`. Patch C sigue siendo prerequisite técnico para `t0 ALL`, pero subordinado al contrato observability. `canonical_source=none`, `bankroll_readiness=blocked`, `wallet_pnl_available=false` sin cambios. `data/wallet_cash_flows.jsonl` no existe. `tools/wallet_cash_flow_log.py` no existe. No runtime, no Railway, no DB, no env vars, no Telegram real, no `bot.py`, no trading core, no BANKROLL, no Fase C. Siguiente paso posible: review del diff y después Codex Patch C solo con signoff explícito de Pablo. |
 | 2026-05-06 | Explícita | Sesión 307 | docs: record wallet hermeticity check | Sonnet registra el micro-cierre documental de la verificación Codex PASS de hermeticidad Patch B/B' con fixture sintético `attested_full_7d`. Veredicto: PASS. Fixture temporal `C:\tmp\polymarket_attested_full_7d_verify` creado y borrado al cierre. Campos con fixture: `cash_flows.status=attested_full_7d`, `coverage_days_7d=7`, `wallet_pnl_available=false`, `phase2_ready=false`, `phase2_ready_reason=need_more_history`, `wallet_pnl_confidence=low/unavailable`, `wallet_pnl_7d=null`, `canonical_source=none`, `bankroll_readiness=blocked`, `would_send=false`. Tests: 45 passed (test_wallet_snapshot.py + test_daily_kanban_digest.py). Primera ejecución pytest falló por permisos Temp de usuario; rerun con `--basetemp` funcionó. Git status final sin cambios. `data/wallet_cash_flows.jsonl` sigue sin existir. `tools/wallet_cash_flow_log.py` no existe. Prioridad 1 Opus cerrada read-only. No runtime, no Railway, no DB, no env vars, no Telegram real, no `bot.py`, no trading core. |
@@ -4304,3 +4307,47 @@ Diseño canónico de `tools/pnl_report.py` como herramienta CLI read-only / LOG_
 ### Siguiente paso posible
 
 Signoff de Pablo sobre `docs/pnl_report_design.md`. Después: Codex implementa `tools/pnl_report.py` y `tests/test_pnl_report.py` siguiendo el contrato. No Patch D todavía.
+
+## Sesión 311 — 7 de mayo de 2026 (Sonnet 4.6)
+
+**Clasificación:** ACTION_TOOLING / PATCH_MEMORY / NOT_CANONICAL / WATCH_RISK
+**Bloque:** B3 — implementación local `tools/pnl_report.py`
+**Veredicto:** IMPLEMENTADO_LOCAL / VALIDADO / NO_PUSH_TODAVÍA
+
+### Contexto
+
+Micro-cierre documental de B3. Codex implementa `tools/pnl_report.py` + `tests/test_pnl_report.py` siguiendo el contrato cerrado en `docs/pnl_report_design.md` (Sesión B3).
+
+### Commits locales
+
+- `082e02d` — `feat: add pnl report tool`
+- `420e4b8` — `docs: add pnl report design`
+- `main...origin/main [ahead 1]` — no push todavía.
+
+### Artefactos
+
+- **Creado:** `tools/pnl_report.py` — CLI read-only, stdlib-only, horizontes 1D/1W/1M/ALL.
+- **Creado:** `tests/test_pnl_report.py` — 14 tests T1–T14.
+- **Modificado:** `docs/pnl_report_design.md` — campo `--generated-at` marcado `testing-only`.
+
+### Validación Codex
+
+- Syntax OK.
+- `pytest tests/test_pnl_report.py`: **14 passed**.
+- Missing cashflow: exit 0, JSON válido, horizontes `blocked`, `value_usdc=null`, `reason` explícito.
+- Guardrails output: `would_send=false` / `operational_use=forbidden` / `promotes_canonical_source=false`.
+
+### Invariantes confirmados
+
+- `data/wallet_cash_flows.jsonl` no existe. `git ls-files -- data/wallet_cash_flows.jsonl` vacío.
+- `canonical_source=none` sin cambios.
+- `bankroll_readiness=blocked` sin cambios.
+- `wallet_pnl_available=false` sin cambios.
+
+### NO se tocó
+
+`bot.py`, trading core, BANKROLL, sizing, whitelist, city modes, scheduler, reglas de riesgo, Fase C, runtime, Railway, DB, env vars, Telegram real, Patch D. No datos reales.
+
+### Siguiente paso posible
+
+Push controlado del commit `082e02d`. Después: B3.1 Polymarket API source strategy o B4 diseño — no integración automática. No Patch D todavía.
