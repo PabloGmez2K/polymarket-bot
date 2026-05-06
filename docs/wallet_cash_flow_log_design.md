@@ -7,6 +7,8 @@
 
 This document is the canonical design specification for `tools/wallet_cash_flow_log.py`. It is documentation only. No implementation exists. No `tools/wallet_cash_flow_log.py` file exists. No `data/wallet_cash_flows.jsonl` file was created. Implementation requires explicit Pablo signoff followed by a Codex diff proposal reviewed before merge.
 
+Patch C feeds the P&L Observability system described in `docs/pnl_observability.md` (step B2 of roadmap B1–B6). Specifically: the first valid entry in `wallet_cash_flows.jsonl` created via `--write --init` defines `t0 ALL`. However, Patch C does not calculate P&L, does not promote `wallet_pnl_7d`, does not change `canonical_source`, and does not advance `bankroll_readiness`. Those require additional coverage, `tools/pnl_report.py` (B3), and a separate Opus review (B6).
+
 ---
 
 ## Purpose

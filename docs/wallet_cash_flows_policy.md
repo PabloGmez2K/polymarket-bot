@@ -92,3 +92,5 @@ Patch B, if approved separately, should update `tools/wallet_snapshot.py` to rea
 Patch B should gate readiness on `attested_full_7d`, not `present`.
 
 Patch C, if approved separately, may introduce a manual CLI such as `tools/wallet_cash_flow_log.py` to append validated rows. That CLI must remain manual-only and reject examples, inferred rows, auto rows, reconstructed rows, and estimated rows. The canonical design specification for Patch C is in `docs/wallet_cash_flow_log_design.md` (ACTION_DESIGN, not implemented).
+
+The broader P&L Observability contract — defining how `wallet_cash_flows.jsonl` feeds the 1D/1W/1M/ALL horizons, the confidence model, the component map, and the roadmap B1–B6 — is documented in `docs/pnl_observability.md` (ACTION_DESIGN / WATCH_RISK). That document governs how metrics derived from this file may be interpreted for read-only observability, manual analysis, and review workflows. It does not authorize operational trading decisions, BANKROLL changes, Fase C, whitelist, sizing, city modes, risk rules, BUY/SELL/SKIP, or actionable Telegram. It is read-only observability documentation only.
