@@ -45,6 +45,7 @@ DISCLAIMER_CALIBRATION = "calibration_global no es evidencia operativa."
 P_L_CONTAMINATION_WARNING = (
     "P/L incluye registros reconstruidos/no audit-ready; no usar para BANKROLL ni decisiones operativas."
 )
+REQUIRED_WALLET_HISTORY_HOURS = 168
 
 
 def configure_stdout() -> None:
@@ -154,6 +155,25 @@ def record_closed_at(record: dict[str, Any]) -> datetime | None:
     return parse_ts(record.get("closed_at") or close_context.get("timestamp"))
 
 
+def snapshot_at(row: dict[str, Any]) -> datetime | None:
+    return parse_ts(row.get("snapshot_at") or row.get("timestamp") or row.get("captured_at"))
+
+
+def is_valid_wallet_snapshot(row: dict[str, Any]) -> bool:
+    return bool(
+        row.get("api_ok") is True
+        and as_float(row.get("total_value")) is not None
+        and snapshot_at(row) is not None
+    )
+
+
+def sorted_valid_wallet_snapshots(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        [row for row in rows if is_valid_wallet_snapshot(row)],
+        key=lambda row: snapshot_at(row) or datetime.min.replace(tzinfo=timezone.utc),
+    )
+
+
 def is_contaminated_lifecycle_record(record: dict[str, Any]) -> bool:
     integrity = record.get("integrity") if isinstance(record.get("integrity"), dict) else {}
     history_sources = record.get("history_sources") if isinstance(record.get("history_sources"), dict) else {}
@@ -186,6 +206,139 @@ def build_source_quality(closed: list[dict[str, Any]]) -> dict[str, Any]:
     if status == "contaminated":
         quality["warning"] = P_L_CONTAMINATION_WARNING
     return quality
+
+
+def summarize_cash_flows(data_dir: Path) -> dict[str, Any]:
+    path = data_dir / "wallet_cash_flows.jsonl"
+    rows = load_jsonl(path, limit=5000)
+    return {
+        "status": "present" if path.exists() else "missing",
+        "source": "wallet_cash_flows.jsonl",
+        "n_records": len(rows) if path.exists() else 0,
+    }
+
+
+def summarize_wallet_pnl(data_dir: Path, cash_flows: dict[str, Any]) -> dict[str, Any]:
+    path = data_dir / "wallet_portfolio_snapshots.jsonl"
+    rows = load_jsonl(path, limit=5000)
+    snapshot_file_present = path.exists() or bool(rows)
+    valid = sorted_valid_wallet_snapshots(rows)
+    latest = valid[-1] if valid else None
+    oldest_at = snapshot_at(valid[0]) if valid else None
+    latest_at = snapshot_at(latest) if latest else None
+    span_hours = 0.0
+    if oldest_at and latest_at:
+        span_hours = max(0.0, (latest_at - oldest_at).total_seconds() / 3600)
+    valid_days = len({(snapshot_at(row) or datetime.min.replace(tzinfo=timezone.utc)).date().isoformat() for row in valid})
+
+    baseline = None
+    if latest_at:
+        cutoff = latest_at - timedelta(hours=REQUIRED_WALLET_HISTORY_HOURS)
+        candidates = [
+            row for row in valid
+            if (snapshot_at(row) or latest_at) <= cutoff
+        ]
+        if candidates:
+            baseline = candidates[-1]
+
+    possible_recent = 0
+    if latest_at:
+        recent_cutoff = latest_at - timedelta(hours=REQUIRED_WALLET_HISTORY_HOURS)
+        possible_recent = sum(
+            1
+            for row in valid
+            if row.get("possible_deposit") is True
+            and (snapshot_at(row) or latest_at) >= recent_cutoff
+        )
+
+    wallet_pnl_available = False
+    wallet_pnl_7d = None
+    wallet_pnl_method = "insufficient_history"
+    wallet_pnl_confidence = "unavailable"
+    if not snapshot_file_present or latest is None:
+        wallet_pnl_method = "api_unavailable"
+    elif baseline is not None:
+        latest_total = as_float(latest.get("total_value"))
+        baseline_total = as_float(baseline.get("total_value"))
+        if latest_total is not None and baseline_total is not None and cash_flows.get("status") == "present":
+            wallet_pnl_available = True
+            wallet_pnl_7d = round(latest_total - baseline_total, 2)
+            wallet_pnl_method = "snapshot_delta"
+            wallet_pnl_confidence = "low" if possible_recent else "medium"
+
+    if not snapshot_file_present:
+        status = "missing"
+        reason = "missing"
+    elif latest is None:
+        status = "blocked"
+        reason = "missing"
+    elif cash_flows.get("status") != "present":
+        status = "accumulating"
+        reason = "cash_flow_unknown"
+    elif span_hours < REQUIRED_WALLET_HISTORY_HOURS:
+        status = "accumulating"
+        reason = "need_more_history"
+    elif baseline is None:
+        status = "accumulating"
+        reason = "need_7d_baseline"
+    elif possible_recent:
+        status = "blocked"
+        reason = "cash_flow_unknown"
+    else:
+        status = "ready"
+        reason = "valid_7d_baseline_available"
+
+    phase2_ready = bool(
+        status == "ready"
+        and wallet_pnl_available
+        and len(valid) >= 14
+        and valid_days >= 7
+    )
+    if not phase2_ready and reason == "valid_7d_baseline_available":
+        reason = "need_more_history"
+
+    return {
+        "status": status,
+        "source": "wallet_portfolio_snapshots.jsonl",
+        "phase2_ready": phase2_ready,
+        "phase2_ready_reason": reason,
+        "valid_snapshots": len(valid),
+        "valid_snapshot_days": valid_days,
+        "history_span_hours": round(span_hours, 2),
+        "required_history_hours": REQUIRED_WALLET_HISTORY_HOURS,
+        "wallet_pnl_available": wallet_pnl_available and phase2_ready,
+        "wallet_pnl_7d": wallet_pnl_7d if phase2_ready else None,
+        "wallet_pnl_method": wallet_pnl_method if phase2_ready else ("api_unavailable" if status == "missing" else "insufficient_history"),
+        "wallet_pnl_confidence": wallet_pnl_confidence if phase2_ready else "unavailable",
+    }
+
+
+def summarize_pnl_sources(data_dir: Path, profitability: dict[str, Any]) -> dict[str, Any]:
+    source_quality = profitability.get("source_quality") or build_source_quality([])
+    cash_flows = summarize_cash_flows(data_dir)
+    wallet_pnl = summarize_wallet_pnl(data_dir, cash_flows)
+    lifecycle = {
+        "status": source_quality.get("status", "missing"),
+        "source": "trade_lifecycle.json",
+        "closed_records": source_quality.get("closed_records", 0),
+        "contaminated_records": source_quality.get("contaminated_records", 0),
+        "contamination_rate": source_quality.get("contamination_rate", 0.0),
+        "operational_use": "untrusted_only"
+        if source_quality.get("status") == "contaminated"
+        else "audit_only",
+    }
+    return {
+        "lifecycle": lifecycle,
+        "wallet_pnl": wallet_pnl,
+        "cash_flows": cash_flows,
+        "dashboard": {
+            "status": "manual_only",
+            "source": "Polymarket dashboard",
+            "auto_extractor_authorized": False,
+        },
+        "canonical_source": "none",
+        "bankroll_readiness": "blocked",
+    }
 
 
 def summarize_operational(data_dir: Path, generated_at: datetime) -> dict[str, Any]:
@@ -465,9 +618,10 @@ def summarize_kanban(data_dir: Path) -> dict[str, Any]:
 
 def build_digest(data_dir: Path, db_path: str | None = None) -> dict[str, Any]:
     generated_at = now_utc()
+    profitability = summarize_profitability(data_dir, generated_at)
     sections = {
         "operational": summarize_operational(data_dir, generated_at),
-        "profitability": summarize_profitability(data_dir, generated_at),
+        "profitability": profitability,
         "activity": summarize_activity(data_dir, generated_at),
         "truth_pipeline": summarize_truth_pipeline(db_path),
         "kanban": summarize_kanban(data_dir),
@@ -478,6 +632,7 @@ def build_digest(data_dir: Path, db_path: str | None = None) -> dict[str, Any]:
         "generated_at_utc": generated_at.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         "level": level,
         "sections": sections,
+        "pnl_sources": summarize_pnl_sources(data_dir, profitability),
         "next_step": next_step,
         "disclaimers": [DISCLAIMER_NO_TRADING, DISCLAIMER_CALIBRATION],
         "would_send": False,
@@ -506,12 +661,17 @@ def format_window(label: str, value: dict[str, Any] | None) -> str:
 
 def format_human(digest: dict[str, Any]) -> str:
     sections = digest["sections"]
+    pnl_sources = digest.get("pnl_sources") or {}
     op = sections["operational"]
     pnl = sections["profitability"]
     activity = sections["activity"]
     truth = sections["truth_pipeline"]
     kanban = sections["kanban"]
     source_quality = pnl.get("source_quality") or {}
+    lifecycle_source = pnl_sources.get("lifecycle") or {}
+    wallet_source = pnl_sources.get("wallet_pnl") or {}
+    cash_flow_source = pnl_sources.get("cash_flows") or {}
+    dashboard_source = pnl_sources.get("dashboard") or {}
     quality_rate = source_quality.get("contamination_rate")
     quality_rate_text = "unknown" if quality_rate is None else f"{quality_rate * 100.0:.1f}%"
 
@@ -540,6 +700,39 @@ def format_human(digest: dict[str, Any]) -> str:
         ),
         f"  - Warning: {source_quality['warning']}" if source_quality.get("warning") else None,
         f"  - Nota: {pnl.get('note', 'unknown')}",
+        "",
+        "2b. P/L Sources",
+        (
+            f"  - Lifecycle: {lifecycle_source.get('status', 'unknown')} | "
+            f"{lifecycle_source.get('operational_use', 'audit_only')} | "
+            f"{lifecycle_source.get('contaminated_records', 0)}/"
+            f"{lifecycle_source.get('closed_records', 0)} contaminated"
+        ),
+        (
+            f"  - Wallet 7d: {wallet_source.get('status', 'unknown')} | "
+            f"phase2_ready={str(wallet_source.get('phase2_ready', False)).lower()} | "
+            f"reason={wallet_source.get('phase2_ready_reason', 'unknown')} | "
+            f"snapshots={wallet_source.get('valid_snapshots', 0)} | "
+            f"days={wallet_source.get('valid_snapshot_days', 0)} | "
+            f"span_h={wallet_source.get('history_span_hours', 0.0)}"
+        ),
+        (
+            f"  - Wallet P/L available: "
+            f"{str(wallet_source.get('wallet_pnl_available', False)).lower()} | "
+            f"method={wallet_source.get('wallet_pnl_method', 'unknown')} | "
+            f"confidence={wallet_source.get('wallet_pnl_confidence', 'unknown')}"
+        ),
+        (
+            f"  - Cash flows: {cash_flow_source.get('status', 'unknown')} | "
+            f"records={cash_flow_source.get('n_records', 0)}"
+        ),
+        (
+            f"  - Dashboard: {dashboard_source.get('status', 'unknown')} | "
+            f"auto_extractor_authorized="
+            f"{str(dashboard_source.get('auto_extractor_authorized', False)).lower()}"
+        ),
+        f"  - Canonical source: {pnl_sources.get('canonical_source', 'none')}",
+        f"  - BANKROLL ready: {pnl_sources.get('bankroll_readiness', 'blocked')}",
         "",
         "3. Actividad",
         f"  - Ciclos recientes 7d: {display(activity.get('recent_cycles_7d'))}",

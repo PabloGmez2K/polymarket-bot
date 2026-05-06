@@ -57,6 +57,7 @@ def test_cli_json_dry_run_valid_json():
         "generated_at_utc",
         "level",
         "sections",
+        "pnl_sources",
         "next_step",
         "disclaimers",
         "would_send",
@@ -319,3 +320,142 @@ def test_contaminated_source_quality_visible_in_json_and_human_output():
     serialized = json.dumps(digest, ensure_ascii=False) + "\n" + human
     for needle in forbidden:
         assert needle not in serialized
+
+
+def test_pnl_sources_marks_policy_state_without_canonical_pnl():
+    module = load_tool_module()
+    lifecycle = {
+        "records": [
+            {
+                "status": "closed",
+                "pnl_cash": 17.91,
+                "closed_at": "2026-05-06T10:00:00+00:00",
+                "integrity": {"analysis_ready": False},
+            },
+            {
+                "status": "closed",
+                "pnl_cash": -1.0,
+                "closed_at": "2026-05-05T10:00:00+00:00",
+                "integrity": {"analysis_ready": False},
+            },
+        ]
+    }
+    snapshot_rows = [
+        {
+            "schema_version": 1,
+            "snapshot_at": "2026-05-06T10:00:00+00:00",
+            "api_ok": True,
+            "total_value": 19.90,
+        }
+    ]
+    fixed_now = datetime(2026, 5, 6, 12, 0, tzinfo=timezone.utc)
+    original_load_json = module.load_json
+    original_load_jsonl = module.load_jsonl
+    original_now_utc = module.now_utc
+
+    def fake_load_json(path):
+        if path.name == "trade_lifecycle.json":
+            return lifecycle
+        return None
+
+    def fake_load_jsonl(path, limit=500):
+        if path.name == "wallet_portfolio_snapshots.jsonl":
+            return snapshot_rows
+        return []
+
+    module.load_json = fake_load_json
+    module.load_jsonl = fake_load_jsonl
+    module.now_utc = lambda: fixed_now
+
+    try:
+        digest = module.build_digest(MISSING_DATA_DIR)
+        human = module.format_human(digest)
+    finally:
+        module.load_json = original_load_json
+        module.load_jsonl = original_load_jsonl
+        module.now_utc = original_now_utc
+
+    pnl_sources = digest["pnl_sources"]
+    assert pnl_sources["lifecycle"]["status"] == "contaminated"
+    assert pnl_sources["lifecycle"]["closed_records"] == 2
+    assert pnl_sources["lifecycle"]["contaminated_records"] == 2
+    assert pnl_sources["lifecycle"]["contamination_rate"] == 1.0
+    assert pnl_sources["lifecycle"]["operational_use"] == "untrusted_only"
+    assert pnl_sources["wallet_pnl"]["status"] == "accumulating"
+    assert pnl_sources["wallet_pnl"]["phase2_ready"] is False
+    assert pnl_sources["wallet_pnl"]["phase2_ready_reason"] == "cash_flow_unknown"
+    assert pnl_sources["wallet_pnl"]["valid_snapshots"] == 1
+    assert pnl_sources["wallet_pnl"]["valid_snapshot_days"] == 1
+    assert pnl_sources["wallet_pnl"]["wallet_pnl_available"] is False
+    assert pnl_sources["wallet_pnl"]["wallet_pnl_7d"] is None
+    assert pnl_sources["cash_flows"]["status"] == "missing"
+    assert pnl_sources["cash_flows"]["n_records"] == 0
+    assert pnl_sources["dashboard"]["status"] == "manual_only"
+    assert pnl_sources["dashboard"]["auto_extractor_authorized"] is False
+    assert pnl_sources["canonical_source"] == "none"
+    assert pnl_sources["bankroll_readiness"] == "blocked"
+    assert "P/L Sources" in human
+    assert "Canonical source: none" in human
+    assert "BANKROLL ready: blocked" in human
+
+
+def test_pnl_sources_cash_flows_present_but_wallet_still_needs_history():
+    module = load_tool_module()
+    snapshot_rows = [
+        {
+            "schema_version": 1,
+            "snapshot_at": "2026-05-05T10:00:00+00:00",
+            "api_ok": True,
+            "total_value": 20.0,
+        },
+        {
+            "schema_version": 1,
+            "snapshot_at": "2026-05-06T10:00:00+00:00",
+            "api_ok": True,
+            "total_value": 21.0,
+        },
+    ]
+    cash_flow_rows = [{"date": "2026-05-06", "type": "deposit", "amount": 0}]
+    original_load_jsonl = module.load_jsonl
+
+    class FakePath:
+        def __init__(self, name: str):
+            self.name = name
+
+        def exists(self):
+            return self.name in {"wallet_portfolio_snapshots.jsonl", "wallet_cash_flows.jsonl"}
+
+    class FakeDataDir:
+        def __truediv__(self, name: str):
+            return FakePath(name)
+
+    def fake_load_jsonl(path, limit=500):
+        if path.name == "wallet_portfolio_snapshots.jsonl":
+            return snapshot_rows
+        if path.name == "wallet_cash_flows.jsonl":
+            return cash_flow_rows
+        return []
+
+    module.load_jsonl = fake_load_jsonl
+
+    try:
+        cash_flows = module.summarize_cash_flows(FakeDataDir())
+        wallet_pnl = module.summarize_wallet_pnl(FakeDataDir(), cash_flows)
+    finally:
+        module.load_jsonl = original_load_jsonl
+
+    assert cash_flows["status"] == "present"
+    assert cash_flows["n_records"] == 1
+    assert wallet_pnl["status"] == "accumulating"
+    assert wallet_pnl["phase2_ready"] is False
+    assert wallet_pnl["phase2_ready_reason"] == "need_more_history"
+    assert wallet_pnl["history_span_hours"] == 24.0
+    assert wallet_pnl["wallet_pnl_available"] is False
+    assert wallet_pnl["wallet_pnl_method"] == "insufficient_history"
+
+
+def test_daily_digest_does_not_execute_wallet_snapshot_tool():
+    source = TOOL_PATH.read_text(encoding="utf-8")
+
+    assert "subprocess" not in source
+    assert "wallet_snapshot.py" not in source

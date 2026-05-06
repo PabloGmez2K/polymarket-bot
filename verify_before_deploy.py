@@ -8560,6 +8560,20 @@ def run_tests():
         and "no usar para BANKROLL ni decisiones operativas" in _daily_kanban_src,
     )
     test(
+        "daily_kanban_digest: expone pnl_sources read-only",
+        "\"pnl_sources\"" in _daily_kanban_src
+        and "\"wallet_pnl\"" in _daily_kanban_src
+        and "\"cash_flows\"" in _daily_kanban_src
+        and "\"canonical_source\"" in _daily_kanban_src
+        and "\"bankroll_readiness\"" in _daily_kanban_src,
+    )
+    test(
+        "daily_kanban_digest: pnl_sources no ejecuta wallet_snapshot ni promueve canon automatico",
+        "wallet_snapshot.py" not in _daily_kanban_src
+        and "\"canonical_source\": \"none\"" in _daily_kanban_src
+        and "\"bankroll_readiness\": \"blocked\"" in _daily_kanban_src,
+    )
+    test(
         "daily_kanban_digest: no escribe archivos de estado",
         "write_text(" not in _daily_kanban_src
         and "write_bytes(" not in _daily_kanban_src
