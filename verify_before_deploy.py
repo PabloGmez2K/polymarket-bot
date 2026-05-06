@@ -8582,6 +8582,138 @@ def run_tests():
         and 'kanban_state.json").write' not in _daily_kanban_src,
     )
 
+    # ---- Wallet Cash Flow Log manual-only ----
+    print("\n Wallet Cash Flow Log manual-only")
+    _wallet_cash_flow_log_path = os.path.join(os.path.dirname(__file__), "tools", "wallet_cash_flow_log.py")
+    _wallet_cash_flow_log_exists = os.path.exists(_wallet_cash_flow_log_path)
+    _wallet_cash_flow_log_src = ""
+    _wallet_cash_flow_log_ast_ok = False
+    _wallet_cash_flow_log_ast_detail = ""
+    _wallet_cash_flow_log_imports = set()
+    if _wallet_cash_flow_log_exists:
+        with open(_wallet_cash_flow_log_path, encoding="utf-8") as _f:
+            _wallet_cash_flow_log_src = _f.read()
+        try:
+            _wallet_cash_flow_log_ast = ast.parse(_wallet_cash_flow_log_src)
+            _wallet_cash_flow_log_ast_ok = True
+            for _node in ast.walk(_wallet_cash_flow_log_ast):
+                if isinstance(_node, ast.Import):
+                    for _alias in _node.names:
+                        _wallet_cash_flow_log_imports.add(_alias.name.split(".", 1)[0])
+                elif isinstance(_node, ast.ImportFrom) and _node.module:
+                    _wallet_cash_flow_log_imports.add(_node.module.split(".", 1)[0])
+        except SyntaxError as _exc:
+            _wallet_cash_flow_log_ast_detail = str(_exc)
+
+    _wallet_cash_flow_allowed_imports = {
+        "__future__", "argparse", "json", "sys", "uuid", "dataclasses",
+        "datetime", "decimal", "pathlib", "typing",
+    }
+    _wallet_cash_flow_forbidden_tokens = [
+        "import bot",
+        "from bot",
+        "execute_trade",
+        "manage_positions",
+        "intra_cycle_sl_check",
+        "OrderArgs",
+        "post_order",
+        "create_order",
+        "cancel_order",
+        "send_telegram",
+        "api.telegram.org",
+        "TELEGRAM_TOKEN",
+        "TELEGRAM_CHAT_ID",
+        "sqlite3",
+        "psycopg",
+        "railway",
+        "RAILWAY",
+        "requests",
+        "httpx",
+        "aiohttp",
+        "urllib.request",
+        "BANKROLL",
+        "canonical_source",
+        "bankroll_readiness",
+    ]
+    _wallet_cash_flow_gitignore_ok = "data/wallet_cash_flows.jsonl" in gitignore_content
+    _wallet_cash_flow_real_path = os.path.join(os.path.dirname(__file__), "data", "wallet_cash_flows.jsonl")
+
+    test(
+        "wallet_cash_flow_log: tool existe y tiene sintaxis valida",
+        _wallet_cash_flow_log_exists and _wallet_cash_flow_log_ast_ok,
+        _wallet_cash_flow_log_ast_detail,
+    )
+    test(
+        "wallet_cash_flow_log: data/wallet_cash_flows.jsonl no existe localmente",
+        not os.path.exists(_wallet_cash_flow_real_path),
+    )
+    test(
+        "wallet_cash_flow_log: archivo real excluido en .gitignore",
+        _wallet_cash_flow_gitignore_ok,
+    )
+    test(
+        "wallet_cash_flow_log: no importa bot.py ni trading core",
+        all(_token not in _wallet_cash_flow_log_src for _token in _wallet_cash_flow_forbidden_tokens[:8]),
+    )
+    test(
+        "wallet_cash_flow_log: sin Telegram, DB, Railway ni red",
+        all(_token not in _wallet_cash_flow_log_src for _token in _wallet_cash_flow_forbidden_tokens[8:20]),
+    )
+    test(
+        "wallet_cash_flow_log: no toca readiness/BANKROLL",
+        all(_token not in _wallet_cash_flow_log_src for _token in _wallet_cash_flow_forbidden_tokens[20:]),
+    )
+    test(
+        "wallet_cash_flow_log: stdlib-only imports",
+        _wallet_cash_flow_log_imports <= _wallet_cash_flow_allowed_imports,
+        f"imports={sorted(_wallet_cash_flow_log_imports - _wallet_cash_flow_allowed_imports)}",
+    )
+    test(
+        "wallet_cash_flow_log: actor hardcoded pablo_manual schema v2",
+        'ACTOR = "pablo_manual"' in _wallet_cash_flow_log_src
+        and "SCHEMA_VERSION = 2" in _wallet_cash_flow_log_src,
+    )
+    test(
+        "wallet_cash_flow_log: tipos allowlist y prohibidos",
+        "deposit" in _wallet_cash_flow_log_src
+        and "withdrawal" in _wallet_cash_flow_log_src
+        and "no_cash_flow_attestation" in _wallet_cash_flow_log_src
+        and "adjustment" in _wallet_cash_flow_log_src
+        and "inferred" in _wallet_cash_flow_log_src
+        and "reconstructed" in _wallet_cash_flow_log_src
+        and "estimated" in _wallet_cash_flow_log_src,
+    )
+    test(
+        "wallet_cash_flow_log: UUID4 auto y EXAMPLE rechazado",
+        "uuid.uuid4()" in _wallet_cash_flow_log_src
+        and "validate_uuid4" in _wallet_cash_flow_log_src
+        and "EXAMPLE-" in _wallet_cash_flow_log_src,
+    )
+    test(
+        "wallet_cash_flow_log: dry-run default no escribe",
+        "if not args.write:" in _wallet_cash_flow_log_src
+        and '"dry_run": True' in _wallet_cash_flow_log_src
+        and "DRY-RUN: row NOT written." in _wallet_cash_flow_log_src,
+    )
+    test(
+        "wallet_cash_flow_log: init requiere write y confirmacion textual",
+        "--init is only valid with --write" in _wallet_cash_flow_log_src
+        and 'CONFIRMATION_TEXT = "YES I CONFIRM"' in _wallet_cash_flow_log_src
+        and "confirm_init(path, args.yes)" in _wallet_cash_flow_log_src,
+    )
+    test(
+        "wallet_cash_flow_log: append valida ledger existente antes de escribir",
+        "ledger = load_existing_ledger(path)" in _wallet_cash_flow_log_src
+        and "build_row(args, ledger.entry_ids)" in _wallet_cash_flow_log_src
+        and 'with path.open("a", encoding="utf-8")' in _wallet_cash_flow_log_src,
+    )
+    test(
+        "wallet_cash_flow_log: adjustment requiere note, Opus y confirmacion",
+        "adjustment requires non-empty note" in _wallet_cash_flow_log_src
+        and "adjustment requires --reviewed-by-opus" in _wallet_cash_flow_log_src
+        and "adjustment requires --confirm-adjustment" in _wallet_cash_flow_log_src,
+    )
+
     # ---- Resultado ----
     print(f"\n{'='*50}")
     total = passed + failed
