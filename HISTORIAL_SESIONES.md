@@ -31,6 +31,7 @@ Comandos útiles:
 
 | Fecha | Tipo | Referencia | Commits clave | Resumen |
 |------|------|------------|---------------|---------|
+| 2026-05-06 | Explícita | Sesión 302 | docs: record pnl sources railway verification | Sonnet registra verificación Railway de Daily Bot Kanban Digest 1.3 con bloque `pnl_sources`. Commit referencia: `ecd314b`. Deployment `58778c54` SUCCESS. Resultado: `lifecycle.status=contaminated`, `lifecycle.contamination_rate=1.0`, `lifecycle.operational_use=untrusted_only`, `wallet_pnl.status=accumulating`, `wallet_pnl.phase2_ready=false`, `cash_flows.status=missing`, `dashboard.status=manual_only`, `canonical_source=none`, `bankroll_readiness=blocked`, `would_send=false`, nivel global `WATCH_RISK`. Interpretación: (1) bloque `pnl_sources` activo y correcto en Railway; (2) digest comunica que no hay P/L canónico; (3) `trade_lifecycle` queda `untrusted_only`; (4) `wallet_pnl` sigue acumulando baseline, `phase2_ready=false`; (5) `wallet_cash_flows.jsonl` missing bloquea promoción; (6) dashboard manual only; (7) bankroll readiness bloqueado; (8) Telegram real bloqueado; (9) Fase C no autorizada. No se toca código, `bot.py`, trading core, BANKROLL, sizing, whitelist, city modes, scheduler, reglas de riesgo, env vars, Railway ni deploy. Clasificación ACTION_DOCUMENTATION / WATCH_RISK. |
 | 2026-05-06 | Explícita | Sesión 301 | docs: add pnl clean source policy | Sonnet documenta política canónica de fuentes P/L según decisión Opus. Clasificación ACTION_DESIGN / WATCH_RISK. `trade_lifecycle.json` contaminated 1.0: prohibido para BANKROLL, Telegram real con cifra, decisiones operativas y comparativas históricas; solo como `untrusted_pnl` con disclaimer. `wallet_portfolio_snapshots.jsonl` accumulating baseline/not_ready: prohibido para P/L operativo. `wallet_cash_flows.jsonl` missing: debe existir antes de promover wallet P/L. Dashboard Polymarket = ground truth manual; sin scraper autorizado. Se documentan 8 criterios de promoción `wallet_pnl_7d`, condiciones Telegram por nivel (informativo/cifra/BANKROLL/Fase C), bloque `pnl_sources` recomendado para próximo patch del digest, y guardrails permanentes. Se crea `docs/pnl_clean_source_policy.md`. No se toca código runtime, `bot.py`, trading core, BANKROLL, sizing, whitelist, city modes, scheduler, reglas de riesgo, env vars, Railway ni deploy. Fase C no autorizada. |
 | 2026-05-06 | Explícita | Sesión 299 | fix: mark daily digest source quality | Codex aplica Daily Bot Kanban Digest 1.2 como patch acotado de tooling/observabilidad. `daily_kanban_digest.py` acepta `timestamp_utc` en `cycles_history.jsonl` para ciclos recientes 24h/7d y agrega `source_quality` al P/L sin cambiar el cálculo base: estados `missing`/`reliable`/`contaminated`, conteos, rate y warning de no usar P/L reconstruido/no audit-ready para BANKROLL ni decisiones operativas. Si hay contaminación, `profitability.level` queda en `WATCH_RISK`; la salida humana muestra "Calidad fuente" y warning. `tests/test_daily_kanban_digest.py` cubre timestamp reciente, contaminación lifecycle, JSON/humano, `would_send=false` y ausencia de instrucciones operativas; `verify_before_deploy.py` añade guardrails estáticos. Validación local: sintaxis OK, pytest focalizado 13 passed, `verify_before_deploy.py` 1123/1123, digest local texto/JSON dry-run OK. Railway read-only opcional confirma que, sin deploy, live sigue en digest anterior (`recent_cycles_24h=0`, `recent_cycles_7d=0`, sin `source_quality`, `would_send=false`). No deploy, no env vars, no Telegram real, no `bot.py`, no trading core, no BANKROLL, no Fase C. Clasificación ACTION_TOOLING / WATCH_RISK. |
 | 2026-05-06 | Explícita | Sesión 298 | feat: add daily kanban digest dry run; docs: record daily kanban digest dry run | Codex implementa y cierra durablemente el primer tooling del sistema Alerts + Kanban Lean. Clasificación PROJECT_MEMORY/PATCH_MEMORY: DAILY_BOT_KANBAN_DIGEST_DRY_RUN_IMPLEMENTADO. Se crea `tools/daily_kanban_digest.py`, CLI local/read-only stdlib-only con `--dry-run`, `--json --dry-run` y `--db` opcional para resumen Truth Pipeline SQLite read-only; `tests/test_daily_kanban_digest.py` cubre salida texto/JSON, datos/DB ausentes sin crash, Truth Pipeline missing controlado, disclaimers, ausencia de instrucciones operativas, no import de `bot.py`/trading core, no Telegram y no escritura de estado; `verify_before_deploy.py` suma guardrails minimos. Commit `6b6b2f1` pusheado a `origin/main`. Validación: sintaxis OK, pytest focalizado 10 passed, `verify_before_deploy.py` 1120/1120. Estado: dry-run, LOG_ONLY, default OFF, `would_send=false`, sin Telegram real, sin runtime automático, sin `alerts_state`, sin `kanban_state`, sin cron, sin env vars, sin Railway y sin deploy. No se toca `bot.py`, trading core, BANKROLL, sizing, whitelist, city modes, scheduler, riesgo ni Fase C. Level inicial `WATCH_RISK` si falta P/L fiable para evitar lectura falsa de salud/mejora; mensaje mantiene "Esta alerta no autoriza cambios de trading." y "Siguiente paso concreto". Próximo paso: ejecutar digest dry-run con datos reales/fixtures y decidir si crear schema `data/kanban_state.json` o seguir con Low Activity Monitor. |
@@ -3895,3 +3896,75 @@ Código, `bot.py`, trading core, BANKROLL, sizing, whitelist, city modes, schedu
 ### Commit
 
 `docs: record daily digest railway verification` — push sí, deploy no.
+
+---
+
+## Sesión 302 — Daily Bot Kanban Digest 1.3 pnl_sources Railway verification (6 may 2026, Sonnet)
+
+**Tipo:** Documentación / cierre de sesión
+**Clasificación:** ACTION_DOCUMENTATION / WATCH_RISK
+
+### Contexto
+
+Sesión de cierre documental posterior al push del commit `ecd314b` (`feat: add pnl sources to daily digest`, sesión previa Codex). El objetivo fue verificar que Railway ejecuta el nuevo código con bloque `pnl_sources` y registrar el resultado.
+
+### Verificación Railway
+
+- **Proyecto:** `enchanting-respect` / environment `production` / service `polymarket-bot`
+- **Deployment:** `58778c54-4de9-46e0-96c2-3f771c8bb62d` — status `SUCCESS`
+- **Confirmación funcional:** el JSON remoto ya incluye `pnl_sources`.
+
+### Resultado digest Railway — bloque `pnl_sources`
+
+| Campo | Valor |
+|---|---|
+| `lifecycle.status` | `contaminated` |
+| `lifecycle.closed_records` | 107 |
+| `lifecycle.contaminated_records` | 107 |
+| `lifecycle.contamination_rate` | 1.0 |
+| `lifecycle.operational_use` | `untrusted_only` |
+| `wallet_pnl.status` | `accumulating` |
+| `wallet_pnl.phase2_ready` | `false` |
+| `wallet_pnl.phase2_ready_reason` | `cash_flow_unknown` |
+| `wallet_pnl.valid_snapshots` | 8 |
+| `wallet_pnl.valid_snapshot_days` | 8 |
+| `wallet_pnl.history_span_hours` | 153.98 |
+| `wallet_pnl.wallet_pnl_available` | `false` |
+| `cash_flows.status` | `missing` |
+| `cash_flows.n_records` | 0 |
+| `dashboard.status` | `manual_only` |
+| `dashboard.auto_extractor_authorized` | `false` |
+| `canonical_source` | `none` |
+| `bankroll_readiness` | `blocked` |
+| `would_send` | `false` |
+| Nivel global | `WATCH_RISK` |
+
+### Interpretación
+
+1. **Bloque `pnl_sources` activo en Railway** — la estructura está presente y comunica correctamente el estado de cada fuente.
+2. **Digest comunica que no hay P/L canónico** — `canonical_source=none` y `bankroll_readiness=blocked` son correctos.
+3. **`trade_lifecycle` queda `untrusted_only`** — `contamination_rate=1.0` es esperado; los 107 registros incluyen históricos reconstruidos/postmortem.
+4. **`wallet_pnl` sigue acumulando baseline** — 8 snapshots/8 días/153.98h; `phase2_ready=false` por `cash_flow_unknown`.
+5. **`wallet_cash_flows.jsonl` missing** — prerequisito para promover `wallet_pnl`; bloquea promoción.
+6. **Dashboard sigue manual only** — sin scraper autorizado.
+7. **BANKROLL readiness bloqueado** — esperado y correcto.
+8. **Telegram real bloqueado** — `would_send=false` correcto.
+9. **Fase C no autorizada.**
+
+### Siguiente bloque recomendado
+
+Acumulación orgánica de `wallet_pnl` snapshots y creación de `wallet_cash_flows.jsonl` (aunque sea vacío) para desbloquear la cadena de promoción.
+
+### NO se tocó
+
+Código, `bot.py`, trading core, BANKROLL, sizing, whitelist, city modes, scheduler, reglas de riesgo, env vars, Railway, deploy manual, Telegram real, Fase C.
+
+### Documentos actualizados
+
+- `CONTEXTO.md`: entrada sesión 302 añadida al inicio.
+- `HISTORIAL_SESIONES.md`: esta entrada.
+- `agent_events.jsonl`: entrada sesión 302.
+
+### Commit
+
+`docs: record pnl sources railway verification` — push sí, deploy no.
