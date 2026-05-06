@@ -4218,3 +4218,45 @@ Runtime, Railway, DB, env vars, Telegram real, `bot.py`, trading core, BANKROLL,
 ### Siguiente paso posible
 
 Push controlado del commit `81e7346`; después diseñar/planificar B3 `tools/pnl_report.py` read-only. No Patch D todavía.
+
+## Sesión 310 — 6 de mayo de 2026 (Codex)
+
+**Clasificación:** ACTION_DOCUMENTATION / PATCH_MEMORY / WATCH_RISK
+**Bloque:** Patch C push controlado + Railway auto-deploy SUCCESS
+**Veredicto:** PUSH_COMPLETADO / DEPLOY_SUCCESS
+
+### Contexto
+
+Push controlado del rango `bd4830a..0506782` tras implementación y validación local de Patch C en Sesión 309. Commits pusheados:
+
+- `81e7346` — `feat: add wallet cash flow log tool`
+- `0506782` — `docs: record wallet cash flow log implementation`
+
+HEAD final: `0506782`. `main` alineado con `origin/main`. Working tree limpio.
+
+### Railway auto-deploy
+
+- **Proyecto:** enchanting-respect
+- **Environment:** production
+- **Service:** polymarket-bot
+- **Deployment ID:** `6849b187-61c9-4a4e-82d3-04372cb1bbcd`
+- **Status final:** SUCCESS
+- No hubo deploy manual. No env vars. No DB.
+
+### Invariantes confirmados al cierre
+
+- `data/wallet_cash_flows.jsonl` no existe.
+- `git ls-files -- data/wallet_cash_flows.jsonl` vacío.
+- `tools/wallet_cash_flow_log.py` existe solo como código (sin uso con datos reales).
+- Herramienta no usada con datos reales.
+- `canonical_source=none` sin cambios.
+- `bankroll_readiness=blocked` sin cambios.
+- `wallet_pnl_available=false` sin cambios.
+
+### NO se tocó
+
+`bot.py`, trading core, BANKROLL, sizing, whitelist, city modes, scheduler, reglas de riesgo, Fase C, runtime, Railway env vars, DB, Telegram real. No deploy manual. Patch C sigue sin activar P&L Observability canónico. Patch C solo crea la vía segura de registro manual.
+
+### Siguiente paso posible
+
+Diseño B3 `tools/pnl_report.py` read-only. No Patch D todavía.
