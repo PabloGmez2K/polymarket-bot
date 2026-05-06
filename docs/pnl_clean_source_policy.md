@@ -14,7 +14,7 @@
 |--------|--------|---------------|---------------|
 | `trade_lifecycle.json` | contaminated 1.0 | `untrusted_pnl` con disclaimer / auditoría interna | BANKROLL readiness, Telegram real con cifra P/L, decisiones operativas, comparativas históricas |
 | `wallet_portfolio_snapshots.jsonl` | accumulating baseline / not_ready | base futura cuando `phase2_ready=true` y cash flows ajustados | P/L operativo mientras `not_ready` o sin cash flows reconciliados |
-| `wallet_cash_flows.jsonl` | missing | — | cualquier uso; debe existir (incluso vacío explícito) antes de promover wallet P/L |
+| `wallet_cash_flows.jsonl` | missing | — | cualquier uso; debe tener cobertura manual atestiguada antes de promover wallet P/L. Un archivo vacío no es evidencia |
 | Dashboard Polymarket | manual only | ground truth de comparación manual | scraper/extractor automático (no autorizado) |
 
 ---
@@ -52,7 +52,7 @@ Próximo patch del Daily Bot Kanban Digest debe incluir este bloque (JSON y form
 2. ≥ 168 h de historia continua de snapshots
 3. ≥ 14 snapshots válidos
 4. ≥ 7 días distintos con al menos un snapshot
-5. `wallet_cash_flows.jsonl` existe y cubre últimos 7 días (puede ser vacío explícito)
+5. `wallet_cash_flows.jsonl` cubre últimos 7 días con attestations explícitas o movimientos reales documentados. Un archivo vacío no es evidencia y no desbloquea readiness
 6. `possible_deposits_7d=0` o todos los movimientos reconciliados
 7. Divergencia ≤ ±$1.50 vs. dashboard Polymarket 1W en comparación manual
 8. Revisión Opus explícita
@@ -89,6 +89,8 @@ P/L no canónico:
 - No hay scraper/extractor automático del dashboard Polymarket autorizado.
 - Ninguna fuente `not_ready` se usa en Telegram real, BANKROLL ni decisiones de sizing.
 - Toda cifra P/L en comunicaciones debe incluir `source_quality` y estado de canon.
+- `data/wallet_cash_flows.jsonl` real no debe versionarse ni crearse antes de Patch B/Patch C y aprobación manual explícita de Pablo.
+- La ausencia sigue siendo el estado correcto hasta que exista attestation manual; `canonical_source=none` y `bankroll_readiness=blocked` permanecen.
 - Esta política no autoriza cambios en trading core, bot.py, scheduler, whitelist, city modes, sizing, reglas de riesgo, BANKROLL ni Fase C.
 
 ---
@@ -97,4 +99,5 @@ P/L no canónico:
 
 | Versión | Fecha | Autor | Cambio |
 |---------|-------|-------|--------|
+| 1.1 | 2026-05-06 | Codex (Sesión 303) | Aclara que un archivo vacío no es attestation y no desbloquea readiness |
 | 1.0 | 2026-05-06 | Opus + Sonnet 4.6 (Sesión 301) | Creación inicial |

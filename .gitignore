@@ -55,6 +55,7 @@ data/city_intelligence_daily_summary_state.json
 data/traders_intelligence_daily_summary_state.json
 data/traders_intelligence/
 data/*.lock
+data/wallet_cash_flows.jsonl
 data/signals_crosscheck.jsonl
 data/signals_crosscheck_daily_summary_state.json
 data/city_phase5_contrast.json
