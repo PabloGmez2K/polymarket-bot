@@ -42,6 +42,9 @@ KANBAN_COLUMNS = [
 ]
 DISCLAIMER_NO_TRADING = "Esta alerta no autoriza cambios de trading."
 DISCLAIMER_CALIBRATION = "calibration_global no es evidencia operativa."
+P_L_CONTAMINATION_WARNING = (
+    "P/L incluye registros reconstruidos/no audit-ready; no usar para BANKROLL ni decisiones operativas."
+)
 
 
 def configure_stdout() -> None:
@@ -151,6 +154,40 @@ def record_closed_at(record: dict[str, Any]) -> datetime | None:
     return parse_ts(record.get("closed_at") or close_context.get("timestamp"))
 
 
+def is_contaminated_lifecycle_record(record: dict[str, Any]) -> bool:
+    integrity = record.get("integrity") if isinstance(record.get("integrity"), dict) else {}
+    history_sources = record.get("history_sources") if isinstance(record.get("history_sources"), dict) else {}
+    return (
+        integrity.get("partial_historical_record") is True
+        or history_sources.get("reconstructed") is True
+        or integrity.get("analysis_ready") is False
+        or record.get("decision_source") == "postmortem_sync"
+        or record.get("close_only_record") is True
+    )
+
+
+def build_source_quality(closed: list[dict[str, Any]]) -> dict[str, Any]:
+    closed_count = len(closed)
+    contaminated_count = sum(1 for record in closed if is_contaminated_lifecycle_record(record))
+    contamination_rate = round(contaminated_count / closed_count, 4) if closed_count else 0.0
+    if not closed_count:
+        status = "missing"
+    elif contaminated_count:
+        status = "contaminated"
+    else:
+        status = "reliable"
+    quality = {
+        "source": "trade_lifecycle.json",
+        "status": status,
+        "closed_records": closed_count,
+        "contaminated_records": contaminated_count,
+        "contamination_rate": contamination_rate,
+    }
+    if status == "contaminated":
+        quality["warning"] = P_L_CONTAMINATION_WARNING
+    return quality
+
+
 def summarize_operational(data_dir: Path, generated_at: datetime) -> dict[str, Any]:
     cycles = load_jsonl(data_dir / "cycles_history.jsonl")
     agent_events = load_jsonl(data_dir / "agent_events.jsonl")
@@ -158,7 +195,7 @@ def summarize_operational(data_dir: Path, generated_at: datetime) -> dict[str, A
     recent_rows = []
     cutoff = generated_at - timedelta(days=1)
     for row in rows:
-        ts = parse_ts(row.get("ts_utc") or row.get("timestamp") or row.get("created_at"))
+        ts = parse_ts(row.get("timestamp_utc") or row.get("ts_utc") or row.get("timestamp") or row.get("created_at"))
         if ts and ts >= cutoff:
             recent_rows.append(row)
 
@@ -188,11 +225,13 @@ def summarize_profitability(data_dir: Path, generated_at: datetime) -> dict[str,
     lifecycle = load_json(data_dir / "trade_lifecycle.json")
     records = normalize_records(lifecycle)
     if not records:
+        source_quality = build_source_quality([])
         return {
             "title": "P/L / Profitability",
             "level": "WATCH_RISK",
             "status": "data_missing",
             "windows": {"1d": None, "7d": None, "30d": None, "all": None},
+            "source_quality": source_quality,
             "note": "No hay datos fiables de lifecycle en disco local.",
         }
 
@@ -224,7 +263,8 @@ def summarize_profitability(data_dir: Path, generated_at: datetime) -> dict[str,
         "30d": stats(30),
         "all": stats(None),
     }
-    level = "WATCH_RISK" if not closed else "NO_ACTION"
+    source_quality = build_source_quality(closed)
+    level = "WATCH_RISK" if not closed or source_quality["status"] == "contaminated" else "NO_ACTION"
     note = "No interpretar P/L contaminado como mejora limpia."
     return {
         "title": "P/L / Profitability",
@@ -232,6 +272,7 @@ def summarize_profitability(data_dir: Path, generated_at: datetime) -> dict[str,
         "status": "ok" if closed else "data_missing",
         "windows": windows,
         "open_positions": sum(1 for record in records if record.get("status") == "open"),
+        "source_quality": source_quality,
         "note": note,
     }
 
@@ -243,7 +284,7 @@ def summarize_activity(data_dir: Path, generated_at: datetime) -> dict[str, Any]
     cutoff_7d = generated_at - timedelta(days=7)
     recent_cycles = []
     for row in cycles:
-        ts = parse_ts(row.get("ts_utc") or row.get("timestamp") or row.get("created_at"))
+        ts = parse_ts(row.get("timestamp_utc") or row.get("ts_utc") or row.get("timestamp") or row.get("created_at"))
         if ts and ts >= cutoff_7d:
             recent_cycles.append(row)
 
@@ -470,6 +511,9 @@ def format_human(digest: dict[str, Any]) -> str:
     activity = sections["activity"]
     truth = sections["truth_pipeline"]
     kanban = sections["kanban"]
+    source_quality = pnl.get("source_quality") or {}
+    quality_rate = source_quality.get("contamination_rate")
+    quality_rate_text = "unknown" if quality_rate is None else f"{quality_rate * 100.0:.1f}%"
 
     lines = [
         f"Daily Bot Kanban Digest - {digest['generated_at_utc']}",
@@ -489,6 +533,12 @@ def format_human(digest: dict[str, Any]) -> str:
         format_window("7D", (pnl.get("windows") or {}).get("7d")),
         format_window("30D", (pnl.get("windows") or {}).get("30d")),
         format_window("All", (pnl.get("windows") or {}).get("all")),
+        (
+            f"  - Calidad fuente: {source_quality.get('status', 'unknown')} "
+            f"({source_quality.get('contaminated_records', 0)}/"
+            f"{source_quality.get('closed_records', 0)} registros; rate {quality_rate_text})"
+        ),
+        f"  - Warning: {source_quality['warning']}" if source_quality.get("warning") else None,
         f"  - Nota: {pnl.get('note', 'unknown')}",
         "",
         "3. Actividad",
@@ -519,6 +569,8 @@ def format_human(digest: dict[str, Any]) -> str:
                     rendered.append(str(item))
             value = " | ".join(rendered)
         lines.append(f"  - {column}: {value}")
+
+    lines = [line for line in lines if line is not None]
 
     lines.extend([
         "",

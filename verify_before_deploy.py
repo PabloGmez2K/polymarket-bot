@@ -8545,6 +8545,21 @@ def run_tests():
         and "disclaimers" in _daily_kanban_src,
     )
     test(
+        "daily_kanban_digest: reconoce timestamp_utc en cycles_history",
+        "row.get(\"timestamp_utc\")" in _daily_kanban_src,
+    )
+    test(
+        "daily_kanban_digest: expone source_quality de P/L",
+        "\"source_quality\"" in _daily_kanban_src
+        and "\"contaminated_records\"" in _daily_kanban_src
+        and "\"contamination_rate\"" in _daily_kanban_src,
+    )
+    test(
+        "daily_kanban_digest: advierte P/L contaminado no operacional",
+        "P/L incluye registros reconstruidos/no audit-ready" in _daily_kanban_src
+        and "no usar para BANKROLL ni decisiones operativas" in _daily_kanban_src,
+    )
+    test(
         "daily_kanban_digest: no escribe archivos de estado",
         "write_text(" not in _daily_kanban_src
         and "write_bytes(" not in _daily_kanban_src

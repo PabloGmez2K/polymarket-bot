@@ -4,6 +4,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -179,3 +180,142 @@ def test_build_digest_contract_with_fixture():
     assert digest["would_send"] is False
     assert digest["sections"]["profitability"]["windows"]["all"]["pnl"] == 1.25
     assert digest["sections"]["activity"]["open_positions"] == 1
+
+
+def test_cycles_history_timestamp_utc_counts_recent_cycles():
+    module = load_tool_module()
+    generated_at = datetime(2026, 5, 6, 7, 35, tzinfo=timezone.utc)
+    cycle_rows = [
+        {
+            "cycle_number": 257,
+            "timestamp_utc": "2026-05-06T07:29:25.720830+00:00",
+            "bot_version": "v-test",
+            "mode": "DRY_RUN",
+        }
+    ]
+    original_load_json = module.load_json
+    original_load_jsonl = module.load_jsonl
+
+    def fake_load_json(path):
+        return None
+
+    def fake_load_jsonl(path, limit=500):
+        if path.name == "cycles_history.jsonl":
+            return cycle_rows
+        return []
+
+    module.load_json = fake_load_json
+    module.load_jsonl = fake_load_jsonl
+
+    try:
+        operational = module.summarize_operational(MISSING_DATA_DIR, generated_at)
+        activity = module.summarize_activity(MISSING_DATA_DIR, generated_at)
+    finally:
+        module.load_json = original_load_json
+        module.load_jsonl = original_load_jsonl
+
+    assert operational["recent_cycles_24h"] > 0
+    assert activity["recent_cycles_7d"] > 0
+
+
+def test_contaminated_lifecycle_marks_profitability_untrusted():
+    module = load_tool_module()
+    generated_at = datetime(2026, 5, 6, 12, 0, tzinfo=timezone.utc)
+    lifecycle = {
+        "records": [
+            {
+                "status": "closed",
+                "pnl_cash": 17.91,
+                "closed_at": "2026-05-06T10:00:00+00:00",
+                "integrity": {
+                    "partial_historical_record": True,
+                    "analysis_ready": False,
+                },
+                "history_sources": {"reconstructed": True},
+                "decision_source": "postmortem_sync",
+                "close_only_record": True,
+            }
+        ]
+    }
+    original_load_json = module.load_json
+
+    def fake_load_json(path):
+        if path.name == "trade_lifecycle.json":
+            return lifecycle
+        return None
+
+    module.load_json = fake_load_json
+
+    try:
+        profitability = module.summarize_profitability(MISSING_DATA_DIR, generated_at)
+    finally:
+        module.load_json = original_load_json
+
+    quality = profitability["source_quality"]
+    assert quality["status"] == "contaminated"
+    assert quality["closed_records"] == 1
+    assert quality["contaminated_records"] == 1
+    assert profitability["level"] == "WATCH_RISK"
+    assert "no usar para BANKROLL ni decisiones operativas" in quality["warning"]
+
+
+def test_contaminated_source_quality_visible_in_json_and_human_output():
+    module = load_tool_module()
+    lifecycle = {
+        "records": [
+            {
+                "status": "closed",
+                "pnl_cash": 17.91,
+                "closed_at": "2026-05-06T10:00:00+00:00",
+                "integrity": {"analysis_ready": False},
+            }
+        ]
+    }
+    cycle_rows = [{"timestamp_utc": "2026-05-06T11:00:00+00:00"}]
+    fixed_now = datetime(2026, 5, 6, 12, 0, tzinfo=timezone.utc)
+    original_load_json = module.load_json
+    original_load_jsonl = module.load_jsonl
+    original_now_utc = module.now_utc
+
+    def fake_load_json(path):
+        if path.name == "trade_lifecycle.json":
+            return lifecycle
+        return None
+
+    def fake_load_jsonl(path, limit=500):
+        if path.name == "cycles_history.jsonl":
+            return cycle_rows
+        return []
+
+    module.load_json = fake_load_json
+    module.load_jsonl = fake_load_jsonl
+    module.now_utc = lambda: fixed_now
+
+    try:
+        digest = module.build_digest(MISSING_DATA_DIR)
+        human = module.format_human(digest)
+    finally:
+        module.load_json = original_load_json
+        module.load_jsonl = original_load_jsonl
+        module.now_utc = original_now_utc
+
+    quality = digest["sections"]["profitability"]["source_quality"]
+    assert digest["would_send"] is False
+    assert quality["status"] == "contaminated"
+    assert "no usar para BANKROLL ni decisiones operativas" in quality["warning"]
+    assert "Calidad fuente" in human
+    assert "contaminated" in human
+    assert "P/L incluye registros reconstruidos/no audit-ready" in human
+
+    forbidden = [
+        "comprar",
+        "vender",
+        "BUY",
+        "SELL",
+        "SKIP real",
+        "subir BANKROLL",
+        "activar Fase C",
+    ]
+    serialized = json.dumps(digest, ensure_ascii=False) + "\n" + human
+    for needle in forbidden:
+        assert needle not in serialized
