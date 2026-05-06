@@ -165,6 +165,7 @@ Los siguientes componentes forman el pipeline de P&L Observability:
 | `tools/wallet_cash_flow_log.py` (Patch C) | CLI manual para registrar cash flows validados en `wallet_cash_flows.jsonl`. Diseño: `docs/wallet_cash_flow_log_design.md`. | Codex diff + Pablo review antes de merge |
 | `tools/pnl_report.py` (Patch D — B3 del roadmap) | Herramienta read-only que produce métricas 1D/1W/1M/ALL con etiquetas de confidence. Nunca accionable. | Patch C operativo + Opus review del diseño |
 | Patch D `missing → partial/available` | Mejora de `wallet_snapshot.py` para transicionar `cash_flows.status` más granular. | Patch C completado + test coverage |
+| Fuente futura opcional `polymarket_api_pnl` | `external_observability` / sanity bound vía Data API pública (`/v1/leaderboard?user=…&timePeriod=DAY\|WEEK\|MONTH\|ALL`). Cross-check humano contra dashboard. **No** sustituye wallet ΔP&L ajustado, **no** es `canonical_source`, **no** desbloquea `bankroll_readiness`, BANKROLL $35, Fase C, BUY/SELL/SKIP ni Telegram accionable. Equivalencia con dashboard sin confirmar. Discovery: [`docs/research/polymarket_api_pnl_discovery.md`](research/polymarket_api_pnl_discovery.md). | Bloque futuro B3.1/B3.2 separado con diseño Opus + signoff Pablo antes de cualquier integración. Fuera del alcance de B3. |
 
 ### E.3 Trade lifecycle como non_canonical_telemetry
 

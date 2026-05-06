@@ -517,6 +517,21 @@ B6  Revisión Opus completa             OBLIGATORIO antes de cualquier uso opera
 
 **B3 no desbloquea B4 automáticamente.** La integración en Daily Digest requiere decisión explícita separada.
 
+### Fuente futura opcional: `polymarket_api_pnl`
+
+Investigación read-only documentada en [`docs/research/polymarket_api_pnl_discovery.md`](research/polymarket_api_pnl_discovery.md) (B3.1, 2026-05-07).
+
+- **Tipo:** `external_observability` / `sanity bound` / cross-check humano contra dashboard.
+- **Estado actual:** no integrada. Hallazgo: no hay endpoint oficial documentado que replique el dashboard P&L; el candidato más cercano es `GET /v1/leaderboard?user=…&timePeriod=DAY|WEEK|MONTH|ALL`, con metodología opaca.
+- **Equivalencia con dashboard:** sin confirmar.
+- **No sustituye** wallet ΔP&L ajustado por cash flows (B.2 / fuente preferida de `pnl_report.py`).
+- **No es `canonical_source`.** Nunca puede serlo por sí sola.
+- **No desbloquea** `bankroll_readiness`, BANKROLL $35, Fase C, BUY/SELL/SKIP ni Telegram accionable.
+- **No forma parte de B3.** Su integración requiere un bloque futuro separado (`B3.1` / `B3.2`) con diseño dedicado, signoff Pablo y revisión Opus antes de cualquier llamada HTTP desde `tools/`.
+- **Etiquetas obligatorias si alguna vez se integra:** `source=polymarket_api_pnl`, `quality=external_opaque`, `confidence<=low` hasta validación contra dashboard manual.
+
+Mientras tanto, esta fuente queda fuera del alcance de `tools/pnl_report.py` definido en este contrato. Cualquier referencia a `polymarket_api_pnl` desde código del bot está prohibida hasta que exista su propio bloque de diseño aprobado.
+
 ---
 
 ## 15. Guardrails transversales
