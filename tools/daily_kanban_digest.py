@@ -174,6 +174,147 @@ def sorted_valid_wallet_snapshots(rows: list[dict[str, Any]]) -> list[dict[str, 
     )
 
 
+def load_cash_flow_jsonl(path: Path) -> tuple[bool, int, list[dict[str, Any]], list[str]]:
+    if not path.exists():
+        return False, 0, [], []
+    rows: list[dict[str, Any]] = []
+    reasons: list[str] = []
+    total = 0
+    try:
+        with path.open("r", encoding="utf-8-sig") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                total += 1
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    reasons.append("json_decode")
+                    continue
+                if isinstance(row, dict):
+                    rows.append(row)
+                else:
+                    reasons.append("not_object")
+    except OSError:
+        reasons.append("read_error")
+    return True, total, rows, reasons
+
+
+def unique_short(values: list[str], limit: int = 8) -> list[str]:
+    seen: list[str] = []
+    for value in values:
+        if value not in seen:
+            seen.append(value)
+        if len(seen) >= limit:
+            break
+    return seen
+
+
+def parse_cash_flow_ts(value: Any) -> tuple[datetime | None, str | None]:
+    if not isinstance(value, str) or not value.strip():
+        return None, "period_format"
+    text = value.strip()
+    if len(text) == 10 and text[4] == "-" and text[7] == "-":
+        return None, "period_format"
+    if "T" not in text:
+        return None, "period_format"
+    normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None, "period_format"
+    if parsed.tzinfo is None or parsed.utcoffset() != timedelta(0):
+        return None, "period_format"
+    return parsed.astimezone(timezone.utc), None
+
+
+def row_has_example_marker(row: dict[str, Any]) -> bool:
+    marker = row.get("marker")
+    if marker is None:
+        return False
+    return "EXAMPLE_ONLY" in str(marker).upper()
+
+
+def adjustment_review_required(row: dict[str, Any]) -> bool:
+    adjustment = row.get("adjustment") if isinstance(row.get("adjustment"), dict) else {}
+    return row.get("review_required") is True or adjustment.get("review_required") is True
+
+
+def validate_cash_flow_row(row: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
+    reasons: list[str] = []
+    entry_id = row.get("entry_id")
+    if row.get("schema_version") != 2:
+        reasons.append("schema_version")
+    if not isinstance(entry_id, str) or not entry_id.strip():
+        reasons.append("entry_id")
+    elif entry_id.startswith("EXAMPLE-"):
+        reasons.append("example_id")
+    if row_has_example_marker(row):
+        reasons.append("example_marker")
+    if row.get("actor") != "pablo_manual":
+        reasons.append("actor_mismatch")
+    flow_type = row.get("type")
+    if flow_type not in {"deposit", "withdrawal", "no_cash_flow_attestation", "adjustment"}:
+        reasons.append("type")
+
+    recorded_at, recorded_reason = parse_cash_flow_ts(row.get("recorded_at"))
+    period_start, start_reason = parse_cash_flow_ts(row.get("period_start"))
+    period_end, end_reason = parse_cash_flow_ts(row.get("period_end"))
+    for reason in (recorded_reason, start_reason, end_reason):
+        if reason:
+            reasons.append(reason)
+    if period_start and period_end and period_start > period_end:
+        reasons.append("period_order")
+
+    amount = None
+    if flow_type in {"deposit", "withdrawal", "adjustment"}:
+        amount = as_float(row.get("amount_usdc"))
+        if amount is None or amount < 0:
+            reasons.append("amount_usdc")
+
+    if reasons:
+        return None, reasons
+    return {
+        "entry_id": entry_id,
+        "type": flow_type,
+        "recorded_at": recorded_at,
+        "period_start": period_start,
+        "period_end": period_end,
+        "amount_usdc": amount,
+        "review_required": flow_type == "adjustment" and adjustment_review_required(row),
+    }, []
+
+
+def interval_overlaps(start: datetime, end: datetime, window_start: datetime, window_end: datetime) -> bool:
+    return start <= window_end and end >= window_start
+
+
+def merged_coverage_seconds(intervals: list[tuple[datetime, datetime]]) -> tuple[float, bool]:
+    if not intervals:
+        return 0.0, False
+    ordered = sorted(intervals, key=lambda item: item[0])
+    merged: list[list[datetime]] = []
+    contiguous = True
+    for start, end in ordered:
+        if start >= end:
+            continue
+        if not merged:
+            merged.append([start, end])
+            continue
+        last = merged[-1]
+        if start <= last[1]:
+            if end > last[1]:
+                last[1] = end
+        elif start == last[1]:
+            last[1] = end
+        else:
+            contiguous = False
+            merged.append([start, end])
+    seconds = sum((end - start).total_seconds() for start, end in merged)
+    return seconds, contiguous and len(merged) == 1
+
+
 def is_contaminated_lifecycle_record(record: dict[str, Any]) -> bool:
     integrity = record.get("integrity") if isinstance(record.get("integrity"), dict) else {}
     history_sources = record.get("history_sources") if isinstance(record.get("history_sources"), dict) else {}
@@ -210,12 +351,116 @@ def build_source_quality(closed: list[dict[str, Any]]) -> dict[str, Any]:
 
 def summarize_cash_flows(data_dir: Path) -> dict[str, Any]:
     path = data_dir / "wallet_cash_flows.jsonl"
-    rows = load_jsonl(path, limit=5000)
-    return {
-        "status": "present" if path.exists() else "missing",
+    exists, total_rows, rows, read_reasons = load_cash_flow_jsonl(path)
+    snapshot_rows = load_jsonl(data_dir / "wallet_portfolio_snapshots.jsonl", limit=5000)
+    snapshots = sorted_valid_wallet_snapshots(snapshot_rows)
+    latest_at = snapshot_at(snapshots[-1]) if snapshots else None
+    window_start = latest_at - timedelta(hours=REQUIRED_WALLET_HISTORY_HOURS) if latest_at else None
+    coverage_window = (
+        {
+            "start": window_start.isoformat().replace("+00:00", "Z"),
+            "end": latest_at.isoformat().replace("+00:00", "Z"),
+        }
+        if latest_at and window_start
+        else None
+    )
+
+    base = {
         "source": "wallet_cash_flows.jsonl",
-        "n_records": len(rows) if path.exists() else 0,
+        "status": "missing",
+        "n_records": 0,
+        "n_records_total": 0,
+        "n_records_valid": 0,
+        "n_records_rejected": 0,
+        "coverage_days_7d": 0,
+        "coverage_window": coverage_window,
+        "rejection_reasons": [],
+        "attestation_count": 0,
+        "last_attestation_at": None,
     }
+    if not exists:
+        return base
+    base["n_records"] = total_rows
+    base["n_records_total"] = total_rows
+    if total_rows == 0:
+        base["status"] = "empty_unattested"
+        return base
+
+    valid_rows: list[dict[str, Any]] = []
+    rejection_reasons = list(read_reasons)
+    example_rejections = 0
+    for row in rows:
+        valid_row, reasons = validate_cash_flow_row(row)
+        if valid_row is None:
+            rejection_reasons.extend(reasons)
+            if "example_id" in reasons or "example_marker" in reasons:
+                example_rejections += 1
+            continue
+        valid_rows.append(valid_row)
+
+    rejected = total_rows - len(valid_rows)
+    base["n_records_valid"] = len(valid_rows)
+    base["n_records_rejected"] = rejected
+    base["rejection_reasons"] = unique_short(rejection_reasons)
+    attestations = [row for row in valid_rows if row["type"] == "no_cash_flow_attestation"]
+    base["attestation_count"] = len(attestations)
+    if attestations:
+        last = max(row["recorded_at"] for row in attestations if row["recorded_at"])
+        base["last_attestation_at"] = last.isoformat().replace("+00:00", "Z")
+
+    if not valid_rows:
+        base["status"] = "rejected_examples_only" if example_rejections == total_rows else "invalid"
+        return base
+    if latest_at is None or window_start is None:
+        base["status"] = "attested_partial"
+        return base
+
+    coverage_intervals: list[tuple[datetime, datetime]] = []
+    explaining_intervals: list[tuple[datetime, datetime]] = []
+    pending_review = False
+    for row in valid_rows:
+        start = row["period_start"]
+        end = row["period_end"]
+        if not start or not end:
+            continue
+        if interval_overlaps(start, end, window_start, latest_at):
+            explaining_intervals.append((start, end))
+            if row["review_required"]:
+                pending_review = True
+            if row["type"] == "no_cash_flow_attestation":
+                coverage_intervals.append((max(start, window_start), min(end, latest_at)))
+
+    coverage_seconds, contiguous = merged_coverage_seconds(coverage_intervals)
+    full_seconds = REQUIRED_WALLET_HISTORY_HOURS * 3600
+    coverage_days = min(7.0, coverage_seconds / 86400)
+    base["coverage_days_7d"] = int(coverage_days) if coverage_days.is_integer() else round(coverage_days, 3)
+
+    full_coverage = (
+        contiguous
+        and coverage_seconds >= full_seconds
+        and bool(coverage_intervals)
+        and min(start for start, _ in coverage_intervals) <= window_start
+        and max(end for _, end in coverage_intervals) >= latest_at
+    )
+    possible_unexplained = False
+    for row in snapshots:
+        row_at = snapshot_at(row)
+        if row.get("possible_deposit") is not True or row_at is None:
+            continue
+        if row_at < window_start or row_at > latest_at:
+            continue
+        explained = any(start <= row_at <= end for start, end in explaining_intervals)
+        if not explained:
+            possible_unexplained = True
+            break
+
+    if pending_review or possible_unexplained:
+        base["status"] = "unreconciled"
+    elif full_coverage:
+        base["status"] = "attested_full_7d"
+    else:
+        base["status"] = "attested_partial"
+    return base
 
 
 def summarize_wallet_pnl(data_dir: Path, cash_flows: dict[str, Any]) -> dict[str, Any]:
@@ -260,7 +505,7 @@ def summarize_wallet_pnl(data_dir: Path, cash_flows: dict[str, Any]) -> dict[str
     elif baseline is not None:
         latest_total = as_float(latest.get("total_value"))
         baseline_total = as_float(baseline.get("total_value"))
-        if latest_total is not None and baseline_total is not None and cash_flows.get("status") == "present":
+        if latest_total is not None and baseline_total is not None and cash_flows.get("status") == "attested_full_7d":
             wallet_pnl_available = True
             wallet_pnl_7d = round(latest_total - baseline_total, 2)
             wallet_pnl_method = "snapshot_delta"
@@ -268,11 +513,11 @@ def summarize_wallet_pnl(data_dir: Path, cash_flows: dict[str, Any]) -> dict[str
 
     if not snapshot_file_present:
         status = "missing"
-        reason = "missing"
+        reason = "cash_flow_unknown" if cash_flows.get("status") != "attested_full_7d" else "missing"
     elif latest is None:
         status = "blocked"
         reason = "missing"
-    elif cash_flows.get("status") != "present":
+    elif cash_flows.get("status") != "attested_full_7d":
         status = "accumulating"
         reason = "cash_flow_unknown"
     elif span_hours < REQUIRED_WALLET_HISTORY_HOURS:
@@ -281,9 +526,6 @@ def summarize_wallet_pnl(data_dir: Path, cash_flows: dict[str, Any]) -> dict[str
     elif baseline is None:
         status = "accumulating"
         reason = "need_7d_baseline"
-    elif possible_recent:
-        status = "blocked"
-        reason = "cash_flow_unknown"
     else:
         status = "ready"
         reason = "valid_7d_baseline_available"

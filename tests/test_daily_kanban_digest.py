@@ -4,7 +4,7 @@ import importlib.util
 import json
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -27,6 +27,58 @@ def load_tool_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def write_jsonl(path: Path, rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+
+def wallet_snapshots(
+    start: datetime | None = None,
+    count: int = 15,
+    step_hours: int = 12,
+    possible_deposit_at: datetime | None = None,
+) -> list[dict]:
+    start = start or datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc)
+    rows = []
+    for index in range(count):
+        at = start + timedelta(hours=step_hours * index)
+        row = {
+            "schema_version": 1,
+            "snapshot_at": at.isoformat().replace("+00:00", "Z"),
+            "api_ok": True,
+            "total_value": 100.0 + index,
+        }
+        if possible_deposit_at is not None and at == possible_deposit_at:
+            row["possible_deposit"] = True
+        rows.append(row)
+    return rows
+
+
+def cash_flow_row(
+    start: datetime,
+    end: datetime,
+    flow_type: str = "no_cash_flow_attestation",
+    **extra,
+) -> dict:
+    row = {
+        "schema_version": 2,
+        "entry_id": extra.pop("entry_id", "WCF-20260508-0001"),
+        "actor": extra.pop("actor", "pablo_manual"),
+        "type": flow_type,
+        "recorded_at": extra.pop("recorded_at", end.isoformat().replace("+00:00", "Z")),
+        "period_start": start.isoformat().replace("+00:00", "Z"),
+        "period_end": end.isoformat().replace("+00:00", "Z"),
+    }
+    if flow_type in {"deposit", "withdrawal", "adjustment"}:
+        row["amount_usdc"] = extra.pop("amount_usdc", "0")
+    row.update(extra)
+    return row
+
+
+def summarize_pnl_sources_for(module, data_dir: Path) -> dict:
+    return module.summarize_pnl_sources(data_dir, module.build_source_quality([]))
 
 
 def test_cli_dry_run_text_exit_zero():
@@ -399,52 +451,197 @@ def test_pnl_sources_marks_policy_state_without_canonical_pnl():
     assert "BANKROLL ready: blocked" in human
 
 
-def test_pnl_sources_cash_flows_present_but_wallet_still_needs_history():
+def test_cash_flows_missing_keeps_wallet_pnl_blocked(tmp_path):
     module = load_tool_module()
-    snapshot_rows = [
-        {
-            "schema_version": 1,
-            "snapshot_at": "2026-05-05T10:00:00+00:00",
-            "api_ok": True,
-            "total_value": 20.0,
-        },
-        {
-            "schema_version": 1,
-            "snapshot_at": "2026-05-06T10:00:00+00:00",
-            "api_ok": True,
-            "total_value": 21.0,
-        },
-    ]
-    cash_flow_rows = [{"date": "2026-05-06", "type": "deposit", "amount": 0}]
-    original_load_jsonl = module.load_jsonl
+    pnl_sources = summarize_pnl_sources_for(module, tmp_path)
 
-    class FakePath:
-        def __init__(self, name: str):
-            self.name = name
+    assert pnl_sources["cash_flows"]["status"] == "missing"
+    assert pnl_sources["cash_flows"]["n_records"] == 0
+    assert pnl_sources["wallet_pnl"]["wallet_pnl_available"] is False
+    assert pnl_sources["canonical_source"] == "none"
+    assert pnl_sources["bankroll_readiness"] == "blocked"
 
-        def exists(self):
-            return self.name in {"wallet_portfolio_snapshots.jsonl", "wallet_cash_flows.jsonl"}
 
-    class FakeDataDir:
-        def __truediv__(self, name: str):
-            return FakePath(name)
+def test_cash_flows_empty_unattested_does_not_unlock_wallet_pnl(tmp_path):
+    module = load_tool_module()
+    write_jsonl(tmp_path / "wallet_portfolio_snapshots.jsonl", wallet_snapshots())
+    (tmp_path / "wallet_cash_flows.jsonl").write_text("", encoding="utf-8")
 
-    def fake_load_jsonl(path, limit=500):
-        if path.name == "wallet_portfolio_snapshots.jsonl":
-            return snapshot_rows
-        if path.name == "wallet_cash_flows.jsonl":
-            return cash_flow_rows
-        return []
+    pnl_sources = summarize_pnl_sources_for(module, tmp_path)
 
-    module.load_jsonl = fake_load_jsonl
+    assert pnl_sources["cash_flows"]["status"] == "empty_unattested"
+    assert pnl_sources["cash_flows"]["coverage_days_7d"] == 0
+    assert pnl_sources["wallet_pnl"]["wallet_pnl_available"] is False
 
-    try:
-        cash_flows = module.summarize_cash_flows(FakeDataDir())
-        wallet_pnl = module.summarize_wallet_pnl(FakeDataDir(), cash_flows)
-    finally:
-        module.load_jsonl = original_load_jsonl
 
-    assert cash_flows["status"] == "present"
+def test_cash_flows_examples_only_are_rejected(tmp_path):
+    module = load_tool_module()
+    start = datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc)
+    end = start + timedelta(days=7)
+    write_jsonl(tmp_path / "wallet_portfolio_snapshots.jsonl", wallet_snapshots(start=start))
+    write_jsonl(tmp_path / "wallet_cash_flows.jsonl", [
+        cash_flow_row(start, end, entry_id="EXAMPLE-001"),
+        cash_flow_row(start, end, entry_id="WCF-EXAMPLE-MARKER", marker="EXAMPLE_ONLY"),
+    ])
+
+    pnl_sources = summarize_pnl_sources_for(module, tmp_path)
+    cash_flows = pnl_sources["cash_flows"]
+
+    assert cash_flows["status"] == "rejected_examples_only"
+    assert cash_flows["n_records_rejected"] >= 1
+    assert "example_id" in cash_flows["rejection_reasons"]
+    assert "example_marker" in cash_flows["rejection_reasons"]
+    assert pnl_sources["wallet_pnl"]["wallet_pnl_available"] is False
+
+
+def test_cash_flows_schema_v1_legacy_is_invalid(tmp_path):
+    module = load_tool_module()
+    write_jsonl(tmp_path / "wallet_portfolio_snapshots.jsonl", wallet_snapshots())
+    write_jsonl(tmp_path / "wallet_cash_flows.jsonl", [{"date": "2026-05-06", "type": "deposit", "amount": 0}])
+
+    pnl_sources = summarize_pnl_sources_for(module, tmp_path)
+
+    assert pnl_sources["cash_flows"]["status"] == "invalid"
+    assert pnl_sources["wallet_pnl"]["wallet_pnl_available"] is False
+
+
+def test_cash_flows_actor_mismatch_is_invalid(tmp_path):
+    module = load_tool_module()
+    start = datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc)
+    end = start + timedelta(days=7)
+    write_jsonl(tmp_path / "wallet_portfolio_snapshots.jsonl", wallet_snapshots(start=start))
+    write_jsonl(tmp_path / "wallet_cash_flows.jsonl", [
+        cash_flow_row(start, end, actor="not_pablo"),
+    ])
+
+    cash_flows = module.summarize_cash_flows(tmp_path)
+
+    assert cash_flows["status"] == "invalid"
+    assert "actor_mismatch" in cash_flows["rejection_reasons"]
+
+
+def test_cash_flows_rejects_pure_date_periods(tmp_path):
+    module = load_tool_module()
+    start = datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc)
+    end = start + timedelta(days=7)
+    row = cash_flow_row(start, end)
+    row["period_start"] = "2026-05-01"
+    row["period_end"] = "2026-05-08"
+    write_jsonl(tmp_path / "wallet_portfolio_snapshots.jsonl", wallet_snapshots(start=start))
+    write_jsonl(tmp_path / "wallet_cash_flows.jsonl", [row])
+
+    cash_flows = module.summarize_cash_flows(tmp_path)
+
+    assert cash_flows["status"] == "invalid"
+    assert "period_format" in cash_flows["rejection_reasons"]
+
+
+def test_cash_flows_three_day_attestation_is_partial(tmp_path):
+    module = load_tool_module()
+    start = datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc)
+    latest = start + timedelta(days=7)
+    write_jsonl(tmp_path / "wallet_portfolio_snapshots.jsonl", wallet_snapshots(start=start))
+    write_jsonl(tmp_path / "wallet_cash_flows.jsonl", [
+        cash_flow_row(latest - timedelta(days=3), latest),
+    ])
+
+    pnl_sources = summarize_pnl_sources_for(module, tmp_path)
+
+    assert pnl_sources["cash_flows"]["status"] == "attested_partial"
+    assert pnl_sources["cash_flows"]["coverage_days_7d"] == 3
+    assert pnl_sources["wallet_pnl"]["wallet_pnl_available"] is False
+
+
+def test_cash_flows_full_7d_attestation_unlocks_wallet_pnl_available(tmp_path):
+    module = load_tool_module()
+    start = datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc)
+    latest = start + timedelta(days=7)
+    write_jsonl(tmp_path / "wallet_portfolio_snapshots.jsonl", wallet_snapshots(start=start))
+    write_jsonl(tmp_path / "wallet_cash_flows.jsonl", [
+        cash_flow_row(start, latest),
+    ])
+
+    pnl_sources = summarize_pnl_sources_for(module, tmp_path)
+
+    assert pnl_sources["cash_flows"]["status"] == "attested_full_7d"
+    assert pnl_sources["wallet_pnl"]["wallet_pnl_available"] is True
+    assert pnl_sources["canonical_source"] == "none"
+    assert pnl_sources["bankroll_readiness"] == "blocked"
+
+
+def test_cash_flows_full_7d_with_unexplained_possible_deposit_is_unreconciled(tmp_path):
+    module = load_tool_module()
+    start = datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc)
+    latest = start + timedelta(days=7)
+    possible_at = start + timedelta(days=3, hours=12)
+    write_jsonl(
+        tmp_path / "wallet_portfolio_snapshots.jsonl",
+        wallet_snapshots(start=start, possible_deposit_at=possible_at),
+    )
+    write_jsonl(tmp_path / "wallet_cash_flows.jsonl", [
+        cash_flow_row(start, possible_at - timedelta(hours=12)),
+        cash_flow_row(possible_at + timedelta(hours=12), latest, entry_id="WCF-20260508-0002"),
+    ])
+
+    pnl_sources = summarize_pnl_sources_for(module, tmp_path)
+
+    assert pnl_sources["cash_flows"]["status"] == "unreconciled"
+    assert pnl_sources["wallet_pnl"]["wallet_pnl_available"] is False
+
+
+def test_cash_flows_full_7d_with_pending_adjustment_review_is_unreconciled(tmp_path):
+    module = load_tool_module()
+    start = datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc)
+    latest = start + timedelta(days=7)
+    review_at = start + timedelta(days=2)
+    write_jsonl(tmp_path / "wallet_portfolio_snapshots.jsonl", wallet_snapshots(start=start))
+    write_jsonl(tmp_path / "wallet_cash_flows.jsonl", [
+        cash_flow_row(start, latest),
+        cash_flow_row(
+            review_at,
+            review_at,
+            flow_type="adjustment",
+            entry_id="WCF-ADJ-REVIEW",
+            review_required=True,
+        ),
+    ])
+
+    pnl_sources = summarize_pnl_sources_for(module, tmp_path)
+
+    assert pnl_sources["cash_flows"]["status"] == "unreconciled"
+    assert pnl_sources["wallet_pnl"]["wallet_pnl_available"] is False
+
+
+def test_cash_flows_full_window_with_one_day_gap_is_partial(tmp_path):
+    module = load_tool_module()
+    start = datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc)
+    latest = start + timedelta(days=7)
+    write_jsonl(tmp_path / "wallet_portfolio_snapshots.jsonl", wallet_snapshots(start=start))
+    write_jsonl(tmp_path / "wallet_cash_flows.jsonl", [
+        cash_flow_row(start, start + timedelta(days=3)),
+        cash_flow_row(start + timedelta(days=4), latest, entry_id="WCF-20260508-0002"),
+    ])
+
+    pnl_sources = summarize_pnl_sources_for(module, tmp_path)
+
+    assert pnl_sources["cash_flows"]["status"] == "attested_partial"
+    assert pnl_sources["cash_flows"]["coverage_days_7d"] < 7
+    assert pnl_sources["wallet_pnl"]["wallet_pnl_available"] is False
+
+
+def test_cash_flows_valid_but_wallet_still_needs_history(tmp_path):
+    module = load_tool_module()
+    start = datetime(2026, 5, 5, 10, 0, tzinfo=timezone.utc)
+    latest = start + timedelta(days=1)
+    write_jsonl(tmp_path / "wallet_portfolio_snapshots.jsonl", wallet_snapshots(start=start, count=2, step_hours=24))
+    write_jsonl(tmp_path / "wallet_cash_flows.jsonl", [
+        cash_flow_row(latest - timedelta(days=7), latest),
+    ])
+
+    cash_flows = module.summarize_cash_flows(tmp_path)
+    wallet_pnl = module.summarize_wallet_pnl(tmp_path, cash_flows)
+
+    assert cash_flows["status"] == "attested_full_7d"
     assert cash_flows["n_records"] == 1
     assert wallet_pnl["status"] == "accumulating"
     assert wallet_pnl["phase2_ready"] is False
@@ -452,6 +649,34 @@ def test_pnl_sources_cash_flows_present_but_wallet_still_needs_history():
     assert wallet_pnl["history_span_hours"] == 24.0
     assert wallet_pnl["wallet_pnl_available"] is False
     assert wallet_pnl["wallet_pnl_method"] == "insufficient_history"
+
+
+def test_digest_would_send_stays_false_for_cash_flow_gate_states(tmp_path):
+    module = load_tool_module()
+    scenarios = [
+        ("missing", None),
+        ("empty_unattested", []),
+        ("rejected_examples_only", "example"),
+        ("attested_full_7d", "full"),
+    ]
+
+    for name, cash_fixture in scenarios:
+        data_dir = tmp_path / name
+        start = datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc)
+        latest = start + timedelta(days=7)
+        write_jsonl(data_dir / "wallet_portfolio_snapshots.jsonl", wallet_snapshots(start=start))
+        if cash_fixture == []:
+            data_dir.mkdir(parents=True, exist_ok=True)
+            (data_dir / "wallet_cash_flows.jsonl").write_text("", encoding="utf-8")
+        elif cash_fixture == "example":
+            write_jsonl(data_dir / "wallet_cash_flows.jsonl", [cash_flow_row(start, latest, entry_id="EXAMPLE-001")])
+        elif cash_fixture == "full":
+            write_jsonl(data_dir / "wallet_cash_flows.jsonl", [cash_flow_row(start, latest)])
+
+        digest = module.build_digest(data_dir)
+
+        assert digest["would_send"] is False
+        assert digest["pnl_sources"]["cash_flows"]["status"] == name
 
 
 def test_daily_digest_does_not_execute_wallet_snapshot_tool():
