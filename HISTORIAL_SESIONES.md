@@ -3837,3 +3837,60 @@ Código runtime, bot.py, trading core, BANKROLL, sizing, whitelist, city modes, 
 ### Commit
 
 `docs: close truth pipeline phase 1 observational` — push sí, deploy no.
+
+---
+
+## Sesión 300 — Daily Bot Kanban Digest 1.2 Railway verification (6 may 2026, Sonnet)
+
+**Tipo:** Documentación / cierre de sesión
+**Clasificación:** ACTION_DOCUMENTATION / WATCH_RISK
+
+### Contexto
+
+Sesión de cierre documental posterior al push del commit `d2d335e` (`fix: mark daily digest source quality`, Sesión 299 Codex). El objetivo fue verificar que Railway ejecuta el nuevo código y registrar el resultado.
+
+### Verificación Railway
+
+- **Proyecto:** `enchanting-respect` / environment `production` / service `polymarket-bot`
+- **Deployment:** `c6ebab44-49dc-4e2f-840a-ce4f647ebb15` — status `SUCCESS`
+- **Nota técnica:** el contenedor no tiene `.git`; no se pudo leer HEAD con `git rev-parse`. La confirmación funcional es directa: el digest remoto ya incluye `source_quality` y ya cuenta ciclos desde `timestamp_utc`.
+
+### Resultado digest Railway
+
+| Campo | Valor |
+|---|---|
+| `recent_cycles_24h` | 7 |
+| `recent_cycles_7d` | 55 |
+| `source_quality.status` | `contaminated` |
+| `closed_records` | 107 |
+| `contaminated_records` | 107 |
+| `contamination_rate` | 1.0 |
+| `would_send` | `false` |
+| Nivel global | `WATCH_RISK` |
+
+Warning presente: *"P/L incluye registros reconstruidos/no audit-ready; no usar para BANKROLL ni decisiones operativas."*
+
+### Interpretación
+
+1. **Bug ciclos=0 corregido en Railway** — `recent_cycles_24h=7` y `recent_cycles_7d=55` confirman que el fix de `timestamp_utc` está activo.
+2. **P/L lifecycle contaminado** — `contamination_rate=1.0` es esperado; los 107 registros incluyen históricos reconstruidos/postmortem.
+3. **No listo para Telegram real** — `would_send=false` correcto.
+4. **No autoriza BANKROLL, trading core ni Fase C.**
+
+### Siguiente bloque recomendado
+
+Diseño/auditoría de fuente limpia de P/L o reconciliación wallet/dashboard antes de habilitar Telegram real.
+
+### NO se tocó
+
+Código, `bot.py`, trading core, BANKROLL, sizing, whitelist, city modes, scheduler, reglas de riesgo, env vars, Railway, deploy manual, Telegram real, Fase C.
+
+### Documentos actualizados
+
+- `CONTEXTO.md`: entrada sesión 300 añadida al inicio.
+- `HISTORIAL_SESIONES.md`: esta entrada.
+- `agent_events.jsonl`: entrada sesión 300.
+
+### Commit
+
+`docs: record daily digest railway verification` — push sí, deploy no.
