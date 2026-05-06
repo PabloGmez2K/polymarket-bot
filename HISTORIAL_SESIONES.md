@@ -4075,3 +4075,74 @@ Idéntico al estado al inicio. Nada cambió en runtime.
 ### Siguiente paso posible
 
 Codex diff proposal de `tools/wallet_cash_flow_log.py` solo tras signoff explícito de Pablo. Sin signoff: Patch C permanece ACTION_DESIGN / NOT_IMPLEMENTED.
+
+---
+
+## Sesión 307 — 6 de mayo de 2026 (Sonnet 4.6)
+
+**Clasificación:** ACTION_DOCUMENTATION / WATCH_RISK
+**Bloque:** Hermeticity check Patch B/B' attested_full_7d
+**Veredicto:** PASS
+
+### Contexto
+
+Codex ejecutó verificación read-only de hermeticidad de Patch B/B' usando fixture sintético `attested_full_7d`. Objetivo: confirmar que `wallet_snapshot.py` y `daily_kanban_digest.py` responden correctamente al estado `attested_full_7d` sin crear datos reales, sin tocar Railway y sin abrir Patch C.
+
+### Fixture sintético
+
+- Directorio temporal: `C:\tmp\polymarket_attested_full_7d_verify` (creado y borrado al cierre).
+- `cash_flows.status = attested_full_7d`
+- `cash_flows.coverage_days_7d = 7`
+
+### Resultado de hermeticidad
+
+| Campo | Valor observado |
+|---|---|
+| `cash_flows.status` | `attested_full_7d` (vía fixture) |
+| `cash_flows.coverage_days_7d` | 7 |
+| `wallet_pnl_available` | `false` |
+| `phase2_ready` | `false` |
+| `phase2_ready_reason` | `need_more_history` |
+| `wallet_pnl_confidence` | `low` / `unavailable` según herramienta |
+| `wallet_pnl_7d` | `null` |
+| `canonical_source` | `none` |
+| `bankroll_readiness` | `blocked` |
+| `would_send` | `false` |
+
+### Tests focalizados
+
+```
+python -m pytest tests/test_wallet_snapshot.py tests/test_daily_kanban_digest.py \
+    -q -p no:cacheprovider --basetemp C:\tmp\pytest_attested_full_7d
+```
+
+**Resultado: 45 passed in 1.52s**
+
+Nota: la primera ejecución falló por permisos en el directorio Temp de usuario (`%TEMP%`). Rerun con `--basetemp` a ruta explícita funcionó correctamente.
+
+### Limpieza
+
+- `C:\tmp\polymarket_attested_full_7d_verify` borrado.
+- `C:\tmp\pytest_attested_full_7d` borrado.
+- `git status` final: sin cambios; solo warning conocido de `.pytest_cache`.
+- No commit, no push.
+
+### Invariantes confirmados al cierre
+
+- `data/wallet_cash_flows.jsonl` sigue sin existir (local).
+- `tools/wallet_cash_flow_log.py` no existe.
+- `canonical_source=none` sin cambios.
+- `bankroll_readiness=blocked` sin cambios.
+- `wallet_pnl_available=false` sin cambios.
+
+### Prioridad 1 de Opus
+
+Cerrada: read-only, hermeticidad verificada. `cash_flows.status` promociona correctamente a `attested_full_7d` bajo fixture sintético. Readiness sigue bloqueada por `need_more_history`, que es el comportamiento correcto dado que no hay historia real de 7 días.
+
+### NO se tocó
+
+`tools/wallet_cash_flow_log.py` (no existe), runtime, Railway, DB, env vars, Telegram real, `bot.py`, trading core, BANKROLL, sizing, whitelist, city modes, scheduler, reglas de riesgo, Fase C. No deploy. No commit/push todavía.
+
+### Siguiente paso posible
+
+Codex diff proposal de `tools/wallet_cash_flow_log.py` solo tras signoff explícito de Pablo. Sin signoff: Patch C permanece ACTION_DESIGN / NOT_IMPLEMENTED.
