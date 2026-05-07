@@ -17501,7 +17501,7 @@ def intra_cycle_sl_check(client):
                             f"PnL actual: <b>{pct_pnl:+.1f}%</b> "
                             f"(${float(p.get('cashPnl', 0)):+.2f})\n"
                             f"Entry ${(_entry_price_intra or 0):.2f} → ahora ${cur_price:.2f}\n"
-                            f"<i>v10.6.40: SL_intra suspendido para exact+days&le;{SL_INTRA_GUARD_DAYS_AHEAD_MAX}. "
+                            f"<i>v10.6.40: SL_intra suspendido para exact+days<={SL_INTRA_GUARD_DAYS_AHEAD_MAX}. "
                             f"Esperamos resolución del mercado.</i>"
                         )
                         guard_state["last_telegram_at"] = now_utc.isoformat()
