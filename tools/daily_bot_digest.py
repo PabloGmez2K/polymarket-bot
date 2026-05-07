@@ -8,14 +8,18 @@ explicit flag; it does not touch runtime state, scheduler state, DB, or Railway.
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 DEFAULT_SNAPSHOT_PATH = Path("data") / "observability" / "leaderboard_pnl_snapshots.jsonl"
@@ -24,6 +28,7 @@ MONEY_QUANT = Decimal("0.01")
 SOURCE = "polymarket_leaderboard"
 SOURCE_QUALITY = "external_opaque"
 TELEGRAM_TIMEOUT_SECONDS = 15
+SPAIN_TZ = "Europe/Madrid"
 
 
 class DigestError(Exception):
@@ -110,34 +115,79 @@ def bool_text(value: bool) -> str:
 def telegram_money(value: Any) -> str:
     parsed = as_decimal(value)
     if parsed is None:
-        return "sin dato"
-    return f"{parsed.quantize(MONEY_QUANT, rounding=ROUND_HALF_UP):+,.2f}"
+        return "no disponible"
+    return f"{parsed.quantize(MONEY_QUANT, rounding=ROUND_HALF_UP):+,.2f}$"
 
 
 def telegram_plain_value(value: Any) -> str:
     parsed = as_decimal(value)
     if parsed is None:
-        return "sin dato"
-    return f"{parsed.quantize(MONEY_QUANT, rounding=ROUND_HALF_UP):,.2f}"
+        return "no disponible"
+    return f"{parsed.quantize(MONEY_QUANT, rounding=ROUND_HALF_UP):,.2f}$"
 
 
 def telegram_delta(value: Any) -> str:
     parsed = as_decimal(value)
     if parsed is None:
-        return "sin dato"
+        return "no disponible"
     if parsed == Decimal("0"):
         return "sin cambios"
-    return f"{parsed.quantize(MONEY_QUANT, rounding=ROUND_HALF_UP):+,.2f}"
+    return f"{parsed.quantize(MONEY_QUANT, rounding=ROUND_HALF_UP):+,.2f}$"
 
 
 def telegram_trend_sentence(trend_label: str) -> str:
     if trend_label == "improving":
-        return "Mejorando frente al snapshot anterior."
+        return "Mejora frente al último registro válido."
     if trend_label == "worsening":
-        return "Empeorando frente al snapshot anterior."
+        return "Empeora frente al último registro válido."
     if trend_label == "flat":
-        return "Sin cambios relevantes frente al snapshot anterior."
-    return "Aun no hay una tendencia clara."
+        return "Sin cambios relevantes frente al último registro válido."
+    return "Aún no hay una tendencia clara."
+
+
+def html_text(value: Any) -> str:
+    return html.escape(str(value), quote=False)
+
+
+def bold(value: Any) -> str:
+    return f"<b>{html_text(value)}</b>"
+
+
+def strip_html_tags(message: str) -> str:
+    return html.unescape(re.sub(r"</?b>", "", message))
+
+
+def last_sunday(year: int, month: int) -> datetime:
+    day = datetime(year, month + 1, 1, tzinfo=timezone.utc) - timedelta(days=1)
+    while day.weekday() != 6:
+        day -= timedelta(days=1)
+    return day
+
+
+def madrid_offset_without_tzdata(utc_dt: datetime) -> int:
+    year = utc_dt.year
+    dst_start = last_sunday(year, 3).replace(hour=1, minute=0, second=0, microsecond=0)
+    dst_end = last_sunday(year, 10).replace(hour=1, minute=0, second=0, microsecond=0)
+    return 2 if dst_start <= utc_dt < dst_end else 1
+
+
+def format_telegram_timestamp(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw or raw == "unknown":
+        return "no disponible"
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return html_text(raw)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    try:
+        local = parsed.astimezone(ZoneInfo(SPAIN_TZ))
+        return local.strftime("%d/%m/%Y %H:%M hora España")
+    except ZoneInfoNotFoundError:
+        utc_dt = parsed.astimezone(timezone.utc)
+        local = utc_dt + timedelta(hours=madrid_offset_without_tzdata(utc_dt))
+        return local.strftime("%d/%m/%Y %H:%M hora España")
 
 
 def build_deltas(latest: dict[str, Any] | None, previous: dict[str, Any] | None) -> dict[str, float | None]:
@@ -286,22 +336,48 @@ def send_telegram_manual(message: str) -> dict[str, Any]:
             "missing_env": missing,
             "token_env_used": token_env,
         }
-    payload = {"chat_id": chat_id, "text": message}
-    req = urllib.request.Request(
-        f"https://api.telegram.org/bot{bot_token}/sendMessage",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+    def build_request(text: str, parse_mode: str | None = "HTML") -> urllib.request.Request:
+        payload = {"chat_id": chat_id, "text": text}
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+        return urllib.request.Request(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
     try:
-        with urllib.request.urlopen(req, timeout=TELEGRAM_TIMEOUT_SECONDS) as resp:
+        with urllib.request.urlopen(build_request(message), timeout=TELEGRAM_TIMEOUT_SECONDS) as resp:
             return {
                 "sent": True,
                 "reason": "sent",
                 "http_code": getattr(resp, "status", None),
+                "parse_mode": "HTML",
                 "token_env_used": token_env,
             }
     except urllib.error.HTTPError as exc:
+        if exc.code == 400:
+            try:
+                with urllib.request.urlopen(
+                    build_request(strip_html_tags(message), parse_mode=None),
+                    timeout=TELEGRAM_TIMEOUT_SECONDS,
+                ) as resp:
+                    return {
+                        "sent": True,
+                        "reason": "sent_plain_text_fallback",
+                        "http_code": getattr(resp, "status", None),
+                        "parse_mode": None,
+                        "token_env_used": token_env,
+                    }
+            except Exception as fallback_exc:
+                return {
+                    "sent": False,
+                    "reason": "TELEGRAM_API_ERROR",
+                    "http_code": exc.code,
+                    "error": f"HTTPError: {exc.code}; fallback={type(fallback_exc).__name__}",
+                    "token_env_used": token_env,
+                }
         return {
             "sent": False,
             "reason": "TELEGRAM_API_ERROR",
@@ -427,36 +503,36 @@ def render_telegram_digest(digest: dict[str, Any]) -> str:
     if not latest:
         return "\n".join(
             [
-                "RESUMEN DIARIO DEL BOT",
+                f"📊 {bold('RESUMEN DIARIO DEL BOT')}",
                 "",
-                "Ultima actualizacion",
-                "Aun no hay datos del leaderboard.",
+                f"🕒 {bold('Actualización')}",
+                "Aún no hay datos del leaderboard.",
                 "",
-                "Evolucion",
-                "P&L leaderboard: sin dato",
+                f"💰 {bold('Evolución P&L')}",
+                "P&L leaderboard: no disponible",
                 "",
-                "Tendencia",
-                "Aun no hay comparacion disponible.",
+                f"📈 {bold('Tendencia')}",
+                "Aún no hay comparación disponible.",
                 "",
-                "Actividad",
-                "Volumen leaderboard: sin dato",
+                f"🔄 {bold('Actividad')}",
+                "Volumen operado según leaderboard: no disponible",
                 "",
-                "Lectura rapida",
-                "No hay snapshot valido para resumir hoy.",
+                f"🧭 {bold('Lectura rápida')}",
+                "No hay registro válido para resumir hoy.",
                 "",
-                "Nota",
-                "Informativo. No cambia bankroll. No BUY/SELL/SKIP. No Fase C.",
+                f"ℹ️ {bold('Nota')}",
+                "Mensaje informativo. No cambia bankroll, no compra, no vende y no activa Fase C.",
             ]
         )
     deltas = digest.get("deltas") or {}
     previous = digest.get("previous")
     latest_valid = digest.get("latest_valid")
     latest_failed = not is_valid_trend_snapshot(latest)
-    update_line = str(latest.get("captured_at_utc", "unknown"))
+    update_line = format_telegram_timestamp(latest.get("captured_at_utc"))
     if latest_failed:
         update_line = "No se pudo actualizar el dato en este intento."
         if latest_valid:
-            update_line += f" Ultimo dato valido: {latest_valid.get('captured_at_utc', 'unknown')}."
+            update_line += f" Último dato válido: {format_telegram_timestamp(latest_valid.get('captured_at_utc'))}."
 
     trend_lines: list[str]
     if latest_failed:
@@ -464,50 +540,49 @@ def render_telegram_digest(digest: dict[str, Any]) -> str:
     elif previous:
         trend_lines = [
             telegram_trend_sentence(str(digest.get("trend_label", "unknown"))),
-            (
-                f"Dia {telegram_delta(deltas.get('day_delta'))} | "
-                f"Semana {telegram_delta(deltas.get('week_delta'))}"
-            ),
-            (
-                f"Mes {telegram_delta(deltas.get('month_delta'))} | "
-                f"Total {telegram_delta(deltas.get('all_delta'))}"
-            ),
+            f"• Día: {telegram_delta(deltas.get('day_delta'))}",
+            f"• Semana: {telegram_delta(deltas.get('week_delta'))}",
+            f"• Mes: {telegram_delta(deltas.get('month_delta'))}",
+            f"• Total: {telegram_delta(deltas.get('all_delta'))}",
         ]
     else:
-        trend_lines = ["Aun no hay comparacion disponible."]
+        trend_lines = ["Aún no hay comparación disponible."]
 
     reading = {
-        "improving": "El leaderboard mejora frente al corte anterior.",
-        "worsening": "El leaderboard empeora frente al corte anterior.",
-        "flat": "El leaderboard esta estable frente al corte anterior.",
-    }.get(str(digest.get("trend_label", "unknown")), "Lectura solo informativa; falta comparacion suficiente.")
+        "improving": "El bot mejora respecto al último registro válido.",
+        "worsening": "El bot empeora respecto al último registro válido.",
+        "flat": "El bot se mantiene estable respecto al último registro válido.",
+    }.get(str(digest.get("trend_label", "unknown")), "Lectura solo informativa; falta comparación suficiente.")
     if latest_valid and not is_valid_trend_snapshot(latest):
-        reading = "El ultimo intento fallo; uso solo el ultimo dato valido como referencia."
+        reading = "El último intento falló; uso solo el último dato válido como referencia."
 
     lines = [
-        "RESUMEN DIARIO DEL BOT",
+        f"📊 {bold('RESUMEN DIARIO DEL BOT')}",
         "",
-        "Ultima actualizacion",
+        f"🕒 {bold('Actualización')}",
         update_line,
         "",
-        "Evolucion",
-        "P&L leaderboard",
-        f"Dia {telegram_money(latest.get('pnl_day'))} | Semana {telegram_money(latest.get('pnl_week'))}",
-        f"Mes {telegram_money(latest.get('pnl_month'))} | Total {telegram_money(latest.get('pnl_all'))}",
+        f"💰 {bold('Evolución P&L')}",
+        f"• Día: {telegram_money(latest.get('pnl_day'))}",
+        f"• Semana: {telegram_money(latest.get('pnl_week'))}",
+        f"• Mes: {telegram_money(latest.get('pnl_month'))}",
+        f"• Total histórico: {telegram_money(latest.get('pnl_all'))}",
         "",
-        "Tendencia",
+        f"📈 {bold('Tendencia')}",
         *trend_lines,
         "",
-        "Actividad",
-        "Volumen leaderboard",
-        f"Dia {telegram_plain_value(latest.get('vol_day'))} | Semana {telegram_plain_value(latest.get('vol_week'))}",
-        f"Mes {telegram_plain_value(latest.get('vol_month'))} | Total {telegram_plain_value(latest.get('vol_all'))}",
+        f"🔄 {bold('Actividad')}",
+        "Volumen operado según leaderboard:",
+        f"• Día: {telegram_plain_value(latest.get('vol_day'))}",
+        f"• Semana: {telegram_plain_value(latest.get('vol_week'))}",
+        f"• Mes: {telegram_plain_value(latest.get('vol_month'))}",
+        f"• Total histórico: {telegram_plain_value(latest.get('vol_all'))}",
         "",
-        "Lectura rapida",
+        f"🧭 {bold('Lectura rápida')}",
         reading,
         "",
-        "Nota",
-        "Informativo. No cambia bankroll. No BUY/SELL/SKIP. No Fase C.",
+        f"ℹ️ {bold('Nota')}",
+        "Mensaje informativo. No cambia bankroll, no compra, no vende y no activa Fase C.",
     ]
     return "\n".join(lines)
 

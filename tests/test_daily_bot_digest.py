@@ -66,6 +66,8 @@ def run_cli(*args: str, snapshot_file: Path) -> subprocess.CompletedProcess[str]
         [sys.executable, str(TOOL_PATH), *args, "--snapshot-file", str(snapshot_file)],
         cwd=REPO_ROOT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         capture_output=True,
         timeout=30,
     )
@@ -248,11 +250,12 @@ def test_message_always_keeps_observability_only_and_no_bankroll():
     assert "usable_for_bankroll=false" in digest["message"]
     assert "Observability only." in digest["message"]
     assert "No BANKROLL increase." in digest["message"]
-    for message in (digest["message"], digest["telegram_preview"]):
-        assert "No BUY/SELL/SKIP." in message
-        assert "No Fase C." in message
-    assert "Informativo." in digest["telegram_preview"]
-    assert "No cambia bankroll." in digest["telegram_preview"]
+    assert "No BUY/SELL/SKIP." in digest["message"]
+    assert "No Fase C." in digest["message"]
+    assert "Mensaje informativo." in digest["telegram_preview"]
+    assert "No cambia bankroll" in digest["telegram_preview"]
+    assert "no compra, no vende" in digest["telegram_preview"]
+    assert "no activa Fase C" in digest["telegram_preview"]
 
 
 def test_volume_is_leaderboard_trading_volume_not_trade_count():
@@ -292,8 +295,8 @@ def test_telegram_preview_does_not_send_or_require_env_vars(monkeypatch):
         result = run_cli("--telegram-preview", snapshot_file=path)
 
     assert result.returncode == 0, result.stderr
-    assert "RESUMEN DIARIO DEL BOT" in result.stdout
-    assert "Volumen leaderboard" in result.stdout
+    assert "📊 <b>RESUMEN DIARIO DEL BOT</b>" in result.stdout
+    assert "Volumen operado según leaderboard" in result.stdout
     assert "No cambia bankroll" in result.stdout
     assert "sent" not in result.stdout.lower()
     assert "TELEGRAM_BOT_TOKEN" not in result.stdout
@@ -314,20 +317,26 @@ def test_telegram_preview_is_human_readable_and_hides_technical_fields():
 
     preview = digest["telegram_preview"]
     for expected in (
-        "RESUMEN DIARIO DEL BOT",
-        "Ultima actualizacion",
-        "Evolucion",
-        "Tendencia",
-        "Actividad",
-        "Lectura rapida",
-        "Nota",
-        "Dia +1.39 | Semana +4.55",
-        "Mes +2.83 | Total -29.81",
-        "Dia sin cambios | Semana sin cambios",
-        "Mes sin cambios | Total sin cambios",
-        "Informativo. No cambia bankroll. No BUY/SELL/SKIP. No Fase C.",
+        "📊 <b>RESUMEN DIARIO DEL BOT</b>",
+        "🕒 <b>Actualización</b>",
+        "07/05/2026 21:00 hora España",
+        "💰 <b>Evolución P&amp;L</b>",
+        "📈 <b>Tendencia</b>",
+        "🔄 <b>Actividad</b>",
+        "🧭 <b>Lectura rápida</b>",
+        "ℹ️ <b>Nota</b>",
+        "• Día: +1.39$",
+        "• Semana: +4.55$",
+        "• Mes: +2.83$",
+        "• Total histórico: -29.81$",
+        "• Día: sin cambios",
+        "• Semana: sin cambios",
+        "• Mes: sin cambios",
+        "• Total: sin cambios",
+        "Mensaje informativo. No cambia bankroll, no compra, no vende y no activa Fase C.",
     ):
         assert expected in preview
+    assert "2026-05-07T19:00:00Z" not in preview
     for hidden in (
         "source_quality=external_opaque",
         "dashboard_equivalent=false",
@@ -361,6 +370,7 @@ def test_telegram_preview_failed_snapshot_uses_human_error_copy():
 
     preview = digest["telegram_preview"]
     assert "No se pudo actualizar el dato en este intento." in preview
+    assert "Último dato válido: 07/05/2026 20:00 hora España." in preview
     assert "query_status=failed" not in preview
     assert "query_status: failed" not in preview
 
@@ -372,7 +382,7 @@ def test_telegram_preview_without_previous_snapshot_uses_human_copy():
         write_jsonl(path, [snapshot()])
         digest = module.build_digest(path)
 
-    assert "Aun no hay comparacion disponible." in digest["telegram_preview"]
+    assert "Aún no hay comparación disponible." in digest["telegram_preview"]
 
 
 def test_manual_telegram_send_requires_explicit_flag(monkeypatch):
@@ -495,10 +505,46 @@ def test_manual_telegram_send_uses_existing_env_without_printing_secrets(monkeyp
     assert result["reason"] == "sent"
     assert result["token_env_used"] == "TELEGRAM_BOT_TOKEN"
     assert result["http_code"] == 200
+    body = json.loads(captured["body"])
+    assert body["parse_mode"] == "HTML"
+    assert body["text"] == message
     assert "secret-token" in captured["url"]
     assert "123456789" in captured["body"]
     assert "secret-token" not in json.dumps(result)
     assert "123456789" not in json.dumps(result)
+
+
+def test_manual_telegram_send_html_parse_mode_falls_back_to_plain_text(monkeypatch):
+    module = load_tool()
+    requests = []
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def fake_urlopen(req, timeout):
+        requests.append(json.loads(req.data.decode("utf-8")))
+        if len(requests) == 1:
+            raise urllib.error.HTTPError(req.full_url, 400, "Bad Request", hdrs=None, fp=None)
+        return Response()
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "secret-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "123456789")
+    monkeypatch.setattr(module.urllib.request, "urlopen", fake_urlopen)
+
+    result = module.send_telegram_manual("📊 <b>RESUMEN</b>")
+
+    assert result["sent"] is True
+    assert result["reason"] == "sent_plain_text_fallback"
+    assert requests[0]["parse_mode"] == "HTML"
+    assert requests[0]["text"] == "📊 <b>RESUMEN</b>"
+    assert "parse_mode" not in requests[1]
+    assert requests[1]["text"] == "📊 RESUMEN"
 
 
 def test_manual_telegram_send_api_error_does_not_retry(monkeypatch):
