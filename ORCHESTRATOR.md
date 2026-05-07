@@ -27,7 +27,7 @@ El orquestador **no implementa directamente**. Su trabajo es:
 - Elegir el agente correcto (Opus / Sonnet / Codex) según la tarea.
 - Preparar prompts limpios, autocontenidos, con scope explícito.
 - Pedir cierre de sesión antes de cambiar de agente si la sesión actual quedó cargada.
-- Mantener economía de tokens: no repetir contexto completo en continuaciones; referenciar archivos.
+- Mantener economía de tokens: no repetir contexto completo en continuaciones; referenciar archivos. No actualizar `CONTEXTO.md` si no cambia estado vivo; `HISTORIAL_SESIONES.md` + `agent_events.jsonl` bastan para microcierres. Documentar sólo cuando cambia contrato, criterio o decisión futura.
 - Resumir cierres y handoffs sin duplicar lo que ya está en `CONTEXTO.md` / `HISTORIAL_SESIONES.md`.
 
 ---
@@ -48,11 +48,13 @@ Regla: **default LITE/NORMAL**. FULL requiere autorización explícita de Pablo 
 
 Para cualquier prompt que combine varios pasos:
 
+**Definición de done** — en bloques delicados, acordar explícitamente antes de empezar: objetivo mínimo, no-objetivos, agente correcto, scope permitido, validaciones y condiciones de parada.
+
 1. **Precheck**: confirmar archivos, ramas, scope, autorización.
 2. **Ejecutar** la tarea acotada.
 3. **Validar** (lectura de diff, test, audit, lo que aplique).
 4. **Cierre condicional**: si OK y estaba autorizado, commit/push; si no, dejar local.
-5. **Si aparece algo fuera de scope** → parar y reportar. Nunca expandir alcance silenciosamente.
+5. **Si aparece algo fuera de scope** → parar y reportar. Nunca expandir alcance silenciosamente. Si aparece una alarma nueva durante el bloque → parar, reclasificar y acordar antes de continuar.
 
 ---
 
@@ -63,6 +65,8 @@ Para cualquier prompt que combine varios pasos:
 - **Codex** — patches, tests, scripts, `verify_before_deploy.py`, Railway/logs, queries DB controladas, investigación con código.
 
 Regla de eficiencia: delegar a Codex patches, tests, verificaciones técnicas e investigación técnica; usar Sonnet para documentación larga, contratos, cierres y síntesis. Reservar Opus para lo que sólo Opus puede hacer.
+
+Secuencia de referencia para guards / SL / riesgo: **Codex** audita → **Opus** cierra semántica → **Sonnet** documenta → **Codex** implementa `LOG_ONLY` → verificar Railway auto-deploy hasta `SUCCESS` / `FAILED`.
 
 ---
 
@@ -77,6 +81,10 @@ Regla de eficiencia: delegar a Codex patches, tests, verificaciones técnicas e 
 - **Herramientas nuevas que afecten runtime**: default `OFF` / `LOG_ONLY`. Nunca activas por default.
 - **Railway**: usar `tools/railway_safe.ps1`, seguir `OPERATIONS_PLAYBOOK.md`.
 - **Docs históricas** (`CONTEXTO.md`, `HISTORIAL_SESIONES.md`): nunca `replace_all` con versiones — corrompe entradas.
+- **Si auditoría read-only deriva en riesgo / guard / SL / BANKROLL / Fase C**: cerrar diagnóstico y abrir Opus antes de cualquier patch.
+- **Antes de documentar o implementar campos que afecten interpretación de riesgo**: cerrar semántica con Opus.
+- **Cohortes mezcladas**: no emitir conclusiones globales; resultado → `WATCH_RISK` / `WAITING_EVIDENCE`, no `ACTIONABLE`, salvo revisión Opus.
+- **Cambios en `bot.py` aunque sean `LOG_ONLY` / copy / logging**: ciclo completo — validaciones, commit, push si autorizado, observar Railway auto-deploy hasta `SUCCESS` / `FAILED`.
 
 ---
 
@@ -87,6 +95,7 @@ Regla de eficiencia: delegar a Codex patches, tests, verificaciones técnicas e 
 - No tooling por tooling.
 - Una alarma sólo merece trabajo si **cambia una decisión**.
 - Si no cambia nada operativo, no se construye.
+- Separar siempre: dato observado / interpretación / copy de alarma / decisión ejecutable. No combinar en el mismo paso ni con el mismo agente.
 
 ---
 
