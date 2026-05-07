@@ -426,6 +426,10 @@ SL_INTRA_GUARD_EXACT_NEAR_RESOLUTION = os.getenv("SL_INTRA_GUARD_EXACT_NEAR_RESO
 SL_INTRA_GUARD_DAYS_AHEAD_MAX = int(os.getenv("SL_INTRA_GUARD_DAYS_AHEAD_MAX", "1"))
 SL_INTRA_GUARD_REVIEW_MIN_SKIPS = int(os.getenv("SL_INTRA_GUARD_REVIEW_MIN_SKIPS", "5"))
 SL_INTRA_GUARD_TELEGRAM_COOLDOWN_MIN = int(os.getenv("SL_INTRA_GUARD_TELEGRAM_COOLDOWN_MIN", "60"))
+SL_INTRA_GUARD_COHORT_SCHEMA_VERSION = "sl_intra_guard_cohort_v1"
+SL_INTRA_GUARD_CATCHABLE_THRESHOLD_PCT = -35.0
+SL_INTRA_GUARD_DEEP_DRAWDOWN_LOW_PCT = -75.0
+SL_INTRA_GUARD_DEEP_DRAWDOWN_HIGH_PCT = -35.0
 # SL_intra Hazard Monitor L2: observador puro bajo L1, LOG_ONLY y default OFF.
 SL_INTRA_HAZARD_MONITOR_ENABLED = os.getenv("SL_INTRA_HAZARD_MONITOR_ENABLED", "0").lower() in ("1", "true", "yes", "on")
 SL_INTRA_HAZARD_MONITOR_LOG_ONLY = os.getenv("SL_INTRA_HAZARD_MONITOR_LOG_ONLY", "1").lower() in ("1", "true", "yes", "on")
@@ -2388,6 +2392,56 @@ def _sl_intra_guard_should_skip(condition, days_ahead):
         return int(days_ahead) <= SL_INTRA_GUARD_DAYS_AHEAD_MAX
     except (ValueError, TypeError):
         return False
+
+
+def _sl_intra_guard_cohort_fields(pct_pnl_at_skip):
+    """Classify SL_intra guard skip audit events for LOG_ONLY review analytics."""
+    base = {
+        "sl_window_catchable_threshold": SL_INTRA_GUARD_CATCHABLE_THRESHOLD_PCT,
+        "deep_drawdown_threshold_high": SL_INTRA_GUARD_DEEP_DRAWDOWN_HIGH_PCT,
+        "deep_drawdown_threshold_low": SL_INTRA_GUARD_DEEP_DRAWDOWN_LOW_PCT,
+        "cohort_schema_version": SL_INTRA_GUARD_COHORT_SCHEMA_VERSION,
+    }
+    if pct_pnl_at_skip is None or pct_pnl_at_skip == "":
+        base.update({
+            "sl_window_catchable": None,
+            "deep_drawdown_at_skip": None,
+            "cohort": "unknown",
+            "cohort_reason": "pct_pnl_at_skip_missing",
+        })
+        return base
+    try:
+        pct = float(pct_pnl_at_skip)
+    except (ValueError, TypeError):
+        base.update({
+            "sl_window_catchable": None,
+            "deep_drawdown_at_skip": None,
+            "cohort": "unknown",
+            "cohort_reason": "pct_pnl_at_skip_invalid",
+        })
+        return base
+    if pct > SL_INTRA_GUARD_CATCHABLE_THRESHOLD_PCT:
+        base.update({
+            "sl_window_catchable": True,
+            "deep_drawdown_at_skip": False,
+            "cohort": "zone_a",
+            "cohort_reason": "pct_pnl_at_skip_gt_-35_leverage_real",
+        })
+    elif pct > SL_INTRA_GUARD_DEEP_DRAWDOWN_LOW_PCT:
+        base.update({
+            "sl_window_catchable": False,
+            "deep_drawdown_at_skip": True,
+            "cohort": "zone_b",
+            "cohort_reason": "pct_pnl_at_skip_between_-75_and_-35_deep_drawdown",
+        })
+    else:
+        base.update({
+            "sl_window_catchable": False,
+            "deep_drawdown_at_skip": False,
+            "cohort": "zone_c",
+            "cohort_reason": "pct_pnl_at_skip_lte_-75_inherited_loss",
+        })
+    return base
 
 
 def _extract_logic_series(value):
@@ -10571,11 +10625,17 @@ def maybe_run_sl_intra_guard_review(state, now=None):
             review["started_at"] = skips[0].get("skipped_at") or now.isoformat()
         return True
 
-    # Calcular hipotetico vs real
+    # Calcular hipotetico vs real. Cohorts are LOG_ONLY analytics; they do not affect guard behavior.
     real_total = 0.0
     hypo_total = 0.0
     wins = 0
     losses = 0
+    cohort_stats = {
+        "zone_a": {"label": "Zona A / leverage-real", "n": 0, "wins": 0, "losses": 0, "real_total": 0.0, "hypo_total": 0.0},
+        "zone_b": {"label": "Zona B / deep drawdown", "n": 0, "wins": 0, "losses": 0, "real_total": 0.0, "hypo_total": 0.0},
+        "zone_c": {"label": "Zona C / inherited loss", "n": 0, "wins": 0, "losses": 0, "real_total": 0.0, "hypo_total": 0.0},
+        "unknown": {"label": "Unknown / pct missing", "n": 0, "wins": 0, "losses": 0, "real_total": 0.0, "hypo_total": 0.0},
+    }
     rows = []
     for s, real_pnl, close_reason in resolved_skips:
         # Hipotetico: si SL hubiera disparado, perdida = pct_pnl_at_skip% * current_value_at_skip
@@ -10583,9 +10643,14 @@ def maybe_run_sl_intra_guard_review(state, now=None):
         # pero tomamos pct_pnl_at_skip directamente como aproximacion conservadora.
         try:
             current_value = float(s.get("current_value") or 0)
-            pct = float(s.get("pct_pnl_at_skip") or 0)
+            pct_raw = s.get("pct_pnl_at_skip")
+            pct = float(pct_raw) if pct_raw is not None and pct_raw != "" else 0.0
         except (ValueError, TypeError):
             current_value, pct = 0.0, 0.0
+        cohort_fields = _sl_intra_guard_cohort_fields(s.get("pct_pnl_at_skip"))
+        cohort = str(s.get("cohort") or cohort_fields.get("cohort") or "unknown")
+        if cohort not in cohort_stats:
+            cohort = "unknown"
         hypo_loss = current_value * (pct / 100.0)
         real_total += real_pnl
         hypo_total += hypo_loss
@@ -10593,6 +10658,14 @@ def maybe_run_sl_intra_guard_review(state, now=None):
             wins += 1
         else:
             losses += 1
+        cs = cohort_stats[cohort]
+        cs["n"] += 1
+        cs["real_total"] += real_pnl
+        cs["hypo_total"] += hypo_loss
+        if real_pnl > 0:
+            cs["wins"] += 1
+        else:
+            cs["losses"] += 1
         rows.append({
             "city": s.get("city", "?"),
             "outcome": s.get("outcome", "?"),
@@ -10600,43 +10673,90 @@ def maybe_run_sl_intra_guard_review(state, now=None):
             "real_pnl": real_pnl,
             "hypo_loss": hypo_loss,
             "close_reason": close_reason,
+            "cohort": cohort,
         })
 
     delta = real_total - hypo_total
-    if delta > 0:
+    for cs in cohort_stats.values():
+        cs["delta"] = cs["real_total"] - cs["hypo_total"]
+
+    zone_a = cohort_stats["zone_a"]
+    n_zone_a_resolved = int(zone_a["n"])
+    mixed_cohorts = sum(1 for cs in cohort_stats.values() if cs["n"] > 0) > 1
+    if n_zone_a_resolved < 6:
         verdict = (
-            f"✅ El guard <b>esta funcionando</b>: real ${real_total:+.2f} vs "
-            f"hipotetico SL ${hypo_total:+.2f} = <b>${delta:+.2f}</b> a favor."
+            "REVIEW PRELIMINAR — muestra insuficiente / mezclada. "
+            "No cambiar guard/env vars sin revisión Opus."
         )
-    elif delta < 0:
+    elif zone_a["delta"] > 0:
         verdict = (
-            f"⚠️ El guard <b>esta perjudicando</b>: real ${real_total:+.2f} vs "
-            f"hipotetico SL ${hypo_total:+.2f} = <b>${delta:+.2f}</b>. "
-            f"Considerar revertir o subir threshold."
+            f"Zona A <b>funcionando</b>: real ${zone_a['real_total']:+.2f} vs "
+            f"hipotetico SL ${zone_a['hypo_total']:+.2f} = <b>${zone_a['delta']:+.2f}</b>."
+        )
+    elif zone_a["delta"] < 0:
+        verdict = (
+            f"Zona A <b>perjudicando</b>: real ${zone_a['real_total']:+.2f} vs "
+            f"hipotetico SL ${zone_a['hypo_total']:+.2f} = <b>${zone_a['delta']:+.2f}</b>. "
+            "Revisar con Opus antes de cambiar guard/env vars."
         )
     else:
         verdict = (
-            f"\U0001f7e1 Resultado <b>neutro</b>: real ${real_total:+.2f} = hipotetico SL ${hypo_total:+.2f}."
+            f"Zona A <b>neutra</b>: real ${zone_a['real_total']:+.2f} = "
+            f"hipotetico SL ${zone_a['hypo_total']:+.2f}."
         )
 
-    rows_text = "\n".join(
-        f"• {r['city']} {r['outcome']} pct@skip={r['pct_at_skip']:+.1f}% "
-        f"real=${r['real_pnl']:+.2f} (hipo=${r['hypo_loss']:+.2f})"
-        for r in rows[:8]
-    )
-    if len(rows) > 8:
-        rows_text += f"\n• ... y {len(rows) - 8} mas"
+    cohort_summary_lines = []
+    for cohort_key in ("zone_a", "zone_b", "zone_c", "unknown"):
+        cs = cohort_stats[cohort_key]
+        if cs["n"] <= 0:
+            continue
+        note = ""
+        if cohort_key == "zone_a":
+            note = " | base del veredicto operativo"
+        elif cohort_key == "zone_b":
+            note = " | evidencia separada"
+        elif cohort_key == "zone_c":
+            note = " | excluida del veredicto principal"
+        cohort_summary_lines.append(
+            f"- {cs['label']}: n={cs['n']} W={cs['wins']} L={cs['losses']} "
+            f"real=${cs['real_total']:+.2f} hipo=${cs['hypo_total']:+.2f} "
+            f"delta=${cs['delta']:+.2f}{note}"
+        )
+    cohort_summary_text = "\n".join(cohort_summary_lines) or "- Sin cohortes resueltas."
+
+    rows_text_parts = []
+    for cohort_key in ("zone_a", "zone_b", "zone_c", "unknown"):
+        cohort_rows = [r for r in rows if r["cohort"] == cohort_key]
+        if not cohort_rows:
+            continue
+        rows_text_parts.append(f"<b>{cohort_stats[cohort_key]['label']}</b>:")
+        for r in cohort_rows[:6]:
+            rows_text_parts.append(
+                f"- {r['city']} {r['outcome']} pct@skip={r['pct_at_skip']:+.1f}% "
+                f"real=${r['real_pnl']:+.2f} (hipo=${r['hypo_loss']:+.2f})"
+            )
+        if len(cohort_rows) > 6:
+            rows_text_parts.append(f"- ... y {len(cohort_rows) - 6} mas")
+    rows_text = "\n".join(rows_text_parts)
+
+    mixed_note = ""
+    if mixed_cohorts:
+        mixed_note = (
+            "\n\nMuestra mezclada: el delta global se muestra como contexto, "
+            "pero no es veredicto accionable del guard."
+        )
 
     msg = (
         f"\U0001f6e1️ <b>Review guard SL_intra v10.6.40</b>\n\n"
         f"Skips resueltos: <b>{len(resolved_skips)}</b> "
         f"(W={wins}, L={losses}) | Pendientes: <b>{len(pending_skips)}</b>\n"
         f"Resueltos PnL real: <b>${real_total:+.2f}</b>\n"
-        f"Hipotetico si SL hubiera disparado: <b>${hypo_total:+.2f}</b>\n\n"
-        f"{verdict}\n\n"
+        f"Hipotetico si SL hubiera disparado: <b>${hypo_total:+.2f}</b>\n"
+        f"Delta global: <b>${delta:+.2f}</b>{mixed_note}\n\n"
+        f"<b>Veredicto</b>: {verdict}\n\n"
+        f"<b>Resumen por cohortes</b>:\n{cohort_summary_text}\n\n"
         f"<b>Detalle</b>:\n{rows_text}\n\n"
-        f"<i>Si delta es claramente negativo, evaluar SL_INTRA_GUARD_EXACT_NEAR_RESOLUTION=0 "
-        f"o subir SL_INTRA_GUARD_DAYS_AHEAD_MAX. Si delta es positivo, mantener.</i>"
+        f"<i>Zona B se conserva como evidencia separada. Zona C queda excluida del veredicto principal.</i>"
     )
 
     try:
@@ -10658,6 +10778,19 @@ def maybe_run_sl_intra_guard_review(state, now=None):
         "real_total": round(real_total, 2),
         "hypo_total": round(hypo_total, 2),
         "delta": round(delta, 2),
+        "n_zone_a_resolved": n_zone_a_resolved,
+        "mixed_cohorts": mixed_cohorts,
+        "cohorts": {
+            key: {
+                "n": int(cs["n"]),
+                "wins": int(cs["wins"]),
+                "losses": int(cs["losses"]),
+                "real_total": round(cs["real_total"], 2),
+                "hypo_total": round(cs["hypo_total"], 2),
+                "delta": round(cs["delta"], 2),
+            }
+            for key, cs in cohort_stats.items()
+        },
     }
     # Marcar tambien en guard_state (idempotencia cruzada)
     try:
@@ -17476,6 +17609,7 @@ def intra_cycle_sl_check(client):
                     "shares": float(p.get("size", 0)),
                     "bot_version": BOT_VERSION,
                 }
+                _entry_pct_pnl_event.update(_sl_intra_guard_cohort_fields(_entry_pct_pnl_event.get("pct_pnl_at_skip")))
                 guard_state.setdefault("skips", []).append(_entry_pct_pnl_event)
                 guard_state_changed = True
                 n_guard_skipped += 1
