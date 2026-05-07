@@ -2,8 +2,8 @@
 """Run the local daily leaderboard snapshot + digest observability flow.
 
 This runner is local-only. It can write the leaderboard JSONL snapshot when
-explicitly requested, but it never sends Telegram messages, reads Telegram
-environment variables, touches runtime state, DB, Railway, or trading code.
+explicitly requested. Telegram delivery is manual-only behind an explicit flag;
+it never touches runtime state, DB, Railway, scheduler, or trading code.
 """
 
 from __future__ import annotations
@@ -70,6 +70,10 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
         temp_payload["temporary_snapshot"] = True
         digest = daily_bot_digest.build_digest_from_rows(rows + [temp_payload], path)
 
+    telegram_send_result = {"sent": False, "reason": "not_attempted"}
+    if args.send_telegram_manual:
+        telegram_send_result = daily_bot_digest.send_telegram_manual(digest["telegram_preview"])
+
     return {
         "mode": "write_snapshot" if args.write_snapshot else "dry_run",
         "snapshot_file": str(path),
@@ -89,8 +93,15 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
             "fase_c": "No Fase C.",
         },
         "digest": digest,
-        "message": render_run_message(digest, payload, written, args.telegram_preview),
+        "message": render_run_message(
+            digest,
+            payload,
+            written,
+            args.telegram_preview or args.send_telegram_manual,
+            telegram_send_result if args.send_telegram_manual else None,
+        ),
         "telegram_preview": digest["telegram_preview"],
+        "telegram_manual_send": telegram_send_result,
     }
 
 
@@ -99,6 +110,7 @@ def render_run_message(
     snapshot: dict[str, Any],
     written: bool,
     include_telegram_preview: bool,
+    telegram_send_result: dict[str, Any] | None = None,
 ) -> str:
     lines = [
         "DAILY BOT OBSERVABILITY RUN",
@@ -114,7 +126,14 @@ def render_run_message(
         digest["message"],
     ]
     if include_telegram_preview:
-        lines.extend(["", "TELEGRAM PREVIEW ONLY", digest["telegram_preview"]])
+        heading = "TELEGRAM MANUAL SEND PREVIEW" if telegram_send_result is not None else "TELEGRAM PREVIEW ONLY"
+        lines.extend(["", heading, digest["telegram_preview"]])
+    if telegram_send_result is not None:
+        lines.extend(["", f"telegram_manual_send={telegram_send_result.get('reason')}"])
+        if telegram_send_result.get("missing_env"):
+            lines.append("missing_env=" + ",".join(telegram_send_result["missing_env"]))
+        if telegram_send_result.get("error"):
+            lines.append("telegram_error=" + str(telegram_send_result["error"]))
     return "\n".join(lines)
 
 
@@ -124,6 +143,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     mode.add_argument("--dry-run", action="store_true", help="Build a temporary snapshot and digest without writing JSONL.")
     mode.add_argument("--write-snapshot", action="store_true", help="Append a snapshot JSONL row before building the digest.")
     parser.add_argument("--telegram-preview", action="store_true", help="Print Telegram-ready preview text only; never sends.")
+    parser.add_argument(
+        "--send-telegram-manual",
+        action="store_true",
+        help="Manually send the Telegram digest after printing the preview. No scheduler or retries.",
+    )
     parser.add_argument("--json", action="store_true", help="Print structured JSON.")
     parser.add_argument("--snapshot-file", default=str(DEFAULT_SNAPSHOT_PATH), help="Leaderboard snapshot JSONL path.")
     parser.add_argument("--wallet", help="Manual wallet/proxy wallet override. Output only shows masked wallet.")
@@ -149,8 +173,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
+        if args.send_telegram_manual and result["telegram_manual_send"].get("reason") == "TELEGRAM_API_ERROR":
+            return 2
         return 0
     print(result["message"])
+    if args.send_telegram_manual and result["telegram_manual_send"].get("reason") == "TELEGRAM_API_ERROR":
+        return 2
     return 0
 
 

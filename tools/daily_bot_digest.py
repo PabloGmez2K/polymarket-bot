@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """Local Daily Bot Digest from external leaderboard P&L snapshots.
 
-This tool is read-only and preview-only. It does not send Telegram messages,
-read Telegram environment variables, touch runtime state, or write files.
+This tool is read-only by default. Telegram delivery is manual-only behind an
+explicit flag; it does not touch runtime state, scheduler state, DB, or Railway.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import urllib.error
+import urllib.request
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any
@@ -19,6 +22,7 @@ DEFAULT_SNAPSHOT_PATH = Path("data") / "observability" / "leaderboard_pnl_snapsh
 MONEY_QUANT = Decimal("0.01")
 SOURCE = "polymarket_leaderboard"
 SOURCE_QUALITY = "external_opaque"
+TELEGRAM_TIMEOUT_SECONDS = 15
 
 
 class DigestError(Exception):
@@ -183,6 +187,69 @@ def build_digest(path: Path) -> dict[str, Any]:
     return build_digest_from_rows(read_snapshots(path), path)
 
 
+def resolve_telegram_env() -> tuple[str, str, str | None, list[str]]:
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    token_env = "TELEGRAM_BOT_TOKEN" if bot_token else None
+    if not bot_token:
+        bot_token = os.getenv("TELEGRAM_TOKEN", "")
+        token_env = "TELEGRAM_TOKEN" if bot_token else None
+    chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+    missing: list[str] = []
+    if not bot_token:
+        missing.append("TELEGRAM_BOT_TOKEN or TELEGRAM_TOKEN")
+    if not chat_id:
+        missing.append("TELEGRAM_CHAT_ID")
+    return bot_token, chat_id, token_env, missing
+
+
+def send_telegram_manual(message: str) -> dict[str, Any]:
+    bot_token, chat_id, token_env, missing = resolve_telegram_env()
+    if missing:
+        return {
+            "sent": False,
+            "reason": "TELEGRAM_NOT_CONFIGURED",
+            "missing_env": missing,
+            "token_env_used": token_env,
+        }
+    payload = {"chat_id": chat_id, "text": message}
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{bot_token}/sendMessage",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=TELEGRAM_TIMEOUT_SECONDS) as resp:
+            return {
+                "sent": True,
+                "reason": "sent",
+                "http_code": getattr(resp, "status", None),
+                "token_env_used": token_env,
+            }
+    except urllib.error.HTTPError as exc:
+        return {
+            "sent": False,
+            "reason": "TELEGRAM_API_ERROR",
+            "http_code": exc.code,
+            "error": f"HTTPError: {exc.code}",
+            "token_env_used": token_env,
+        }
+    except urllib.error.URLError as exc:
+        return {
+            "sent": False,
+            "reason": "TELEGRAM_API_ERROR",
+            "error": f"URLError: {exc.reason}",
+            "token_env_used": token_env,
+        }
+    except TimeoutError as exc:
+        return {
+            "sent": False,
+            "reason": "TELEGRAM_API_ERROR",
+            "error": f"TimeoutError: {exc}",
+            "token_env_used": token_env,
+        }
+
+
 def render_human_digest(digest: dict[str, Any]) -> str:
     latest = digest.get("latest")
     previous = digest.get("previous")
@@ -192,8 +259,22 @@ def render_human_digest(digest: dict[str, Any]) -> str:
     if not latest:
         lines.extend(
             [
-                "No leaderboard P&L snapshot data.",
+                "data_unavailable: No leaderboard P&L snapshot data.",
                 f"snapshot_count={digest.get('snapshot_count', 0)}",
+                "",
+                "P&L leaderboard:",
+                "DAY: unknown",
+                "WEEK: unknown",
+                "MONTH: unknown",
+                "ALL: unknown",
+                "",
+                "Leaderboard trading volume:",
+                "DAY: unknown",
+                "WEEK: unknown",
+                "MONTH: unknown",
+                "ALL: unknown",
+                "",
+                "Trend vs previous valid snapshot:",
                 "trend_label=unknown",
                 "",
                 "Data quality:",
@@ -272,8 +353,19 @@ def render_telegram_digest(digest: dict[str, Any]) -> str:
         return "\n".join(
             [
                 "DAILY BOT DIGEST",
-                "No leaderboard P&L snapshot data.",
+                "data_unavailable: No leaderboard P&L snapshot data.",
+                "",
+                "P&L leaderboard",
+                "DAY unknown | WEEK unknown",
+                "MONTH unknown | ALL unknown",
+                "",
+                "Leaderboard trading volume",
+                "DAY unknown | WEEK unknown",
+                "MONTH unknown | ALL unknown",
+                "",
+                "Trend vs previous valid snapshot",
                 "trend_label=unknown",
+                "",
                 f"source={SOURCE} | source_quality={SOURCE_QUALITY}",
                 "dashboard_equivalent=false",
                 "usable_for_digest=true | usable_for_trend=true | usable_for_bankroll=false",
@@ -332,6 +424,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Print Telegram-ready preview text only. Does not send Telegram.",
     )
+    parser.add_argument(
+        "--send-telegram-manual",
+        action="store_true",
+        help="Manually send the Telegram digest after printing the preview. No scheduler or retries.",
+    )
     return parser.parse_args(argv)
 
 
@@ -347,8 +444,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps(digest, indent=2, sort_keys=True))
         return 0
-    if args.telegram_preview:
+    if args.telegram_preview or args.send_telegram_manual:
         print(digest["telegram_preview"])
+        if args.send_telegram_manual:
+            result = send_telegram_manual(digest["telegram_preview"])
+            print("")
+            print(f"telegram_manual_send={result.get('reason')}")
+            if result.get("missing_env"):
+                print("missing_env=" + ",".join(result["missing_env"]))
+            if result.get("error"):
+                print("telegram_error=" + str(result["error"]))
+            return 0 if result.get("reason") in {"sent", "TELEGRAM_NOT_CONFIGURED"} else 2
         return 0
     print(digest["message"])
     return 0

@@ -131,6 +131,54 @@ def test_runner_telegram_preview_does_not_send_or_require_telegram_env_vars(monk
     assert "sent" not in result["message"].lower()
 
 
+def test_runner_manual_telegram_send_only_with_explicit_flag(monkeypatch):
+    module = load_tool()
+    calls = []
+    monkeypatch.setattr(module.leaderboard_pnl_snapshot, "build_snapshot", lambda args: snapshot())
+    monkeypatch.setattr(
+        module.daily_bot_digest,
+        "send_telegram_manual",
+        lambda message: calls.append(message) or {"sent": True, "reason": "sent"},
+    )
+
+    with local_tmp_dir() as tmp_dir:
+        path = tmp_dir / "leaderboard_pnl_snapshots.jsonl"
+        preview_args = module.parse_args(["--dry-run", "--telegram-preview", "--snapshot-file", str(path)])
+        preview_result = module.build_run(preview_args)
+        send_args = module.parse_args(["--dry-run", "--send-telegram-manual", "--snapshot-file", str(path)])
+        send_result = module.build_run(send_args)
+
+    assert calls == [send_result["telegram_preview"]]
+    assert preview_result["telegram_manual_send"]["reason"] == "not_attempted"
+    assert send_result["telegram_manual_send"]["reason"] == "sent"
+    assert "TELEGRAM MANUAL SEND PREVIEW" in send_result["message"]
+    assert "usable_for_bankroll=false" in send_result["message"]
+
+
+def test_runner_manual_telegram_missing_env_is_non_fatal(monkeypatch):
+    module = load_tool()
+    monkeypatch.setattr(module.leaderboard_pnl_snapshot, "build_snapshot", lambda args: snapshot())
+    monkeypatch.setattr(
+        module.daily_bot_digest,
+        "send_telegram_manual",
+        lambda message: {
+            "sent": False,
+            "reason": "TELEGRAM_NOT_CONFIGURED",
+            "missing_env": ["TELEGRAM_BOT_TOKEN or TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID"],
+        },
+    )
+
+    with local_tmp_dir() as tmp_dir:
+        path = tmp_dir / "leaderboard_pnl_snapshots.jsonl"
+        args = module.parse_args(["--dry-run", "--send-telegram-manual", "--snapshot-file", str(path)])
+        result = module.build_run(args)
+
+    assert result["telegram_manual_send"]["reason"] == "TELEGRAM_NOT_CONFIGURED"
+    assert "telegram_manual_send=TELEGRAM_NOT_CONFIGURED" in result["message"]
+    assert "TELEGRAM_BOT_TOKEN or TELEGRAM_TOKEN" in result["message"]
+    assert "usable_for_bankroll=false" in result["message"]
+
+
 def test_runner_digest_shows_deltas_with_existing_snapshot(monkeypatch):
     module = load_tool()
     monkeypatch.setattr(

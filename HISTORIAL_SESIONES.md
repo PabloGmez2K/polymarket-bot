@@ -4595,3 +4595,45 @@ Con el historico local actual OK/failed/failed/OK: `snapshot_count=4`, `valid_sn
 ### NO se toco
 
 Telegram real, scheduler, Railway, DB, env vars, BANKROLL, trading core, `bot.py`, sizing, whitelist, city modes, guards, SL, reglas de riesgo, Fase C, `bankroll_scaling_check.py`, semantica P&L.
+
+---
+
+## Sesión 325 — 7 de mayo de 2026 (Codex)
+
+**Clasificacion:** NORMAL / Telegram delivery / observability only / manual send gated / no trading
+**Bloque:** B4.7 — Telegram Manual Send / LOG_ONLY
+**Veredicto:** IMPLEMENTADO / VALIDADO / PUSH AUTORIZADO
+
+### Discovery Telegram
+
+Se encontraron patrones existentes de envio en `tools/*` y `bot.py`: `TELEGRAM_CHAT_ID` como chat comun, token dividido entre `TELEGRAM_TOKEN` (runtime/herramientas legacy) y `TELEGRAM_BOT_TOKEN` (Truth Pipeline), y `urllib.request` contra `api.telegram.org/bot.../sendMessage`. No hay helper unico compartido. La deduplicacion/cooldown existente vive en herramientas runtime con `alerts_state`/state files; B4.7 no agrega estado persistente ni anti-spam porque el envio es manual-only.
+
+### Artefactos
+
+- **Modificado:** `tools/daily_bot_digest.py` — agrega `--send-telegram-manual` y helper manual de envio.
+- **Modificado:** `tools/daily_bot_observability_run.py` — expone `--send-telegram-manual` para snapshot + digest.
+- **Modificado:** `tests/test_daily_bot_digest.py` — cubre no envio sin flag, env faltante, secretos y error API sin retry.
+- **Modificado:** `tests/test_daily_bot_observability_run.py` — cubre gating manual y `TELEGRAM_NOT_CONFIGURED`.
+- **Actualizado:** `CONTEXTO.md`, `HISTORIAL_SESIONES.md`, `agent_events.jsonl` — cierre y trazabilidad.
+
+### Contrato
+
+Comandos soportados:
+
+- `python tools\daily_bot_digest.py --send-telegram-manual`
+- `python tools\daily_bot_observability_run.py --write-snapshot --send-telegram-manual`
+
+El flag imprime el preview Telegram y luego intenta enviar una sola vez. Usa `TELEGRAM_BOT_TOKEN` con fallback `TELEGRAM_TOKEN` + `TELEGRAM_CHAT_ID`; no imprime tokens ni chat_id. Si faltan env vars, devuelve `TELEGRAM_NOT_CONFIGURED` sin fallo peligroso. Si falla Telegram API, devuelve `TELEGRAM_API_ERROR` sin retry/bucle. No scheduler, no Railway, no DB, no env var changes.
+
+El mensaje conserva `DAILY BOT DIGEST`, P&L leaderboard DAY/WEEK/MONTH/ALL, Leaderboard trading volume DAY/WEEK/MONTH/ALL, `Trend vs previous valid snapshot`, `trend_label`, `source_quality=external_opaque`, `dashboard_equivalent=false`, `usable_for_bankroll=false`, `Observability only`, `No BANKROLL increase`, `No BUY/SELL/SKIP`, `No Fase C`.
+
+### Validacion Codex
+
+- `python tools\check_python_syntax.py tools\daily_bot_digest.py tools\daily_bot_observability_run.py tests\test_daily_bot_digest.py tests\test_daily_bot_observability_run.py` — OK.
+- `python -m pytest tests\test_daily_bot_digest.py tests\test_daily_bot_observability_run.py -q -p no:cacheprovider` — 22 passed.
+- `python tools\daily_bot_digest.py --send-telegram-manual --snapshot-file data\observability\leaderboard_pnl_snapshots.jsonl` con `TELEGRAM_*` vacias — preview impreso y `telegram_manual_send=TELEGRAM_NOT_CONFIGURED`.
+- `git diff --check` — OK.
+
+### NO se toco
+
+Telegram real enviado, scheduler, Railway, DB, env vars modificadas, BANKROLL, trading core, `bot.py`, BUY/SELL/SKIP, Fase C, sizing, whitelist, city modes, guards, SL, reglas de riesgo, `bankroll_scaling_check.py`, semantica P&L.

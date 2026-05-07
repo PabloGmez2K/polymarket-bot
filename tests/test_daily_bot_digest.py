@@ -5,6 +5,7 @@ import json
 import shutil
 import subprocess
 import sys
+import urllib.error
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -294,3 +295,91 @@ def test_telegram_preview_does_not_send_or_require_env_vars(monkeypatch):
     assert "usable_for_bankroll=false" in result.stdout
     assert "sent" not in result.stdout.lower()
     assert "TELEGRAM_BOT_TOKEN" not in result.stdout
+
+
+def test_manual_telegram_send_requires_explicit_flag(monkeypatch):
+    module = load_tool()
+    calls = []
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "secret-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "123456789")
+    monkeypatch.setattr(module.urllib.request, "urlopen", lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    with local_tmp_dir() as tmp_dir:
+        path = tmp_dir / "leaderboard_pnl_snapshots.jsonl"
+        write_jsonl(path, [snapshot()])
+        result = run_cli("--telegram-preview", snapshot_file=path)
+
+    assert result.returncode == 0, result.stderr
+    assert calls == []
+    assert "secret-token" not in result.stdout
+    assert "123456789" not in result.stdout
+
+
+def test_manual_telegram_send_missing_env_returns_not_configured(monkeypatch):
+    module = load_tool()
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+
+    result = module.send_telegram_manual("DAILY BOT DIGEST\nusable_for_bankroll=false")
+
+    assert result["sent"] is False
+    assert result["reason"] == "TELEGRAM_NOT_CONFIGURED"
+    assert "TELEGRAM_CHAT_ID" in result["missing_env"]
+
+
+def test_manual_telegram_send_uses_existing_env_without_printing_secrets(monkeypatch):
+    module = load_tool()
+    captured = {}
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def fake_urlopen(req, timeout):
+        captured["url"] = req.full_url
+        captured["body"] = req.data.decode("utf-8")
+        captured["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "secret-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "123456789")
+    monkeypatch.setattr(module.urllib.request, "urlopen", fake_urlopen)
+
+    message = "DAILY BOT DIGEST\nusable_for_bankroll=false\nObservability only."
+    result = module.send_telegram_manual(message)
+
+    assert result["sent"] is True
+    assert result["reason"] == "sent"
+    assert result["token_env_used"] == "TELEGRAM_BOT_TOKEN"
+    assert result["http_code"] == 200
+    assert "secret-token" in captured["url"]
+    assert "123456789" in captured["body"]
+    assert "secret-token" not in json.dumps(result)
+    assert "123456789" not in json.dumps(result)
+
+
+def test_manual_telegram_send_api_error_does_not_retry(monkeypatch):
+    module = load_tool()
+    calls = {"n": 0}
+
+    def fake_urlopen(req, timeout):
+        calls["n"] += 1
+        raise urllib.error.URLError("network down")
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "secret-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "123456789")
+    monkeypatch.setattr(module.urllib.request, "urlopen", fake_urlopen)
+
+    result = module.send_telegram_manual("DAILY BOT DIGEST\nusable_for_bankroll=false")
+
+    assert calls["n"] == 1
+    assert result["sent"] is False
+    assert result["reason"] == "TELEGRAM_API_ERROR"
+    assert "secret-token" not in json.dumps(result)
+    assert "123456789" not in json.dumps(result)
