@@ -321,11 +321,70 @@ def test_manual_telegram_send_missing_env_returns_not_configured(monkeypatch):
     monkeypatch.delenv("TELEGRAM_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
 
-    result = module.send_telegram_manual("DAILY BOT DIGEST\nusable_for_bankroll=false")
+    with local_tmp_dir() as tmp_dir:
+        monkeypatch.chdir(tmp_dir)
+        result = module.send_telegram_manual("DAILY BOT DIGEST\nusable_for_bankroll=false")
 
     assert result["sent"] is False
     assert result["reason"] == "TELEGRAM_NOT_CONFIGURED"
     assert "TELEGRAM_CHAT_ID" in result["missing_env"]
+
+
+def test_manual_telegram_send_reads_telegram_token_from_env_file(monkeypatch):
+    module = load_tool()
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    with local_tmp_dir() as tmp_dir:
+        (tmp_dir / ".env").write_text(
+            "TELEGRAM_TOKEN=file-token\nTELEGRAM_CHAT_ID=987654321\n",
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(tmp_dir)
+        bot_token, chat_id, token_env, missing = module.resolve_telegram_env()
+
+    assert bot_token == "file-token"
+    assert chat_id == "987654321"
+    assert token_env == ".env:TELEGRAM_TOKEN"
+    assert missing == []
+
+
+def test_manual_telegram_send_reads_bot_token_from_env_file(monkeypatch):
+    module = load_tool()
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    with local_tmp_dir() as tmp_dir:
+        (tmp_dir / ".env").write_text(
+            'TELEGRAM_BOT_TOKEN="bot-token-from-file"\nTELEGRAM_CHAT_ID="987654321"\n',
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(tmp_dir)
+        bot_token, chat_id, token_env, missing = module.resolve_telegram_env()
+
+    assert bot_token == "bot-token-from-file"
+    assert chat_id == "987654321"
+    assert token_env == ".env:TELEGRAM_BOT_TOKEN"
+    assert missing == []
+
+
+def test_manual_telegram_loaded_env_vars_take_priority_over_env_file(monkeypatch):
+    module = load_tool()
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "loaded-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "111222333")
+    monkeypatch.delenv("TELEGRAM_TOKEN", raising=False)
+    with local_tmp_dir() as tmp_dir:
+        (tmp_dir / ".env").write_text(
+            "TELEGRAM_BOT_TOKEN=file-token\nTELEGRAM_CHAT_ID=987654321\n",
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(tmp_dir)
+        bot_token, chat_id, token_env, missing = module.resolve_telegram_env()
+
+    assert bot_token == "loaded-token"
+    assert chat_id == "111222333"
+    assert token_env == "TELEGRAM_BOT_TOKEN"
+    assert missing == []
 
 
 def test_manual_telegram_send_uses_existing_env_without_printing_secrets(monkeypatch):

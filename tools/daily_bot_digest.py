@@ -19,6 +19,7 @@ from typing import Any
 
 
 DEFAULT_SNAPSHOT_PATH = Path("data") / "observability" / "leaderboard_pnl_snapshots.jsonl"
+DEFAULT_ENV_PATH = Path(".env")
 MONEY_QUANT = Decimal("0.01")
 SOURCE = "polymarket_leaderboard"
 SOURCE_QUALITY = "external_opaque"
@@ -187,19 +188,60 @@ def build_digest(path: Path) -> dict[str, Any]:
     return build_digest_from_rows(read_snapshots(path), path)
 
 
+def parse_env_line(line: str) -> tuple[str, str] | None:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#") or "=" not in stripped:
+        return None
+    key, value = stripped.split("=", 1)
+    key = key.strip()
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1]
+    return key, value
+
+
+def read_env_file_values(path: Path = DEFAULT_ENV_PATH) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    values: dict[str, str] = {}
+    try:
+        with path.open("r", encoding="utf-8-sig") as handle:
+            for raw_line in handle:
+                parsed = parse_env_line(raw_line)
+                if parsed is None:
+                    continue
+                key, value = parsed
+                if key in {"TELEGRAM_BOT_TOKEN", "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID"}:
+                    values[key] = value
+    except OSError:
+        return {}
+    return values
+
+
 def resolve_telegram_env() -> tuple[str, str, str | None, list[str]]:
+    env_file_values = read_env_file_values()
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
     token_env = "TELEGRAM_BOT_TOKEN" if bot_token else None
     if not bot_token:
         bot_token = os.getenv("TELEGRAM_TOKEN", "")
         token_env = "TELEGRAM_TOKEN" if bot_token else None
+    if not bot_token:
+        bot_token = env_file_values.get("TELEGRAM_BOT_TOKEN", "")
+        token_env = ".env:TELEGRAM_BOT_TOKEN" if bot_token else None
+    if not bot_token:
+        bot_token = env_file_values.get("TELEGRAM_TOKEN", "")
+        token_env = ".env:TELEGRAM_TOKEN" if bot_token else None
     chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+    chat_id_env = "TELEGRAM_CHAT_ID" if chat_id else None
+    if not chat_id:
+        chat_id = env_file_values.get("TELEGRAM_CHAT_ID", "")
+        chat_id_env = ".env:TELEGRAM_CHAT_ID" if chat_id else None
     missing: list[str] = []
     if not bot_token:
         missing.append("TELEGRAM_BOT_TOKEN or TELEGRAM_TOKEN")
     if not chat_id:
         missing.append("TELEGRAM_CHAT_ID")
-    return bot_token, chat_id, token_env, missing
+    return bot_token, chat_id, token_env or chat_id_env, missing
 
 
 def send_telegram_manual(message: str) -> dict[str, Any]:
