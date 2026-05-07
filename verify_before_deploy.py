@@ -5368,7 +5368,7 @@ def run_tests():
                 except Exception:
                     pass
 
-    test("Version v10.6.47", 'BOT_VERSION = "v10.6.47"' in code)
+    test("Version v10.6.48", 'BOT_VERSION = "v10.6.48"' in code)
 
     # ---- v10.6.15: Quality-trader canary exact/range ----
     test(
@@ -7374,8 +7374,8 @@ def run_tests():
         and "def intra_cycle_sl_check(client):" in code,
     )
     test(
-        "v10.6.47: BOT_VERSION bumpeado a v10.6.47",
-        'BOT_VERSION = "v10.6.47"' in code,
+        "v10.6.48: BOT_VERSION bumpeado a v10.6.48",
+        'BOT_VERSION = "v10.6.48"' in code,
     )
 
     # ---- v10.6.46: Fase B1 — blocked_signals_audit.py ----
@@ -8719,6 +8719,42 @@ def run_tests():
         "adjustment requires non-empty note" in _wallet_cash_flow_log_src
         and "adjustment requires --reviewed-by-opus" in _wallet_cash_flow_log_src
         and "adjustment requires --confirm-adjustment" in _wallet_cash_flow_log_src,
+    )
+
+    # ---- v10.6.48: daily leaderboard P&L digest ----
+    print("  Checks v10.6.48: daily leaderboard digest automático")
+    test(
+        "v10.6.48: maybe_send_daily_bot_digest definida",
+        "def maybe_send_daily_bot_digest(" in code,
+    )
+    test(
+        "v10.6.48: DAILY_DIGEST_ENABLED configurable",
+        "DAILY_DIGEST_ENABLED" in code,
+    )
+    test(
+        "v10.6.48: DAILY_DIGEST_HOUR_UTC configurable",
+        "DAILY_DIGEST_HOUR_UTC" in code,
+    )
+    test(
+        "v10.6.48: DAILY_DIGEST_STATE_FILE usa _data_path",
+        'DAILY_DIGEST_STATE_FILE = _data_path("daily_digest_state.json")' in code,
+    )
+    test(
+        "v10.6.48: digest usa subprocess con timeout",
+        "DAILY_DIGEST_SCRIPT" in code and "timeout=120" in code,
+    )
+    test(
+        "v10.6.48: digest idempotente por fecha",
+        '"last_sent_date"' in code and "maybe_send_daily_bot_digest" in code,
+    )
+    test(
+        "v10.6.48: digest invocado en loop principal",
+        "maybe_send_daily_bot_digest()" in code,
+    )
+    test(
+        "v10.6.48: digest no toca trading core",
+        "execute_buy" not in code.split("def maybe_send_daily_bot_digest(", 1)[-1].split("def _classify_city_bucket", 1)[0]
+        and "execute_sell" not in code.split("def maybe_send_daily_bot_digest(", 1)[-1].split("def _classify_city_bucket", 1)[0],
     )
 
     # ---- Resultado ----

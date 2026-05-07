@@ -4598,6 +4598,36 @@ Telegram real, scheduler, Railway, DB, env vars, BANKROLL, trading core, `bot.py
 
 ---
 
+## Sesion 326 — 7 de mayo de 2026 (Sonnet 4.6)
+
+**Clasificacion:** NORMAL / scheduler hook / observability / no trading
+**Bloque:** B4.8 — Daily Digest automático Railway
+**Veredicto:** IMPLEMENTADO / VALIDADO / COMMIT PUSHEADO
+
+### Cambios
+
+`bot.py` bumpeado a `v10.6.48`. Se añade `maybe_send_daily_bot_digest()` siguiendo el patron de `maybe_run_daily_briefing`: state file propio `data/daily_digest_state.json`, idempotencia por fecha UTC, subprocess con timeout 120s, log detallado. Constantes nuevas: `DAILY_DIGEST_ENABLED` (default 1), `DAILY_DIGEST_HOUR_UTC` (default 20), `DAILY_DIGEST_STATE_FILE`, `DAILY_DIGEST_SCRIPT`. Invocado en el loop principal tras `maybe_run_daily_briefing`.
+
+### Timing
+
+Con schedule por defecto `[8,16,23 UTC]` y `DAILY_DIGEST_HOUR_UTC=20`, el primer ciclo elegible es el **23 UTC** (= 01:00 España verano / 00:00 España invierno). Para exactitud 22:00 España (20:00 UTC): Pablo debe añadir `20` a `SCHEDULE_HOURS_UTC` en Railway.
+
+### Artefactos
+
+- **Modificado:** `bot.py` — `v10.6.47` → `v10.6.48`, constantes + función + call en loop.
+- **Modificado:** `verify_before_deploy.py` — versión actualizada + 8 tests v10.6.48.
+
+### Validacion
+
+- `python verify_before_deploy.py` — 1148/1148 OK.
+- `python -m pytest tests/test_daily_bot_digest.py tests/test_daily_bot_observability_run.py tests/test_leaderboard_pnl_snapshot.py` — 40 passed.
+
+### NO se toco
+
+Trading core, BANKROLL, sizing, whitelist, city modes, guards, SL, reglas de riesgo, env vars Railway, DB, Fase C, bot.py scheduler, BUY/SELL/SKIP.
+
+---
+
 ## Sesión 325 — 7 de mayo de 2026 (Codex)
 
 **Clasificacion:** NORMAL / Telegram delivery / observability only / manual send gated / no trading

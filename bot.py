@@ -109,7 +109,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.47"
+BOT_VERSION = "v10.6.48"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -163,6 +163,11 @@ PNL_RECONCILIATION_HOUR_UTC = int(os.getenv("PNL_RECONCILIATION_HOUR_UTC", str(D
 WALLET_SNAPSHOT_ENABLED = os.getenv("WALLET_SNAPSHOT_ENABLED", "1").lower() in ("1", "true", "yes", "on")
 WALLET_SNAPSHOT_HOUR_UTC = int(os.getenv("WALLET_SNAPSHOT_HOUR_UTC", str(PNL_RECONCILIATION_HOUR_UTC)))
 WALLET_SNAPSHOT_TIMEOUT_SECONDS = int(os.getenv("WALLET_SNAPSHOT_TIMEOUT_SECONDS", "45"))
+# v10.6.48: daily leaderboard P&L digest por Telegram. Hora UTC a partir de la cual se envía.
+# Default 20 → primer ciclo >= 20:00 UTC = 22:00 España (CEST/verano). Para exactitud añadir
+# 20 a SCHEDULE_HOURS_UTC en Railway. Sin ese slot el primer ciclo elegible es el de 23 UTC.
+DAILY_DIGEST_ENABLED = os.getenv("DAILY_DIGEST_ENABLED", "1").lower() in ("1", "true", "yes", "on")
+DAILY_DIGEST_HOUR_UTC = int(os.getenv("DAILY_DIGEST_HOUR_UTC", "20"))
 UNSELLABLE_GUARD_MONITOR_ENABLED = os.getenv("UNSELLABLE_GUARD_MONITOR_ENABLED", "1").lower() in ("1", "true", "yes", "on")
 UNSELLABLE_GUARD_MONITOR_HOUR_UTC = int(os.getenv("UNSELLABLE_GUARD_MONITOR_HOUR_UTC", str(PNL_RECONCILIATION_HOUR_UTC)))
 UNSELLABLE_GUARD_MONITOR_TIMEOUT_SECONDS = int(os.getenv("UNSELLABLE_GUARD_MONITOR_TIMEOUT_SECONDS", "30"))
@@ -713,6 +718,12 @@ PNL_RECONCILIATION_SCRIPT = os.path.join(
 SL_RETROSPECTIVE_STATE_FILE = _data_path("sl_retrospective_state.json")
 DAILY_BRIEFING_STATE_FILE = _data_path("daily_briefing_state.json")
 PNL_RECONCILIATION_STATE_FILE = _data_path("pnl_reconciliation_state.json")
+DAILY_DIGEST_STATE_FILE = _data_path("daily_digest_state.json")
+DAILY_DIGEST_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "tools",
+    "daily_bot_observability_run.py",
+)
 CITY_INTELLIGENCE_RUNTIME_EXPORT_SCRIPT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "tools",
@@ -5637,6 +5648,15 @@ def run_observability_alerts():
         if logger:
             logger.warning(f"daily briefing: fallo ({e})")
 
+    # v10.6.48: leaderboard P&L digest diario por Telegram.
+    try:
+        if maybe_send_daily_bot_digest():
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"daily digest: fallo ({e})")
+
     # v10.6.43: Recorder Health Alerts (Fase 0.6)
     try:
         if maybe_run_recorder_health_alert(state):
@@ -9263,6 +9283,76 @@ def maybe_run_daily_briefing(state):
 
     if logger:
         logger.info("daily briefing: OK")
+    return True
+
+
+def maybe_send_daily_bot_digest(now=None):
+    """v10.6.48: Digest diario de P&L vía leaderboard. One-shot por día a partir de DAILY_DIGEST_HOUR_UTC UTC."""
+    logger = globals().get("log")
+    if not DAILY_DIGEST_ENABLED:
+        if logger:
+            logger.info("daily digest: skip (DAILY_DIGEST_ENABLED=0)")
+        return False
+    if now is None:
+        now = datetime.now(timezone.utc)
+    if now.hour < DAILY_DIGEST_HOUR_UTC:
+        return False
+
+    today = now.date().isoformat()
+    digest_state: dict = {}
+    if os.path.exists(DAILY_DIGEST_STATE_FILE):
+        try:
+            with open(DAILY_DIGEST_STATE_FILE, "r", encoding="utf-8-sig") as fh:
+                digest_state = json.load(fh)
+        except Exception as exc:
+            if logger:
+                logger.warning(f"daily digest: no pude leer state ({exc})")
+            digest_state = {}
+
+    if digest_state.get("last_sent_date") == today:
+        if logger:
+            logger.info(f"daily digest: skip (already sent today: {today})")
+        return False
+
+    if not os.path.exists(DAILY_DIGEST_SCRIPT):
+        if logger:
+            logger.warning(f"daily digest: skip (missing script: {DAILY_DIGEST_SCRIPT})")
+        return False
+
+    try:
+        result = subprocess.run(
+            [sys.executable, DAILY_DIGEST_SCRIPT, "--write-snapshot", "--send-telegram-manual"],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+    except Exception as exc:
+        if logger:
+            logger.warning(f"daily digest: fallo ejecutando script ({exc})")
+        return False
+
+    if result.returncode not in (0, 2):
+        if logger:
+            detail = (result.stderr or result.stdout or "sin detalle").strip()
+            logger.warning(f"daily digest: fallo ({detail[:500]})")
+        return False
+
+    if logger:
+        output = (result.stdout or "").strip()
+        sent_line = next((ln for ln in output.splitlines() if "telegram_manual_send=" in ln), "")
+        logger.info(f"daily digest: OK ({sent_line or 'sin linea de resultado'})")
+
+    try:
+        digest_state["last_sent_date"] = today
+        digest_state["last_sent_utc"] = now.replace(microsecond=0).isoformat()
+        with open(DAILY_DIGEST_STATE_FILE, "w", encoding="utf-8") as fh:
+            json.dump(digest_state, fh, indent=2)
+    except Exception as exc:
+        if logger:
+            logger.warning(f"daily digest: no pude guardar state ({exc})")
+
     return True
 
 
