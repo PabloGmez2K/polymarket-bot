@@ -132,8 +132,7 @@ def normalized_latest(latest: dict[str, Any] | None) -> dict[str, Any] | None:
     return normalized
 
 
-def build_digest(path: Path) -> dict[str, Any]:
-    rows = read_snapshots(path)
+def build_digest_from_rows(rows: list[dict[str, Any]], snapshot_file: str | Path) -> dict[str, Any]:
     latest = normalized_latest(rows[-1]) if rows else None
     previous = rows[-2] if len(rows) >= 2 else None
     deltas = build_deltas(latest, previous)
@@ -142,7 +141,7 @@ def build_digest(path: Path) -> dict[str, Any]:
         trend_label = "unknown"
 
     payload: dict[str, Any] = {
-        "snapshot_file": str(path),
+        "snapshot_file": str(snapshot_file),
         "snapshot_count": len(rows),
         "latest": latest,
         "previous": previous,
@@ -160,6 +159,10 @@ def build_digest(path: Path) -> dict[str, Any]:
     payload["message"] = render_human_digest(payload)
     payload["telegram_preview"] = render_telegram_digest(payload)
     return payload
+
+
+def build_digest(path: Path) -> dict[str, Any]:
+    return build_digest_from_rows(read_snapshots(path), path)
 
 
 def render_human_digest(digest: dict[str, Any]) -> str:

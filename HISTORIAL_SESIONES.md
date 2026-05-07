@@ -4513,3 +4513,46 @@ La salida mantiene explicitamente `source=polymarket_leaderboard`, `source_quali
 ### NO se toco
 
 Telegram real, scheduler, Railway, DB, env vars, BANKROLL, trading core, `bot.py`, sizing, whitelist, city modes, guards, SL, reglas de riesgo, Fase C, `bankroll_scaling_check.py`.
+
+---
+
+## Sesión 323 — 7 de mayo de 2026 (Codex)
+
+**Clasificacion:** NORMAL / observability orchestration / patch acotado / Telegram PREVIEW ONLY / no runtime
+**Bloque:** B4.6 — Daily Snapshot + Digest Runner
+**Veredicto:** IMPLEMENTADO / VALIDADO / PUSH AUTORIZADO
+
+### Contexto
+
+B4.4/B4.4b capturan snapshots externos del leaderboard de Polymarket y B4.5 genera el digest local. B4.6 une el flujo diario en un solo comando local sin integrarlo a runtime, scheduler, Telegram real ni readiness.
+
+### Artefactos
+
+- **Creado:** `tools/daily_bot_observability_run.py` — runner local snapshot + digest + preview.
+- **Creado:** `tests/test_daily_bot_observability_run.py` — tests focalizados de dry-run, write, preview, deltas y guardrails.
+- **Modificado:** `tools/daily_bot_digest.py` — añade `build_digest_from_rows()` para digest in-memory.
+- **Actualizado:** `CONTEXTO.md`, `HISTORIAL_SESIONES.md`, `agent_events.jsonl` — cierre y trazabilidad.
+
+### Contrato
+
+Comandos soportados:
+
+- `python tools\daily_bot_observability_run.py --dry-run`
+- `python tools\daily_bot_observability_run.py --write-snapshot`
+- `python tools\daily_bot_observability_run.py --write-snapshot --telegram-preview`
+- `python tools\daily_bot_observability_run.py --json`
+
+`--dry-run` construye un snapshot temporal usando la logica existente de `leaderboard_pnl_snapshot.py`, no escribe JSONL, y genera digest in-memory contra el historico existente. `--write-snapshot` appendea una fila JSONL y luego genera digest usando el historico actualizado. `--telegram-preview` solo imprime texto apto para Telegram; no envia Telegram y no lee `TELEGRAM_*`.
+
+La salida conserva `source_quality=external_opaque`, `dashboard_equivalent=false`, `usable_for_digest=true`, `usable_for_trend=true`, `usable_for_bankroll=false` y `Observability only`. Fallos API quedan como `query_status=failed` y no producen readiness.
+
+### Validacion Codex
+
+- `python tools\check_python_syntax.py tools\daily_bot_observability_run.py tools\daily_bot_digest.py tests\test_daily_bot_observability_run.py tests\test_daily_bot_digest.py` — OK.
+- `python -m pytest tests\test_daily_bot_observability_run.py tests\test_daily_bot_digest.py -q -p no:cacheprovider` — 13 passed.
+- `python tools\daily_bot_observability_run.py --dry-run --env-file __missing_env_file__` — OK, no write, `NEEDS_MANUAL_WALLET_INPUT`.
+- `python tools\daily_bot_observability_run.py --dry-run --telegram-preview --env-file __missing_env_file__` — OK preview-only.
+
+### NO se toco
+
+Telegram real, scheduler, Railway, DB, env vars Telegram, BANKROLL, trading core, `bot.py`, sizing, whitelist, city modes, guards, SL, reglas de riesgo, Fase C, `bankroll_scaling_check.py`, semantica P&L.
