@@ -4476,3 +4476,40 @@ La salida sigue mostrando solo `wallet_masked`; la wallet completa no aparece en
 ### NO se toco
 
 Daily Digest, Telegram, scheduler, Railway, DB, env vars, BANKROLL, trading core, `bot.py`, sizing, whitelist, city modes, guards, SL, reglas de riesgo, Fase C.
+
+---
+
+## Sesión 322 — 7 de mayo de 2026 (Codex)
+
+**Clasificacion:** NORMAL / observability digest / patch acotado / Telegram PREVIEW ONLY / no runtime
+**Bloque:** B4.5 — Daily Bot Digest dry-run + Telegram preview
+**Veredicto:** IMPLEMENTADO / VALIDADO / PUSH AUTORIZADO
+
+### Contexto
+
+B4.4/B4.4b dejaron un store JSONL de snapshots externos del leaderboard de Polymarket. B4.5 crea el generador local de digest sobre ese store, sin conectarlo a runtime, Telegram real ni readiness.
+
+### Artefactos
+
+- **Creado:** `tools/daily_bot_digest.py` — CLI read-only para digest humano, `--json` y `--telegram-preview`.
+- **Creado:** `tests/test_daily_bot_digest.py` — tests focalizados de 0/1/2 snapshots, deltas, guardrails y preview.
+- **Actualizado:** `CONTEXTO.md`, `HISTORIAL_SESIONES.md`, `agent_events.jsonl` — cierre y trazabilidad.
+
+### Contrato
+
+La ruta por defecto es `data/observability/leaderboard_pnl_snapshots.jsonl`. El digest toma el ultimo snapshot y lo compara con el anterior cuando existe. Si solo hay un snapshot, imprime `No previous snapshot yet` y `trend_label=unknown`.
+
+La salida mantiene explicitamente `source=polymarket_leaderboard`, `source_quality=external_opaque`, `dashboard_equivalent=false`, `usable_for_digest=true`, `usable_for_trend=true`, `usable_for_bankroll=false`. `vol_day/week/month/all` se renderiza como `Leaderboard trading volume`; no se interpreta como `buy_count`, `trade_count`, numero de buys ni numero de operaciones.
+
+`--telegram-preview` solo imprime texto apto para Telegram. No envia Telegram, no lee `TELEGRAM_*`, no requiere env vars y no escribe estado.
+
+### Validacion Codex
+
+- `python tools\check_python_syntax.py tools\daily_bot_digest.py tests\test_daily_bot_digest.py` — OK.
+- `python -m pytest tests\test_daily_bot_digest.py -q -p no:cacheprovider` — 7 passed.
+- `python tools\daily_bot_digest.py --dry-run` — OK con snapshot real actual, trend `unknown`.
+- `python tools\daily_bot_digest.py --telegram-preview` — OK preview-only con snapshot real actual.
+
+### NO se toco
+
+Telegram real, scheduler, Railway, DB, env vars, BANKROLL, trading core, `bot.py`, sizing, whitelist, city modes, guards, SL, reglas de riesgo, Fase C, `bankroll_scaling_check.py`.
