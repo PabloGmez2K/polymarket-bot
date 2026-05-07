@@ -12,6 +12,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TOOL_PATH = REPO_ROOT / "tools" / "leaderboard_pnl_snapshot.py"
+WALLET_EXPLICIT = "0x1111111111111111111111111111111111111111"
+WALLET_ENV = "0x2222222222222222222222222222222222222222"
+WALLET_DOTENV = "0x3333333333333333333333333333333333333333"
 
 
 @contextmanager
@@ -98,6 +101,9 @@ def test_snapshot_flags_are_never_bankroll_positive(monkeypatch):
     assert payload["dashboard_equivalent"] is False
     assert payload["source_quality"] == "external_opaque"
     assert payload["wallet_masked"] == "0x1234...5678"
+    assert payload["volume_label"] == "leaderboard_trading_volume"
+    assert "trading volume" in payload["volume_notes"]
+    assert "not buy_count" in payload["volume_notes"]
     assert "readiness" not in payload
     assert "bankroll_readiness" not in payload
 
@@ -153,12 +159,63 @@ def test_missing_wallet_returns_needs_manual_wallet_input(monkeypatch):
     for key in ("FUNDER", "POLYMARKET_WALLET", "WALLET_ADDRESS", "PROXY_WALLET"):
         monkeypatch.delenv(key, raising=False)
 
-    args = module.parse_args(["--dry-run"])
+    args = module.parse_args(["--dry-run", "--env-file", "__missing_env_file__"])
     payload = module.build_snapshot(args, now=datetime(2026, 5, 7, 10, tzinfo=timezone.utc))
 
     assert payload["query_status"] == "NEEDS_MANUAL_WALLET_INPUT"
     assert payload["usable_for_bankroll"] is False
     assert payload["wallet_masked"] is None
+
+
+def test_wallet_fallback_reads_funder_from_env_file(monkeypatch):
+    module = load_tool()
+    for key in ("FUNDER", "POLYMARKET_WALLET", "WALLET_ADDRESS", "PROXY_WALLET"):
+        monkeypatch.delenv(key, raising=False)
+
+    with local_tmp_dir() as tmp_dir:
+        env_file = tmp_dir / ".env"
+        env_file.write_text(f"FUNDER='{WALLET_DOTENV}'\n", encoding="utf-8")
+        args = module.parse_args(["--dry-run", "--env-file", str(env_file)])
+
+        assert module.configured_wallet(args) == WALLET_DOTENV
+
+
+def test_wallet_priority_explicit_over_env_over_env_file(monkeypatch):
+    module = load_tool()
+    monkeypatch.setenv("FUNDER", WALLET_ENV)
+
+    with local_tmp_dir() as tmp_dir:
+        env_file = tmp_dir / ".env"
+        env_file.write_text(f"FUNDER={WALLET_DOTENV}\n", encoding="utf-8")
+
+        explicit_args = module.parse_args(["--dry-run", "--wallet", WALLET_EXPLICIT, "--env-file", str(env_file)])
+        env_args = module.parse_args(["--dry-run", "--env-file", str(env_file)])
+
+        assert module.configured_wallet(explicit_args) == WALLET_EXPLICIT
+        assert module.configured_wallet(env_args) == WALLET_ENV
+
+
+def test_full_wallet_never_appears_in_output(monkeypatch, capsys):
+    module = load_tool()
+
+    def fake_query(wallet: str):
+        return (
+            {period: {"pnl": 1.0, "vol": 2.0} for period in module.PERIODS},
+            "ok",
+            "pablo",
+            None,
+        )
+
+    monkeypatch.setattr(module, "query_leaderboard", fake_query)
+    args = module.parse_args(["--dry-run", "--wallet", WALLET_EXPLICIT])
+    payload = module.build_snapshot(args, now=datetime(2026, 5, 7, 10, tzinfo=timezone.utc))
+    module.output(payload)
+    stdout = capsys.readouterr().out
+
+    assert WALLET_EXPLICIT not in stdout
+    assert "0x1111...1111" in stdout
+    assert "leaderboard_trading_volume" in stdout
+    assert "buy_count" not in payload
 
 
 def test_summary_cli_reads_existing_snapshots():

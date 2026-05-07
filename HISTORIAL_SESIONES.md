@@ -4437,3 +4437,42 @@ Si no hay wallet en `--wallet`, `FUNDER`, `POLYMARKET_WALLET`, `WALLET_ADDRESS` 
 ### Siguiente paso posible
 
 Ejecutar manualmente `tools/leaderboard_pnl_snapshot.py --write --wallet <wallet>` cuando Pablo quiera iniciar historico real. No conectar a `bankroll_scaling_check.py` ni a readiness sin revision separada.
+
+---
+
+## Sesión 321 — 7 de mayo de 2026 (Codex)
+
+**Clasificacion:** LITE / observability tooling / patch acotado / no runtime
+**Bloque:** B4.4b — Wallet fallback + leaderboard vol labeling
+**Veredicto:** IMPLEMENTADO / VALIDADO / PUSH AUTORIZADO
+
+### Contexto
+
+B4.4a confirmo la primera captura real, pero requirio pasar `--wallet` manualmente porque la shell no tenia `FUNDER` cargado. Tambien quedo aclarado que `leaderboard.vol` es volumen de trading del trader en el leaderboard de Polymarket, no numero de buys ni operaciones.
+
+### Artefactos
+
+- **Modificado:** `tools/leaderboard_pnl_snapshot.py`.
+- **Modificado:** `tests/test_leaderboard_pnl_snapshot.py`.
+- **Actualizado:** `CONTEXTO.md`, `HISTORIAL_SESIONES.md`, `agent_events.jsonl`.
+
+### Cambio
+
+La herramienta resuelve wallet con prioridad:
+
+1. `--wallet` explicito.
+2. Env vars cargadas: `FUNDER`, `POLYMARKET_WALLET`, `WALLET_ADDRESS`, `PROXY_WALLET`.
+3. `FUNDER` en `.env` local.
+
+La salida sigue mostrando solo `wallet_masked`; la wallet completa no aparece en JSON stdout. Se agregan `volume_label=leaderboard_trading_volume` y `volume_notes` para fijar que `vol_day/week/month/all` son leaderboard trading volume, no `buy_count`, numero de buys ni numero de operaciones.
+
+### Validacion Codex
+
+- `python tools\check_python_syntax.py tools\leaderboard_pnl_snapshot.py tests\test_leaderboard_pnl_snapshot.py` — OK.
+- `python -m pytest tests\test_leaderboard_pnl_snapshot.py -q -p no:cacheprovider` — 8 passed.
+- `git diff --check` — OK.
+- `python verify_before_deploy.py` — 1140/1140 OK.
+
+### NO se toco
+
+Daily Digest, Telegram, scheduler, Railway, DB, env vars, BANKROLL, trading core, `bot.py`, sizing, whitelist, city modes, guards, SL, reglas de riesgo, Fase C.

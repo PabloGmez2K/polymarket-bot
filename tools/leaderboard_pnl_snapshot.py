@@ -23,8 +23,11 @@ METHODOLOGY_NOTES = (
     "External opaque Polymarket leaderboard.pnl snapshot for digest/trend only. "
     "Not dashboard-equivalent, not canonical P&L, and never usable for BANKROLL readiness. "
     "B4.3 interpretation: DAY and WEEK appear calendar/UTC closed-position realizedPnl-like; "
-    "MONTH remains opaque; ALL matched a manual 1Y check but is not proven equivalent."
+    "MONTH remains opaque; ALL matched a manual 1Y check but is not proven equivalent. "
+    "vol_day/week/month/all are Polymarket leaderboard trading volume, not buy_count or trade_count."
 )
+VOLUME_LABEL = "leaderboard_trading_volume"
+VOLUME_NOTES = "vol_day/week/month/all are leaderboard trading volume; they are not buy_count or operation count."
 
 
 class SnapshotError(Exception):
@@ -94,6 +97,25 @@ def normalize_wallet(wallet: str | None) -> str | None:
     return text
 
 
+def read_funder_from_env_file(path: str | Path = ".env") -> str | None:
+    env_path = Path(path)
+    if not env_path.exists():
+        return None
+    try:
+        lines = env_path.read_text(encoding="utf-8-sig").splitlines()
+    except OSError:
+        return None
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key.strip() != "FUNDER":
+            continue
+        return value.strip().strip('"').strip("'")
+    return None
+
+
 def configured_wallet(args: argparse.Namespace) -> str | None:
     return normalize_wallet(
         args.wallet
@@ -101,6 +123,7 @@ def configured_wallet(args: argparse.Namespace) -> str | None:
         or os.getenv("POLYMARKET_WALLET")
         or os.getenv("WALLET_ADDRESS")
         or os.getenv("PROXY_WALLET")
+        or read_funder_from_env_file(args.env_file)
     )
 
 
@@ -219,6 +242,8 @@ def base_snapshot(now: datetime, wallet: str | None, user: str | None) -> dict[s
         "vol_week": None,
         "vol_month": None,
         "vol_all": None,
+        "volume_label": VOLUME_LABEL,
+        "volume_notes": VOLUME_NOTES,
         "confidence_day": CONFIDENCE["DAY"],
         "confidence_week": CONFIDENCE["WEEK"],
         "confidence_month": CONFIDENCE["MONTH"],
@@ -236,7 +261,7 @@ def build_snapshot(args: argparse.Namespace, now: datetime | None = None) -> dic
     payload = base_snapshot(captured, wallet, args.user)
     if not wallet:
         payload["query_status"] = "NEEDS_MANUAL_WALLET_INPUT"
-        payload["api_error"] = "wallet not found in --wallet, FUNDER, POLYMARKET_WALLET, WALLET_ADDRESS, or PROXY_WALLET"
+        payload["api_error"] = "wallet not found in --wallet, FUNDER, POLYMARKET_WALLET, WALLET_ADDRESS, PROXY_WALLET, or local .env FUNDER"
         add_dashboard_fields(payload, args)
         return payload
 
@@ -353,6 +378,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     mode.add_argument("--summary", action="store_true", help="Read existing snapshots and print latest/delta summary.")
     parser.add_argument("--snapshot-file", default=str(DEFAULT_SNAPSHOT_PATH), help="JSONL snapshot output path.")
     parser.add_argument("--wallet", help="Manual wallet/proxy wallet override. Output only shows masked wallet.")
+    parser.add_argument("--env-file", default=".env", help=argparse.SUPPRESS)
     parser.add_argument("--user", help="Optional manual user label override.")
     parser.add_argument("--dashboard-1d")
     parser.add_argument("--dashboard-1w")
