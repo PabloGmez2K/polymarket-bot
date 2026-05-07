@@ -4354,3 +4354,38 @@ Micro-cierre documental de B3. Codex implementa `tools/pnl_report.py` + `tests/t
 ### Siguiente paso posible
 
 Push controlado del commit `082e02d`. Después: B3.1 Polymarket API source strategy o B4 diseño — no integración automática. No Patch D todavía.
+
+---
+
+## Sesión 315 — 7 de mayo de 2026 (Sonnet 4.6)
+
+**Tipo:** DOCUMENTATION / WATCH_RISK — Cierre documental LITE
+
+### Contexto
+
+Pre-requisito para el futuro SL_intra Guard Evidence Ledger: definir el campo `sl_window_catchable` antes de que Opus diseñe el ledger o Codex lo implemente en runtime.
+
+### Artefactos
+
+- **Creado:** `docs/sl_intra_guard_leverage_instrumentation.md` — define `sl_window_catchable`, criterio inicial, schema de campos, casos borde, uso previsto/prohibido y relación con el futuro ledger.
+- **Actualizado:** `CONTEXTO.md` — entrada breve de Sesión 315.
+- **Actualizado:** `HISTORIAL_SESIONES.md` — esta entrada.
+- **Actualizado:** `agent_events.jsonl` — evento de documentación.
+
+### Decisión central documentada
+
+`sl_window_catchable = true` si `pct_pnl_at_skip > -35%`; `false` si `<= -35%`. Umbral observacional y revisable. No ejecutable.
+
+### NO se tocó
+
+`bot.py`, `tools/`, scheduler, NOAA, reglas de entrada/salida, Railway, DB, env vars, BANKROLL, Fase C, trading core, whitelist, city modes, sizing, risk rules, Telegram real.
+
+### Invariantes confirmados
+
+- A8 estado: `WATCH / ESPERAR_MÁS_MUESTRA` (n=2 leverage-real).
+- Re-check: 5.º guarded o 2026-05-21.
+- No implementación runtime.
+
+### Siguiente paso posible
+
+Codex patch mínimo para añadir `sl_window_catchable` al skip event (LOG_ONLY), o Opus diseña el Evidence Ledger si el campo ya existe.
