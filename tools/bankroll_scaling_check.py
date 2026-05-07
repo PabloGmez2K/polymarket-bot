@@ -22,8 +22,11 @@ from typing import Any
 TIERS = [25, 35, 50, 75, 100]
 DEFAULT_LOG_TAIL = 200
 DB_STALE_HOURS = 48
+RUNTIME_STALE_HOURS = 48
+SCORE_STALE_HOURS = 48
 GAP_THRESHOLD_HOURS = 18
 DRAW_DOWN_LIMIT = -3.0
+NON_CANONICAL_PNL_SOURCE = "non_canonical_telemetry"
 
 CRITICAL_EXECUTION_RE = re.compile(
     r"order rejected|insufficient funds|auth failed|not enough balance|allowance",
@@ -459,6 +462,11 @@ def legacy_pnl_summary(stats: dict[str, Any]) -> dict[str, Any]:
         "sample_ok": stats.get("sample_ok"),
         "sample_min": stats.get("sample_min"),
         "recent_closed": stats.get("recent_closed", []),
+        "source_quality": stats.get("source_quality"),
+        "canonical_source": stats.get("canonical_source"),
+        "operational_use": stats.get("operational_use"),
+        "readiness_use": stats.get("readiness_use"),
+        "source_warning": stats.get("source_warning"),
     }
 
 
@@ -514,6 +522,15 @@ def pnl_metrics(
 
     evaluation = dict(windows[evaluation_window])
     evaluation["source"] = source if closed else None
+    evaluation["source_quality"] = NON_CANONICAL_PNL_SOURCE if closed else None
+    evaluation["canonical_source"] = "none" if closed else None
+    evaluation["operational_use"] = "forbidden_for_bankroll"
+    evaluation["readiness_use"] = "blocked_by_data_quality"
+    evaluation["source_warning"] = (
+        "trade_lifecycle/performance PnL is internal non-canonical telemetry; "
+        "do not use it to justify BANKROLL changes without wallet/cashflow canonical evidence."
+        if closed else None
+    )
     evaluation["evaluation_window"] = evaluation_window
     recent = closed_sorted[-5:]
     evaluation["recent_closed"] = [
@@ -551,12 +568,15 @@ def inspect_bankroll_score(state: Any, paths_checked: list[str]) -> dict[str, An
     if stage is None:
         stage = find_nested(state, {"stage", "label", "status"})
     updated_at = find_nested(state, {"updated_at", "generated_at", "timestamp"})
+    updated_at_dt = parse_ts(updated_at)
+    updated_age = age_hours(updated_at_dt)
     return {
         "available": as_float(score) is not None,
         "score": as_float(score),
         "score_pct": as_float(score),
         "stage": stage,
         "updated_at": updated_at,
+        "updated_age_hours": updated_age,
         "paths_checked": paths_checked,
         "message": None,
     }
@@ -659,6 +679,22 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
     logs = inspect_logs(data_dir, args.log_tail)
     positions = inspect_positions(trade_lifecycle)
 
+    runtime_age = cycles.get("last_cycle_age_hours")
+    runtime_fresh = runtime_age is not None and runtime_age <= RUNTIME_STALE_HOURS
+    criterion(
+        criteria,
+        "runtime_data_fresh",
+        "pass" if runtime_fresh else "fail",
+        runtime_fresh,
+        f"last_cycle_age_hours={runtime_age}",
+    )
+    if not runtime_fresh:
+        add_item(
+            hard_blockers,
+            "runtime_data_stale",
+            "Runtime import/cycle data is stale or missing; do not treat local PnL windows as current evidence.",
+        )
+
     db_fresh = db["readable"] and db["last_write_age_hours"] is not None and db["last_write_age_hours"] <= DB_STALE_HOURS
     criterion(criteria, "sqlite_recorder_fresh", "pass" if db_fresh else "fail", bool(db_fresh), f"age_hours={db['last_write_age_hours']}")
     if not db["exists"] or not db["readable"]:
@@ -690,32 +726,47 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
     if not cycles_ok:
         add_item(hard_blockers, "insufficient_cycles", "Not enough stable cycles for the target tier")
 
+    pnl_source_canonical = pnl.get("canonical_source") not in (None, "none") and pnl.get("source_quality") != NON_CANONICAL_PNL_SOURCE
+    criterion(
+        criteria,
+        "pnl_source_quality",
+        "pass" if pnl_source_canonical else "blocked",
+        pnl.get("source_quality") or "missing",
+        "canonical wallet/cashflow evidence is required before PnL can support BANKROLL readiness",
+    )
+    if not pnl_source_canonical:
+        add_item(
+            hard_blockers,
+            "pnl_source_non_canonical",
+            "PnL/WR/drawdown come from non-canonical lifecycle/performance telemetry; BLOCKED_BY_DATA_QUALITY for bankroll scaling.",
+        )
+
     trades_ok = pnl["closed_trades"] >= int(thresholds["trades"])
-    criterion(criteria, "clean_trades_minimum", "pass" if trades_ok else "unknown", f"{pnl['closed_trades']}/{thresholds['trades']}")
+    criterion(criteria, "clean_trades_minimum", "blocked" if not pnl_source_canonical else "pass" if trades_ok else "unknown", f"{pnl['closed_trades']}/{thresholds['trades']}")
     if pnl["closed_trades"] == 0:
         add_item(missing_evidence, "closed_trades_unavailable", "Closed trade evidence is unavailable")
     elif not trades_ok:
         add_item(watch_items, "insufficient_closed_trades", "Closed trade sample is below policy target")
 
-    pnl_ok = pnl["pnl_total"] is not None and pnl["pnl_total"] >= 0
-    criterion(criteria, "pnl_non_negative", "pass" if pnl_ok else "fail" if pnl["pnl_total"] is not None else "unknown", pnl["pnl_total"])
+    pnl_ok = pnl_source_canonical and pnl["pnl_total"] is not None and pnl["pnl_total"] >= 0
+    criterion(criteria, "pnl_non_negative", "blocked" if not pnl_source_canonical else "pass" if pnl_ok else "fail" if pnl["pnl_total"] is not None else "unknown", pnl["pnl_total"])
     if pnl["pnl_total"] is None:
         add_item(missing_evidence, "pnl_unavailable", "PnL evidence is unavailable")
-    elif not pnl_ok:
+    elif pnl_source_canonical and not pnl_ok:
         add_item(hard_blockers, "pnl_negative", "PnL is negative for available closed trade evidence")
 
-    wr_ok = pnl["win_rate_pct"] is not None and pnl["win_rate_pct"] >= float(thresholds["wr"])
-    criterion(criteria, "win_rate_minimum", "pass" if wr_ok else "fail" if pnl["win_rate_pct"] is not None else "unknown", pnl["win_rate_pct"])
+    wr_ok = pnl_source_canonical and pnl["win_rate_pct"] is not None and pnl["win_rate_pct"] >= float(thresholds["wr"])
+    criterion(criteria, "win_rate_minimum", "blocked" if not pnl_source_canonical else "pass" if wr_ok else "fail" if pnl["win_rate_pct"] is not None else "unknown", pnl["win_rate_pct"])
     if pnl["win_rate_pct"] is None:
         add_item(missing_evidence, "win_rate_unavailable", "Win rate evidence is unavailable")
-    elif not wr_ok:
+    elif pnl_source_canonical and not wr_ok:
         add_item(hard_blockers, "win_rate_below_threshold", "Win rate is below policy threshold")
 
-    dd_ok = pnl["drawdown_last_5"] is not None and pnl["drawdown_last_5"] > DRAW_DOWN_LIMIT
-    criterion(criteria, "drawdown_last_5_above_limit", "pass" if dd_ok else "fail" if pnl["drawdown_last_5"] is not None else "unknown", pnl["drawdown_last_5"])
+    dd_ok = pnl_source_canonical and pnl["drawdown_last_5"] is not None and pnl["drawdown_last_5"] > DRAW_DOWN_LIMIT
+    criterion(criteria, "drawdown_last_5_above_limit", "blocked" if not pnl_source_canonical else "pass" if dd_ok else "fail" if pnl["drawdown_last_5"] is not None else "unknown", pnl["drawdown_last_5"])
     if pnl["drawdown_last_5"] is None:
         add_item(missing_evidence, "drawdown_unavailable", "Recent drawdown cannot be calculated")
-    elif not dd_ok:
+    elif pnl_source_canonical and not dd_ok:
         add_item(hard_blockers, "recent_drawdown_exceeded", "Drawdown across the last 5 closes is at or below -$3")
 
     score_ok = score["score_pct"] is not None and score["score_pct"] >= float(thresholds["score"])
@@ -728,6 +779,12 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         )
     elif not score_ok:
         add_item(watch_items, "score_low", "Bankroll readiness score is below threshold")
+    if score.get("updated_age_hours") is not None and score["updated_age_hours"] > SCORE_STALE_HOURS:
+        add_item(
+            hard_blockers,
+            "bankroll_readiness_score_stale",
+            "Bankroll readiness score state is stale; rerun with fresh canonical inputs before review.",
+        )
 
     execution_reasons = cycles["execution_reject_reasons"]
     execution_text = json.dumps(execution_reasons, ensure_ascii=True) if execution_reasons else ""

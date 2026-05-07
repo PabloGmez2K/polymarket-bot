@@ -88,13 +88,20 @@ The tool implements a conservative read-only interpretation of `docs/bankroll_sc
 For `$25 -> $35`, it checks at least:
 
 - stable cycles threshold;
+- runtime data freshness; stale `runtime_import` snapshots are a hard blocker;
 - SQLiteRecorder freshness and large gaps;
 - Phase 1 readiness as a conservative gate. Pending Phase 1 is shown as `pending`, not `pass`, until readiness is actually true;
-- PnL non-negative on the selected evaluation window;
-- win rate threshold on the selected evaluation window;
-- drawdown over the last five closes above `-$3` on the selected evaluation window;
+- PnL non-negative on the selected evaluation window, only when the PnL source is canonical;
+- win rate threshold on the selected evaluation window, only when the source is canonical;
+- drawdown over the last five closes above `-$3` on the selected evaluation window, only when the source is canonical;
 - bankroll readiness score threshold;
 - absence of critical execution errors and stuck pending exits.
+
+`trade_lifecycle.json` and `performance.json` are reported as diagnostic
+`non_canonical_telemetry`. They may explain a discrepancy, but they cannot
+produce `pass` for BANKROLL readiness PnL/WR/drawdown. When wallet/cashflow
+canonical evidence is absent, the tool emits `pnl_source_quality=blocked` and
+adds `pnl_source_non_canonical`.
 
 For `$35 -> $50` and above, Phase 1 readiness must be ready. Higher tiers add conservative checks for Truth Pipeline, settlement fidelity, and replay/shadow evidence where applicable.
 

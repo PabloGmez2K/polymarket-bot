@@ -156,10 +156,17 @@ def load_trade_lifecycle(path: Path) -> dict[str, Any]:
     if not path.exists():
         return base
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
     except json.JSONDecodeError as exc:
         raise InputError(f"trade_lifecycle.json: invalid JSON: {exc.msg}") from exc
-    records = payload if isinstance(payload, list) else payload.get("trades", []) if isinstance(payload, dict) else []
+    if isinstance(payload, list):
+        records = payload
+    elif isinstance(payload, dict):
+        records = payload.get("records")
+        if not isinstance(records, list):
+            records = payload.get("trades", [])
+    else:
+        records = []
     if not isinstance(records, list):
         raise InputError("trade_lifecycle.json: expected list or object with trades list")
     closed = 0
@@ -183,7 +190,8 @@ def load_trade_lifecycle(path: Path) -> dict[str, Any]:
             except Exception:
                 contaminated += 1
     if closed:
-        base["status"] = "contaminated" if contaminated or closed else "partial"
+        contaminated = closed
+        base["status"] = "contaminated"
         base["contamination_rate"] = money(Decimal(contaminated) / Decimal(closed))
         base["realized_pnl_usdc"] = money(pnl)
         base["n_closed_trades"] = closed
