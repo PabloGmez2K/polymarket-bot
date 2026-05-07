@@ -107,6 +107,39 @@ def bool_text(value: bool) -> str:
     return "true" if value else "false"
 
 
+def telegram_money(value: Any) -> str:
+    parsed = as_decimal(value)
+    if parsed is None:
+        return "sin dato"
+    return f"{parsed.quantize(MONEY_QUANT, rounding=ROUND_HALF_UP):+,.2f}"
+
+
+def telegram_plain_value(value: Any) -> str:
+    parsed = as_decimal(value)
+    if parsed is None:
+        return "sin dato"
+    return f"{parsed.quantize(MONEY_QUANT, rounding=ROUND_HALF_UP):,.2f}"
+
+
+def telegram_delta(value: Any) -> str:
+    parsed = as_decimal(value)
+    if parsed is None:
+        return "sin dato"
+    if parsed == Decimal("0"):
+        return "sin cambios"
+    return f"{parsed.quantize(MONEY_QUANT, rounding=ROUND_HALF_UP):+,.2f}"
+
+
+def telegram_trend_sentence(trend_label: str) -> str:
+    if trend_label == "improving":
+        return "Mejorando frente al snapshot anterior."
+    if trend_label == "worsening":
+        return "Empeorando frente al snapshot anterior."
+    if trend_label == "flat":
+        return "Sin cambios relevantes frente al snapshot anterior."
+    return "Aun no hay una tendencia clara."
+
+
 def build_deltas(latest: dict[str, Any] | None, previous: dict[str, Any] | None) -> dict[str, float | None]:
     if not latest or not previous:
         return {
@@ -394,66 +427,89 @@ def render_telegram_digest(digest: dict[str, Any]) -> str:
     if not latest:
         return "\n".join(
             [
-                "DAILY BOT DIGEST",
-                "data_unavailable: No leaderboard P&L snapshot data.",
+                "RESUMEN DIARIO DEL BOT",
                 "",
-                "P&L leaderboard",
-                "DAY unknown | WEEK unknown",
-                "MONTH unknown | ALL unknown",
+                "Ultima actualizacion",
+                "Aun no hay datos del leaderboard.",
                 "",
-                "Leaderboard trading volume",
-                "DAY unknown | WEEK unknown",
-                "MONTH unknown | ALL unknown",
+                "Evolucion",
+                "P&L leaderboard: sin dato",
                 "",
-                "Trend vs previous valid snapshot",
-                "trend_label=unknown",
+                "Tendencia",
+                "Aun no hay comparacion disponible.",
                 "",
-                f"source={SOURCE} | source_quality={SOURCE_QUALITY}",
-                "dashboard_equivalent=false",
-                "usable_for_digest=true | usable_for_trend=true | usable_for_bankroll=false",
-                "Decision: No BANKROLL increase. Observability only. No BUY/SELL/SKIP. No Fase C.",
+                "Actividad",
+                "Volumen leaderboard: sin dato",
+                "",
+                "Lectura rapida",
+                "No hay snapshot valido para resumir hoy.",
+                "",
+                "Nota",
+                "Informativo. No cambia bankroll. No BUY/SELL/SKIP. No Fase C.",
             ]
         )
     deltas = digest.get("deltas") or {}
-    trend_intro = "No previous valid snapshot yet"
     previous = digest.get("previous")
     latest_valid = digest.get("latest_valid")
-    if latest_valid and not is_valid_trend_snapshot(latest):
-        trend_intro = f"last_valid_snapshot_captured_at_utc: {latest_valid.get('captured_at_utc', 'unknown')}"
-    if previous:
-        trend_intro = f"previous_valid_captured_at_utc: {previous.get('captured_at_utc', 'unknown')}"
-    return "\n".join(
-        [
-            "DAILY BOT DIGEST",
-            f"captured_at_utc: {latest.get('captured_at_utc', 'unknown')}",
-            f"query_status: {latest.get('query_status', 'unknown')}",
-            "",
-            "P&L leaderboard",
-            f"DAY {money(latest.get('pnl_day'))} | WEEK {money(latest.get('pnl_week'))}",
-            f"MONTH {money(latest.get('pnl_month'))} | ALL {money(latest.get('pnl_all'))}",
-            "",
-            "Leaderboard trading volume",
-            f"DAY {plain_value(latest.get('vol_day'))} | WEEK {plain_value(latest.get('vol_week'))}",
-            f"MONTH {plain_value(latest.get('vol_month'))} | ALL {plain_value(latest.get('vol_all'))}",
-            "",
-            "Trend vs previous valid snapshot",
-            trend_intro,
+    latest_failed = not is_valid_trend_snapshot(latest)
+    update_line = str(latest.get("captured_at_utc", "unknown"))
+    if latest_failed:
+        update_line = "No se pudo actualizar el dato en este intento."
+        if latest_valid:
+            update_line += f" Ultimo dato valido: {latest_valid.get('captured_at_utc', 'unknown')}."
+
+    trend_lines: list[str]
+    if latest_failed:
+        trend_lines = ["Aun no hay comparacion disponible en este intento."]
+    elif previous:
+        trend_lines = [
+            telegram_trend_sentence(str(digest.get("trend_label", "unknown"))),
             (
-                f"day_delta {money(deltas.get('day_delta'))} | "
-                f"week_delta {money(deltas.get('week_delta'))}"
+                f"Dia {telegram_delta(deltas.get('day_delta'))} | "
+                f"Semana {telegram_delta(deltas.get('week_delta'))}"
             ),
             (
-                f"month_delta {money(deltas.get('month_delta'))} | "
-                f"all_delta {money(deltas.get('all_delta'))}"
+                f"Mes {telegram_delta(deltas.get('month_delta'))} | "
+                f"Total {telegram_delta(deltas.get('all_delta'))}"
             ),
-            f"trend_label={digest.get('trend_label', 'unknown')}",
-            "",
-            f"source={SOURCE} | source_quality={SOURCE_QUALITY}",
-            "dashboard_equivalent=false",
-            "usable_for_digest=true | usable_for_trend=true | usable_for_bankroll=false",
-            "Decision: No BANKROLL increase. Observability only. No BUY/SELL/SKIP. No Fase C.",
         ]
-    )
+    else:
+        trend_lines = ["Aun no hay comparacion disponible."]
+
+    reading = {
+        "improving": "El leaderboard mejora frente al corte anterior.",
+        "worsening": "El leaderboard empeora frente al corte anterior.",
+        "flat": "El leaderboard esta estable frente al corte anterior.",
+    }.get(str(digest.get("trend_label", "unknown")), "Lectura solo informativa; falta comparacion suficiente.")
+    if latest_valid and not is_valid_trend_snapshot(latest):
+        reading = "El ultimo intento fallo; uso solo el ultimo dato valido como referencia."
+
+    lines = [
+        "RESUMEN DIARIO DEL BOT",
+        "",
+        "Ultima actualizacion",
+        update_line,
+        "",
+        "Evolucion",
+        "P&L leaderboard",
+        f"Dia {telegram_money(latest.get('pnl_day'))} | Semana {telegram_money(latest.get('pnl_week'))}",
+        f"Mes {telegram_money(latest.get('pnl_month'))} | Total {telegram_money(latest.get('pnl_all'))}",
+        "",
+        "Tendencia",
+        *trend_lines,
+        "",
+        "Actividad",
+        "Volumen leaderboard",
+        f"Dia {telegram_plain_value(latest.get('vol_day'))} | Semana {telegram_plain_value(latest.get('vol_week'))}",
+        f"Mes {telegram_plain_value(latest.get('vol_month'))} | Total {telegram_plain_value(latest.get('vol_all'))}",
+        "",
+        "Lectura rapida",
+        reading,
+        "",
+        "Nota",
+        "Informativo. No cambia bankroll. No BUY/SELL/SKIP. No Fase C.",
+    ]
+    return "\n".join(lines)
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:

@@ -245,12 +245,14 @@ def test_message_always_keeps_observability_only_and_no_bankroll():
         write_jsonl(path, [snapshot()])
         digest = module.build_digest(path)
 
+    assert "usable_for_bankroll=false" in digest["message"]
+    assert "Observability only." in digest["message"]
+    assert "No BANKROLL increase." in digest["message"]
     for message in (digest["message"], digest["telegram_preview"]):
-        assert "usable_for_bankroll=false" in message
-        assert "Observability only." in message
-        assert "No BANKROLL increase." in message
         assert "No BUY/SELL/SKIP." in message
         assert "No Fase C." in message
+    assert "Informativo." in digest["telegram_preview"]
+    assert "No cambia bankroll." in digest["telegram_preview"]
 
 
 def test_volume_is_leaderboard_trading_volume_not_trade_count():
@@ -290,11 +292,87 @@ def test_telegram_preview_does_not_send_or_require_env_vars(monkeypatch):
         result = run_cli("--telegram-preview", snapshot_file=path)
 
     assert result.returncode == 0, result.stderr
-    assert "DAILY BOT DIGEST" in result.stdout
-    assert "Leaderboard trading volume" in result.stdout
-    assert "usable_for_bankroll=false" in result.stdout
+    assert "RESUMEN DIARIO DEL BOT" in result.stdout
+    assert "Volumen leaderboard" in result.stdout
+    assert "No cambia bankroll" in result.stdout
     assert "sent" not in result.stdout.lower()
     assert "TELEGRAM_BOT_TOKEN" not in result.stdout
+
+
+def test_telegram_preview_is_human_readable_and_hides_technical_fields():
+    module = load_tool()
+    with local_tmp_dir() as tmp_dir:
+        path = tmp_dir / "leaderboard_pnl_snapshots.jsonl"
+        write_jsonl(
+            path,
+            [
+                snapshot(captured_at_utc="2026-05-07T18:00:00Z"),
+                snapshot(captured_at_utc="2026-05-07T19:00:00Z"),
+            ],
+        )
+        digest = module.build_digest(path)
+
+    preview = digest["telegram_preview"]
+    for expected in (
+        "RESUMEN DIARIO DEL BOT",
+        "Ultima actualizacion",
+        "Evolucion",
+        "Tendencia",
+        "Actividad",
+        "Lectura rapida",
+        "Nota",
+        "Dia +1.39 | Semana +4.55",
+        "Mes +2.83 | Total -29.81",
+        "Dia sin cambios | Semana sin cambios",
+        "Mes sin cambios | Total sin cambios",
+        "Informativo. No cambia bankroll. No BUY/SELL/SKIP. No Fase C.",
+    ):
+        assert expected in preview
+    for hidden in (
+        "source_quality=external_opaque",
+        "dashboard_equivalent=false",
+        "usable_for_digest=true",
+        "usable_for_trend=true",
+        "usable_for_bankroll=false",
+        "query_status",
+    ):
+        assert hidden not in preview
+
+
+def test_telegram_preview_failed_snapshot_uses_human_error_copy():
+    module = load_tool()
+    with local_tmp_dir() as tmp_dir:
+        path = tmp_dir / "leaderboard_pnl_snapshots.jsonl"
+        write_jsonl(
+            path,
+            [
+                snapshot(captured_at_utc="2026-05-07T18:00:00Z"),
+                snapshot(
+                    captured_at_utc="2026-05-07T19:00:00Z",
+                    query_status="failed",
+                    pnl_day=None,
+                    pnl_week=None,
+                    pnl_month=None,
+                    pnl_all=None,
+                ),
+            ],
+        )
+        digest = module.build_digest(path)
+
+    preview = digest["telegram_preview"]
+    assert "No se pudo actualizar el dato en este intento." in preview
+    assert "query_status=failed" not in preview
+    assert "query_status: failed" not in preview
+
+
+def test_telegram_preview_without_previous_snapshot_uses_human_copy():
+    module = load_tool()
+    with local_tmp_dir() as tmp_dir:
+        path = tmp_dir / "leaderboard_pnl_snapshots.jsonl"
+        write_jsonl(path, [snapshot()])
+        digest = module.build_digest(path)
+
+    assert "Aun no hay comparacion disponible." in digest["telegram_preview"]
 
 
 def test_manual_telegram_send_requires_explicit_flag(monkeypatch):

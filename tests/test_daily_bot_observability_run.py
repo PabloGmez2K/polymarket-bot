@@ -125,7 +125,8 @@ def test_runner_telegram_preview_does_not_send_or_require_telegram_env_vars(monk
         result = module.build_run(args)
 
     assert "TELEGRAM PREVIEW ONLY" in result["message"]
-    assert "DAILY BOT DIGEST" in result["telegram_preview"]
+    assert "RESUMEN DIARIO DEL BOT" in result["telegram_preview"]
+    assert "No cambia bankroll" in result["telegram_preview"]
     assert "usable_for_bankroll=false" in result["message"]
     assert "TELEGRAM_BOT_TOKEN" not in result["message"]
     assert "sent" not in result["message"].lower()
