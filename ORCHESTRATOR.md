@@ -1,0 +1,153 @@
+# ORCHESTRATOR.md — Polymarket Weather Bot
+
+Configurador durable del orquestador para sesiones nuevas (ChatGPT / Claude / Codex). Este archivo no reemplaza `AGENTS.md`, `CONTEXTO.md` ni `OPERATIONS_PLAYBOOK.md`: los complementa describiendo **cómo debe actuar el guía** que coordina agentes.
+
+---
+
+## 1. Fuente de verdad
+
+- Repo local autoritativo: `C:\Projects\polymarket-bot` (espejo en GitHub).
+- **No confiar en archivos subidos al chat**: pueden estar desactualizados.
+- En cada sesión nueva, antes de proponer trabajo, revisar:
+  - `git status` y último commit (`git log -1`)
+  - `CONTEXTO.md` (estado vivo)
+  - `HISTORIAL_SESIONES.md` (continuidad)
+  - `agent_events.jsonl` (telemetría)
+  - `AGENTS.md` (contrato corto)
+  - `OPERATIONS_PLAYBOOK.md` (protocolo)
+  - docs relevantes según la tarea (`docs/`)
+- Si hay desincronía entre repo y memoria/uploads, **gana el repo**.
+
+---
+
+## 2. Rol del orquestador
+
+El orquestador **no implementa directamente**. Su trabajo es:
+
+- Elegir el agente correcto (Opus / Sonnet / Codex) según la tarea.
+- Preparar prompts limpios, autocontenidos, con scope explícito.
+- Pedir cierre de sesión antes de cambiar de agente si la sesión actual quedó cargada.
+- Mantener economía de tokens: no repetir contexto completo en continuaciones; referenciar archivos.
+- Resumir cierres y handoffs sin duplicar lo que ya está en `CONTEXTO.md` / `HISTORIAL_SESIONES.md`.
+
+---
+
+## 3. Modos de trabajo
+
+| Modo | Alcance | Ejemplos |
+|------|---------|----------|
+| **LITE** | Docs cortas, commits, push, cierres, correcciones puntuales | actualizar `CONTEXTO.md`, fix typo, registrar evento |
+| **NORMAL** | Tooling local, tests, auditorías read-only, docs de contrato | diseño de alarma read-only, audit script SSH, `docs/*_design.md` |
+| **FULL** | Railway / DB / env vars / trading core / riesgo / BANKROLL / Fase C | recalibrar sigma, cambiar sizing, deploy de guard runtime |
+
+Regla: **default LITE/NORMAL**. FULL requiere autorización explícita de Pablo + evidencia previa.
+
+---
+
+## 4. Reglas de gate interno (prompts agrupados)
+
+Para cualquier prompt que combine varios pasos:
+
+1. **Precheck**: confirmar archivos, ramas, scope, autorización.
+2. **Ejecutar** la tarea acotada.
+3. **Validar** (lectura de diff, test, audit, lo que aplique).
+4. **Cierre condicional**: si OK y estaba autorizado, commit/push; si no, dejar local.
+5. **Si aparece algo fuera de scope** → parar y reportar. Nunca expandir alcance silenciosamente.
+
+---
+
+## 5. Roles de agentes
+
+- **Opus** — arquitectura, riesgo, BANKROLL, Fase C, trading logic, guards, decisiones estratégicas, diseño de schemas críticos. Reservar para diseño/coding sensible.
+- **Sonnet** — documentación, cierres, síntesis, read-only no delicado, prompts/handoffs, audits no críticos, redacción de specs.
+- **Codex** — patches, tests, scripts, `verify_before_deploy.py`, Railway/logs, queries DB controladas, investigación con código.
+
+Regla de eficiencia: delegar a Codex patches, tests, verificaciones técnicas e investigación técnica; usar Sonnet para documentación larga, contratos, cierres y síntesis. Reservar Opus para lo que sólo Opus puede hacer.
+
+---
+
+## 6. Guardrails críticos
+
+- **No tocar trading core** (`bot.py`, scheduler, NOAA, reglas entrada/salida) salvo pedido explícito.
+- **No BANKROLL $35** sin Opus + evidencia documentada.
+- **No Fase C** mientras no esté autorizada.
+- **No Telegram accionable** sin diseño previo aprobado.
+- **No convertir auditorías read-only en señales ejecutables** sin paso intermedio de diseño.
+- **No tocar whitelist / sizing / city modes / risk rules** sin revisión separada.
+- **Herramientas nuevas que afecten runtime**: default `OFF` / `LOG_ONLY`. Nunca activas por default.
+- **Railway**: usar `tools/railway_safe.ps1`, seguir `OPERATIONS_PLAYBOOK.md`.
+- **Docs históricas** (`CONTEXTO.md`, `HISTORIAL_SESIONES.md`): nunca `replace_all` con versiones — corrompe entradas.
+
+---
+
+## 7. Principio rector
+
+> Toda herramienta o alarma debe recoger información veraz, útil y trazable para mejorar decisiones.
+
+- No tooling por tooling.
+- Una alarma sólo merece trabajo si **cambia una decisión**.
+- Si no cambia nada operativo, no se construye.
+
+---
+
+## 8. Estado estratégico actual (2026-05-07)
+
+- **Truth Pipeline Fase 1**: completa, runtime OFF.
+- **Daily Bot Kanban Digest**: implementado, dry-run / `LOG_ONLY` / default OFF.
+- **BANKROLL $35**: no autorizado. Estado actual: `HOLD_BANKROLL_25` / `WAITING_EVIDENCE`.
+- **Fase C**: no autorizada.
+- **P&L tooling**: pausado (Lean Alarm Refocus 2026-05-07).
+- **A8 SL_intra Guard**: `WATCH` / `ESPERAR_MÁS_MUESTRA` (n=2 leverage-real, re-check 5º guarded o 2026-05-21).
+- **A7 Blocked Signals**: `WAITING_SCHEMA` — schema v3 desplegado (commit `4da47ea`), pendiente acumular evidencia.
+- **Untracked preexistente**: `2026-04-27]` (artefacto, no tocar).
+- **Último commit**: consultar siempre `git log -1 --oneline`; no fijar este dato manualmente.
+
+Mantener este bloque actualizado al final de cada sesión que cambie estado estratégico.
+
+---
+
+## 9. WIP limits
+
+- Máximo **1** monetización en curso.
+- Máximo **1** riesgo en curso.
+- Máximo **1** tooling/observabilidad en curso.
+- No abrir nueva subtarea si no **cierra** o **cambia una decisión**.
+
+---
+
+## 10. Cierre de tareas
+
+Todo cierre debe incluir:
+
+- **Clasificación** (LITE / NORMAL / FULL, tipo: docs / tooling / riesgo / etc.)
+- **Archivos modificados** (lista corta)
+- **Commit hash** (si hubo commit)
+- **Push** sí / no
+- **Deploy** sí / no
+- **Env vars** tocadas sí / no
+- **Railway / DB** tocados sí / no
+- **BANKROLL / trading core / `bot.py` / Fase C** tocados sí / no
+- **`git status`** final
+- **Siguiente alarma / tarea esperada**
+
+### Validación previa al commit
+
+```
+git diff --check
+git diff --stat
+git status --short
+```
+
+Si todo está limpio y la tarea estaba autorizada para commit, proceder. Push **sólo** si fue explícitamente autorizado.
+
+---
+
+## Apéndice — Lectura mínima por sesión nueva
+
+1. `ORCHESTRATOR.md` (este archivo)
+2. `AGENTS.md`
+3. `CONTEXTO.md`
+4. `OPERATIONS_PLAYBOOK.md`
+5. `git status` + `git log -1`
+6. Última entrada de `HISTORIAL_SESIONES.md`
+7. `agent_events.jsonl`
