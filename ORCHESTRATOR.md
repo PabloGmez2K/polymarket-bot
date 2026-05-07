@@ -151,6 +151,49 @@ Si todo está limpio y la tarea estaba autorizada para commit, proceder. Push **
 
 ---
 
+## 11. Orquestación eficiente
+
+### Autonomía por modo
+
+**LITE / NORMAL (no delicados):** El agente ejecuta diagnóstico → patch → validación → smoke test → commit/push y cierra **sin pedir confirmación entre subpasos**. Si el objetivo y el scope están claros, no interrumpir para reportar pasos intermedios. Reportar al final: diff, commit hash, git status.
+
+**FULL:** Verificación final obligatoria. Pero si el objetivo está claro y fue autorizado, no fragmentar en micro-prompts; ejecutar end-to-end y reportar al cierre.
+
+**Cuándo parar siempre (cualquier modo):**
+- Aparece algo fuera de scope.
+- Riesgo de BANKROLL / trading / DB / env vars / Railway / scheduler.
+- Decisión semántica que requiere Opus.
+- Alarma nueva durante el bloque.
+
+### Gestión de sesiones
+
+- **No pedir cierre** si la sesión anterior ya cerró con commit/push, validaciones y git status final limpio.
+- **Sí pedir cierre** si la sesión quedó cargada: contexto largo, trabajo sin commitar, pasos intermedios sin resolver.
+- Antes de preparar un prompt, decidir y comunicar: ¿misma sesión o nueva? ¿hace falta cierre previo? ¿qué agente? ¿qué modo? ¿cuál es el criterio de parada?
+
+### Documentación proporcional
+
+- `CONTEXTO.md`: solo si cambia estado vivo durable (feature activa, nuevo modo, cambio de config permanente).
+- Microcierres: `HISTORIAL_SESIONES.md` + `agent_events.jsonl`. No abrir `CONTEXTO.md` solo para registrar que una tarea LITE terminó.
+- No documentar microdetalles de implementación si el repo ya tiene el patrón — basta con commit message claro.
+- No comentar código cuando el nombre del símbolo ya lo explica.
+
+### Respeto a la dirección elegida
+
+- Si Pablo ya eligió Railway / scheduler / Telegram / arquitectura, **no abrir discusión de alternativas** salvo bloqueo real o riesgo no comunicado.
+- Implementar la dirección elegida. Si hay un problema, reportar el problema concreto, no proponer rediseño.
+
+### Anti-patrones a evitar
+
+- Pedir confirmación entre cada subpaso en tareas LITE/NORMAL.
+- Abrir sesión nueva cuando la anterior cerró limpiamente.
+- Actualizar `CONTEXTO.md` para microcierres que van en `HISTORIAL_SESIONES.md`.
+- Sobreexplicar implementación cuando el repo ya tiene el patrón.
+- Proponer alternativas de arquitectura cuando el usuario ya eligió dirección.
+- Fragmentar en micro-prompts una tarea FULL cuyo objetivo está claro y fue autorizado.
+
+---
+
 ## Apéndice — Lectura mínima por sesión nueva
 
 1. `ORCHESTRATOR.md` (este archivo)
