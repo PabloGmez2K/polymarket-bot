@@ -9331,6 +9331,82 @@ def _resolve_blocked_reason(city: str, condition=None) -> tuple:
 # v10.6.47 — Fase B2: blocked_signals Telegram summary helpers
 # =============================================================
 
+def _blocked_signal_bot_eval_fields(signal: dict) -> dict:
+    """
+    v3 schema adapter for blocked_signals records.
+    Only trusts explicit bot eval metadata already captured upstream.
+    """
+    try:
+        source = str(signal.get("bot_evaluation_source", "") or "").strip()
+        if source not in {"live_eval", "replay", "unknown"}:
+            source = "unknown"
+        would_have_bought = signal.get("bot_would_have_bought")
+        if isinstance(would_have_bought, bool):
+            return {
+                "bot_would_have_bought": would_have_bought,
+                "bot_evaluation_source": source,
+            }
+    except Exception:
+        pass
+    return {
+        "bot_would_have_bought": False,
+        "bot_evaluation_source": "unknown",
+    }
+
+
+def _build_blocked_signal_resolution_record(signal: dict, market: dict, prices, now) -> dict:
+    outcome = signal.get("outcome", "")
+    yes_p, no_p = float(prices[0]), float(prices[1])
+    resolved = yes_p >= 0.95 or no_p >= 0.95
+    if outcome == "Yes":
+        win = yes_p >= 0.95
+    elif outcome == "No":
+        win = no_p >= 0.95
+    else:
+        win = False
+
+    city = signal.get("city", "")
+    condition = signal.get("condition", "")
+    reason_blocked, block_reason_detail = _resolve_blocked_reason(city, condition)
+    canonical_signal_id = _build_blocked_signal_canonical_id(signal, outcome)
+    bot_eval_fields = _blocked_signal_bot_eval_fields(signal)
+    return {
+        "schema_version": 3,
+        "canonical_signal_id": canonical_signal_id,
+        "checked_at": now.isoformat(),
+        "match_key": signal.get("match_key", ""),
+        "city": city,
+        "date": signal.get("date", ""),
+        "condition": condition,
+        "trader": signal.get("trader", ""),
+        "trader_historical_wr": signal.get("trader_win_rate", 0),
+        "outcome": outcome,
+        "avg_price_entered": signal.get("avg_price", 0),
+        "close_price": yes_p if outcome == "Yes" else no_p,
+        "resolved": resolved,
+        "win_for_trader": bool(win and resolved),
+        "has_consensus": signal.get("has_consensus", False),
+        "market_id": market.get("id") or None,
+        "condition_id": market.get("conditionId") or None,
+        "token_id_yes": _extract_token_id(market, 0),
+        "token_id_no": _extract_token_id(market, 1),
+        "market_slug": market.get("slug") or None,
+        "city_mode_at_record_time": get_effective_city_mode(city) or "unknown",
+        "whitelist_status_at_record_time": "in" if city in QUALITY_TRADER_CITIES_WHITELIST else "out",
+        "city_policy_status_at_record_time": _classify_city_bucket(city),
+        "reason_blocked": reason_blocked,
+        "block_reason_detail": block_reason_detail,
+        "resolution_source": "polymarket_market_price",
+        "observed_coverage_status": _resolve_observed_coverage_status(city),
+        "settlement_source": "unknown",
+        "settlement_fidelity_status": "unverified",
+        "bot_edge_pct_at_signal": None,
+        "bot_would_have_bought": bot_eval_fields["bot_would_have_bought"],
+        "bot_evaluation_source": bot_eval_fields["bot_evaluation_source"],
+        "price_bucket": _price_bucket(signal.get("avg_price", 0)),
+    }
+
+
 def _bs_normalize(rec):
     out = dict(rec)
     out.setdefault("schema_version", 1)
@@ -9677,54 +9753,7 @@ def maybe_run_blocked_signals_check(state, now=None):
                 except Exception:
                     continue
 
-                outcome = signal.get("outcome", "")
-                resolved = yes_p >= 0.95 or no_p >= 0.95
-                if outcome == "Yes":
-                    win = yes_p >= 0.95
-                elif outcome == "No":
-                    win = no_p >= 0.95
-                else:
-                    win = False
-
-                city = signal.get("city", "")
-                condition = signal.get("condition", "")
-                reason_blocked, block_reason_detail = _resolve_blocked_reason(city, condition)
-                canonical_signal_id = _build_blocked_signal_canonical_id(signal, outcome)
-                new_records.append({
-                    "schema_version": 2,
-                    "canonical_signal_id": canonical_signal_id,
-                    "checked_at": now.isoformat(),
-                    "match_key": signal.get("match_key", ""),
-                    "city": city,
-                    "date": signal.get("date", ""),
-                    "condition": condition,
-                    "trader": signal.get("trader", ""),
-                    "trader_historical_wr": signal.get("trader_win_rate", 0),
-                    "outcome": outcome,
-                    "avg_price_entered": signal.get("avg_price", 0),
-                    "close_price": yes_p if outcome == "Yes" else no_p,
-                    "resolved": resolved,
-                    "win_for_trader": bool(win and resolved),
-                    "has_consensus": signal.get("has_consensus", False),
-                    "market_id": market.get("id") or None,
-                    "condition_id": market.get("conditionId") or None,
-                    "token_id_yes": _extract_token_id(market, 0),
-                    "token_id_no": _extract_token_id(market, 1),
-                    "market_slug": market.get("slug") or None,
-                    "city_mode_at_record_time": get_effective_city_mode(city) or "unknown",
-                    "whitelist_status_at_record_time": "in" if city in QUALITY_TRADER_CITIES_WHITELIST else "out",
-                    "city_policy_status_at_record_time": _classify_city_bucket(city),
-                    "reason_blocked": reason_blocked,
-                    "block_reason_detail": block_reason_detail,
-                    "resolution_source": "polymarket_market_price",
-                    "observed_coverage_status": _resolve_observed_coverage_status(city),
-                    "settlement_source": "unknown",
-                    "settlement_fidelity_status": "unverified",
-                    "bot_edge_pct_at_signal": None,
-                    "bot_would_have_bought": None,
-                    "bot_evaluation_source": "unknown",
-                    "price_bucket": _price_bucket(signal.get("avg_price", 0)),
-                })
+                new_records.append(_build_blocked_signal_resolution_record(signal, market, prices, now))
 
             if new_records:
                 blocked_dir = os.path.dirname(BLOCKED_SIGNALS_FILE)

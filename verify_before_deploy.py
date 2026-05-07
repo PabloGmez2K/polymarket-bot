@@ -7277,8 +7277,8 @@ def run_tests():
     print("  Checks v10.6.45: blocked_signals schema v2 Fase A")
 
     test(
-        "v10.6.45: schema_version=2 hardcoded en blocked_signals dict",
-        '"schema_version": 2,' in code,
+        "blocked_signals schema v3: nuevos registros hardcodean schema_version=3",
+        '"schema_version": 3,' in code,
     )
     test(
         "v10.6.45: 15 campos v2 siempre-disponibles cubiertos por schema_version + 14 campos adicionales",
@@ -7298,12 +7298,19 @@ def run_tests():
         and '"canonical_signal_id"' in code,
     )
     test(
-        "v10.6.45: 5 campos v2 settlement/edge persistidos como null/unknown",
+        "blocked_signals schema v3: settlement/edge v2 preservados y bot eval v3 persistido",
         '"settlement_source": "unknown"' in code
         and '"settlement_fidelity_status": "unverified"' in code
         and '"bot_edge_pct_at_signal": None' in code
-        and '"bot_would_have_bought": None' in code
-        and '"bot_evaluation_source": "unknown"' in code,
+        and '"bot_would_have_bought": bot_eval_fields["bot_would_have_bought"]' in code
+        and '"bot_evaluation_source": bot_eval_fields["bot_evaluation_source"]' in code,
+    )
+    test(
+        "blocked_signals schema v3: helper no inventa bot_would_have_bought=true",
+        "def _blocked_signal_bot_eval_fields(" in code
+        and '"bot_would_have_bought": False' in code
+        and '"bot_evaluation_source": "unknown"' in code
+        and '{"live_eval", "replay", "unknown"}' in code,
     )
     test(
         "v10.6.45: helper _classify_city_bucket presente con 6 buckets canonicos",
