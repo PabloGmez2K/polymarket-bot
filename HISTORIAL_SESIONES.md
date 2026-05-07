@@ -4394,3 +4394,46 @@ Pre-requisito para el futuro SL_intra Guard Evidence Ledger: definir el campo `s
 ### Siguiente paso posible
 
 Codex patch mínimo para añadir `sl_window_catchable` al skip event (LOG_ONLY), o Opus diseña el Evidence Ledger si el campo ya existe.
+
+---
+
+## Sesión 320 — 7 de mayo de 2026 (Codex)
+
+**Clasificacion:** NORMAL / tooling observability / patch acotado / no runtime
+**Bloque:** B4.4 — Leaderboard P&L Snapshot Store
+**Veredicto:** IMPLEMENTADO / VALIDADO / PUSH AUTORIZADO
+
+### Contexto
+
+B4.3 cerro que `leaderboard.pnl` no es dashboard-equivalent ni fuente canonica, pero si sirve como observabilidad externa para historico, digest y tendencia. B4.4 materializa esa captura sin conectarla a readiness.
+
+### Artefactos
+
+- **Creado:** `tools/leaderboard_pnl_snapshot.py` — CLI stdlib-only para `--dry-run`, `--write` y `--summary`.
+- **Creado:** `tests/test_leaderboard_pnl_snapshot.py` — tests de flags, summary y fallo API.
+- **Actualizado:** `.gitignore` — excluye `data/observability/`.
+- **Actualizado:** `ORCHESTRATOR.md` — estado estrategico P&L tooling.
+- **Actualizado:** `CONTEXTO.md`, `HISTORIAL_SESIONES.md`, `agent_events.jsonl` — cierre y trazabilidad.
+
+### Contrato
+
+La ruta por defecto es `data/observability/leaderboard_pnl_snapshots.jsonl`. Cada fila es append-only y etiqueta explicitamente `source=polymarket_leaderboard`, `source_quality=external_opaque`, `dashboard_equivalent=false`, `usable_for_digest=true`, `usable_for_trend=true`, `usable_for_bankroll=false`. `MONTH` mantiene `confidence_month=low`.
+
+Si no hay wallet en `--wallet`, `FUNDER`, `POLYMARKET_WALLET`, `WALLET_ADDRESS` o `PROXY_WALLET`, la herramienta devuelve `NEEDS_MANUAL_WALLET_INPUT`. Los fallos API pueden escribirse con `query_status=failed` y `api_error`, sin generar readiness.
+
+### Validacion Codex
+
+- `python tools\check_python_syntax.py tools\leaderboard_pnl_snapshot.py tests\test_leaderboard_pnl_snapshot.py` — OK.
+- `python -m pytest tests\test_leaderboard_pnl_snapshot.py -q -p no:cacheprovider` — 5 passed.
+- `python tools\leaderboard_pnl_snapshot.py --dry-run` — no write, devuelve `NEEDS_MANUAL_WALLET_INPUT` sin wallet local.
+- `python tools\leaderboard_pnl_snapshot.py --summary` — 0 snapshots, trend `unknown`.
+- `git diff --check` — OK.
+- `python verify_before_deploy.py` — 1140/1140 OK.
+
+### NO se toco
+
+`bot.py`, runtime, trading core, BANKROLL, Fase C, sizing, whitelist, city modes, scheduler, guards, SL, reglas de riesgo, env vars, DB, Railway/deploy, Telegram real.
+
+### Siguiente paso posible
+
+Ejecutar manualmente `tools/leaderboard_pnl_snapshot.py --write --wallet <wallet>` cuando Pablo quiera iniciar historico real. No conectar a `bankroll_scaling_check.py` ni a readiness sin revision separada.

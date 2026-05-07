@@ -105,7 +105,7 @@ Secuencia de referencia para guards / SL / riesgo: **Codex** audita → **Opus**
 - **Daily Bot Kanban Digest**: implementado, dry-run / `LOG_ONLY` / default OFF.
 - **BANKROLL $35**: no autorizado. Estado actual: `HOLD_BANKROLL_25` / `WAITING_EVIDENCE`.
 - **Fase C**: no autorizada.
-- **P&L tooling**: pausado (Lean Alarm Refocus 2026-05-07).
+- **P&L tooling**: B4.4 leaderboard snapshot store implementado para historico/digest/tendencia; externo opaco, no dashboard-equivalent, nunca BANKROLL readiness.
 - **A8 SL_intra Guard**: `WATCH` / `ESPERAR_MÁS_MUESTRA` (n=2 leverage-real, re-check 5º guarded o 2026-05-21).
 - **A7 Blocked Signals**: `WAITING_SCHEMA` — schema v3 desplegado (commit `4da47ea`), pendiente acumular evidencia.
 - **Untracked preexistente**: `2026-04-27]` (artefacto, no tocar).
