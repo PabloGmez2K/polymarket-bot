@@ -118,6 +118,18 @@ def build_deltas(latest: dict[str, Any] | None, previous: dict[str, Any] | None)
     }
 
 
+def is_valid_trend_snapshot(row: dict[str, Any] | None) -> bool:
+    if not row:
+        return False
+    if str(row.get("query_status", "")).lower() not in {"ok", "success"}:
+        return False
+    return all(row.get(f"pnl_{name}") is not None for name in ("day", "week", "month", "all"))
+
+
+def valid_trend_snapshots(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [row for row in rows if is_valid_trend_snapshot(row)]
+
+
 def normalized_latest(latest: dict[str, Any] | None) -> dict[str, Any] | None:
     if latest is None:
         return None
@@ -134,17 +146,22 @@ def normalized_latest(latest: dict[str, Any] | None) -> dict[str, Any] | None:
 
 def build_digest_from_rows(rows: list[dict[str, Any]], snapshot_file: str | Path) -> dict[str, Any]:
     latest = normalized_latest(rows[-1]) if rows else None
-    previous = rows[-2] if len(rows) >= 2 else None
-    deltas = build_deltas(latest, previous)
+    valid_rows = valid_trend_snapshots(rows)
+    latest_valid = normalized_latest(valid_rows[-1]) if valid_rows else None
+    previous_valid = valid_rows[-2] if len(valid_rows) >= 2 else None
+    deltas = build_deltas(latest_valid, previous_valid)
     trend_label = trend_label_from_deltas(deltas)
-    if latest and not previous:
+    if latest_valid and not previous_valid:
         trend_label = "unknown"
 
     payload: dict[str, Any] = {
         "snapshot_file": str(snapshot_file),
         "snapshot_count": len(rows),
+        "valid_snapshot_count": len(valid_rows),
         "latest": latest,
-        "previous": previous,
+        "latest_valid": latest_valid,
+        "previous": previous_valid,
+        "previous_valid": previous_valid,
         "deltas": deltas,
         "trend_label": trend_label,
         "source": SOURCE,
@@ -154,7 +171,8 @@ def build_digest_from_rows(rows: list[dict[str, Any]], snapshot_file: str | Path
         "usable_for_trend": True,
         "usable_for_bankroll": False,
         "has_data": latest is not None,
-        "no_previous_snapshot": latest is not None and previous is None,
+        "latest_snapshot_query_status": latest.get("query_status") if latest else None,
+        "no_previous_snapshot": latest_valid is not None and previous_valid is None,
     }
     payload["message"] = render_human_digest(payload)
     payload["telegram_preview"] = render_telegram_digest(payload)
@@ -198,6 +216,7 @@ def render_human_digest(digest: dict[str, Any]) -> str:
     lines.extend(
         [
             f"captured_at_utc: {latest.get('captured_at_utc', 'unknown')}",
+            f"query_status: {latest.get('query_status', 'unknown')}",
             "",
             "P&L leaderboard:",
             f"DAY: {money(latest.get('pnl_day'))}",
@@ -211,13 +230,16 @@ def render_human_digest(digest: dict[str, Any]) -> str:
             f"MONTH: {plain_value(latest.get('vol_month'))}",
             f"ALL: {plain_value(latest.get('vol_all'))}",
             "",
-            "Trend vs previous snapshot:",
+            "Trend vs previous valid snapshot:",
         ]
     )
+    latest_valid = digest.get("latest_valid")
+    if latest_valid and not is_valid_trend_snapshot(latest):
+        lines.append(f"last_valid_snapshot_captured_at_utc: {latest_valid.get('captured_at_utc', 'unknown')}")
     if previous is None:
-        lines.append("No previous snapshot yet")
+        lines.append("No previous valid snapshot yet")
     else:
-        lines.append(f"previous_captured_at_utc: {previous.get('captured_at_utc', 'unknown')}")
+        lines.append(f"previous_valid_captured_at_utc: {previous.get('captured_at_utc', 'unknown')}")
     lines.extend(
         [
             f"day_delta: {money(deltas.get('day_delta'))}",
@@ -259,14 +281,18 @@ def render_telegram_digest(digest: dict[str, Any]) -> str:
             ]
         )
     deltas = digest.get("deltas") or {}
-    trend_intro = "No previous snapshot yet"
+    trend_intro = "No previous valid snapshot yet"
     previous = digest.get("previous")
+    latest_valid = digest.get("latest_valid")
+    if latest_valid and not is_valid_trend_snapshot(latest):
+        trend_intro = f"last_valid_snapshot_captured_at_utc: {latest_valid.get('captured_at_utc', 'unknown')}"
     if previous:
-        trend_intro = f"previous_captured_at_utc: {previous.get('captured_at_utc', 'unknown')}"
+        trend_intro = f"previous_valid_captured_at_utc: {previous.get('captured_at_utc', 'unknown')}"
     return "\n".join(
         [
             "DAILY BOT DIGEST",
             f"captured_at_utc: {latest.get('captured_at_utc', 'unknown')}",
+            f"query_status: {latest.get('query_status', 'unknown')}",
             "",
             "P&L leaderboard",
             f"DAY {money(latest.get('pnl_day'))} | WEEK {money(latest.get('pnl_week'))}",
@@ -276,7 +302,7 @@ def render_telegram_digest(digest: dict[str, Any]) -> str:
             f"DAY {plain_value(latest.get('vol_day'))} | WEEK {plain_value(latest.get('vol_week'))}",
             f"MONTH {plain_value(latest.get('vol_month'))} | ALL {plain_value(latest.get('vol_all'))}",
             "",
-            "Trend vs previous snapshot",
+            "Trend vs previous valid snapshot",
             trend_intro,
             (
                 f"day_delta {money(deltas.get('day_delta'))} | "

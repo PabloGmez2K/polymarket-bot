@@ -326,24 +326,44 @@ def append_snapshot(path: Path, payload: dict[str, Any]) -> None:
         handle.write(json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n")
 
 
+def is_valid_trend_snapshot(row: dict[str, Any] | None) -> bool:
+    if not row:
+        return False
+    if str(row.get("query_status", "")).lower() not in {"ok", "success"}:
+        return False
+    return all(row.get(f"pnl_{name}") is not None for name in ("day", "week", "month", "all"))
+
+
+def valid_trend_snapshots(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [row for row in rows if is_valid_trend_snapshot(row)]
+
+
 def build_summary(path: Path) -> dict[str, Any]:
     rows = read_snapshots(path)
     latest = rows[-1] if rows else None
-    previous = rows[-2] if len(rows) >= 2 else None
+    valid_rows = valid_trend_snapshots(rows)
+    latest_valid = valid_rows[-1] if valid_rows else None
+    previous_valid = valid_rows[-2] if len(valid_rows) >= 2 else None
     summary: dict[str, Any] = {
         "path": str(path),
         "snapshot_count": len(rows),
         "latest_snapshot": latest,
-        "previous_snapshot_captured_at_utc": previous.get("captured_at_utc") if previous else None,
+        "valid_snapshot_count": len(valid_rows),
+        "latest_valid_snapshot": latest_valid,
+        "previous_valid_snapshot_captured_at_utc": previous_valid.get("captured_at_utc") if previous_valid else None,
+        "previous_snapshot_captured_at_utc": previous_valid.get("captured_at_utc") if previous_valid else None,
         "day_delta_vs_previous_snapshot": None,
         "week_delta_vs_previous_snapshot": None,
         "month_delta_vs_previous_snapshot": None,
         "all_delta_vs_previous_snapshot": None,
         "trend_label": "unknown",
     }
-    if latest and previous:
+    if latest_valid and previous_valid:
         for name in ("day", "week", "month", "all"):
-            summary[f"{name}_delta_vs_previous_snapshot"] = delta(latest.get(f"pnl_{name}"), previous.get(f"pnl_{name}"))
+            summary[f"{name}_delta_vs_previous_snapshot"] = delta(
+                latest_valid.get(f"pnl_{name}"),
+                previous_valid.get(f"pnl_{name}"),
+            )
         summary["trend_label"] = trend_label(summary)
     return summary
 

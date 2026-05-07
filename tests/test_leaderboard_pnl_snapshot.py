@@ -130,6 +130,96 @@ def test_summary_calculates_delta_against_previous_snapshot():
     assert summary["trend_label"] == "improving"
 
 
+def test_summary_skips_failed_snapshot_between_valid_snapshots():
+    module = load_tool()
+    with local_tmp_dir() as tmp_dir:
+        path = tmp_dir / "observability" / "leaderboard_pnl_snapshots.jsonl"
+        write_jsonl(
+            path,
+            [
+                snapshot(captured_at_utc="2026-05-07T10:00:00Z", pnl_day=1.0, pnl_week=2.0, pnl_month=3.0, pnl_all=4.0),
+                snapshot(
+                    captured_at_utc="2026-05-07T10:30:00Z",
+                    query_status="failed",
+                    pnl_day=None,
+                    pnl_week=None,
+                    pnl_month=None,
+                    pnl_all=None,
+                ),
+                snapshot(captured_at_utc="2026-05-07T11:00:00Z", pnl_day=1.5, pnl_week=1.0, pnl_month=3.0, pnl_all=5.0),
+            ],
+        )
+
+        summary = module.build_summary(path)
+
+    assert summary["snapshot_count"] == 3
+    assert summary["valid_snapshot_count"] == 2
+    assert summary["latest_snapshot"]["captured_at_utc"] == "2026-05-07T11:00:00Z"
+    assert summary["previous_valid_snapshot_captured_at_utc"] == "2026-05-07T10:00:00Z"
+    assert summary["day_delta_vs_previous_snapshot"] == 0.5
+    assert summary["week_delta_vs_previous_snapshot"] == -1.0
+    assert summary["month_delta_vs_previous_snapshot"] == 0.0
+    assert summary["all_delta_vs_previous_snapshot"] == 1.0
+
+
+def test_summary_latest_global_failed_keeps_last_valid_without_trend():
+    module = load_tool()
+    with local_tmp_dir() as tmp_dir:
+        path = tmp_dir / "observability" / "leaderboard_pnl_snapshots.jsonl"
+        write_jsonl(
+            path,
+            [
+                snapshot(captured_at_utc="2026-05-07T10:00:00Z", pnl_day=1.0, pnl_week=2.0, pnl_month=3.0, pnl_all=4.0),
+                snapshot(
+                    captured_at_utc="2026-05-07T11:00:00Z",
+                    query_status="failed",
+                    pnl_day=None,
+                    pnl_week=None,
+                    pnl_month=None,
+                    pnl_all=None,
+                ),
+            ],
+        )
+
+        summary = module.build_summary(path)
+
+    assert summary["snapshot_count"] == 2
+    assert summary["valid_snapshot_count"] == 1
+    assert summary["latest_snapshot"]["query_status"] == "failed"
+    assert summary["latest_valid_snapshot"]["captured_at_utc"] == "2026-05-07T10:00:00Z"
+    assert summary["previous_valid_snapshot_captured_at_utc"] is None
+    assert summary["day_delta_vs_previous_snapshot"] is None
+    assert summary["trend_label"] == "unknown"
+    assert summary["latest_snapshot"]["usable_for_bankroll"] is False
+
+
+def test_summary_only_failed_has_no_valid_trend():
+    module = load_tool()
+    with local_tmp_dir() as tmp_dir:
+        path = tmp_dir / "observability" / "leaderboard_pnl_snapshots.jsonl"
+        write_jsonl(
+            path,
+            [
+                snapshot(
+                    captured_at_utc="2026-05-07T11:00:00Z",
+                    query_status="failed",
+                    pnl_day=None,
+                    pnl_week=None,
+                    pnl_month=None,
+                    pnl_all=None,
+                ),
+            ],
+        )
+
+        summary = module.build_summary(path)
+
+    assert summary["snapshot_count"] == 1
+    assert summary["valid_snapshot_count"] == 0
+    assert summary["latest_valid_snapshot"] is None
+    assert summary["previous_valid_snapshot_captured_at_utc"] is None
+    assert summary["trend_label"] == "unknown"
+
+
 def test_api_failure_does_not_create_readiness_or_positive_bankroll_flags(monkeypatch):
     module = load_tool()
 

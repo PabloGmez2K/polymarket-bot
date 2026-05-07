@@ -4556,3 +4556,42 @@ La salida conserva `source_quality=external_opaque`, `dashboard_equivalent=false
 ### NO se toco
 
 Telegram real, scheduler, Railway, DB, env vars Telegram, BANKROLL, trading core, `bot.py`, sizing, whitelist, city modes, guards, SL, reglas de riesgo, Fase C, `bankroll_scaling_check.py`, semantica P&L.
+
+---
+
+## Sesión 324 — 7 de mayo de 2026 (Codex)
+
+**Clasificacion:** LITE / observability digest fix / patch acotado / no runtime
+**Bloque:** B4.6c — compare against previous valid snapshot
+**Veredicto:** IMPLEMENTADO / VALIDADO / PUSH AUTORIZADO
+
+### Contexto
+
+B4.6a/B4.6b dejaron intentos failed por `WinError 10061` entre snapshots validos. El digest y el summary comparaban contra el intento inmediatamente anterior, por lo que un OK posterior a failed quedaba con deltas `unknown`.
+
+### Artefactos
+
+- **Modificado:** `tools/leaderboard_pnl_snapshot.py` — summary basado en snapshots validos para tendencia.
+- **Modificado:** `tools/daily_bot_digest.py` — digest basado en snapshots validos para tendencia.
+- **Modificado:** `tests/test_leaderboard_pnl_snapshot.py` — tests OK/failed/OK, OK/failed y solo failed.
+- **Modificado:** `tests/test_daily_bot_digest.py` — tests equivalentes y copy guardrail.
+- **Actualizado:** `CONTEXTO.md`, `HISTORIAL_SESIONES.md`, `agent_events.jsonl` — cierre y trazabilidad.
+
+### Contrato
+
+Los snapshots failed se conservan y cuentan como intentos (`snapshot_count`), pero no se usan para deltas. Un snapshot valido requiere `query_status` `ok`/`success` y `pnl_day`, `pnl_week`, `pnl_month`, `pnl_all` no null.
+
+El summary expone `valid_snapshot_count`, `latest_valid_snapshot` y `previous_valid_snapshot_captured_at_utc`. El digest muestra `query_status`, `Trend vs previous valid snapshot`; si el ultimo intento global es failed, muestra `last_valid_snapshot_captured_at_utc` si existe y deja `trend_label=unknown`.
+
+Con el historico local actual OK/failed/failed/OK: `snapshot_count=4`, `valid_snapshot_count=2`, previous valid `2026-05-07T19:51:33Z`, deltas P&L `0.00`, `trend_label=flat`.
+
+### Validacion Codex
+
+- `python tools\check_python_syntax.py tools\leaderboard_pnl_snapshot.py tools\daily_bot_digest.py tests\test_leaderboard_pnl_snapshot.py tests\test_daily_bot_digest.py` — OK.
+- `python -m pytest tests\test_leaderboard_pnl_snapshot.py tests\test_daily_bot_digest.py -q -p no:cacheprovider` — 21 passed.
+- `python tools\leaderboard_pnl_snapshot.py --summary` — OK, valid deltas 0.00 contra previous valid.
+- `python tools\daily_bot_digest.py --dry-run` — OK, `Trend vs previous valid snapshot`.
+
+### NO se toco
+
+Telegram real, scheduler, Railway, DB, env vars, BANKROLL, trading core, `bot.py`, sizing, whitelist, city modes, guards, SL, reglas de riesgo, Fase C, `bankroll_scaling_check.py`, semantica P&L.

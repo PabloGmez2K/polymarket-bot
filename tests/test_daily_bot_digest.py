@@ -99,7 +99,7 @@ def test_one_snapshot_has_unknown_trend_and_no_previous_snapshot():
         "month_delta": None,
         "all_delta": None,
     }
-    assert "No previous snapshot yet" in digest["message"]
+    assert "No previous valid snapshot yet" in digest["message"]
     assert "trend_label=unknown" in digest["message"]
 
 
@@ -133,6 +133,108 @@ def test_two_snapshots_calculates_deltas_correctly():
     assert digest["deltas"]["month_delta"] == 0.0
     assert digest["deltas"]["all_delta"] == 1.0
     assert digest["trend_label"] == "improving"
+
+
+def test_digest_skips_failed_snapshot_between_valid_snapshots():
+    module = load_tool()
+    with local_tmp_dir() as tmp_dir:
+        path = tmp_dir / "leaderboard_pnl_snapshots.jsonl"
+        write_jsonl(
+            path,
+            [
+                snapshot(
+                    captured_at_utc="2026-05-07T18:00:00Z",
+                    pnl_day=1.0,
+                    pnl_week=2.0,
+                    pnl_month=3.0,
+                    pnl_all=4.0,
+                ),
+                snapshot(
+                    captured_at_utc="2026-05-07T18:30:00Z",
+                    query_status="failed",
+                    pnl_day=None,
+                    pnl_week=None,
+                    pnl_month=None,
+                    pnl_all=None,
+                ),
+                snapshot(
+                    captured_at_utc="2026-05-07T19:00:00Z",
+                    pnl_day=1.5,
+                    pnl_week=1.0,
+                    pnl_month=3.0,
+                    pnl_all=5.0,
+                ),
+            ],
+        )
+        digest = module.build_digest(path)
+
+    assert digest["snapshot_count"] == 3
+    assert digest["valid_snapshot_count"] == 2
+    assert digest["previous"]["captured_at_utc"] == "2026-05-07T18:00:00Z"
+    assert digest["deltas"]["day_delta"] == 0.5
+    assert digest["deltas"]["week_delta"] == -1.0
+    assert "previous_valid_captured_at_utc: 2026-05-07T18:00:00Z" in digest["message"]
+
+
+def test_digest_latest_failed_shows_last_valid_without_trend():
+    module = load_tool()
+    with local_tmp_dir() as tmp_dir:
+        path = tmp_dir / "leaderboard_pnl_snapshots.jsonl"
+        write_jsonl(
+            path,
+            [
+                snapshot(captured_at_utc="2026-05-07T18:00:00Z"),
+                snapshot(
+                    captured_at_utc="2026-05-07T19:00:00Z",
+                    query_status="failed",
+                    pnl_day=None,
+                    pnl_week=None,
+                    pnl_month=None,
+                    pnl_all=None,
+                ),
+            ],
+        )
+        digest = module.build_digest(path)
+
+    assert digest["latest"]["query_status"] == "failed"
+    assert digest["latest_valid"]["captured_at_utc"] == "2026-05-07T18:00:00Z"
+    assert digest["previous"] is None
+    assert digest["trend_label"] == "unknown"
+    assert "query_status: failed" in digest["message"]
+    assert "last_valid_snapshot_captured_at_utc: 2026-05-07T18:00:00Z" in digest["message"]
+    assert "usable_for_bankroll=false" in digest["message"]
+    assert "Observability only." in digest["message"]
+
+
+def test_digest_only_failed_has_no_valid_trend():
+    module = load_tool()
+    with local_tmp_dir() as tmp_dir:
+        path = tmp_dir / "leaderboard_pnl_snapshots.jsonl"
+        write_jsonl(
+            path,
+            [
+                snapshot(
+                    captured_at_utc="2026-05-07T19:00:00Z",
+                    query_status="failed",
+                    pnl_day=None,
+                    pnl_week=None,
+                    pnl_month=None,
+                    pnl_all=None,
+                ),
+            ],
+        )
+        digest = module.build_digest(path)
+
+    assert digest["valid_snapshot_count"] == 0
+    assert digest["latest_valid"] is None
+    assert digest["previous"] is None
+    assert digest["trend_label"] == "unknown"
+    assert digest["deltas"] == {
+        "day_delta": None,
+        "week_delta": None,
+        "month_delta": None,
+        "all_delta": None,
+    }
 
 
 def test_message_always_keeps_observability_only_and_no_bankroll():
