@@ -4917,3 +4917,61 @@ Trading core, BANKROLL, sizing, whitelist, city modes, scheduler, risk rules, po
 ### Siguiente accion
 
 Para pasar de `V1_PACKAGE_PREPARED` a `V1_ACTIVE_OBSERVATIONAL`: confirmacion separada, confirmar `signals.json` fresco, ejecutar `tools/traders_intelligence_snapshot.py --dry-run`, y si es coherente hacer una corrida manual real registrando run id, `n_current_signals`, status counts y artefactos escritos. Si se quiere ampliar scope, scheduler o uso ejecutable, parar y llevar a Opus.
+
+---
+
+## Sesión 332 - 8 de mayo de 2026 (Codex)
+
+**Clasificacion:** NORMAL / TRADERS_INTELLIGENCE / observational manual / runtime artifacts gitignored
+**Bloque:** Traders Intelligence V1 observational activation
+**Veredicto:** V1_OBSERVATIONAL_ACTIVE / MANUAL_SNAPSHOT_1
+
+### Contrato confirmado
+
+V1 activa significa permitir ejecucion manual de `tools/traders_intelligence_snapshot.py` contra `signals.json` fresco para archivar snapshots filtrados y pseudo-lifecycle observacional bajo `data/traders_intelligence/`.
+
+Queda fuera: scheduler, Telegram real/accionable, DB, env vars, policy, BUY/SELL/SKIP, BANKROLL, Fase C, trading core, cambios de readiness, scope expansion y cualquier interpretacion ejecutable.
+
+### Input usado
+
+- Fuente: `data/runtime_import/signals.json`.
+- Frescura: `generated=2026-05-08T11:13:56.716424+00:00`.
+- Resumen input: `n_actionable_signals=59`; quality traders `Entire-Hood`, `Dimpled-Boy`, `Villainous-Wave`, `Loyal-Aggression`.
+- Scope fijo V1: traders `Thrifty-Original`, `Entire-Hood`; cities `Houston`, `Los Angeles`, `Manila`, `Miami`.
+
+### Ejecuciones
+
+- Dry-run: `python tools/traders_intelligence_snapshot.py --dry-run --run-id 20260508T111356Z-v1-observational-dry-run`.
+  - Resultado: OK, sin writes.
+  - `n_current_signals=1`.
+  - Status counts: `appeared=1`, `still_present=0`, `disappeared_apparent=3`, `reappeared=0`.
+- Corrida real manual: `python tools/traders_intelligence_snapshot.py --run-id 20260508T111356Z-v1-observational-manual-1`.
+  - Resultado: OK.
+  - `generated_at/snapshot_at=2026-05-08T11:44:51+00:00`.
+  - `n_current_signals=1`.
+  - Status counts: `appeared=1`, `still_present=0`, `disappeared_apparent=3`, `reappeared=0`.
+
+### Artefactos runtime escritos
+
+- `data/traders_intelligence/snapshots/20260508T111356Z-v1-observational-manual-1.json`.
+- `data/traders_intelligence/reports/20260508T111356Z-v1-observational-manual-1.json`.
+- `data/traders_intelligence/pseudo_lifecycle_runs.jsonl`.
+
+Los tres viven bajo `data/traders_intelligence/` y estan gitignored como runtime/regenerables.
+
+### Eventos observados
+
+- `appeared`: `Entire-Hood` / `Houston|2026-05-08|range|75|F`.
+- `disappeared_apparent`: `Entire-Hood` / `Los Angeles|2026-04-26|range|63|F`.
+- `disappeared_apparent`: `Entire-Hood` / `Los Angeles|2026-04-27|range|65|F`.
+- `disappeared_apparent`: `Thrifty-Original` / `Miami|2026-04-26|range|89|F`.
+
+`disappeared_apparent` sigue siendo ausencia en snapshot filtrado, no salida confirmada.
+
+### NO se toco
+
+Trading core, BANKROLL, sizing, whitelist, city modes, scheduler, risk rules, policy gates ejecutables, Fase C, `bot.py`, DB, env vars, Railway runtime, Telegram real, criterios de readiness ni scope V1.
+
+### Siguiente accion
+
+Acumular mas snapshots manuales con `signals.json` fresco antes de sacar conclusiones. Si se quiere ampliar scope a `Dimpled-Boy`, `Loyal-Aggression`, San Francisco o Tel Aviv, o conectar scheduler/Telegram/semantica ejecutable, parar y llevar a revision Opus.
