@@ -7,8 +7,9 @@
 >
 > **Roadmap evolutivo durable:** ver
 > [`docs/traders-intelligence-roadmap.md`](traders-intelligence-roadmap.md)
-> para el diseño V1 → V1.1 → V1.2 → recomendaciones (no implementado, gates
-> y guardrails explícitos).
+> para el diseño V1 -> V1.1 -> V1.2 -> recomendaciones. V1.1 collector esta
+> implementado como `LOG_ONLY / default OFF`; fases posteriores mantienen gates
+> y guardrails explicitos.
 
 ---
 

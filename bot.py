@@ -700,6 +700,11 @@ TRADERS_INTELLIGENCE_DAILY_SUMMARY_SCRIPT = os.path.join(
     "tools",
     "traders_intelligence_daily_summary.py",
 )
+TRADERS_INTELLIGENCE_COLLECTOR_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "tools",
+    "traders_intelligence_collector.py",
+)
 SL_RETROSPECTIVE_SCRIPT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "tools",
@@ -751,6 +756,7 @@ CITY_INTELLIGENCE_DAILY_SUMMARY_SCRIPT = os.path.join(
 )
 TRADERS_INTELLIGENCE_ENABLED = os.getenv("TRADERS_INTELLIGENCE_ENABLED", "true").lower() in ("1", "true", "yes", "on")
 TRADERS_INTELLIGENCE_HOUR_UTC = int(os.getenv("TRADERS_INTELLIGENCE_HOUR_UTC", "8"))
+TRADERS_INTELLIGENCE_COLLECTOR_ENABLED = os.getenv("TRADERS_INTELLIGENCE_COLLECTOR", "OFF").lower() in ("1", "true", "yes", "on")
 CITY_INTELLIGENCE_RUNTIME_BRIDGE_ENABLED = os.getenv("CITY_INTELLIGENCE_RUNTIME_BRIDGE_ENABLED", "true").lower() in ("1", "true", "yes", "on")
 CITY_INTELLIGENCE_RUNTIME_BRIDGE_HOUR_UTC = int(os.getenv("CITY_INTELLIGENCE_RUNTIME_BRIDGE_HOUR_UTC", "7"))
 BLOCKED_SIGNALS_FILE = _data_path("blocked_signals_resolutions.jsonl")
@@ -5657,6 +5663,15 @@ def run_observability_alerts():
         if logger:
             logger.warning(f"daily digest: fallo ({e})")
 
+    # Traders Intelligence V1.1 collector: LOG_ONLY, default OFF.
+    try:
+        if maybe_run_traders_intelligence_collector():
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"traders intelligence collector: fallo ({e})")
+
     # v10.6.43: Recorder Health Alerts (Fase 0.6)
     try:
         if maybe_run_recorder_health_alert(state):
@@ -8827,6 +8842,55 @@ def maybe_run_traders_intelligence_summary(state, now=None):
     if logger:
         logger.info("traders intelligence summary: OK")
     return True
+
+
+def maybe_run_traders_intelligence_collector(now=None):
+    """
+    Ejecuta el collector V1.1 LOG_ONLY detras de TRADERS_INTELLIGENCE_COLLECTOR.
+    Default OFF; el propio collector aplica cooldown, idempotencia y kill switch.
+    """
+    logger = globals().get("log")
+    if not TRADERS_INTELLIGENCE_COLLECTOR_ENABLED:
+        if logger:
+            logger.info("traders intelligence collector: skip (TRADERS_INTELLIGENCE_COLLECTOR=OFF)")
+        return False
+    if now is None:
+        now = datetime.now(timezone.utc)
+    if not os.path.exists(TRADERS_INTELLIGENCE_COLLECTOR_SCRIPT):
+        if logger:
+            logger.warning(f"traders intelligence collector: skip (missing script: {TRADERS_INTELLIGENCE_COLLECTOR_SCRIPT})")
+        return False
+
+    try:
+        result = subprocess.run(
+            [sys.executable, TRADERS_INTELLIGENCE_COLLECTOR_SCRIPT, "--json", "--now", now.replace(microsecond=0).isoformat()],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=False,
+        )
+    except Exception as exc:
+        if logger:
+            logger.warning(f"traders intelligence collector: fallo ejecutando script ({exc})")
+        return False
+
+    if result.returncode != 0:
+        if logger:
+            detail = (result.stderr or result.stdout or "sin detalle").strip()
+            logger.warning(f"traders intelligence collector: fallo ({detail[:500]})")
+        return False
+
+    try:
+        payload = json.loads(result.stdout or "{}")
+    except Exception:
+        payload = {}
+    status = payload.get("status")
+    reason = payload.get("reason") or "none"
+    run_id = payload.get("run_id") or "none"
+    if logger:
+        logger.info(f"traders intelligence collector: status={status} reason={reason} run_id={run_id}")
+    return status == "completed"
 
 
 def maybe_run_city_intelligence_runtime_summary(state, now=None):

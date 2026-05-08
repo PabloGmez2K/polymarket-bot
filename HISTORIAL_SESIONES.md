@@ -5003,3 +5003,38 @@ Trading core, BANKROLL, sizing, whitelist, city modes, scheduler, risk rules, po
 ### Siguiente accion
 
 Roadmap es diseño durable. Para mover de `ROADMAP_DOCUMENTED` a `V1.1_IMPLEMENTED_LOG_ONLY` requiere autorización explícita y revisión separada del primer patch (sección 9 del roadmap), siguiendo gates V1 → V1.1.
+---
+
+## Sesión 334 - 8 de mayo de 2026 (Codex)
+
+**Clasificacion:** NORMAL / TRADERS_INTELLIGENCE / tooling observability / scheduler hook default OFF
+**Bloque:** Traders Intelligence V1.1 collector automatico LOG_ONLY
+**Veredicto:** V1.1_COLLECTOR_IMPLEMENTED_LOG_ONLY / DEFAULT_OFF
+
+### Implementado
+
+- Nuevo `tools/traders_intelligence_collector.py` como wrapper de `tools/traders_intelligence_snapshot.py`; no reimplementa la logica V1 de snapshots.
+- Estado persistente `data/traders_intelligence/collector_state.json` con `last_run_id`, `last_snapshot_at`, `last_signals_generated_at`, `consecutive_failures`, `kill_switch_active`.
+- Idempotencia: skip por `signals.json.generated` sin cambios, cooldown default 30 minutos y run_id derivado de `snapshot_at`.
+- Kill switch: `TRADERS_INTELLIGENCE_COLLECTOR=OFF` default y auto-disable si `consecutive_failures >= 5`.
+- Dry-run: ejecuta el snapshot tool con `--dry-run` y no escribe snapshots, reports, state ni eventos.
+- Trazabilidad: corridas reales/fallos agregan evento `traders_intelligence_collector_run` en `agent_events.jsonl` con `run_id`, `n_signals`, `status_counts`, `dry_run`, `ok`.
+- Hook en `bot.py` detras de `TRADERS_INTELLIGENCE_COLLECTOR=OFF`; queda conectado pero inerte hasta activacion explicita.
+- `verify_before_deploy.py` agrega checks estructurales del collector y el hook.
+- Docs actualizadas: `docs/traders-intelligence-roadmap.md`, `docs/traders-intelligence-v1-snapshots.md`, `docs/traders-intelligence-v1-activation-package.md`, `docs/traders-intelligence-spec.md`.
+
+### Validacion
+
+- `python tools/check_python_syntax.py tools/traders_intelligence_collector.py tests/test_traders_intelligence_collector.py bot.py verify_before_deploy.py`
+- `python -m pytest tests/test_traders_intelligence_collector.py -q -p no:cacheprovider`
+- `python tools/traders_intelligence_collector.py --dry-run --json` con env OFF: skip sin writes.
+- `TRADERS_INTELLIGENCE_COLLECTOR=ON python tools/traders_intelligence_collector.py --dry-run --json`: completed, `n_current_signals=1`, `still_present=1`, sin writes.
+- Validacion completa pre-commit registrada en el cierre de Codex.
+
+### NO se toco
+
+BANKROLL, sizing, whitelist, city modes, risk rules, Fase C, DB, env vars reales, BUY/SELL/SKIP, Telegram accionable, reglas de trading, NOAA ni semantica ejecutable. `bot.py` solo recibe hook LOG_ONLY default OFF.
+
+### Siguiente accion
+
+Activar `TRADERS_INTELLIGENCE_COLLECTOR=ON` solo cuando Pablo quiera empezar recoleccion automatica real. Tras 7 dias con `runs_24h>=20`, `consecutive_failures<3` y evidencia suficiente, evaluar V1.2 scoreboard read-only como patch separado.

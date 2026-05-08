@@ -162,5 +162,7 @@ No step in this checklist authorizes trading or policy changes.
 Future evolution (V1.1 automatic collector, V1.2 evidence scoreboard, future
 human recommendations) is documented in
 [`docs/traders-intelligence-roadmap.md`](traders-intelligence-roadmap.md).
-The roadmap is design-only and does not authorize implementation, scheduler
-hooks, Telegram, or any runtime change.
+V1.1 collector is now implemented as `LOG_ONLY / default OFF` with a scheduler
+hook behind `TRADERS_INTELLIGENCE_COLLECTOR=OFF`. V1.2, Telegram Andon, human
+recommendations, and any executable/runtime semantic change remain out of scope
+until separate gates and review.

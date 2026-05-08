@@ -1,13 +1,14 @@
 # Traders Intelligence — Roadmap V1 → V1.1 → V1.2 → recomendaciones
 
-**Status:** `ROADMAP_DOCUMENTED / NOT_IMPLEMENTED`
+**Status:** `V1.1_COLLECTOR_IMPLEMENTED_LOG_ONLY / DEFAULT_OFF`
 **Prepared:** 2026-05-08 (Opus design)
 **Basis:** `docs/traders-intelligence-spec.md` (v0), `docs/traders-intelligence-v1-snapshots.md`, `docs/traders-intelligence-v1-activation-package.md`, commit `0b262e1` (V1 observational active).
 
 Documento durable que persiste el diseño estratégico de evolución de Traders
 Intelligence desde la V1 manual observacional actual hacia una herramienta
-automatizada de aprendizaje operativo. **No autoriza implementación.** Cada
-fase requiere gates explícitos y, donde corresponde, revisión Opus separada.
+automatizada de aprendizaje operativo. La primera pieza V1.1 ya existe como
+collector `LOG_ONLY` default `OFF`; las fases posteriores siguen requiriendo
+gates explícitos y, donde corresponde, revisión Opus separada.
 
 Principio rector: `data → evidencia → interpretación → recomendación →
 decisión controlada`. Sin saltos.
@@ -31,6 +32,13 @@ evidencia trazable.
 
 ## 2. V1.1 — Collector automático (LOG_ONLY)
 
+**Implementation status 2026-05-08:** implemented as
+`tools/traders_intelligence_collector.py`, with optional `bot.py` hook behind
+`TRADERS_INTELLIGENCE_COLLECTOR=OFF` by default. It reuses
+`tools/traders_intelligence_snapshot.py`; no snapshot logic was reimplemented.
+Scheduler connection is present but inert until the env flag is explicitly set
+to an ON value.
+
 ### 2.1 Forma
 Wrapper sobre `tools/traders_intelligence_snapshot.py` actual. **No** reescribir
 el snapshot tool; reutilizar.
@@ -40,6 +48,8 @@ el snapshot tool; reutilizar.
   nuevo. Ventana operativa: 24/7 mientras `signals.json` se refresque.
 - Trigger manual: `--run-id` ya existe.
 - Cooldown: mínimo 30 min entre runs.
+- Runtime flag: `TRADERS_INTELLIGENCE_COLLECTOR=ON` (or `1/true/yes`) is
+  required. Default is `OFF`.
 
 ### 2.3 Inputs
 - `data/runtime_import/signals.json` (existente).
@@ -81,6 +91,8 @@ Adicional V1.1:
 - No agrega por trader/city más allá del lifecycle pseudo actual.
 - No emite recomendaciones.
 - No toca BUY/SELL/SKIP, `blocked_signals`, ni `promotion_gate`.
+- No envia Telegram.
+- No cambia `TARGET_TRADERS` / `TARGET_CITIES`.
 
 ---
 
@@ -249,7 +261,7 @@ Clasificaciones:
 
 ## 9. Primer patch para Codex (V1.1, LOG_ONLY)
 
-Scope mínimo, autorizable después de revisión:
+Scope mínimo implementado el 2026-05-08:
 
 1. Crear `tools/traders_intelligence_collector.py` que invoque el snapshot
    tool actual con:
@@ -259,9 +271,10 @@ Scope mínimo, autorizable después de revisión:
    - Append a `agent_events.jsonl`.
 2. Hook al scheduler **existente** del bot — bloque opt-in tras env var.
    Default OFF.
-3. Tests: dry-run, cooldown, kill switch, env OFF.
+3. Tests: dry-run, cooldown, kill switch, env OFF, signals sin cambios y
+   auto-disable por fallos consecutivos.
 4. Doc en `docs/traders-intelligence-v1-snapshots.md` (sección V1.1).
-5. `verify_before_deploy.py`: smoke del nuevo tool.
+5. `verify_before_deploy.py`: smoke estructural del nuevo tool y hook.
 
 No incluye en este patch:
 - Telegram Andon (segundo patch separado, tras 7 días estables).

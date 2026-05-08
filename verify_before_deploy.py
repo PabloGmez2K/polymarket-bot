@@ -170,6 +170,7 @@ def run_tests():
     traders_daily_summary_path = os.path.join(os.path.dirname(__file__), "tools", "traders_intelligence_daily_summary.py")
     traders_report_path = os.path.join(os.path.dirname(__file__), "tools", "traders_intelligence_report.py")
     traders_snapshot_path = os.path.join(os.path.dirname(__file__), "tools", "traders_intelligence_snapshot.py")
+    traders_collector_path = os.path.join(os.path.dirname(__file__), "tools", "traders_intelligence_collector.py")
     traders_snapshot_doc_path = os.path.join(os.path.dirname(__file__), "docs", "traders-intelligence-v1-snapshots.md")
     trader_code = ""
     finder_code = ""
@@ -185,6 +186,7 @@ def run_tests():
     traders_daily_summary_code = ""
     traders_report_code = ""
     traders_snapshot_code = ""
+    traders_collector_code = ""
     traders_snapshot_doc = ""
     agent_event_rows = []
     if os.path.exists(trader_analyzer_path):
@@ -238,6 +240,9 @@ def run_tests():
     if os.path.exists(traders_snapshot_path):
         with open(traders_snapshot_path, "r", encoding="utf-8") as f:
             traders_snapshot_code = f.read()
+    if os.path.exists(traders_collector_path):
+        with open(traders_collector_path, "r", encoding="utf-8") as f:
+            traders_collector_code = f.read()
     if os.path.exists(traders_snapshot_doc_path):
         with open(traders_snapshot_doc_path, "r", encoding="utf-8") as f:
             traders_snapshot_doc = f.read()
@@ -7792,6 +7797,83 @@ def run_tests():
         bool(traders_snapshot_doc)
         and "python tools/traders_intelligence_snapshot.py --dry-run" in traders_snapshot_doc
         and "`disappeared_apparent` is not a confirmed exit" in traders_snapshot_doc,
+    )
+    print("  Checks traders_intelligence v1.1 collector LOG_ONLY")
+    traders_collector_forbidden = [
+        "import bot",
+        "from bot",
+        "execute_trade",
+        "execute_buy",
+        "execute_sell",
+        "create_order",
+        "post_order",
+        "cancel_order",
+        "OrderArgs",
+        "BANKROLL",
+        "QUALITY_TRADER_CITIES_WHITELIST",
+        "ACTIVE_TRADING_CITIES",
+        "CANARY_TRADING_CITIES",
+        "BLOCKED_CITIES",
+        "SCHEDULE_HOURS_UTC",
+        "TELEGRAM",
+    ]
+    test(
+        "traders_intelligence v1.1: collector tool existe",
+        bool(traders_collector_code)
+        and "traders_intelligence_collector_state_v1" in traders_collector_code
+        and "traders_intelligence_snapshot.py" in traders_collector_code,
+    )
+    test(
+        "traders_intelligence v1.1: default OFF y kill switch",
+        'ENV_FLAG = "TRADERS_INTELLIGENCE_COLLECTOR"' in traders_collector_code
+        and "env_off" in traders_collector_code
+        and "kill_switch_active" in traders_collector_code
+        and "DEFAULT_FAILURE_LIMIT = 5" in traders_collector_code,
+    )
+    test(
+        "traders_intelligence v1.1: cooldown e idempotencia",
+        "DEFAULT_COOLDOWN_MINUTES = 30" in traders_collector_code
+        and "signals_unchanged" in traders_collector_code
+        and "cooldown_active" in traders_collector_code
+        and "last_signals_generated_at" in traders_collector_code,
+    )
+    test(
+        "traders_intelligence v1.1: dry-run no escribe state/event",
+        "--dry-run" in traders_collector_code
+        and "if not args.dry_run:" in traders_collector_code
+        and "state_written = False" in traders_collector_code
+        and "event_written = False" in traders_collector_code,
+    )
+    test(
+        "traders_intelligence v1.1: evento trazable agent_events",
+        "DEFAULT_AGENT_EVENTS_PATH" in traders_collector_code
+        and "traders_intelligence_collector_run" in traders_collector_code
+        and "status_counts" in traders_collector_code
+        and "n_signals" in traders_collector_code,
+    )
+    test(
+        "traders_intelligence v1.1: no toca trading/core/Telegram",
+        all(token not in traders_collector_code for token in traders_collector_forbidden),
+    )
+    try:
+        traders_collector_src = code.split("def maybe_run_traders_intelligence_collector(", 1)[1].split(
+            "def maybe_run_city_intelligence_runtime_summary(", 1
+        )[0]
+    except IndexError:
+        traders_collector_src = ""
+    test(
+        "traders_intelligence v1.1: hook bot.py default OFF",
+        "TRADERS_INTELLIGENCE_COLLECTOR_SCRIPT" in code
+        and 'os.getenv("TRADERS_INTELLIGENCE_COLLECTOR", "OFF")' in code
+        and "def maybe_run_traders_intelligence_collector(" in code
+        and "TRADERS_INTELLIGENCE_COLLECTOR=OFF" in traders_collector_src,
+    )
+    test(
+        "traders_intelligence v1.1: hook no compra/vende ni toca bankroll",
+        "execute_buy" not in traders_collector_src
+        and "execute_sell" not in traders_collector_src
+        and "BANKROLL" not in traders_collector_src
+        and "SCHEDULE_HOURS_UTC" not in traders_collector_src,
     )
 
     # ---- Bot health check read-only CLI ----
