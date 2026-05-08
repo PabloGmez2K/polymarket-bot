@@ -4745,3 +4745,34 @@ La alarma inicial llego como `TRADERS_INTELLIGENCE / REFRESH_REQUIRED / V1_NOT_R
 ### NO se toco
 
 Trading core, BANKROLL, sizing, whitelist, city modes, scheduler, risk rules, policy gates ejecutables, Fase C, `bot.py`, Railway, DB, env vars, Telegram real, ni activacion v1.
+
+---
+
+## Sesión 329 — 8 de mayo de 2026 (Codex)
+
+**Clasificacion:** NORMAL / TRADERS_INTELLIGENCE / trazabilidad / no trading
+**Bloque:** Correccion mismatch local/runtime en recent_crosscheck_runs
+**Veredicto:** CORREGIDO / NEEDS_CANONICAL_REEVAL
+
+### Hallazgo
+
+La discrepancia `recent_runs=7` live vs `recent_runs=2` local no era perdida de evidencia ni cambio de semantica. Eran fuentes distintas:
+
+- Runtime Railway: `/app/data/traders_intelligence.json` usa `/app/data/signals_crosscheck.jsonl`; ese archivo tiene `26` lineas y `traders_intelligence_report.py` resume las ultimas `7`, por eso readiness live ve `recent_crosscheck_runs=7` OK.
+- Local repo: no existe `data/signals_crosscheck.jsonl` porque esta gitignored; `traders_intelligence_report.py` cayo a `data/runtime_import_derived/signals_crosscheck.jsonl`, que tiene `2` lineas, por eso el refresh local dejo `recent_crosscheck_runs=2`.
+
+### Correccion
+
+- Se revierte solo `data/traders_intelligence.json` al estado anterior a `64daada`, porque el JSON versionado regenerado localmente desde fallback era misleading como foto de readiness.
+- Se conservan los cierres documentales de la sesion previa como trazabilidad del refresh local y del diagnostico posterior.
+
+### Estado correcto
+
+- Fuente canonica para la alarma live: `/app/data/traders_intelligence.json` generado en Railway sobre `/app/data/signals_crosscheck.jsonl`.
+- Fuente local del repo no debe usarse como equivalencia canónica si falta `data/signals_crosscheck.jsonl`.
+- Readiness live observada read-only: `recent_crosscheck_runs=7` OK, `census_stale_days=15` WAIT, por tanto V1 sigue `not_ready`.
+- Estado de aprendizaje tras el refresh local: **NEEDS_CANONICAL_REEVAL**. Para saber si queda `READY_CANDIDATE`, hay que refrescar/re-evaluar con inputs coherentes live o traer todos los inputs canónicos al entorno local.
+
+### NO se toco
+
+Trading core, BANKROLL, sizing, whitelist, city modes, scheduler, risk rules, policy gates ejecutables, Fase C, `bot.py`, DB, env vars, Telegram real, ni activacion v1. Railway solo lectura.
