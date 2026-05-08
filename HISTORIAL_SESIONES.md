@@ -4667,3 +4667,38 @@ El mensaje conserva `DAILY BOT DIGEST`, P&L leaderboard DAY/WEEK/MONTH/ALL, Lead
 ### NO se toco
 
 Telegram real enviado, scheduler, Railway, DB, env vars modificadas, BANKROLL, trading core, `bot.py`, BUY/SELL/SKIP, Fase C, sizing, whitelist, city modes, guards, SL, reglas de riesgo, `bankroll_scaling_check.py`, semantica P&L.
+
+---
+
+## Sesión 327 — 8 de mayo de 2026 (Codex)
+
+**Clasificacion:** NORMAL / observability / LOG_ONLY / no trading
+**Bloque:** INTRA-REEVAL SHADOW outcome tracking
+**Veredicto:** IMPLEMENTADO / VALIDADO LOCAL
+
+### Cambios
+
+- **Modificado:** `bot.py` — `v10.6.48` → `v10.6.49`; la review one-shot de INTRA-REEVAL shadow cruza triggers por `token_id` contra `trade_lifecycle.json`, anota `outcome_review` por trigger y guarda `outcome_review_summary`.
+- **Modificado:** `verify_before_deploy.py` — checks estructurales y funcionales para `GOOD_SHADOW`, `BAD_SHADOW`, `OVERLAP_ACTIVE_REEVAL`, `STILL_OPEN` e `INSUFFICIENT_DATA`.
+- **Actualizado:** `CONTEXTO.md`, `HISTORIAL_SESIONES.md`, `agent_events.jsonl` — cierre y trazabilidad.
+
+### Contrato
+
+Clasificacion LOG_ONLY:
+
+- `OVERLAP_ACTIVE_REEVAL`: hubo intento/cierre real posterior por `reeval` o `reeval_intra`.
+- `GOOD_SHADOW`: el cierre posterior tuvo precio menor que el trigger; vender al trigger habria sido mejor.
+- `BAD_SHADOW`: el cierre posterior tuvo precio mayor que el trigger; mantener/vender despues fue mejor.
+- `STILL_OPEN`: lifecycle sigue `open`, `pending_exit` o `exit_failed`.
+- `INSUFFICIENT_DATA`: falta token/timestamp/precio, no hay match lifecycle, no hay cierre posterior o falta precio de cierre.
+
+El Telegram de review agrega n triggers, clasificados, overlap active reeval, good/bad/still_open/insufficient y la nota: `Observability only: no ventas nuevas, no BUY/SELL/SKIP, no BANKROLL, no Fase C.`
+
+### Validacion Codex
+
+- `python tools\check_python_syntax.py bot.py verify_before_deploy.py` — OK.
+- `python verify_before_deploy.py` — pendiente de re-run final tras alinear docs/evento; los checks nuevos de INTRA-REEVAL pasaron en la primera corrida.
+
+### NO se toco
+
+Ventas nuevas, criterios de entrada/salida, scheduler, NOAA, BANKROLL, sizing, whitelist, city modes, SL, guards, env vars, DB, Railway, Fase C, `INTRA_REEVAL_ENABLED`, `INTRA_REEVAL_SHADOW_MODE`.

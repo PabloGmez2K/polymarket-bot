@@ -5368,7 +5368,7 @@ def run_tests():
                 except Exception:
                     pass
 
-    test("Version v10.6.48", 'BOT_VERSION = "v10.6.48"' in code)
+    test("Version v10.6.49", 'BOT_VERSION = "v10.6.49"' in code)
 
     # ---- v10.6.15: Quality-trader canary exact/range ----
     test(
@@ -6902,6 +6902,20 @@ def run_tests():
         "def maybe_run_intra_reeval_review_alert(" in code,
     )
     test(
+        "v10.6.49: intra-reeval outcome helper definido",
+        "def _intra_reeval_trigger_outcome(" in code
+        and "def _annotate_intra_reeval_shadow_outcomes(" in code,
+    )
+    test(
+        "v10.6.49: review Telegram incluye outcome tracking LOG_ONLY",
+        "Outcome tracking (LOG_ONLY)" in code
+        and "OVERLAP_ACTIVE_REEVAL" in code
+        and "GOOD_SHADOW" in code
+        and "BAD_SHADOW" in code
+        and "INSUFFICIENT_DATA" in code
+        and "Observability only: no ventas nuevas" in code,
+    )
+    test(
         "v10.6.30: intra_reeval_review_alert registrada en run_alerts",
         "maybe_run_intra_reeval_review_alert(state)" in code,
     )
@@ -7024,6 +7038,114 @@ def run_tests():
         )
     except Exception as e:
         test("test_intra_reeval_cooldown_blocks_repeat funcional ejecuta", False, str(e))
+
+    # Test: outcome tracking clasifica triggers shadow contra trade_lifecycle
+    try:
+        outcome_ns = {
+            "datetime": datetime,
+            "timezone": timezone,
+        }
+        for fn_name in [
+            "_parse_lifecycle_timestamp",
+            "_to_lifecycle_float",
+            "_intra_reeval_trigger_outcome",
+            "_annotate_intra_reeval_shadow_outcomes",
+        ]:
+            exec(get_function_source(module_ast, code_lines, fn_name), outcome_ns)
+
+        trigger_ts = "2026-05-01T10:00:00+00:00"
+        reeval_state = {
+            "shadow_log": {
+                "triggers": [
+                    {"ts": trigger_ts, "token_id": "tok-good", "cur_price": 0.60},
+                    {"ts": trigger_ts, "token_id": "tok-bad", "cur_price": 0.40},
+                    {"ts": trigger_ts, "token_id": "tok-overlap", "cur_price": 0.55},
+                    {"ts": trigger_ts, "token_id": "tok-open", "cur_price": 0.50},
+                    {"ts": trigger_ts, "token_id": "tok-missing", "cur_price": 0.50},
+                ]
+            }
+        }
+        lifecycle_data = {
+            "records": [
+                {
+                    "token_id": "tok-good",
+                    "status": "closed",
+                    "closed_at": "2026-05-02T10:00:00+00:00",
+                    "close_context": {
+                        "close_reason": "take_profit",
+                        "close_price": 0.30,
+                        "timestamp": "2026-05-02T10:00:00+00:00",
+                    },
+                    "exit_attempts": [],
+                },
+                {
+                    "token_id": "tok-bad",
+                    "status": "closed",
+                    "closed_at": "2026-05-02T10:00:00+00:00",
+                    "close_context": {
+                        "close_reason": "take_profit",
+                        "close_price": 0.75,
+                        "timestamp": "2026-05-02T10:00:00+00:00",
+                    },
+                    "exit_attempts": [],
+                },
+                {
+                    "token_id": "tok-overlap",
+                    "status": "closed",
+                    "closed_at": "2026-05-02T10:00:00+00:00",
+                    "close_context": {
+                        "close_reason": "reeval",
+                        "close_price": 0.52,
+                        "timestamp": "2026-05-02T10:00:00+00:00",
+                    },
+                    "exit_attempts": [
+                        {
+                            "placed_at": "2026-05-02T09:00:00+00:00",
+                            "reason": "reeval",
+                            "decision_source": "manage_positions",
+                            "limit_price": 0.52,
+                        }
+                    ],
+                },
+                {
+                    "token_id": "tok-open",
+                    "status": "open",
+                    "close_context": {},
+                    "exit_attempts": [],
+                },
+            ]
+        }
+        summary, changed = outcome_ns["_annotate_intra_reeval_shadow_outcomes"](reeval_state, lifecycle_data)
+        classifications = [
+            t.get("outcome_review", {}).get("classification")
+            for t in reeval_state["shadow_log"]["triggers"]
+        ]
+        test(
+            "test_intra_reeval_outcomes: clasifica good/bad/overlap/open/insufficient",
+            classifications == [
+                "GOOD_SHADOW",
+                "BAD_SHADOW",
+                "OVERLAP_ACTIVE_REEVAL",
+                "STILL_OPEN",
+                "INSUFFICIENT_DATA",
+            ],
+            classifications,
+        )
+        test(
+            "test_intra_reeval_outcomes: summary agregado preserva LOG_ONLY",
+            changed is True
+            and summary.get("n_triggers") == 5
+            and summary.get("n_classified") == 4
+            and summary.get("n_overlap_active_reeval") == 1
+            and summary.get("n_good_shadow") == 1
+            and summary.get("n_bad_shadow") == 1
+            and summary.get("n_still_open") == 1
+            and summary.get("n_insufficient_data") == 1
+            and summary.get("observability_only") is True,
+            summary,
+        )
+    except Exception as e:
+        test("test_intra_reeval_outcomes funcional ejecuta", False, str(e))
 
     # Test: recompute_position_edge parity guard (returns None when no station)
     try:
@@ -7374,8 +7496,8 @@ def run_tests():
         and "def intra_cycle_sl_check(client):" in code,
     )
     test(
-        "v10.6.48: BOT_VERSION bumpeado a v10.6.48",
-        'BOT_VERSION = "v10.6.48"' in code,
+        "v10.6.49: BOT_VERSION bumpeado a v10.6.49",
+        'BOT_VERSION = "v10.6.49"' in code,
     )
 
     # ---- v10.6.46: Fase B1 — blocked_signals_audit.py ----

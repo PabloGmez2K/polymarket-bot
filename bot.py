@@ -109,7 +109,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.48"
+BOT_VERSION = "v10.6.49"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -10891,6 +10891,159 @@ def maybe_run_sl_intra_guard_review(state, now=None):
     return True
 
 
+def _intra_reeval_trigger_outcome(trigger, lifecycle_records):
+    token_id = str(trigger.get("token_id", "") or "").strip()
+    if not token_id:
+        return {
+            "classification": "INSUFFICIENT_DATA",
+            "reason": "missing_token_id",
+        }
+
+    trigger_dt = _parse_lifecycle_timestamp(trigger.get("ts"))
+    trigger_price = _to_lifecycle_float(trigger.get("cur_price"))
+    if trigger_dt is None or trigger_price is None:
+        return {
+            "classification": "INSUFFICIENT_DATA",
+            "reason": "missing_trigger_time_or_price",
+        }
+
+    record = None
+    for candidate in lifecycle_records or []:
+        if str(candidate.get("token_id", "") or "").strip() == token_id:
+            record = candidate
+            break
+    if not record:
+        return {
+            "classification": "INSUFFICIENT_DATA",
+            "reason": "no_lifecycle_match",
+        }
+
+    for attempt in record.get("exit_attempts", []) or []:
+        placed_dt = _parse_lifecycle_timestamp(attempt.get("placed_at"))
+        if placed_dt is None or placed_dt < trigger_dt:
+            continue
+        reason = str(attempt.get("reason", "") or "")
+        source = str(attempt.get("decision_source", "") or "")
+        if reason in {"reeval", "reeval_intra"} and source in {"manage_positions", "intra_cycle_sl_check", ""}:
+            return {
+                "classification": "OVERLAP_ACTIVE_REEVAL",
+                "reason": "real_reeval_exit_attempt_after_trigger",
+                "close_price": _to_lifecycle_float(attempt.get("fill_price", attempt.get("limit_price"))),
+                "closed_at": attempt.get("confirmed_at") or attempt.get("placed_at") or "",
+            }
+
+    close_ctx = record.get("close_context") or {}
+    close_dt = _parse_lifecycle_timestamp(record.get("closed_at") or close_ctx.get("timestamp"))
+    close_reason = str(close_ctx.get("close_reason", "") or "")
+    if close_dt and close_dt >= trigger_dt and close_reason in {"reeval", "reeval_intra"}:
+        return {
+            "classification": "OVERLAP_ACTIVE_REEVAL",
+            "reason": "real_reeval_close_after_trigger",
+            "close_price": _to_lifecycle_float(close_ctx.get("close_price")),
+            "closed_at": record.get("closed_at") or close_ctx.get("timestamp") or "",
+        }
+
+    status = str(record.get("status", "") or "")
+    if status in {"open", "pending_exit", "exit_failed"}:
+        return {
+            "classification": "STILL_OPEN",
+            "reason": f"lifecycle_status_{status or 'open'}",
+        }
+
+    if not close_dt or close_dt < trigger_dt:
+        return {
+            "classification": "INSUFFICIENT_DATA",
+            "reason": "no_close_after_trigger",
+        }
+
+    close_price = _to_lifecycle_float(close_ctx.get("close_price"))
+    close_action = str(close_ctx.get("close_action", "") or "")
+    if close_price is None:
+        if close_action == "RESOLVED_WIN":
+            close_price = 1.0
+        elif close_action == "LOSS_TOTAL":
+            close_price = 0.0
+
+    if close_price is None:
+        return {
+            "classification": "INSUFFICIENT_DATA",
+            "reason": "missing_close_price",
+            "closed_at": record.get("closed_at") or close_ctx.get("timestamp") or "",
+        }
+
+    delta_vs_trigger = round(close_price - trigger_price, 4)
+    if delta_vs_trigger < 0:
+        classification = "GOOD_SHADOW"
+        reason = "later_exit_price_below_trigger"
+    elif delta_vs_trigger > 0:
+        classification = "BAD_SHADOW"
+        reason = "later_exit_price_above_trigger"
+    else:
+        classification = "INSUFFICIENT_DATA"
+        reason = "later_exit_price_equal_trigger"
+
+    return {
+        "classification": classification,
+        "reason": reason,
+        "trigger_price": trigger_price,
+        "close_price": close_price,
+        "delta_vs_trigger": delta_vs_trigger,
+        "closed_at": record.get("closed_at") or close_ctx.get("timestamp") or "",
+        "close_reason": close_reason,
+        "close_action": close_action,
+    }
+
+
+def _annotate_intra_reeval_shadow_outcomes(reeval_state, lifecycle_data=None):
+    shadow_log = reeval_state.setdefault("shadow_log", {})
+    triggers = shadow_log.setdefault("triggers", [])
+    if lifecycle_data is None:
+        try:
+            lifecycle_data = load_trade_lifecycle_data()
+        except Exception:
+            lifecycle_data = {}
+    lifecycle_records = lifecycle_data.get("records", []) if isinstance(lifecycle_data, dict) else []
+
+    counts = {
+        "OVERLAP_ACTIVE_REEVAL": 0,
+        "GOOD_SHADOW": 0,
+        "BAD_SHADOW": 0,
+        "STILL_OPEN": 0,
+        "INSUFFICIENT_DATA": 0,
+    }
+    changed = False
+    for trigger in triggers:
+        if not isinstance(trigger, dict):
+            counts["INSUFFICIENT_DATA"] += 1
+            continue
+        outcome = _intra_reeval_trigger_outcome(trigger, lifecycle_records)
+        classification = outcome.get("classification", "INSUFFICIENT_DATA")
+        counts[classification] = counts.get(classification, 0) + 1
+        previous = trigger.get("outcome_review") or {}
+        if previous != outcome:
+            trigger["outcome_review"] = outcome
+            changed = True
+
+    summary = {
+        "n_triggers": len(triggers),
+        "n_classified": sum(
+            counts.get(key, 0)
+            for key in ["OVERLAP_ACTIVE_REEVAL", "GOOD_SHADOW", "BAD_SHADOW", "STILL_OPEN"]
+        ),
+        "n_overlap_active_reeval": counts.get("OVERLAP_ACTIVE_REEVAL", 0),
+        "n_good_shadow": counts.get("GOOD_SHADOW", 0),
+        "n_bad_shadow": counts.get("BAD_SHADOW", 0),
+        "n_still_open": counts.get("STILL_OPEN", 0),
+        "n_insufficient_data": counts.get("INSUFFICIENT_DATA", 0),
+        "counts": counts,
+        "observability_only": True,
+    }
+    if shadow_log.get("outcome_review_summary") != summary:
+        shadow_log["outcome_review_summary"] = summary
+        changed = True
+    return summary, changed
+
+
 def maybe_run_intra_reeval_review_alert(state, now=None):
     """
     v10.6.30: alerta one-shot de revision intra-reeval shadow.
@@ -10953,6 +11106,13 @@ def maybe_run_intra_reeval_review_alert(state, now=None):
     in_positive_band = sum(1 for pnl in pnl_list if 20 <= pnl <= 40)
     in_drawdown = sum(1 for pnl in pnl_list if pnl < 0)
 
+    outcome_summary, outcomes_changed = _annotate_intra_reeval_shadow_outcomes(reeval_state)
+    if outcomes_changed:
+        try:
+            save_intra_reeval_state(reeval_state)
+        except Exception:
+            pass
+
     prompt_opus = (
         "Lee AGENTS.md y el bloque reciente de CONTEXTO.md.\n\n"
         "Tarea: Sesion de revision intra-reeval shadow — decidir si promover a modo real.\n\n"
@@ -10962,7 +11122,13 @@ def maybe_run_intra_reeval_review_alert(state, now=None):
         f"- PnL% mediana al trigger: {pnl_median:+.1f}%\n"
         f"- fresh_edge_pct promedio: {edge_avg:+.1f}%\n"
         f"- Triggers con PnL en +20..+40%: {in_positive_band}\n"
-        f"- Triggers con PnL negativo: {in_drawdown}\n\n"
+        f"- Triggers con PnL negativo: {in_drawdown}\n"
+        f"- Outcomes: clasificados={outcome_summary['n_classified']} | "
+        f"overlap_active_reeval={outcome_summary['n_overlap_active_reeval']} | "
+        f"good_shadow={outcome_summary['n_good_shadow']} | "
+        f"bad_shadow={outcome_summary['n_bad_shadow']} | "
+        f"still_open={outcome_summary['n_still_open']} | "
+        f"insufficient={outcome_summary['n_insufficient_data']}\n\n"
         "Preguntas a responder:\n"
         "1. Es la mediana de PnL en triggers positiva? Si si -> shadow predice ventas prematuras; "
         "ajustar INTRA_REEVAL_PRICE_DRIFT_PP o INTRA_REEVAL_EDGE_THRESHOLD antes de promover.\n"
@@ -10982,6 +11148,12 @@ def maybe_run_intra_reeval_review_alert(state, now=None):
         f"  PnL% promedio: {pnl_avg:+.1f}% | mediana: {pnl_median:+.1f}%\n"
         f"  Edge promedio: {edge_avg:+.1f}%\n"
         f"  Triggers en +20..+40%: {in_positive_band} | en drawdown: {in_drawdown}\n\n"
+        f"<b>Outcome tracking (LOG_ONLY):</b>\n"
+        f"  Clasificados: {outcome_summary['n_classified']}/{outcome_summary['n_triggers']}\n"
+        f"  OVERLAP_ACTIVE_REEVAL: {outcome_summary['n_overlap_active_reeval']}\n"
+        f"  GOOD_SHADOW: {outcome_summary['n_good_shadow']} | BAD_SHADOW: {outcome_summary['n_bad_shadow']}\n"
+        f"  STILL_OPEN: {outcome_summary['n_still_open']} | INSUFFICIENT_DATA: {outcome_summary['n_insufficient_data']}\n"
+        f"  <i>Observability only: no ventas nuevas, no BUY/SELL/SKIP, no BANKROLL, no Fase C.</i>\n\n"
         f"<b>Prompt para Opus/Sonnet</b> (copiar y pegar):\n"
         f"<code>{prompt_opus}</code>"
     )
