@@ -115,13 +115,30 @@ def infer_condition(question: Any) -> str | None:
     if not text:
         return None
     normalized = re.sub(r"\s+", " ", text)
-    if re.search(r"\bbetween\b|\bfrom\s+-?\d+(?:\.\d+)?\s*(?:c|f)?\s+to\b|\brange\b", normalized):
+    if re.search(
+        r"\bbetween\s+-?\d+(?:\.\d+)?\s*[-–]\s*-?\d+(?:\.\d+)?\s*°?\s*[cf]\b"
+        r"|\bbetween\b|\bfrom\s+-?\d+(?:\.\d+)?\s*°?\s*(?:c|f)?\s+to\b|\brange\b",
+        normalized,
+    ):
         return "range"
-    if re.search(r"\bat\s+or\s+above\b|\babove\s+or\s+equal\b|\bat\s+least\b|\bno\s+less\s+than\b", normalized):
+    if re.search(
+        r"\bat\s+or\s+above\b|\babove\s+or\s+equal\b|\bat\s+least\b|\bno\s+less\s+than\b"
+        r"|\bor\s+higher\b|\bor\s+above\b|\bhigher\s+than\b",
+        normalized,
+    ):
         return "at_or_above"
-    if re.search(r"\bat\s+or\s+below\b|\bbelow\s+or\s+equal\b|\bat\s+most\b|\bno\s+more\s+than\b", normalized):
+    if re.search(
+        r"\bat\s+or\s+below\b|\bbelow\s+or\s+equal\b|\bat\s+most\b|\bno\s+more\s+than\b"
+        r"|\bor\s+lower\b|\bor\s+below\b|\blower\s+than\b",
+        normalized,
+    ):
         return "at_or_below"
-    if re.search(r"\bexactly\b|\bbe\s+-?\d+(?:\.\d+)?\s*(?:c|f)\b|\bbe\s+-?\d+(?:\.\d+)?\s+degrees\b", normalized):
+    if re.search(
+        r"\bexactly\b|\bbe\s+-?\d+(?:\.\d+)?\s*°?\s*[cf]\b"
+        r"|\bon\s+-?\d+(?:\.\d+)?\s*°?\s*[cf]\b"
+        r"|\bbe\s+-?\d+(?:\.\d+)?\s+degrees\b",
+        normalized,
+    ):
         return "exact"
     return None
 

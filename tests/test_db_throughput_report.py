@@ -199,6 +199,15 @@ def test_condition_inference_and_city_snapshots(tmp_path):
     assert cities["London"]["snapshots"] == 1
 
 
+def test_condition_inference_matches_polymarket_temperature_phrasing():
+    module = load_tool_module()
+
+    assert module.infer_condition("Will the highest temperature in London be 18°C on March 22?") == "exact"
+    assert module.infer_condition("Will the highest temperature in Seoul be 14°C or higher on March 22?") == "at_or_above"
+    assert module.infer_condition("Will the highest temperature in Paris be 20°F or below on March 22?") == "at_or_below"
+    assert module.infer_condition("Will the highest temperature in NYC be between 62-63°F on March 22?") == "range"
+
+
 def test_gaps_are_reported(tmp_path):
     db = tmp_path / "polymarket.db"
     create_db(db)
