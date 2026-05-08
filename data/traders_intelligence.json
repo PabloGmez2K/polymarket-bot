@@ -1,6 +1,6 @@
 {
   "schema_version": "v0",
-  "generated_at": "2026-04-24T10:28:39+00:00",
+  "generated_at": "2026-05-08T10:47:31+00:00",
   "health_status": "usable_signal",
   "inputs": {
     "signals": "C:\\Projects\\polymarket-bot\\data\\runtime_import\\signals.json",
@@ -12,24 +12,24 @@
     "trade_lifecycle": "C:\\Projects\\polymarket-bot\\data\\runtime_import\\trade_lifecycle.json"
   },
   "integrity": {
-    "signals_generated_at": "2026-04-21T21:01:00.171035+00:00",
-    "census_generated_at": "2026-04-08T15:21:10+00:00",
-    "census_stale_days": 15,
-    "enrichment_generated_at": "2026-04-22T07:20:28+00:00",
-    "n_traders_profiled": 16,
-    "n_traders_dropped_insufficient_data": 0,
+    "signals_generated_at": "2026-05-08T10:21:47.974598+00:00",
+    "census_generated_at": "2026-05-08T10:47:20+00:00",
+    "census_stale_days": 0,
+    "enrichment_generated_at": "2026-05-08T10:47:27+00:00",
+    "n_traders_profiled": 13,
+    "n_traders_dropped_insufficient_data": 1,
     "likely_input_degraded": false,
     "missing_inputs": []
   },
   "bot_context": {
     "summary": {
-      "tracked_positions": 82,
-      "open_positions": 13,
-      "closed_positions": 69,
-      "take_profit_closes": 6,
-      "stop_loss_closes": 16,
-      "reeval_closes": 3,
-      "with_market_data_after_close": 36
+      "tracked_positions": 110,
+      "open_positions": 0,
+      "closed_positions": 110,
+      "take_profit_closes": 10,
+      "stop_loss_closes": 29,
+      "reeval_closes": 6,
+      "with_market_data_after_close": 64
     },
     "confidence": "high",
     "evidence": [
@@ -38,150 +38,427 @@
   },
   "traders": [
     {
-      "pseudonym": "Entire-Hood",
-      "address": "0xb40e89677d59665d5188541ad860450a6e2a7cc9",
-      "reference_quality": "high_priority_reference",
+      "pseudonym": "Bogus-Curry",
+      "address": "0xb06a0eae498750ed0acac7e1f759f741c56e52f5",
+      "reference_quality": "candidate_reference",
       "activity": {
-        "n_active_signals_now": 23,
-        "n_distinct_cities_active_now": 12,
+        "n_active_signals_now": 0,
+        "n_distinct_cities_active_now": 0,
         "n_closed_positions_recent": 100,
         "closed_weather_conditions": {
-          "exact": 47,
-          "range": 6,
-          "at_or_above": 4
+          "exact": 53,
+          "range": 20,
+          "at_or_above": 9,
+          "at_or_below": 4
         },
-        "confidence": "high",
+        "confidence": "medium",
         "evidence": [
-          "signals.json n=23",
+          "signals.json n=0",
           "directional_trader_enrichment.json closed_n=100"
         ]
       },
       "style": {
-        "dominant_city": "Wuhan",
+        "dominant_city": "Taipei",
         "top_cities": {
-          "Wuhan": 1,
-          "Shanghai": 1,
-          "Ankara": 1
+          "Taipei": 4,
+          "Shenzhen": 1
         },
         "condition_preference": "at_or_above",
         "outcome_bias_pct": {
-          "Yes": 33.3,
-          "No": 66.7,
+          "Yes": 100.0,
+          "No": 0.0,
           "Other": 0.0
         },
         "price_style": "mid_range",
         "entry_price_band": {
-          "p25": 0.48,
-          "p50": 0.6245,
-          "p75": 0.8109,
-          "n": 33
+          "p25": 0.37,
+          "p50": 0.4,
+          "p75": 0.44,
+          "n": 5
+        },
+        "confidence": "medium",
+        "evidence": [
+          "census.sample_positions n=5",
+          "blocked_signals_resolutions.jsonl n=0"
+        ]
+      },
+      "grid_structure": {
+        "multi_strike_signals": [],
+        "any_consensus_with_others": false,
+        "n_consensus_match_keys": 0,
+        "n_consensus_counterparties": 0,
+        "confidence": "insufficient_data",
+        "evidence": [
+          "signals.json signals n=0"
+        ]
+      },
+      "realized_performance": {
+        "closed_win_rate_pct": 53.0,
+        "closed_pnl_cash": 2667.93,
+        "closed_n": 100,
+        "confidence": "medium",
+        "caveat": "Polymarket enrichment cohort, no necesariamente weather-only",
+        "evidence": [
+          "directional_trader_enrichment.json closed_n=100"
+        ]
+      },
+      "blocked_signal_performance": {
+        "n_resolved": 0,
+        "n_wins": 0,
+        "wr_pct": null,
+        "avg_entry_price": null,
+        "avg_close_price": null,
+        "confidence": "insufficient_data",
+        "evidence": [
+          "blocked_signals_resolutions.jsonl n=0"
+        ]
+      },
+      "vs_bot": {
+        "recent_crosscheck_run_at": "2026-04-19T08:44:09.197769+00:00",
+        "n_match_keys_overlap_recent": 0,
+        "n_cities_bot_only": 4,
+        "n_cities_trader_only": 0,
+        "trader_only_cities_now": [],
+        "confidence": "high",
+        "evidence": [
+          "signals.json active signals",
+          "signals_crosscheck.jsonl latest record"
+        ]
+      },
+      "exit_behaviour": {
+        "answerable": false,
+        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede inferir SL/TP.",
+        "confidence": "insufficient_data"
+      },
+      "hold_duration": {
+        "answerable": false,
+        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede medir first_seen/last_seen.",
+        "confidence": "insufficient_data"
+      },
+      "scaling_behaviour": {
+        "answerable": false,
+        "reason": "v0 no archiva serie de signals.json; sin trayectoria de avg_price no se puede inferir scale-in/scale-out.",
+        "confidence": "insufficient_data"
+      },
+      "candidate_profiles": [
+        {
+          "name": "directional_forecaster",
+          "confidence": "medium",
+          "evidence": [
+            "census.conditions dominant=at_or_above n=5",
+            "census.price_style=mid_range"
+          ]
+        }
+      ],
+      "profile_tags": [
+        "specialist_at_or_above",
+        "yes_biased"
+      ]
+    },
+    {
+      "pseudonym": "Tepid-Monopoly",
+      "address": "0x28bf066c6cb952da62d6d182c16ad173ada64a4e",
+      "reference_quality": "candidate_reference",
+      "activity": {
+        "n_active_signals_now": 0,
+        "n_distinct_cities_active_now": 0,
+        "n_closed_positions_recent": 100,
+        "closed_weather_conditions": {
+          "exact": 3
+        },
+        "confidence": "medium",
+        "evidence": [
+          "signals.json n=0",
+          "directional_trader_enrichment.json closed_n=100"
+        ]
+      },
+      "style": {
+        "dominant_city": "Madrid",
+        "top_cities": {
+          "Madrid": 1,
+          "Hong Kong": 1
+        },
+        "condition_preference": "at_or_below",
+        "outcome_bias_pct": {
+          "Yes": 0.0,
+          "No": 100.0,
+          "Other": 0.0
+        },
+        "price_style": "mid_range",
+        "entry_price_band": {
+          "p25": 0.515,
+          "p50": 0.55,
+          "p75": 0.585,
+          "n": 2
+        },
+        "confidence": "low",
+        "evidence": [
+          "census.sample_positions n=2",
+          "blocked_signals_resolutions.jsonl n=0"
+        ]
+      },
+      "grid_structure": {
+        "multi_strike_signals": [],
+        "any_consensus_with_others": false,
+        "n_consensus_match_keys": 0,
+        "n_consensus_counterparties": 0,
+        "confidence": "insufficient_data",
+        "evidence": [
+          "signals.json signals n=0"
+        ]
+      },
+      "realized_performance": {
+        "closed_win_rate_pct": 95.0,
+        "closed_pnl_cash": 346.59,
+        "closed_n": 100,
+        "confidence": "medium",
+        "caveat": "Polymarket enrichment cohort, no necesariamente weather-only",
+        "evidence": [
+          "directional_trader_enrichment.json closed_n=100"
+        ]
+      },
+      "blocked_signal_performance": {
+        "n_resolved": 0,
+        "n_wins": 0,
+        "wr_pct": null,
+        "avg_entry_price": null,
+        "avg_close_price": null,
+        "confidence": "insufficient_data",
+        "evidence": [
+          "blocked_signals_resolutions.jsonl n=0"
+        ]
+      },
+      "vs_bot": {
+        "recent_crosscheck_run_at": "2026-04-19T08:44:09.197769+00:00",
+        "n_match_keys_overlap_recent": 0,
+        "n_cities_bot_only": 4,
+        "n_cities_trader_only": 0,
+        "trader_only_cities_now": [],
+        "confidence": "high",
+        "evidence": [
+          "signals.json active signals",
+          "signals_crosscheck.jsonl latest record"
+        ]
+      },
+      "exit_behaviour": {
+        "answerable": false,
+        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede inferir SL/TP.",
+        "confidence": "insufficient_data"
+      },
+      "hold_duration": {
+        "answerable": false,
+        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede medir first_seen/last_seen.",
+        "confidence": "insufficient_data"
+      },
+      "scaling_behaviour": {
+        "answerable": false,
+        "reason": "v0 no archiva serie de signals.json; sin trayectoria de avg_price no se puede inferir scale-in/scale-out.",
+        "confidence": "insufficient_data"
+      },
+      "candidate_profiles": [
+        {
+          "name": "insufficient_profile_signal",
+          "confidence": "low",
+          "evidence": [
+            "v0 evidence insufficient for a stronger archetype"
+          ]
+        }
+      ],
+      "profile_tags": []
+    },
+    {
+      "pseudonym": "Entire-Hood",
+      "address": null,
+      "reference_quality": "unknown",
+      "activity": {
+        "n_active_signals_now": 41,
+        "n_distinct_cities_active_now": 23,
+        "n_closed_positions_recent": 0,
+        "closed_weather_conditions": {},
+        "confidence": "medium",
+        "evidence": [
+          "signals.json n=41",
+          "directional_trader_enrichment.json closed_n=0"
+        ]
+      },
+      "style": {
+        "dominant_city": "Hong Kong",
+        "top_cities": {
+          "Hong Kong": 4,
+          "Shanghai": 3,
+          "Seoul": 2,
+          "Wuhan": 2,
+          "Guangzhou": 2,
+          "Munich": 2,
+          "Kuala Lumpur": 2,
+          "Madrid": 3,
+          "Shenzhen": 1,
+          "Istanbul": 2,
+          "Milan": 2,
+          "Jakarta": 3,
+          "Warsaw": 1,
+          "London": 2,
+          "Beijing": 1,
+          "Chicago": 1,
+          "Dallas": 1,
+          "Paris": 2,
+          "Houston": 1,
+          "New York City": 1,
+          "Singapore": 1,
+          "Chengdu": 1,
+          "Taipei": 1
+        },
+        "condition_preference": "exact",
+        "outcome_bias_pct": {
+          "Yes": 31.7,
+          "No": 68.3,
+          "Other": 0.0
+        },
+        "price_style": null,
+        "entry_price_band": {
+          "p25": 0.476,
+          "p50": 0.6355,
+          "p75": 0.818,
+          "n": 30
         },
         "confidence": "high",
         "evidence": [
-          "census.sample_positions n=3",
+          "census.sample_positions n=0",
           "blocked_signals_resolutions.jsonl n=30"
         ]
       },
       "grid_structure": {
         "multi_strike_signals": [
           {
-            "city": "New York City",
-            "date": "2026-04-21",
-            "condition": "range",
-            "unit": "F",
-            "n_strikes": 4,
+            "city": "Hong Kong",
+            "date": "2026-05-08",
+            "condition": "exact",
+            "unit": "C",
+            "n_strikes": 3,
             "strikes": [
-              49,
-              51,
-              53,
-              55
+              28,
+              29,
+              30
+            ]
+          },
+          {
+            "city": "Jakarta",
+            "date": "2026-05-08",
+            "condition": "exact",
+            "unit": "C",
+            "n_strikes": 3,
+            "strikes": [
+              32,
+              33,
+              34
+            ]
+          },
+          {
+            "city": "Shanghai",
+            "date": "2026-05-08",
+            "condition": "exact",
+            "unit": "C",
+            "n_strikes": 3,
+            "strikes": [
+              19,
+              20,
+              21
+            ]
+          },
+          {
+            "city": "Kuala Lumpur",
+            "date": "2026-05-08",
+            "condition": "exact",
+            "unit": "C",
+            "n_strikes": 2,
+            "strikes": [
+              29,
+              30
             ]
           },
           {
             "city": "London",
-            "date": "2026-04-21",
+            "date": "2026-05-08",
             "condition": "exact",
             "unit": "C",
-            "n_strikes": 3,
+            "n_strikes": 2,
             "strikes": [
-              12,
-              13,
-              14
+              17,
+              20
+            ]
+          },
+          {
+            "city": "Milan",
+            "date": "2026-05-08",
+            "condition": "exact",
+            "unit": "C",
+            "n_strikes": 2,
+            "strikes": [
+              22,
+              23
+            ]
+          },
+          {
+            "city": "Munich",
+            "date": "2026-05-08",
+            "condition": "exact",
+            "unit": "C",
+            "n_strikes": 2,
+            "strikes": [
+              18,
+              20
             ]
           },
           {
             "city": "Paris",
-            "date": "2026-04-21",
-            "condition": "exact",
-            "unit": "C",
-            "n_strikes": 3,
-            "strikes": [
-              15,
-              16,
-              17
-            ]
-          },
-          {
-            "city": "Atlanta",
-            "date": "2026-04-21",
-            "condition": "range",
-            "unit": "F",
-            "n_strikes": 2,
-            "strikes": [
-              79,
-              81
-            ]
-          },
-          {
-            "city": "Hong Kong",
-            "date": "2026-04-21",
+            "date": "2026-05-08",
             "condition": "exact",
             "unit": "C",
             "n_strikes": 2,
             "strikes": [
-              28,
-              29
+              20,
+              22
             ]
           },
           {
-            "city": "Los Angeles",
-            "date": "2026-04-21",
-            "condition": "range",
-            "unit": "F",
-            "n_strikes": 2,
-            "strikes": [
-              67,
-              69
-            ]
-          },
-          {
-            "city": "Madrid",
-            "date": "2026-04-21",
+            "city": "Seoul",
+            "date": "2026-05-08",
             "condition": "exact",
             "unit": "C",
             "n_strikes": 2,
             "strikes": [
-              26,
-              27
+              20,
+              21
+            ]
+          },
+          {
+            "city": "Wuhan",
+            "date": "2026-05-08",
+            "condition": "exact",
+            "unit": "C",
+            "n_strikes": 2,
+            "strikes": [
+              22,
+              23
             ]
           }
         ],
         "any_consensus_with_others": true,
-        "n_consensus_match_keys": 10,
+        "n_consensus_match_keys": 4,
         "n_consensus_counterparties": 1,
         "confidence": "high",
         "evidence": [
-          "signals.json signals n=23"
+          "signals.json signals n=41"
         ]
       },
       "realized_performance": {
-        "closed_win_rate_pct": 74.0,
-        "closed_pnl_cash": 667.59,
-        "closed_n": 100,
-        "confidence": "medium",
+        "closed_win_rate_pct": null,
+        "closed_pnl_cash": null,
+        "closed_n": null,
+        "confidence": "insufficient_data",
         "caveat": "Polymarket enrichment cohort, no necesariamente weather-only",
         "evidence": [
-          "directional_trader_enrichment.json closed_n=100"
+          "directional_trader_enrichment.json closed_n=0"
         ]
       },
       "blocked_signal_performance": {
@@ -197,516 +474,19 @@
       },
       "vs_bot": {
         "recent_crosscheck_run_at": "2026-04-19T08:44:09.197769+00:00",
-        "n_match_keys_overlap_recent": 5,
+        "n_match_keys_overlap_recent": 18,
         "n_cities_bot_only": 4,
-        "n_cities_trader_only": 6,
+        "n_cities_trader_only": 10,
         "trader_only_cities_now": [
-          "Houston",
-          "Los Angeles",
-          "Madrid",
-          "Paris",
-          "Seattle",
-          "Warsaw"
-        ],
-        "confidence": "high",
-        "evidence": [
-          "signals.json active signals",
-          "signals_crosscheck.jsonl latest record"
-        ]
-      },
-      "exit_behaviour": {
-        "answerable": false,
-        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede inferir SL/TP.",
-        "confidence": "insufficient_data"
-      },
-      "hold_duration": {
-        "answerable": false,
-        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede medir first_seen/last_seen.",
-        "confidence": "insufficient_data"
-      },
-      "scaling_behaviour": {
-        "answerable": false,
-        "reason": "v0 no archiva serie de signals.json; sin trayectoria de avg_price no se puede inferir scale-in/scale-out.",
-        "confidence": "insufficient_data"
-      },
-      "candidate_profiles": [
-        {
-          "name": "multi_strike_structurer",
-          "confidence": "medium",
-          "evidence": [
-            "signals.json multi_strike_groups=7"
-          ]
-        }
-      ],
-      "profile_tags": [
-        "consensus_hub",
-        "high_blocked_wr",
-        "multi_strike_issuer"
-      ]
-    },
-    {
-      "pseudonym": "Motionless-Stalk",
-      "address": "0xe3479950ef6e8984df109ec5c9be40630f9fb438",
-      "reference_quality": "high_priority_reference",
-      "activity": {
-        "n_active_signals_now": 0,
-        "n_distinct_cities_active_now": 0,
-        "n_closed_positions_recent": 100,
-        "closed_weather_conditions": {
-          "exact": 16,
-          "at_or_below": 4,
-          "at_or_above": 3,
-          "range": 1
-        },
-        "confidence": "medium",
-        "evidence": [
-          "signals.json n=0",
-          "directional_trader_enrichment.json closed_n=100"
-        ]
-      },
-      "style": {
-        "dominant_city": "Ankara",
-        "top_cities": {
-          "Ankara": 6,
-          "Shanghai": 3
-        },
-        "condition_preference": "at_or_below",
-        "outcome_bias_pct": {
-          "Yes": 0.0,
-          "No": 100.0,
-          "Other": 0.0
-        },
-        "price_style": "mid_range",
-        "entry_price_band": {
-          "p25": 0.53,
-          "p50": 0.555,
-          "p75": 0.61,
-          "n": 6
-        },
-        "confidence": "medium",
-        "evidence": [
-          "census.sample_positions n=6",
-          "blocked_signals_resolutions.jsonl n=0"
-        ]
-      },
-      "grid_structure": {
-        "multi_strike_signals": [],
-        "any_consensus_with_others": false,
-        "n_consensus_match_keys": 0,
-        "n_consensus_counterparties": 0,
-        "confidence": "insufficient_data",
-        "evidence": [
-          "signals.json signals n=0"
-        ]
-      },
-      "realized_performance": {
-        "closed_win_rate_pct": 68.0,
-        "closed_pnl_cash": 66.69,
-        "closed_n": 100,
-        "confidence": "medium",
-        "caveat": "Polymarket enrichment cohort, no necesariamente weather-only",
-        "evidence": [
-          "directional_trader_enrichment.json closed_n=100"
-        ]
-      },
-      "blocked_signal_performance": {
-        "n_resolved": 0,
-        "n_wins": 0,
-        "wr_pct": null,
-        "avg_entry_price": null,
-        "avg_close_price": null,
-        "confidence": "insufficient_data",
-        "evidence": [
-          "blocked_signals_resolutions.jsonl n=0"
-        ]
-      },
-      "vs_bot": {
-        "recent_crosscheck_run_at": "2026-04-19T08:44:09.197769+00:00",
-        "n_match_keys_overlap_recent": 0,
-        "n_cities_bot_only": 4,
-        "n_cities_trader_only": 0,
-        "trader_only_cities_now": [],
-        "confidence": "high",
-        "evidence": [
-          "signals.json active signals",
-          "signals_crosscheck.jsonl latest record"
-        ]
-      },
-      "exit_behaviour": {
-        "answerable": false,
-        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede inferir SL/TP.",
-        "confidence": "insufficient_data"
-      },
-      "hold_duration": {
-        "answerable": false,
-        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede medir first_seen/last_seen.",
-        "confidence": "insufficient_data"
-      },
-      "scaling_behaviour": {
-        "answerable": false,
-        "reason": "v0 no archiva serie de signals.json; sin trayectoria de avg_price no se puede inferir scale-in/scale-out.",
-        "confidence": "insufficient_data"
-      },
-      "candidate_profiles": [
-        {
-          "name": "directional_forecaster",
-          "confidence": "medium",
-          "evidence": [
-            "census.conditions dominant=at_or_below n=6",
-            "census.price_style=mid_range"
-          ]
-        }
-      ],
-      "profile_tags": [
-        "no_biased",
-        "specialist_Ankara",
-        "specialist_at_or_below"
-      ]
-    },
-    {
-      "pseudonym": "White-Donkey",
-      "address": "0x993fe20a9ecfb7e3c072f7f8c3dcbf87243b35cb",
-      "reference_quality": "high_priority_reference",
-      "activity": {
-        "n_active_signals_now": 0,
-        "n_distinct_cities_active_now": 0,
-        "n_closed_positions_recent": 100,
-        "closed_weather_conditions": {
-          "exact": 68,
-          "range": 21,
-          "at_or_above": 8,
-          "at_or_below": 3
-        },
-        "confidence": "medium",
-        "evidence": [
-          "signals.json n=0",
-          "directional_trader_enrichment.json closed_n=100"
-        ]
-      },
-      "style": {
-        "dominant_city": "Shanghai",
-        "top_cities": {
-          "Shanghai": 12,
-          "Ankara": 5,
-          "Wuhan": 1
-        },
-        "condition_preference": "at_or_above",
-        "outcome_bias_pct": {
-          "Yes": 0.0,
-          "No": 100.0,
-          "Other": 0.0
-        },
-        "price_style": "mid_range",
-        "entry_price_band": {
-          "p25": 0.5947,
-          "p50": 0.639,
-          "p75": 0.6398,
-          "n": 6
-        },
-        "confidence": "medium",
-        "evidence": [
-          "census.sample_positions n=6",
-          "blocked_signals_resolutions.jsonl n=0"
-        ]
-      },
-      "grid_structure": {
-        "multi_strike_signals": [],
-        "any_consensus_with_others": false,
-        "n_consensus_match_keys": 0,
-        "n_consensus_counterparties": 0,
-        "confidence": "insufficient_data",
-        "evidence": [
-          "signals.json signals n=0"
-        ]
-      },
-      "realized_performance": {
-        "closed_win_rate_pct": 65.0,
-        "closed_pnl_cash": 111.92,
-        "closed_n": 100,
-        "confidence": "medium",
-        "caveat": "Polymarket enrichment cohort, no necesariamente weather-only",
-        "evidence": [
-          "directional_trader_enrichment.json closed_n=100"
-        ]
-      },
-      "blocked_signal_performance": {
-        "n_resolved": 0,
-        "n_wins": 0,
-        "wr_pct": null,
-        "avg_entry_price": null,
-        "avg_close_price": null,
-        "confidence": "insufficient_data",
-        "evidence": [
-          "blocked_signals_resolutions.jsonl n=0"
-        ]
-      },
-      "vs_bot": {
-        "recent_crosscheck_run_at": "2026-04-19T08:44:09.197769+00:00",
-        "n_match_keys_overlap_recent": 0,
-        "n_cities_bot_only": 4,
-        "n_cities_trader_only": 0,
-        "trader_only_cities_now": [],
-        "confidence": "high",
-        "evidence": [
-          "signals.json active signals",
-          "signals_crosscheck.jsonl latest record"
-        ]
-      },
-      "exit_behaviour": {
-        "answerable": false,
-        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede inferir SL/TP.",
-        "confidence": "insufficient_data"
-      },
-      "hold_duration": {
-        "answerable": false,
-        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede medir first_seen/last_seen.",
-        "confidence": "insufficient_data"
-      },
-      "scaling_behaviour": {
-        "answerable": false,
-        "reason": "v0 no archiva serie de signals.json; sin trayectoria de avg_price no se puede inferir scale-in/scale-out.",
-        "confidence": "insufficient_data"
-      },
-      "candidate_profiles": [
-        {
-          "name": "directional_forecaster",
-          "confidence": "medium",
-          "evidence": [
-            "census.conditions dominant=at_or_above n=13",
-            "census.price_style=mid_range"
-          ]
-        }
-      ],
-      "profile_tags": [
-        "no_biased",
-        "specialist_Shanghai",
-        "specialist_at_or_above"
-      ]
-    },
-    {
-      "pseudonym": "Thrifty-Original",
-      "address": null,
-      "reference_quality": "unknown",
-      "activity": {
-        "n_active_signals_now": 38,
-        "n_distinct_cities_active_now": 25,
-        "n_closed_positions_recent": 0,
-        "closed_weather_conditions": {},
-        "confidence": "medium",
-        "evidence": [
-          "signals.json n=38",
-          "directional_trader_enrichment.json closed_n=0"
-        ]
-      },
-      "style": {
-        "dominant_city": "Buenos Aires",
-        "top_cities": {
-          "Atlanta": 3,
-          "Paris": 2,
-          "Buenos Aires": 3,
-          "Los Angeles": 2,
-          "New York City": 1,
-          "Singapore": 2,
-          "Cape Town": 1,
-          "Busan": 2,
-          "Munich": 1,
-          "Milan": 1,
-          "Istanbul": 2,
-          "Jeddah": 1,
-          "Madrid": 1,
-          "Shanghai": 2,
-          "Houston": 2,
-          "Warsaw": 1,
-          "Taipei": 1,
-          "Chengdu": 1,
-          "Wellington": 1,
-          "Jakarta": 1,
-          "Chongqing": 2,
-          "Wuhan": 2,
-          "Dallas": 1,
-          "Tokyo": 1,
-          "Manila": 1
-        },
-        "condition_preference": "exact",
-        "outcome_bias_pct": {
-          "Yes": 7.9,
-          "No": 92.1,
-          "Other": 0.0
-        },
-        "price_style": null,
-        "entry_price_band": {
-          "p25": 0.5841,
-          "p50": 0.7013,
-          "p75": 0.778,
-          "n": 55
-        },
-        "confidence": "high",
-        "evidence": [
-          "census.sample_positions n=0",
-          "blocked_signals_resolutions.jsonl n=55"
-        ]
-      },
-      "grid_structure": {
-        "multi_strike_signals": [
-          {
-            "city": "Atlanta",
-            "date": "2026-04-21",
-            "condition": "range",
-            "unit": "F",
-            "n_strikes": 3,
-            "strikes": [
-              77,
-              79,
-              81
-            ]
-          },
-          {
-            "city": "Buenos Aires",
-            "date": "2026-04-21",
-            "condition": "exact",
-            "unit": "C",
-            "n_strikes": 2,
-            "strikes": [
-              21,
-              22
-            ]
-          },
-          {
-            "city": "Busan",
-            "date": "2026-04-22",
-            "condition": "exact",
-            "unit": "C",
-            "n_strikes": 2,
-            "strikes": [
-              17,
-              18
-            ]
-          },
-          {
-            "city": "Chongqing",
-            "date": "2026-04-22",
-            "condition": "exact",
-            "unit": "C",
-            "n_strikes": 2,
-            "strikes": [
-              20,
-              21
-            ]
-          },
-          {
-            "city": "Houston",
-            "date": "2026-04-21",
-            "condition": "range",
-            "unit": "F",
-            "n_strikes": 2,
-            "strikes": [
-              69,
-              71
-            ]
-          },
-          {
-            "city": "Los Angeles",
-            "date": "2026-04-21",
-            "condition": "range",
-            "unit": "F",
-            "n_strikes": 2,
-            "strikes": [
-              67,
-              69
-            ]
-          },
-          {
-            "city": "Paris",
-            "date": "2026-04-21",
-            "condition": "exact",
-            "unit": "C",
-            "n_strikes": 2,
-            "strikes": [
-              16,
-              17
-            ]
-          },
-          {
-            "city": "Shanghai",
-            "date": "2026-04-22",
-            "condition": "exact",
-            "unit": "C",
-            "n_strikes": 2,
-            "strikes": [
-              18,
-              19
-            ]
-          },
-          {
-            "city": "Singapore",
-            "date": "2026-04-22",
-            "condition": "exact",
-            "unit": "C",
-            "n_strikes": 2,
-            "strikes": [
-              32,
-              33
-            ]
-          },
-          {
-            "city": "Wuhan",
-            "date": "2026-04-22",
-            "condition": "exact",
-            "unit": "C",
-            "n_strikes": 2,
-            "strikes": [
-              15,
-              17
-            ]
-          }
-        ],
-        "any_consensus_with_others": true,
-        "n_consensus_match_keys": 11,
-        "n_consensus_counterparties": 2,
-        "confidence": "high",
-        "evidence": [
-          "signals.json signals n=38"
-        ]
-      },
-      "realized_performance": {
-        "closed_win_rate_pct": null,
-        "closed_pnl_cash": null,
-        "closed_n": null,
-        "confidence": "insufficient_data",
-        "caveat": "Polymarket enrichment cohort, no necesariamente weather-only",
-        "evidence": [
-          "directional_trader_enrichment.json closed_n=0"
-        ]
-      },
-      "blocked_signal_performance": {
-        "n_resolved": 55,
-        "n_wins": 44,
-        "wr_pct": 80.0,
-        "avg_entry_price": 0.6836,
-        "avg_close_price": 0.8,
-        "confidence": "high",
-        "evidence": [
-          "blocked_signals_resolutions.jsonl n=55"
-        ]
-      },
-      "vs_bot": {
-        "recent_crosscheck_run_at": "2026-04-19T08:44:09.197769+00:00",
-        "n_match_keys_overlap_recent": 7,
-        "n_cities_bot_only": 4,
-        "n_cities_trader_only": 13,
-        "trader_only_cities_now": [
-          "Buenos Aires",
           "Chengdu",
-          "Chongqing",
+          "Guangzhou",
           "Houston",
           "Jakarta",
-          "Jeddah",
-          "Los Angeles",
+          "Kuala Lumpur",
           "Madrid",
           "Paris",
           "Singapore",
           "Warsaw",
-          "Wellington",
           "Wuhan"
         ],
         "confidence": "high",
@@ -746,70 +526,56 @@
       ]
     },
     {
-      "pseudonym": "Eminent-Shack",
+      "pseudonym": "Dimpled-Boy",
       "address": null,
       "reference_quality": "unknown",
       "activity": {
-        "n_active_signals_now": 12,
-        "n_distinct_cities_active_now": 2,
+        "n_active_signals_now": 11,
+        "n_distinct_cities_active_now": 8,
         "n_closed_positions_recent": 0,
         "closed_weather_conditions": {},
         "confidence": "medium",
         "evidence": [
-          "signals.json n=12",
+          "signals.json n=11",
           "directional_trader_enrichment.json closed_n=0"
         ]
       },
       "style": {
-        "dominant_city": "Seoul",
+        "dominant_city": "Shanghai",
         "top_cities": {
-          "Seoul": 7,
-          "Chongqing": 5
+          "Shanghai": 2,
+          "Chongqing": 1,
+          "Busan": 2,
+          "Istanbul": 1,
+          "Chengdu": 2,
+          "Warsaw": 1,
+          "Wuhan": 1,
+          "Ankara": 1
         },
         "condition_preference": "exact",
         "outcome_bias_pct": {
-          "Yes": 100.0,
-          "No": 0.0,
+          "Yes": 63.6,
+          "No": 36.4,
           "Other": 0.0
         },
         "price_style": null,
-        "entry_price_band": null,
-        "confidence": "insufficient_data",
+        "entry_price_band": {
+          "p25": 0.7861,
+          "p50": 0.8151,
+          "p75": 0.8492,
+          "n": 6
+        },
+        "confidence": "medium",
         "evidence": [
           "census.sample_positions n=0",
-          "blocked_signals_resolutions.jsonl n=0"
+          "blocked_signals_resolutions.jsonl n=6"
         ]
       },
       "grid_structure": {
         "multi_strike_signals": [
           {
-            "city": "Seoul",
-            "date": "2026-04-22",
-            "condition": "exact",
-            "unit": "C",
-            "n_strikes": 4,
-            "strikes": [
-              14,
-              15,
-              17,
-              18
-            ]
-          },
-          {
-            "city": "Chongqing",
-            "date": "2026-04-22",
-            "condition": "exact",
-            "unit": "C",
-            "n_strikes": 3,
-            "strikes": [
-              19,
-              20,
-              22
-            ]
-          },
-          {
-            "city": "Chongqing",
-            "date": "2026-04-23",
+            "city": "Busan",
+            "date": "2026-05-08",
             "condition": "exact",
             "unit": "C",
             "n_strikes": 2,
@@ -817,14 +583,36 @@
               23,
               24
             ]
+          },
+          {
+            "city": "Chengdu",
+            "date": "2026-05-08",
+            "condition": "exact",
+            "unit": "C",
+            "n_strikes": 2,
+            "strikes": [
+              24,
+              26
+            ]
+          },
+          {
+            "city": "Shanghai",
+            "date": "2026-05-08",
+            "condition": "exact",
+            "unit": "C",
+            "n_strikes": 2,
+            "strikes": [
+              19,
+              21
+            ]
           }
         ],
         "any_consensus_with_others": true,
-        "n_consensus_match_keys": 1,
+        "n_consensus_match_keys": 4,
         "n_consensus_counterparties": 1,
         "confidence": "high",
         "evidence": [
-          "signals.json signals n=12"
+          "signals.json signals n=11"
         ]
       },
       "realized_performance": {
@@ -838,23 +626,27 @@
         ]
       },
       "blocked_signal_performance": {
-        "n_resolved": 0,
-        "n_wins": 0,
-        "wr_pct": null,
-        "avg_entry_price": null,
-        "avg_close_price": null,
-        "confidence": "insufficient_data",
+        "n_resolved": 6,
+        "n_wins": 6,
+        "wr_pct": 100.0,
+        "avg_entry_price": 0.8062,
+        "avg_close_price": 1.0,
+        "confidence": "medium",
         "evidence": [
-          "blocked_signals_resolutions.jsonl n=0"
+          "blocked_signals_resolutions.jsonl n=6"
         ]
       },
       "vs_bot": {
         "recent_crosscheck_run_at": "2026-04-19T08:44:09.197769+00:00",
-        "n_match_keys_overlap_recent": 7,
+        "n_match_keys_overlap_recent": 1,
         "n_cities_bot_only": 4,
-        "n_cities_trader_only": 1,
+        "n_cities_trader_only": 5,
         "trader_only_cities_now": [
-          "Chongqing"
+          "Ankara",
+          "Chengdu",
+          "Chongqing",
+          "Warsaw",
+          "Wuhan"
         ],
         "confidence": "high",
         "evidence": [
@@ -884,9 +676,19 @@
           "evidence": [
             "signals.json multi_strike_groups=3"
           ]
+        },
+        {
+          "name": "favorite_chaser",
+          "confidence": "medium",
+          "evidence": [
+            "blocked_signals_resolutions.jsonl avg_entry=0.8062 n=6"
+          ]
         }
       ],
       "profile_tags": [
+        "consensus_hub",
+        "favorite_entrant",
+        "high_blocked_wr",
         "multi_strike_issuer"
       ]
     },
@@ -1000,291 +802,44 @@
       ]
     },
     {
-      "pseudonym": "Unaware-Engine",
-      "address": null,
-      "reference_quality": "unknown",
-      "activity": {
-        "n_active_signals_now": 5,
-        "n_distinct_cities_active_now": 2,
-        "n_closed_positions_recent": 0,
-        "closed_weather_conditions": {},
-        "confidence": "medium",
-        "evidence": [
-          "signals.json n=5",
-          "directional_trader_enrichment.json closed_n=0"
-        ]
-      },
-      "style": {
-        "dominant_city": "Moscow",
-        "top_cities": {
-          "Moscow": 4,
-          "Seattle": 1
-        },
-        "condition_preference": "exact",
-        "outcome_bias_pct": {
-          "Yes": 80.0,
-          "No": 20.0,
-          "Other": 0.0
-        },
-        "price_style": null,
-        "entry_price_band": {
-          "p25": 0.3852,
-          "p50": 0.5505,
-          "p75": 0.7157,
-          "n": 2
-        },
-        "confidence": "low",
-        "evidence": [
-          "census.sample_positions n=0",
-          "blocked_signals_resolutions.jsonl n=2"
-        ]
-      },
-      "grid_structure": {
-        "multi_strike_signals": [
-          {
-            "city": "Moscow",
-            "date": "2026-04-22",
-            "condition": "exact",
-            "unit": "C",
-            "n_strikes": 3,
-            "strikes": [
-              12,
-              13,
-              14
-            ]
-          }
-        ],
-        "any_consensus_with_others": false,
-        "n_consensus_match_keys": 0,
-        "n_consensus_counterparties": 0,
-        "confidence": "high",
-        "evidence": [
-          "signals.json signals n=5"
-        ]
-      },
-      "realized_performance": {
-        "closed_win_rate_pct": null,
-        "closed_pnl_cash": null,
-        "closed_n": null,
-        "confidence": "insufficient_data",
-        "caveat": "Polymarket enrichment cohort, no necesariamente weather-only",
-        "evidence": [
-          "directional_trader_enrichment.json closed_n=0"
-        ]
-      },
-      "blocked_signal_performance": {
-        "n_resolved": 2,
-        "n_wins": 1,
-        "wr_pct": 50.0,
-        "avg_entry_price": 0.5505,
-        "avg_close_price": 0.5,
-        "confidence": "medium",
-        "evidence": [
-          "blocked_signals_resolutions.jsonl n=2"
-        ]
-      },
-      "vs_bot": {
-        "recent_crosscheck_run_at": "2026-04-19T08:44:09.197769+00:00",
-        "n_match_keys_overlap_recent": 3,
-        "n_cities_bot_only": 4,
-        "n_cities_trader_only": 1,
-        "trader_only_cities_now": [
-          "Seattle"
-        ],
-        "confidence": "high",
-        "evidence": [
-          "signals.json active signals",
-          "signals_crosscheck.jsonl latest record"
-        ]
-      },
-      "exit_behaviour": {
-        "answerable": false,
-        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede inferir SL/TP.",
-        "confidence": "insufficient_data"
-      },
-      "hold_duration": {
-        "answerable": false,
-        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede medir first_seen/last_seen.",
-        "confidence": "insufficient_data"
-      },
-      "scaling_behaviour": {
-        "answerable": false,
-        "reason": "v0 no archiva serie de signals.json; sin trayectoria de avg_price no se puede inferir scale-in/scale-out.",
-        "confidence": "insufficient_data"
-      },
-      "candidate_profiles": [
-        {
-          "name": "multi_strike_structurer",
-          "confidence": "medium",
-          "evidence": [
-            "signals.json multi_strike_groups=1"
-          ]
-        }
-      ],
-      "profile_tags": [
-        "multi_strike_issuer"
-      ]
-    },
-    {
-      "pseudonym": "Dimpled-Boy",
-      "address": null,
-      "reference_quality": "unknown",
-      "activity": {
-        "n_active_signals_now": 4,
-        "n_distinct_cities_active_now": 4,
-        "n_closed_positions_recent": 0,
-        "closed_weather_conditions": {},
-        "confidence": "medium",
-        "evidence": [
-          "signals.json n=4",
-          "directional_trader_enrichment.json closed_n=0"
-        ]
-      },
-      "style": {
-        "dominant_city": "Warsaw",
-        "top_cities": {
-          "Warsaw": 1,
-          "Tel Aviv": 1,
-          "Ankara": 1,
-          "Munich": 1
-        },
-        "condition_preference": "exact",
-        "outcome_bias_pct": {
-          "Yes": 50.0,
-          "No": 50.0,
-          "Other": 0.0
-        },
-        "price_style": null,
-        "entry_price_band": {
-          "p25": 0.7861,
-          "p50": 0.8151,
-          "p75": 0.8492,
-          "n": 6
-        },
-        "confidence": "medium",
-        "evidence": [
-          "census.sample_positions n=0",
-          "blocked_signals_resolutions.jsonl n=6"
-        ]
-      },
-      "grid_structure": {
-        "multi_strike_signals": [],
-        "any_consensus_with_others": false,
-        "n_consensus_match_keys": 0,
-        "n_consensus_counterparties": 0,
-        "confidence": "high",
-        "evidence": [
-          "signals.json signals n=4"
-        ]
-      },
-      "realized_performance": {
-        "closed_win_rate_pct": null,
-        "closed_pnl_cash": null,
-        "closed_n": null,
-        "confidence": "insufficient_data",
-        "caveat": "Polymarket enrichment cohort, no necesariamente weather-only",
-        "evidence": [
-          "directional_trader_enrichment.json closed_n=0"
-        ]
-      },
-      "blocked_signal_performance": {
-        "n_resolved": 6,
-        "n_wins": 6,
-        "wr_pct": 100.0,
-        "avg_entry_price": 0.8062,
-        "avg_close_price": 1.0,
-        "confidence": "medium",
-        "evidence": [
-          "blocked_signals_resolutions.jsonl n=6"
-        ]
-      },
-      "vs_bot": {
-        "recent_crosscheck_run_at": "2026-04-19T08:44:09.197769+00:00",
-        "n_match_keys_overlap_recent": 1,
-        "n_cities_bot_only": 4,
-        "n_cities_trader_only": 3,
-        "trader_only_cities_now": [
-          "Ankara",
-          "Tel Aviv",
-          "Warsaw"
-        ],
-        "confidence": "high",
-        "evidence": [
-          "signals.json active signals",
-          "signals_crosscheck.jsonl latest record"
-        ]
-      },
-      "exit_behaviour": {
-        "answerable": false,
-        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede inferir SL/TP.",
-        "confidence": "insufficient_data"
-      },
-      "hold_duration": {
-        "answerable": false,
-        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede medir first_seen/last_seen.",
-        "confidence": "insufficient_data"
-      },
-      "scaling_behaviour": {
-        "answerable": false,
-        "reason": "v0 no archiva serie de signals.json; sin trayectoria de avg_price no se puede inferir scale-in/scale-out.",
-        "confidence": "insufficient_data"
-      },
-      "candidate_profiles": [
-        {
-          "name": "favorite_chaser",
-          "confidence": "medium",
-          "evidence": [
-            "blocked_signals_resolutions.jsonl avg_entry=0.8062 n=6"
-          ]
-        }
-      ],
-      "profile_tags": [
-        "favorite_entrant",
-        "high_blocked_wr"
-      ]
-    },
-    {
-      "pseudonym": "Academic-Maniac",
-      "address": "0xa6fbd527070abf16092d05512e4c603516de58e2",
-      "reference_quality": "active_but_unproven",
+      "pseudonym": "Agreeable-Harvester",
+      "address": "0xb7321756e00c7220ce016515fcd290530c9d6900",
+      "reference_quality": "low_signal",
       "activity": {
         "n_active_signals_now": 0,
         "n_distinct_cities_active_now": 0,
-        "n_closed_positions_recent": 100,
+        "n_closed_positions_recent": 3,
         "closed_weather_conditions": {
-          "at_or_above": 11,
-          "exact": 40,
-          "range": 47,
-          "at_or_below": 2
+          "exact": 3
         },
         "confidence": "medium",
         "evidence": [
           "signals.json n=0",
-          "directional_trader_enrichment.json closed_n=100"
+          "directional_trader_enrichment.json closed_n=3"
         ]
       },
       "style": {
-        "dominant_city": "Ankara",
+        "dominant_city": "Madrid",
         "top_cities": {
-          "Ankara": 5,
-          "Shanghai": 2
+          "Madrid": 3,
+          "Shenzhen": 1
         },
         "condition_preference": "at_or_below",
         "outcome_bias_pct": {
-          "Yes": 0.0,
-          "No": 100.0,
+          "Yes": 25.0,
+          "No": 75.0,
           "Other": 0.0
         },
         "price_style": "mid_range",
         "entry_price_band": {
-          "p25": 0.5125,
-          "p50": 0.55,
-          "p75": 0.6175,
-          "n": 6
+          "p25": 0.432,
+          "p50": 0.5475,
+          "p75": 0.6923,
+          "n": 4
         },
         "confidence": "medium",
         "evidence": [
-          "census.sample_positions n=6",
+          "census.sample_positions n=4",
           "blocked_signals_resolutions.jsonl n=0"
         ]
       },
@@ -1299,8 +854,121 @@
         ]
       },
       "realized_performance": {
-        "closed_win_rate_pct": 75.0,
-        "closed_pnl_cash": -40.22,
+        "closed_win_rate_pct": 33.3,
+        "closed_pnl_cash": 0.67,
+        "closed_n": 3,
+        "confidence": "medium",
+        "caveat": "Polymarket enrichment cohort, no necesariamente weather-only",
+        "evidence": [
+          "directional_trader_enrichment.json closed_n=3"
+        ]
+      },
+      "blocked_signal_performance": {
+        "n_resolved": 0,
+        "n_wins": 0,
+        "wr_pct": null,
+        "avg_entry_price": null,
+        "avg_close_price": null,
+        "confidence": "insufficient_data",
+        "evidence": [
+          "blocked_signals_resolutions.jsonl n=0"
+        ]
+      },
+      "vs_bot": {
+        "recent_crosscheck_run_at": "2026-04-19T08:44:09.197769+00:00",
+        "n_match_keys_overlap_recent": 0,
+        "n_cities_bot_only": 4,
+        "n_cities_trader_only": 0,
+        "trader_only_cities_now": [],
+        "confidence": "high",
+        "evidence": [
+          "signals.json active signals",
+          "signals_crosscheck.jsonl latest record"
+        ]
+      },
+      "exit_behaviour": {
+        "answerable": false,
+        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede inferir SL/TP.",
+        "confidence": "insufficient_data"
+      },
+      "hold_duration": {
+        "answerable": false,
+        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede medir first_seen/last_seen.",
+        "confidence": "insufficient_data"
+      },
+      "scaling_behaviour": {
+        "answerable": false,
+        "reason": "v0 no archiva serie de signals.json; sin trayectoria de avg_price no se puede inferir scale-in/scale-out.",
+        "confidence": "insufficient_data"
+      },
+      "candidate_profiles": [
+        {
+          "name": "insufficient_profile_signal",
+          "confidence": "low",
+          "evidence": [
+            "v0 evidence insufficient for a stronger archetype"
+          ]
+        }
+      ],
+      "profile_tags": []
+    },
+    {
+      "pseudonym": "Courteous-Syndrome",
+      "address": "0xca5eefaa9a82330482b756d4874bb7f0b69e4a1c",
+      "reference_quality": "active_but_unproven",
+      "activity": {
+        "n_active_signals_now": 0,
+        "n_distinct_cities_active_now": 0,
+        "n_closed_positions_recent": 100,
+        "closed_weather_conditions": {
+          "exact": 42,
+          "range": 27,
+          "at_or_above": 22
+        },
+        "confidence": "medium",
+        "evidence": [
+          "signals.json n=0",
+          "directional_trader_enrichment.json closed_n=100"
+        ]
+      },
+      "style": {
+        "dominant_city": "Shenzhen",
+        "top_cities": {
+          "Shenzhen": 3,
+          "Taipei": 1
+        },
+        "condition_preference": "at_or_above",
+        "outcome_bias_pct": {
+          "Yes": 100.0,
+          "No": 0.0,
+          "Other": 0.0
+        },
+        "price_style": "low_price",
+        "entry_price_band": {
+          "p25": 0.219,
+          "p50": 0.219,
+          "p75": 0.2518,
+          "n": 4
+        },
+        "confidence": "medium",
+        "evidence": [
+          "census.sample_positions n=4",
+          "blocked_signals_resolutions.jsonl n=0"
+        ]
+      },
+      "grid_structure": {
+        "multi_strike_signals": [],
+        "any_consensus_with_others": false,
+        "n_consensus_match_keys": 0,
+        "n_consensus_counterparties": 0,
+        "confidence": "insufficient_data",
+        "evidence": [
+          "signals.json signals n=0"
+        ]
+      },
+      "realized_performance": {
+        "closed_win_rate_pct": 36.4,
+        "closed_pnl_cash": -75.99,
         "closed_n": 100,
         "confidence": "medium",
         "caveat": "Polymarket enrichment cohort, no necesariamente weather-only",
@@ -1348,33 +1016,28 @@
       },
       "candidate_profiles": [
         {
-          "name": "directional_forecaster",
-          "confidence": "medium",
+          "name": "insufficient_profile_signal",
+          "confidence": "low",
           "evidence": [
-            "census.conditions dominant=at_or_below n=5",
-            "census.price_style=mid_range"
+            "v0 evidence insufficient for a stronger archetype"
           ]
         }
       ],
-      "profile_tags": [
-        "no_biased",
-        "specialist_Ankara",
-        "specialist_at_or_below"
-      ]
+      "profile_tags": []
     },
     {
-      "pseudonym": "Coarse-Gas",
-      "address": "0xae68539542db9d69e66445c21e6e3bdde417064a",
+      "pseudonym": "Greedy-Diffuse",
+      "address": "0xedbd76fe832c4a43d5538f979126e97db24bdd60",
       "reference_quality": "active_but_unproven",
       "activity": {
         "n_active_signals_now": 0,
         "n_distinct_cities_active_now": 0,
         "n_closed_positions_recent": 100,
         "closed_weather_conditions": {
-          "exact": 68,
-          "at_or_above": 9,
-          "range": 18,
-          "at_or_below": 5
+          "at_or_below": 10,
+          "exact": 65,
+          "at_or_above": 14,
+          "range": 11
         },
         "confidence": "medium",
         "evidence": [
@@ -1383,22 +1046,22 @@
         ]
       },
       "style": {
-        "dominant_city": "Shanghai",
+        "dominant_city": "Madrid",
         "top_cities": {
-          "Shanghai": 2,
-          "Ankara": 1
+          "Madrid": 2,
+          "Hong Kong": 1
         },
-        "condition_preference": "at_or_above",
+        "condition_preference": "at_or_below",
         "outcome_bias_pct": {
-          "Yes": 66.7,
-          "No": 33.3,
+          "Yes": 0.0,
+          "No": 100.0,
           "Other": 0.0
         },
-        "price_style": "low_price",
+        "price_style": "mid_range",
         "entry_price_band": {
-          "p25": 0.3125,
-          "p50": 0.343,
-          "p75": 0.4315,
+          "p25": 0.399,
+          "p50": 0.438,
+          "p75": 0.534,
           "n": 3
         },
         "confidence": "medium",
@@ -1418,8 +1081,8 @@
         ]
       },
       "realized_performance": {
-        "closed_win_rate_pct": 25.0,
-        "closed_pnl_cash": -1478.02,
+        "closed_win_rate_pct": 61.0,
+        "closed_pnl_cash": -54.02,
         "closed_n": 100,
         "confidence": "medium",
         "caveat": "Polymarket enrichment cohort, no necesariamente weather-only",
@@ -1477,41 +1140,40 @@
       "profile_tags": []
     },
     {
-      "pseudonym": "Content-Lunchroom",
-      "address": "0xb1c4fa3ada2adccbd1d07fe8c0a00300f8f3293d",
+      "pseudonym": "Lovable-Permafrost",
+      "address": "0x7e4bd2388cd26882dc57c9d943e7d63e35aeac6b",
       "reference_quality": "active_but_unproven",
       "activity": {
         "n_active_signals_now": 0,
         "n_distinct_cities_active_now": 0,
-        "n_closed_positions_recent": 46,
+        "n_closed_positions_recent": 3,
         "closed_weather_conditions": {
-          "range": 6,
-          "exact": 36,
-          "at_or_above": 4
+          "at_or_above": 1,
+          "exact": 2
         },
         "confidence": "medium",
         "evidence": [
           "signals.json n=0",
-          "directional_trader_enrichment.json closed_n=46"
+          "directional_trader_enrichment.json closed_n=3"
         ]
       },
       "style": {
-        "dominant_city": "Shanghai",
+        "dominant_city": "Taipei",
         "top_cities": {
-          "Shanghai": 1,
-          "Ankara": 1
+          "Madrid": 1,
+          "Taipei": 1
         },
         "condition_preference": "at_or_below",
         "outcome_bias_pct": {
-          "Yes": 50.0,
-          "No": 50.0,
+          "Yes": 0.0,
+          "No": 100.0,
           "Other": 0.0
         },
         "price_style": "mid_range",
         "entry_price_band": {
-          "p25": 0.5198,
-          "p50": 0.5396,
-          "p75": 0.5595,
+          "p25": 0.5051,
+          "p50": 0.5501,
+          "p75": 0.595,
           "n": 2
         },
         "confidence": "low",
@@ -1531,348 +1193,13 @@
         ]
       },
       "realized_performance": {
-        "closed_win_rate_pct": 0.0,
-        "closed_pnl_cash": -347.34,
-        "closed_n": 46,
+        "closed_win_rate_pct": 66.7,
+        "closed_pnl_cash": -0.14,
+        "closed_n": 3,
         "confidence": "medium",
         "caveat": "Polymarket enrichment cohort, no necesariamente weather-only",
         "evidence": [
-          "directional_trader_enrichment.json closed_n=46"
-        ]
-      },
-      "blocked_signal_performance": {
-        "n_resolved": 0,
-        "n_wins": 0,
-        "wr_pct": null,
-        "avg_entry_price": null,
-        "avg_close_price": null,
-        "confidence": "insufficient_data",
-        "evidence": [
-          "blocked_signals_resolutions.jsonl n=0"
-        ]
-      },
-      "vs_bot": {
-        "recent_crosscheck_run_at": "2026-04-19T08:44:09.197769+00:00",
-        "n_match_keys_overlap_recent": 0,
-        "n_cities_bot_only": 4,
-        "n_cities_trader_only": 0,
-        "trader_only_cities_now": [],
-        "confidence": "high",
-        "evidence": [
-          "signals.json active signals",
-          "signals_crosscheck.jsonl latest record"
-        ]
-      },
-      "exit_behaviour": {
-        "answerable": false,
-        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede inferir SL/TP.",
-        "confidence": "insufficient_data"
-      },
-      "hold_duration": {
-        "answerable": false,
-        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede medir first_seen/last_seen.",
-        "confidence": "insufficient_data"
-      },
-      "scaling_behaviour": {
-        "answerable": false,
-        "reason": "v0 no archiva serie de signals.json; sin trayectoria de avg_price no se puede inferir scale-in/scale-out.",
-        "confidence": "insufficient_data"
-      },
-      "candidate_profiles": [
-        {
-          "name": "insufficient_profile_signal",
-          "confidence": "low",
-          "evidence": [
-            "v0 evidence insufficient for a stronger archetype"
-          ]
-        }
-      ],
-      "profile_tags": []
-    },
-    {
-      "pseudonym": "Extra-Small-Tabletop",
-      "address": "0xd76368032df56fade24307cf2e0f0f43c6b1bd7f",
-      "reference_quality": "low_signal",
-      "activity": {
-        "n_active_signals_now": 0,
-        "n_distinct_cities_active_now": 0,
-        "n_closed_positions_recent": 1,
-        "closed_weather_conditions": {},
-        "confidence": "medium",
-        "evidence": [
-          "signals.json n=0",
-          "directional_trader_enrichment.json closed_n=1"
-        ]
-      },
-      "style": {
-        "dominant_city": "Shanghai",
-        "top_cities": {
-          "Shanghai": 1,
-          "Ankara": 1
-        },
-        "condition_preference": "at_or_below",
-        "outcome_bias_pct": {
-          "Yes": 50.0,
-          "No": 50.0,
-          "Other": 0.0
-        },
-        "price_style": "mid_range",
-        "entry_price_band": {
-          "p25": 0.4338,
-          "p50": 0.4556,
-          "p75": 0.4774,
-          "n": 2
-        },
-        "confidence": "low",
-        "evidence": [
-          "census.sample_positions n=2",
-          "blocked_signals_resolutions.jsonl n=0"
-        ]
-      },
-      "grid_structure": {
-        "multi_strike_signals": [],
-        "any_consensus_with_others": false,
-        "n_consensus_match_keys": 0,
-        "n_consensus_counterparties": 0,
-        "confidence": "insufficient_data",
-        "evidence": [
-          "signals.json signals n=0"
-        ]
-      },
-      "realized_performance": {
-        "closed_win_rate_pct": 0.0,
-        "closed_pnl_cash": -0.03,
-        "closed_n": 1,
-        "confidence": "medium",
-        "caveat": "Polymarket enrichment cohort, no necesariamente weather-only",
-        "evidence": [
-          "directional_trader_enrichment.json closed_n=1"
-        ]
-      },
-      "blocked_signal_performance": {
-        "n_resolved": 0,
-        "n_wins": 0,
-        "wr_pct": null,
-        "avg_entry_price": null,
-        "avg_close_price": null,
-        "confidence": "insufficient_data",
-        "evidence": [
-          "blocked_signals_resolutions.jsonl n=0"
-        ]
-      },
-      "vs_bot": {
-        "recent_crosscheck_run_at": "2026-04-19T08:44:09.197769+00:00",
-        "n_match_keys_overlap_recent": 0,
-        "n_cities_bot_only": 4,
-        "n_cities_trader_only": 0,
-        "trader_only_cities_now": [],
-        "confidence": "high",
-        "evidence": [
-          "signals.json active signals",
-          "signals_crosscheck.jsonl latest record"
-        ]
-      },
-      "exit_behaviour": {
-        "answerable": false,
-        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede inferir SL/TP.",
-        "confidence": "insufficient_data"
-      },
-      "hold_duration": {
-        "answerable": false,
-        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede medir first_seen/last_seen.",
-        "confidence": "insufficient_data"
-      },
-      "scaling_behaviour": {
-        "answerable": false,
-        "reason": "v0 no archiva serie de signals.json; sin trayectoria de avg_price no se puede inferir scale-in/scale-out.",
-        "confidence": "insufficient_data"
-      },
-      "candidate_profiles": [
-        {
-          "name": "insufficient_profile_signal",
-          "confidence": "low",
-          "evidence": [
-            "v0 evidence insufficient for a stronger archetype"
-          ]
-        }
-      ],
-      "profile_tags": []
-    },
-    {
-      "pseudonym": "Illustrious-Church",
-      "address": "0xe5b29f5da62141c6e20e6a6a99a16585893b21f4",
-      "reference_quality": "active_but_unproven",
-      "activity": {
-        "n_active_signals_now": 0,
-        "n_distinct_cities_active_now": 0,
-        "n_closed_positions_recent": 100,
-        "closed_weather_conditions": {
-          "exact": 80,
-          "range": 18,
-          "at_or_above": 2
-        },
-        "confidence": "medium",
-        "evidence": [
-          "signals.json n=0",
-          "directional_trader_enrichment.json closed_n=100"
-        ]
-      },
-      "style": {
-        "dominant_city": "Shanghai",
-        "top_cities": {
-          "Shanghai": 1,
-          "Ankara": 1
-        },
-        "condition_preference": "at_or_below",
-        "outcome_bias_pct": {
-          "Yes": 50.0,
-          "No": 50.0,
-          "Other": 0.0
-        },
-        "price_style": "mid_range",
-        "entry_price_band": {
-          "p25": 0.5241,
-          "p50": 0.5427,
-          "p75": 0.5613,
-          "n": 2
-        },
-        "confidence": "low",
-        "evidence": [
-          "census.sample_positions n=2",
-          "blocked_signals_resolutions.jsonl n=0"
-        ]
-      },
-      "grid_structure": {
-        "multi_strike_signals": [],
-        "any_consensus_with_others": false,
-        "n_consensus_match_keys": 0,
-        "n_consensus_counterparties": 0,
-        "confidence": "insufficient_data",
-        "evidence": [
-          "signals.json signals n=0"
-        ]
-      },
-      "realized_performance": {
-        "closed_win_rate_pct": 31.0,
-        "closed_pnl_cash": -290.95,
-        "closed_n": 100,
-        "confidence": "medium",
-        "caveat": "Polymarket enrichment cohort, no necesariamente weather-only",
-        "evidence": [
-          "directional_trader_enrichment.json closed_n=100"
-        ]
-      },
-      "blocked_signal_performance": {
-        "n_resolved": 0,
-        "n_wins": 0,
-        "wr_pct": null,
-        "avg_entry_price": null,
-        "avg_close_price": null,
-        "confidence": "insufficient_data",
-        "evidence": [
-          "blocked_signals_resolutions.jsonl n=0"
-        ]
-      },
-      "vs_bot": {
-        "recent_crosscheck_run_at": "2026-04-19T08:44:09.197769+00:00",
-        "n_match_keys_overlap_recent": 0,
-        "n_cities_bot_only": 4,
-        "n_cities_trader_only": 0,
-        "trader_only_cities_now": [],
-        "confidence": "high",
-        "evidence": [
-          "signals.json active signals",
-          "signals_crosscheck.jsonl latest record"
-        ]
-      },
-      "exit_behaviour": {
-        "answerable": false,
-        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede inferir SL/TP.",
-        "confidence": "insufficient_data"
-      },
-      "hold_duration": {
-        "answerable": false,
-        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede medir first_seen/last_seen.",
-        "confidence": "insufficient_data"
-      },
-      "scaling_behaviour": {
-        "answerable": false,
-        "reason": "v0 no archiva serie de signals.json; sin trayectoria de avg_price no se puede inferir scale-in/scale-out.",
-        "confidence": "insufficient_data"
-      },
-      "candidate_profiles": [
-        {
-          "name": "insufficient_profile_signal",
-          "confidence": "low",
-          "evidence": [
-            "v0 evidence insufficient for a stronger archetype"
-          ]
-        }
-      ],
-      "profile_tags": []
-    },
-    {
-      "pseudonym": "Massive-Distribution",
-      "address": "0x75f33dacb4a16cbadd55c22e3271f0d28a77fe29",
-      "reference_quality": "active_but_unproven",
-      "activity": {
-        "n_active_signals_now": 0,
-        "n_distinct_cities_active_now": 0,
-        "n_closed_positions_recent": 17,
-        "closed_weather_conditions": {
-          "exact": 9,
-          "at_or_above": 2,
-          "range": 3
-        },
-        "confidence": "medium",
-        "evidence": [
-          "signals.json n=0",
-          "directional_trader_enrichment.json closed_n=17"
-        ]
-      },
-      "style": {
-        "dominant_city": "Ankara",
-        "top_cities": {
-          "Ankara": 4,
-          "Wuhan": 1
-        },
-        "condition_preference": "at_or_below",
-        "outcome_bias_pct": {
-          "Yes": 60.0,
-          "No": 40.0,
-          "Other": 0.0
-        },
-        "price_style": "mid_range",
-        "entry_price_band": {
-          "p25": 0.38,
-          "p50": 0.43,
-          "p75": 0.53,
-          "n": 5
-        },
-        "confidence": "medium",
-        "evidence": [
-          "census.sample_positions n=5",
-          "blocked_signals_resolutions.jsonl n=0"
-        ]
-      },
-      "grid_structure": {
-        "multi_strike_signals": [],
-        "any_consensus_with_others": false,
-        "n_consensus_match_keys": 0,
-        "n_consensus_counterparties": 0,
-        "confidence": "insufficient_data",
-        "evidence": [
-          "signals.json signals n=0"
-        ]
-      },
-      "realized_performance": {
-        "closed_win_rate_pct": 58.8,
-        "closed_pnl_cash": -90.9,
-        "closed_n": 17,
-        "confidence": "medium",
-        "caveat": "Polymarket enrichment cohort, no necesariamente weather-only",
-        "evidence": [
-          "directional_trader_enrichment.json closed_n=17"
+          "directional_trader_enrichment.json closed_n=3"
         ]
       },
       "blocked_signal_performance": {
@@ -2019,47 +1346,44 @@
       "profile_tags": []
     },
     {
-      "pseudonym": "Rewarding-Pusher",
-      "address": "0x0a199eb79682188fb66f3a3c95795aa913663c95",
-      "reference_quality": "active_but_unproven",
+      "pseudonym": "Remarkable-Foam",
+      "address": "0xcaaacd98457713a56808ce185db6dedb5860da37",
+      "reference_quality": "low_signal",
       "activity": {
         "n_active_signals_now": 0,
         "n_distinct_cities_active_now": 0,
-        "n_closed_positions_recent": 34,
+        "n_closed_positions_recent": 4,
         "closed_weather_conditions": {
-          "range": 12,
-          "exact": 19,
-          "at_or_below": 1,
-          "at_or_above": 1
+          "exact": 4
         },
         "confidence": "medium",
         "evidence": [
           "signals.json n=0",
-          "directional_trader_enrichment.json closed_n=34"
+          "directional_trader_enrichment.json closed_n=4"
         ]
       },
       "style": {
-        "dominant_city": "Shanghai",
+        "dominant_city": "Madrid",
         "top_cities": {
-          "Shanghai": 1,
-          "Ankara": 1
+          "Madrid": 2,
+          "Taipei": 1
         },
         "condition_preference": "at_or_below",
         "outcome_bias_pct": {
-          "Yes": 50.0,
-          "No": 50.0,
+          "Yes": 33.3,
+          "No": 66.7,
           "Other": 0.0
         },
         "price_style": "mid_range",
         "entry_price_band": {
-          "p25": 0.5101,
-          "p50": 0.5598,
-          "p75": 0.6096,
-          "n": 2
+          "p25": 0.5055,
+          "p50": 0.65,
+          "p75": 0.6665,
+          "n": 3
         },
-        "confidence": "low",
+        "confidence": "medium",
         "evidence": [
-          "census.sample_positions n=2",
+          "census.sample_positions n=3",
           "blocked_signals_resolutions.jsonl n=0"
         ]
       },
@@ -2074,13 +1398,13 @@
         ]
       },
       "realized_performance": {
-        "closed_win_rate_pct": 52.9,
-        "closed_pnl_cash": -328.46,
-        "closed_n": 34,
+        "closed_win_rate_pct": 25.0,
+        "closed_pnl_cash": -0.78,
+        "closed_n": 4,
         "confidence": "medium",
         "caveat": "Polymarket enrichment cohort, no necesariamente weather-only",
         "evidence": [
-          "directional_trader_enrichment.json closed_n=34"
+          "directional_trader_enrichment.json closed_n=4"
         ]
       },
       "blocked_signal_performance": {
@@ -2131,16 +1455,206 @@
         }
       ],
       "profile_tags": []
+    },
+    {
+      "pseudonym": "Thrifty-Original",
+      "address": null,
+      "reference_quality": "unknown",
+      "activity": {
+        "n_active_signals_now": 0,
+        "n_distinct_cities_active_now": 0,
+        "n_closed_positions_recent": 0,
+        "closed_weather_conditions": {},
+        "confidence": "insufficient_data",
+        "evidence": [
+          "signals.json n=0",
+          "directional_trader_enrichment.json closed_n=0"
+        ]
+      },
+      "style": {
+        "dominant_city": null,
+        "top_cities": {},
+        "condition_preference": null,
+        "outcome_bias_pct": {},
+        "price_style": null,
+        "entry_price_band": {
+          "p25": 0.5841,
+          "p50": 0.7013,
+          "p75": 0.778,
+          "n": 55
+        },
+        "confidence": "high",
+        "evidence": [
+          "census.sample_positions n=0",
+          "blocked_signals_resolutions.jsonl n=55"
+        ]
+      },
+      "grid_structure": {
+        "multi_strike_signals": [],
+        "any_consensus_with_others": false,
+        "n_consensus_match_keys": 0,
+        "n_consensus_counterparties": 0,
+        "confidence": "insufficient_data",
+        "evidence": [
+          "signals.json signals n=0"
+        ]
+      },
+      "realized_performance": {
+        "closed_win_rate_pct": null,
+        "closed_pnl_cash": null,
+        "closed_n": null,
+        "confidence": "insufficient_data",
+        "caveat": "Polymarket enrichment cohort, no necesariamente weather-only",
+        "evidence": [
+          "directional_trader_enrichment.json closed_n=0"
+        ]
+      },
+      "blocked_signal_performance": {
+        "n_resolved": 55,
+        "n_wins": 44,
+        "wr_pct": 80.0,
+        "avg_entry_price": 0.6836,
+        "avg_close_price": 0.8,
+        "confidence": "high",
+        "evidence": [
+          "blocked_signals_resolutions.jsonl n=55"
+        ]
+      },
+      "vs_bot": {
+        "recent_crosscheck_run_at": "2026-04-19T08:44:09.197769+00:00",
+        "n_match_keys_overlap_recent": 0,
+        "n_cities_bot_only": 4,
+        "n_cities_trader_only": 0,
+        "trader_only_cities_now": [],
+        "confidence": "high",
+        "evidence": [
+          "signals.json active signals",
+          "signals_crosscheck.jsonl latest record"
+        ]
+      },
+      "exit_behaviour": {
+        "answerable": false,
+        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede inferir SL/TP.",
+        "confidence": "insufficient_data"
+      },
+      "hold_duration": {
+        "answerable": false,
+        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede medir first_seen/last_seen.",
+        "confidence": "insufficient_data"
+      },
+      "scaling_behaviour": {
+        "answerable": false,
+        "reason": "v0 no archiva serie de signals.json; sin trayectoria de avg_price no se puede inferir scale-in/scale-out.",
+        "confidence": "insufficient_data"
+      },
+      "candidate_profiles": [],
+      "profile_tags": [
+        "high_blocked_wr"
+      ]
+    },
+    {
+      "pseudonym": "Unaware-Engine",
+      "address": null,
+      "reference_quality": "unknown",
+      "activity": {
+        "n_active_signals_now": 0,
+        "n_distinct_cities_active_now": 0,
+        "n_closed_positions_recent": 0,
+        "closed_weather_conditions": {},
+        "confidence": "insufficient_data",
+        "evidence": [
+          "signals.json n=0",
+          "directional_trader_enrichment.json closed_n=0"
+        ]
+      },
+      "style": {
+        "dominant_city": null,
+        "top_cities": {},
+        "condition_preference": null,
+        "outcome_bias_pct": {},
+        "price_style": null,
+        "entry_price_band": {
+          "p25": 0.3852,
+          "p50": 0.5505,
+          "p75": 0.7157,
+          "n": 2
+        },
+        "confidence": "low",
+        "evidence": [
+          "census.sample_positions n=0",
+          "blocked_signals_resolutions.jsonl n=2"
+        ]
+      },
+      "grid_structure": {
+        "multi_strike_signals": [],
+        "any_consensus_with_others": false,
+        "n_consensus_match_keys": 0,
+        "n_consensus_counterparties": 0,
+        "confidence": "insufficient_data",
+        "evidence": [
+          "signals.json signals n=0"
+        ]
+      },
+      "realized_performance": {
+        "closed_win_rate_pct": null,
+        "closed_pnl_cash": null,
+        "closed_n": null,
+        "confidence": "insufficient_data",
+        "caveat": "Polymarket enrichment cohort, no necesariamente weather-only",
+        "evidence": [
+          "directional_trader_enrichment.json closed_n=0"
+        ]
+      },
+      "blocked_signal_performance": {
+        "n_resolved": 2,
+        "n_wins": 1,
+        "wr_pct": 50.0,
+        "avg_entry_price": 0.5505,
+        "avg_close_price": 0.5,
+        "confidence": "medium",
+        "evidence": [
+          "blocked_signals_resolutions.jsonl n=2"
+        ]
+      },
+      "vs_bot": {
+        "recent_crosscheck_run_at": "2026-04-19T08:44:09.197769+00:00",
+        "n_match_keys_overlap_recent": 0,
+        "n_cities_bot_only": 4,
+        "n_cities_trader_only": 0,
+        "trader_only_cities_now": [],
+        "confidence": "high",
+        "evidence": [
+          "signals.json active signals",
+          "signals_crosscheck.jsonl latest record"
+        ]
+      },
+      "exit_behaviour": {
+        "answerable": false,
+        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede inferir SL/TP.",
+        "confidence": "insufficient_data"
+      },
+      "hold_duration": {
+        "answerable": false,
+        "reason": "v0 no archiva serie de signals.json; sin snapshots periódicos no se puede medir first_seen/last_seen.",
+        "confidence": "insufficient_data"
+      },
+      "scaling_behaviour": {
+        "answerable": false,
+        "reason": "v0 no archiva serie de signals.json; sin trayectoria de avg_price no se puede inferir scale-in/scale-out.",
+        "confidence": "insufficient_data"
+      },
+      "candidate_profiles": [],
+      "profile_tags": []
     }
   ],
   "city_rollup": [
     {
-      "city": "Warsaw",
-      "policy_mode": "shadow",
-      "n_reference_traders_active": 3,
+      "city": "Milan",
+      "policy_mode": "canary",
+      "n_reference_traders_active": 2,
       "dominant_trader_now": "Entire-Hood",
-      "any_consensus_now": true,
-      "bot_overlap_recent": false,
+      "any_consensus_now": false,
+      "bot_overlap_recent": true,
       "confidence": "high",
       "evidence": [
         "signals.json active_signals=3",
@@ -2148,20 +1662,7 @@
       ]
     },
     {
-      "city": "Milan",
-      "policy_mode": "canary",
-      "n_reference_traders_active": 2,
-      "dominant_trader_now": "Thrifty-Original",
-      "any_consensus_now": false,
-      "bot_overlap_recent": true,
-      "confidence": "high",
-      "evidence": [
-        "signals.json active_signals=2",
-        "reference_trader_city_market_cross.json"
-      ]
-    },
-    {
-      "city": "New York City",
+      "city": "Shanghai",
       "policy_mode": "canary",
       "n_reference_traders_active": 2,
       "dominant_trader_now": "Entire-Hood",
@@ -2170,19 +1671,6 @@
       "confidence": "high",
       "evidence": [
         "signals.json active_signals=5",
-        "reference_trader_city_market_cross.json"
-      ]
-    },
-    {
-      "city": "Tokyo",
-      "policy_mode": "canary",
-      "n_reference_traders_active": 2,
-      "dominant_trader_now": "Loyal-Aggression",
-      "any_consensus_now": false,
-      "bot_overlap_recent": true,
-      "confidence": "high",
-      "evidence": [
-        "signals.json active_signals=3",
         "reference_trader_city_market_cross.json"
       ]
     },
@@ -2200,41 +1688,15 @@
       ]
     },
     {
-      "city": "Atlanta",
+      "city": "Chengdu",
       "policy_mode": "shadow",
       "n_reference_traders_active": 2,
-      "dominant_trader_now": "Thrifty-Original",
-      "any_consensus_now": true,
+      "dominant_trader_now": "Dimpled-Boy",
+      "any_consensus_now": false,
       "bot_overlap_recent": false,
       "confidence": "high",
       "evidence": [
-        "signals.json active_signals=5",
-        "reference_trader_city_market_cross.json"
-      ]
-    },
-    {
-      "city": "Cape Town",
-      "policy_mode": "shadow",
-      "n_reference_traders_active": 2,
-      "dominant_trader_now": "Entire-Hood",
-      "any_consensus_now": true,
-      "bot_overlap_recent": false,
-      "confidence": "high",
-      "evidence": [
-        "signals.json active_signals=2",
-        "reference_trader_city_market_cross.json"
-      ]
-    },
-    {
-      "city": "Chongqing",
-      "policy_mode": "shadow",
-      "n_reference_traders_active": 2,
-      "dominant_trader_now": "Eminent-Shack",
-      "any_consensus_now": true,
-      "bot_overlap_recent": false,
-      "confidence": "high",
-      "evidence": [
-        "signals.json active_signals=7",
+        "signals.json active_signals=3",
         "reference_trader_city_market_cross.json"
       ]
     },
@@ -2247,77 +1709,25 @@
       "bot_overlap_recent": true,
       "confidence": "high",
       "evidence": [
-        "signals.json active_signals=3",
-        "reference_trader_city_market_cross.json"
-      ]
-    },
-    {
-      "city": "Houston",
-      "policy_mode": "shadow",
-      "n_reference_traders_active": 2,
-      "dominant_trader_now": "Thrifty-Original",
-      "any_consensus_now": false,
-      "bot_overlap_recent": false,
-      "confidence": "high",
-      "evidence": [
-        "signals.json active_signals=3",
-        "reference_trader_city_market_cross.json"
-      ]
-    },
-    {
-      "city": "Los Angeles",
-      "policy_mode": "shadow",
-      "n_reference_traders_active": 2,
-      "dominant_trader_now": "Entire-Hood",
-      "any_consensus_now": true,
-      "bot_overlap_recent": false,
-      "confidence": "high",
-      "evidence": [
-        "signals.json active_signals=4",
-        "reference_trader_city_market_cross.json"
-      ]
-    },
-    {
-      "city": "Madrid",
-      "policy_mode": "shadow",
-      "n_reference_traders_active": 2,
-      "dominant_trader_now": "Entire-Hood",
-      "any_consensus_now": true,
-      "bot_overlap_recent": false,
-      "confidence": "high",
-      "evidence": [
-        "signals.json active_signals=3",
-        "reference_trader_city_market_cross.json"
-      ]
-    },
-    {
-      "city": "Munich",
-      "policy_mode": "shadow",
-      "n_reference_traders_active": 2,
-      "dominant_trader_now": "Thrifty-Original",
-      "any_consensus_now": false,
-      "bot_overlap_recent": true,
-      "confidence": "high",
-      "evidence": [
-        "signals.json active_signals=2",
-        "reference_trader_city_market_cross.json"
-      ]
-    },
-    {
-      "city": "Paris",
-      "policy_mode": "shadow",
-      "n_reference_traders_active": 2,
-      "dominant_trader_now": "Entire-Hood",
-      "any_consensus_now": true,
-      "bot_overlap_recent": false,
-      "confidence": "high",
-      "evidence": [
         "signals.json active_signals=5",
         "reference_trader_city_market_cross.json"
       ]
     },
     {
-      "city": "Seattle",
+      "city": "Istanbul",
+      "policy_mode": "shadow",
+      "n_reference_traders_active": 2,
+      "dominant_trader_now": "Entire-Hood",
+      "any_consensus_now": true,
+      "bot_overlap_recent": true,
+      "confidence": "high",
+      "evidence": [
+        "signals.json active_signals=3",
+        "reference_trader_city_market_cross.json"
+      ]
+    },
+    {
+      "city": "Warsaw",
       "policy_mode": "shadow",
       "n_reference_traders_active": 2,
       "dominant_trader_now": "Entire-Hood",
@@ -2330,37 +1740,11 @@
       ]
     },
     {
-      "city": "Seoul",
-      "policy_mode": "canary",
-      "n_reference_traders_active": 1,
-      "dominant_trader_now": "Eminent-Shack",
-      "any_consensus_now": false,
-      "bot_overlap_recent": true,
-      "confidence": "high",
-      "evidence": [
-        "signals.json active_signals=7",
-        "reference_trader_city_market_cross.json"
-      ]
-    },
-    {
-      "city": "Shanghai",
-      "policy_mode": "canary",
-      "n_reference_traders_active": 1,
-      "dominant_trader_now": "Thrifty-Original",
-      "any_consensus_now": false,
-      "bot_overlap_recent": false,
-      "confidence": "high",
-      "evidence": [
-        "signals.json active_signals=2",
-        "reference_trader_city_market_cross.json"
-      ]
-    },
-    {
-      "city": "Buenos Aires",
+      "city": "Wuhan",
       "policy_mode": "shadow",
-      "n_reference_traders_active": 1,
-      "dominant_trader_now": "Thrifty-Original",
-      "any_consensus_now": false,
+      "n_reference_traders_active": 2,
+      "dominant_trader_now": "Entire-Hood",
+      "any_consensus_now": true,
       "bot_overlap_recent": false,
       "confidence": "high",
       "evidence": [
@@ -2369,23 +1753,10 @@
       ]
     },
     {
-      "city": "Busan",
-      "policy_mode": "shadow",
+      "city": "Chicago",
+      "policy_mode": "canary",
       "n_reference_traders_active": 1,
-      "dominant_trader_now": "Thrifty-Original",
-      "any_consensus_now": false,
-      "bot_overlap_recent": false,
-      "confidence": "high",
-      "evidence": [
-        "signals.json active_signals=2",
-        "reference_trader_city_market_cross.json"
-      ]
-    },
-    {
-      "city": "Chengdu",
-      "policy_mode": "shadow",
-      "n_reference_traders_active": 1,
-      "dominant_trader_now": "Thrifty-Original",
+      "dominant_trader_now": "Entire-Hood",
       "any_consensus_now": false,
       "bot_overlap_recent": false,
       "confidence": "high",
@@ -2396,9 +1767,9 @@
     },
     {
       "city": "Dallas",
-      "policy_mode": "shadow",
+      "policy_mode": "canary",
       "n_reference_traders_active": 1,
-      "dominant_trader_now": "Thrifty-Original",
+      "dominant_trader_now": "Entire-Hood",
       "any_consensus_now": false,
       "bot_overlap_recent": true,
       "confidence": "high",
@@ -2408,10 +1779,10 @@
       ]
     },
     {
-      "city": "Istanbul",
-      "policy_mode": "shadow",
+      "city": "Munich",
+      "policy_mode": "canary",
       "n_reference_traders_active": 1,
-      "dominant_trader_now": "Thrifty-Original",
+      "dominant_trader_now": "Entire-Hood",
       "any_consensus_now": false,
       "bot_overlap_recent": true,
       "confidence": "high",
@@ -2421,38 +1792,103 @@
       ]
     },
     {
-      "city": "Jakarta",
-      "policy_mode": "shadow",
-      "n_reference_traders_active": 1,
-      "dominant_trader_now": "Thrifty-Original",
-      "any_consensus_now": false,
-      "bot_overlap_recent": false,
-      "confidence": "high",
-      "evidence": [
-        "signals.json active_signals=1",
-        "reference_trader_city_market_cross.json"
-      ]
-    },
-    {
-      "city": "Jeddah",
-      "policy_mode": "shadow",
-      "n_reference_traders_active": 1,
-      "dominant_trader_now": "Thrifty-Original",
-      "any_consensus_now": false,
-      "bot_overlap_recent": false,
-      "confidence": "high",
-      "evidence": [
-        "signals.json active_signals=1",
-        "reference_trader_city_market_cross.json"
-      ]
-    },
-    {
-      "city": "London",
-      "policy_mode": "blocked",
+      "city": "Seoul",
+      "policy_mode": "canary",
       "n_reference_traders_active": 1,
       "dominant_trader_now": "Entire-Hood",
       "any_consensus_now": false,
       "bot_overlap_recent": true,
+      "confidence": "high",
+      "evidence": [
+        "signals.json active_signals=2",
+        "reference_trader_city_market_cross.json"
+      ]
+    },
+    {
+      "city": "Tokyo",
+      "policy_mode": "canary",
+      "n_reference_traders_active": 1,
+      "dominant_trader_now": "Loyal-Aggression",
+      "any_consensus_now": false,
+      "bot_overlap_recent": true,
+      "confidence": "high",
+      "evidence": [
+        "signals.json active_signals=2",
+        "reference_trader_city_market_cross.json"
+      ]
+    },
+    {
+      "city": "Beijing",
+      "policy_mode": "shadow",
+      "n_reference_traders_active": 1,
+      "dominant_trader_now": "Entire-Hood",
+      "any_consensus_now": false,
+      "bot_overlap_recent": true,
+      "confidence": "high",
+      "evidence": [
+        "signals.json active_signals=1",
+        "reference_trader_city_market_cross.json"
+      ]
+    },
+    {
+      "city": "Busan",
+      "policy_mode": "shadow",
+      "n_reference_traders_active": 1,
+      "dominant_trader_now": "Dimpled-Boy",
+      "any_consensus_now": false,
+      "bot_overlap_recent": false,
+      "confidence": "high",
+      "evidence": [
+        "signals.json active_signals=2",
+        "reference_trader_city_market_cross.json"
+      ]
+    },
+    {
+      "city": "Chongqing",
+      "policy_mode": "shadow",
+      "n_reference_traders_active": 1,
+      "dominant_trader_now": "Dimpled-Boy",
+      "any_consensus_now": false,
+      "bot_overlap_recent": false,
+      "confidence": "high",
+      "evidence": [
+        "signals.json active_signals=1",
+        "reference_trader_city_market_cross.json"
+      ]
+    },
+    {
+      "city": "Guangzhou",
+      "policy_mode": "shadow",
+      "n_reference_traders_active": 1,
+      "dominant_trader_now": "Entire-Hood",
+      "any_consensus_now": false,
+      "bot_overlap_recent": false,
+      "confidence": "high",
+      "evidence": [
+        "signals.json active_signals=2",
+        "reference_trader_city_market_cross.json"
+      ]
+    },
+    {
+      "city": "Houston",
+      "policy_mode": "shadow",
+      "n_reference_traders_active": 1,
+      "dominant_trader_now": "Entire-Hood",
+      "any_consensus_now": false,
+      "bot_overlap_recent": false,
+      "confidence": "high",
+      "evidence": [
+        "signals.json active_signals=1",
+        "reference_trader_city_market_cross.json"
+      ]
+    },
+    {
+      "city": "Jakarta",
+      "policy_mode": "shadow",
+      "n_reference_traders_active": 1,
+      "dominant_trader_now": "Entire-Hood",
+      "any_consensus_now": false,
+      "bot_overlap_recent": false,
       "confidence": "high",
       "evidence": [
         "signals.json active_signals=3",
@@ -2460,15 +1896,41 @@
       ]
     },
     {
-      "city": "Manila",
+      "city": "Kuala Lumpur",
       "policy_mode": "shadow",
       "n_reference_traders_active": 1,
-      "dominant_trader_now": "Thrifty-Original",
+      "dominant_trader_now": "Entire-Hood",
       "any_consensus_now": false,
       "bot_overlap_recent": false,
       "confidence": "high",
       "evidence": [
-        "signals.json active_signals=1",
+        "signals.json active_signals=2",
+        "reference_trader_city_market_cross.json"
+      ]
+    },
+    {
+      "city": "London",
+      "policy_mode": "shadow",
+      "n_reference_traders_active": 1,
+      "dominant_trader_now": "Entire-Hood",
+      "any_consensus_now": false,
+      "bot_overlap_recent": true,
+      "confidence": "high",
+      "evidence": [
+        "signals.json active_signals=2",
+        "reference_trader_city_market_cross.json"
+      ]
+    },
+    {
+      "city": "Madrid",
+      "policy_mode": "shadow",
+      "n_reference_traders_active": 1,
+      "dominant_trader_now": "Entire-Hood",
+      "any_consensus_now": false,
+      "bot_overlap_recent": false,
+      "confidence": "high",
+      "evidence": [
+        "signals.json active_signals=3",
         "reference_trader_city_market_cross.json"
       ]
     },
@@ -2486,59 +1948,7 @@
       ]
     },
     {
-      "city": "Moscow",
-      "policy_mode": "shadow",
-      "n_reference_traders_active": 1,
-      "dominant_trader_now": "Unaware-Engine",
-      "any_consensus_now": false,
-      "bot_overlap_recent": true,
-      "confidence": "high",
-      "evidence": [
-        "signals.json active_signals=4",
-        "reference_trader_city_market_cross.json"
-      ]
-    },
-    {
-      "city": "Singapore",
-      "policy_mode": "shadow",
-      "n_reference_traders_active": 1,
-      "dominant_trader_now": "Thrifty-Original",
-      "any_consensus_now": false,
-      "bot_overlap_recent": false,
-      "confidence": "high",
-      "evidence": [
-        "signals.json active_signals=2",
-        "reference_trader_city_market_cross.json"
-      ]
-    },
-    {
-      "city": "Taipei",
-      "policy_mode": "shadow",
-      "n_reference_traders_active": 1,
-      "dominant_trader_now": "Thrifty-Original",
-      "any_consensus_now": false,
-      "bot_overlap_recent": true,
-      "confidence": "high",
-      "evidence": [
-        "signals.json active_signals=1",
-        "reference_trader_city_market_cross.json"
-      ]
-    },
-    {
-      "city": "Tel Aviv",
-      "policy_mode": "shadow",
-      "n_reference_traders_active": 1,
-      "dominant_trader_now": "Dimpled-Boy",
-      "any_consensus_now": false,
-      "bot_overlap_recent": false,
-      "confidence": "high",
-      "evidence": [
-        "signals.json active_signals=1",
-        "reference_trader_city_market_cross.json"
-      ]
-    },
-    {
-      "city": "Toronto",
+      "city": "New York City",
       "policy_mode": "shadow",
       "n_reference_traders_active": 1,
       "dominant_trader_now": "Entire-Hood",
@@ -2551,10 +1961,36 @@
       ]
     },
     {
-      "city": "Wellington",
+      "city": "Paris",
       "policy_mode": "shadow",
       "n_reference_traders_active": 1,
-      "dominant_trader_now": "Thrifty-Original",
+      "dominant_trader_now": "Entire-Hood",
+      "any_consensus_now": false,
+      "bot_overlap_recent": false,
+      "confidence": "high",
+      "evidence": [
+        "signals.json active_signals=2",
+        "reference_trader_city_market_cross.json"
+      ]
+    },
+    {
+      "city": "Shenzhen",
+      "policy_mode": "shadow",
+      "n_reference_traders_active": 1,
+      "dominant_trader_now": "Entire-Hood",
+      "any_consensus_now": false,
+      "bot_overlap_recent": true,
+      "confidence": "high",
+      "evidence": [
+        "signals.json active_signals=1",
+        "reference_trader_city_market_cross.json"
+      ]
+    },
+    {
+      "city": "Singapore",
+      "policy_mode": "shadow",
+      "n_reference_traders_active": 1,
+      "dominant_trader_now": "Entire-Hood",
       "any_consensus_now": false,
       "bot_overlap_recent": false,
       "confidence": "high",
@@ -2564,29 +2000,29 @@
       ]
     },
     {
-      "city": "Wuhan",
+      "city": "Taipei",
       "policy_mode": "shadow",
       "n_reference_traders_active": 1,
-      "dominant_trader_now": "Thrifty-Original",
+      "dominant_trader_now": "Entire-Hood",
       "any_consensus_now": false,
-      "bot_overlap_recent": false,
+      "bot_overlap_recent": true,
       "confidence": "high",
       "evidence": [
-        "signals.json active_signals=2",
+        "signals.json active_signals=1",
         "reference_trader_city_market_cross.json"
       ]
     }
   ],
   "aggregate": {
     "reference_quality_counts": {
-      "high_priority_reference": 3,
-      "low_signal": 1,
-      "active_but_unproven": 6
+      "candidate_reference": 3,
+      "low_signal": 2,
+      "active_but_unproven": 3
     },
-    "n_traders_profiled": 16,
-    "n_high_priority": 3,
-    "n_low_signal": 1,
-    "n_active_but_unproven": 6,
+    "n_traders_profiled": 13,
+    "n_high_priority": 0,
+    "n_low_signal": 2,
+    "n_active_but_unproven": 3,
     "top_blocked_wr": [
       {
         "trader": "Dimpled-Boy",
@@ -2616,7 +2052,7 @@
     ],
     "traders_profile_incomplete": [
       "Dimpled-Boy",
-      "Eminent-Shack",
+      "Entire-Hood",
       "Loyal-Aggression",
       "Pricey-Score",
       "Thrifty-Original",
@@ -2717,7 +2153,6 @@
     ]
   },
   "warnings": [
-    "census.generated_at is 15 days old; top_cities/conditions may be stale",
     "blocked_signals_resolutions.jsonl n=113 global; per-trader N varies"
   ]
 }

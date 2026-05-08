@@ -4702,3 +4702,46 @@ El Telegram de review agrega n triggers, clasificados, overlap active reeval, go
 ### NO se toco
 
 Ventas nuevas, criterios de entrada/salida, scheduler, NOAA, BANKROLL, sizing, whitelist, city modes, SL, guards, env vars, DB, Railway, Fase C, `INTRA_REEVAL_ENABLED`, `INTRA_REEVAL_SHADOW_MODE`.
+
+---
+
+## Sesión 328 — 8 de mayo de 2026 (Codex)
+
+**Clasificacion:** NORMAL / TRADERS_INTELLIGENCE / refresh evidencia / no trading
+**Bloque:** Traders Intelligence daily alarm — stale census refresh
+**Veredicto:** REFRESHED / STILL_NOT_READY
+
+### Diagnostico
+
+La alarma inicial llego como `TRADERS_INTELLIGENCE / REFRESH_REQUIRED / V1_NOT_READY`: `health_status=usable_signal`, `census_stale_days=15`, umbral esperado `<=14`, y daily summary con `recent_crosscheck_runs=2/5`.
+
+### Refresh local
+
+- Ejecutado `tools/directional_trader_census.py`: `n_scanned_markets=40`, `n_total_buy_trades=3545`, `n_unique_traders_raw=1107`, `n_traders_after_filter=8`.
+- Ejecutado `tools/directional_trader_enrichment.py`: `n_traders_enriched=8`, `health_status=usable_signal`, `quality_reference_traders=3`, `active_directional_traders=4`.
+- Ejecutado `tools/traders_intelligence_report.py`: `data/traders_intelligence.json` regenerado con `health_status=usable_signal`, `n_traders_profiled=13`, `census_stale_days=0`.
+- Ejecutado `tools/traders_intelligence_daily_summary.py --dry-run`: readiness final `not_ready`.
+
+### Antes / despues
+
+- `census_stale_days`: `15` -> `0`.
+- `health_status`: `usable_signal` -> `usable_signal`.
+- `traders_intelligence.n_traders_profiled`: `16` -> `13`.
+- Daily readiness: `not_ready` -> `not_ready`.
+- Blocker final: `recent_crosscheck_runs=2`, requiere `>=5`.
+
+### Traders fuertes finales
+
+- `Entire-Hood`: `active_now=41`, `blocked_wr=93.3`, `blocked_n=30`; trader_only cities relevantes: Chengdu, Guangzhou, Houston, Jakarta, Kuala Lumpur, Madrid, Paris, Singapore, Warsaw, Wuhan.
+- `Dimpled-Boy`: `active_now=11`, `blocked_wr=100.0`, `blocked_n=6`; trader_only cities relevantes: Ankara, Chengdu, Chongqing, Warsaw, Wuhan.
+- `Loyal-Aggression`: `active_now=6`, `blocked_wr=100.0`, `blocked_n=6`; trader_only cities relevantes: Ankara, Miami.
+
+### Validacion
+
+- `python tools\check_python_syntax.py tools\directional_trader_census.py tools\directional_trader_enrichment.py tools\traders_intelligence_report.py tools\traders_intelligence_daily_summary.py` — OK.
+- `git diff --check` — OK.
+- `python verify_before_deploy.py` — `1152/1152` OK.
+
+### NO se toco
+
+Trading core, BANKROLL, sizing, whitelist, city modes, scheduler, risk rules, policy gates ejecutables, Fase C, `bot.py`, Railway, DB, env vars, Telegram real, ni activacion v1.
