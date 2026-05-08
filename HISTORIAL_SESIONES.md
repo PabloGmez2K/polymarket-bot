@@ -5038,3 +5038,55 @@ BANKROLL, sizing, whitelist, city modes, risk rules, Fase C, DB, env vars reales
 ### Siguiente accion
 
 Activar `TRADERS_INTELLIGENCE_COLLECTOR=ON` solo cuando Pablo quiera empezar recoleccion automatica real. Tras 7 dias con `runs_24h>=20`, `consecutive_failures<3` y evidencia suficiente, evaluar V1.2 scoreboard read-only como patch separado.
+---
+
+## Sesión 335 - 8 de mayo de 2026 (Codex)
+
+**Clasificacion:** FULL controlado / TRADERS_INTELLIGENCE / Railway env var / runtime validation
+**Bloque:** Activacion Railway del collector V1.1 LOG_ONLY
+**Veredicto:** ACTIVATION_ROLLED_BACK / NEEDS_CANONICAL_SIGNALS_PATH_FIX
+
+### Precheck
+
+- Git local limpio salvo el untracked preexistente `2026-04-27]`.
+- HEAD local: `c570ae4 feat: add traders intelligence collector`.
+- `origin/main`: `c570ae4`.
+- Railway service `polymarket-bot`: deployment `f67b2b6c-b9fe-4577-b74e-bff26209eb49`, `SUCCESS`.
+- `TRADERS_INTELLIGENCE_COLLECTOR` no existia/estaba OFF.
+- Runtime `/app/data/signals.json` existia y estaba fresco: `generated=2026-05-08T14:04:48.969127+00:00`.
+- No existia `/app/data/traders_intelligence/collector_state.json` antes de activar.
+
+### Activacion y hallazgo
+
+- Se activo `TRADERS_INTELLIGENCE_COLLECTOR=ON`.
+- Railway deployment `5fd189e9-62c3-40f8-8ec7-140bc4fa06b5` termino en `SUCCESS`.
+- Logs confirmaron ejecucion del collector:
+  - `traders intelligence collector: status=completed reason=none run_id=20260508T141400Z-v11-collector`.
+- Artefactos creados bajo `/app/data/traders_intelligence/`:
+  - `collector_state.json`.
+  - `snapshots/20260508T141400Z-v11-collector.json`.
+  - `reports/20260508T141400Z-v11-collector.json`.
+  - `pseudo_lifecycle_runs.jsonl`.
+- Validacion detecto fuente no canonica/stale:
+  - `collector_state.last_signals_generated_at=2026-05-07T21:59:28.094632+00:00`.
+  - Esto no coincide con `/app/data/signals.json` fresco (`2026-05-08T14:04:48.969127+00:00`).
+  - Interpretacion: el hook runtime uso el default `data/runtime_import/signals.json` en vez del canónico `/app/data/signals.json`.
+
+### Rollback
+
+- Para evitar acumulacion de evidencia stale, se puso `TRADERS_INTELLIGENCE_COLLECTOR=OFF`.
+- Railway deployment `3e1a388d-7149-4eaa-9ea2-e8d0c95ccb62` termino en `SUCCESS`.
+- Variable final confirmada: `TRADERS_INTELLIGENCE_COLLECTOR=OFF`.
+- Logs de arranque posteriores sanos; no se observaron errores del collector tras el rollback.
+
+### NO usar como evidencia
+
+La corrida `20260508T141400Z-v11-collector` queda marcada como no canonica para V1.1 porque tomo `signals.json` stale. No debe alimentar readiness ni conclusion operativa.
+
+### NO se toco
+
+Codigo, DB, trading core, BANKROLL, sizing, whitelist, city modes, risk rules, Fase C, scheduler core, Telegram accionable ni BUY/SELL/SKIP.
+
+### Siguiente accion
+
+Patch acotado Codex: en `bot.py`, invocar `tools/traders_intelligence_collector.py` con `--signals` apuntando al `SIGNALS_FILE` runtime (`/app/data/signals.json` en Railway), y revisar que el evento runtime se escriba donde el scoreboard lo pueda recoger. Validar con dry-run/real controlado antes de reactivar `TRADERS_INTELLIGENCE_COLLECTOR=ON`.
