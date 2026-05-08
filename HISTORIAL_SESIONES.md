@@ -5220,3 +5220,80 @@ BANKROLL, Fase C, trading core, `bot.py`, scheduler, DB, env vars, sizing, white
 ### Siguiente accion
 
 Pablo debe confirmar manualmente: "No hubo retiradas ni otros cash flows entre `2026-04-29T22:12:16.678244Z` y `2026-05-08T08:01:04.117648Z`." Con esa confirmacion, repetir el append con `--write --init --yes` contra `/app/data`, verificar JSONL y rerun `wallet_snapshot.py`/`pnl_report.py`.
+
+---
+
+## Sesión 338 - 8 de mayo de 2026 (Codex)
+
+**Clasificacion:** FULL controlado / WALLET_PNL / runtime data write
+**Bloque:** Wallet cash flow attestation real para P&L canonico futuro
+**Veredicto:** CASHFLOW_ATTESTATION_STARTED / WAITING_CANONICAL_PNL_GATES
+
+### Confirmacion manual
+
+Pablo confirmo explicitamente que no hubo depositos, retiradas ni otros cash flows externos en Polymarket durante:
+
+`2026-04-29T22:12:16.678244Z` -> `2026-05-08T08:01:04.117648Z`.
+
+El ultimo deposito conocido fue el `2026-03-30` por 15 USDC, fuera de esta ventana.
+
+### Precheck
+
+- Railway service `polymarket-bot`: deployment `1df88fcd-8711-4e78-b7a0-547c510ecdd5`, `SUCCESS`.
+- `/app/data/wallet_cash_flows.jsonl`: missing antes del write.
+- `/app/data/wallet_portfolio_snapshots.jsonl`: existe.
+- Git inicial: `4a40d99 docs: record wallet cash flow attestation precheck`, sin cambios versionados, untracked preexistente `2026-04-27]`.
+
+### Runtime write
+
+Comando ejecutado:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 ssh "python tools/wallet_cash_flow_log.py append --type no_cash_flow_attestation --period-start 2026-04-29T22:12:16.678244Z --period-end 2026-05-08T08:01:04.117648Z --note 'Pablo manual attestation: no deposits, withdrawals, or other external Polymarket cash flows during this period. Last known deposit was 2026-03-30 for 15 USDC, outside this window. Codex snapshot review found no possible_deposit=true or withdrawal-like large suspicious jumps in available snapshots.' --data-dir /app/data --write --init --yes --json"
+```
+
+Resultado: `appended=true`, path `/app/data/wallet_cash_flows.jsonl`.
+
+Linea JSONL registrada:
+
+```json
+{"actor":"pablo_manual","entry_id":"12fc15e1-f5f5-4197-aadc-1f42e4abeff1","note":"Pablo manual attestation: no deposits, withdrawals, or other external Polymarket cash flows during this period. Last known deposit was 2026-03-30 for 15 USDC, outside this window. Codex snapshot review found no possible_deposit=true or withdrawal-like large suspicious jumps in available snapshots.","period_end":"2026-05-08T08:01:04.117648Z","period_start":"2026-04-29T22:12:16.678244Z","recorded_at":"2026-05-08T15:23:02.657857Z","schema_version":2,"type":"no_cash_flow_attestation"}
+```
+
+`wallet_cash_flow_log.py validate --data-dir /app/data --json`: `ok=true`, `status=valid`, `rows=1`.
+
+### Reportes read-only
+
+`wallet_snapshot.py --report-only --json --data-dir /app/data`:
+
+- `cash_flows.status=attested_full_7d`.
+- `coverage_days_7d=7`.
+- `attestation_count=1`.
+- `n_records_valid=1`.
+- `phase2_ready=false`.
+- `phase2_ready_reason=need_more_history`.
+- `valid_snapshots=10` de 14 requeridos.
+- `valid_snapshot_days=10`.
+- `history_span_hours=201.81`.
+- `wallet_pnl_available=true`.
+- `wallet_pnl_7d=4.83`.
+- `possible_deposits_7d_count=0`.
+
+`pnl_report.py --data-dir /app/data --json`:
+
+- `canonical_source=none`.
+- `bankroll_readiness=blocked`.
+- `guardrails.promotes_canonical_source=false`.
+- `inputs.cash_flows.status=present`, `n_records=1`, `coverage_days=7.0`.
+- `1W`: `status=provisional`, `value_usdc=4.86`, `confidence=low`, blocker `canonical_requires_B5_B6_opus_review_pablo_signoff`.
+- `ALL`: `status=provisional`, `value_usdc=2.64`, `confidence=low`, same canonical review blocker.
+- `1D`: blocked por single snapshot.
+- `1M`: blocked por coverage menor a 1M.
+
+### Estado final
+
+La cadena de cashflow manual queda iniciada, pero no hay P&L canonico ni readiness de BANKROLL. Siguiente faltante para BANKROLL $35: al menos 14 snapshots validos/gates de historia, cross-check manual contra dashboard Polymarket, reconciliacion/divergencia aceptable, revision Opus y signoff Pablo, ademas de los gates generales de bankroll scaling.
+
+### NO se toco
+
+BANKROLL, Fase C, trading core, `bot.py`, scheduler, DB schema, env vars, sizing, whitelist, city modes, risk rules, Telegram real.
