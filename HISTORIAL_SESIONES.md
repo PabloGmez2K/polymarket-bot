@@ -4776,3 +4776,82 @@ La discrepancia `recent_runs=7` live vs `recent_runs=2` local no era perdida de 
 ### NO se toco
 
 Trading core, BANKROLL, sizing, whitelist, city modes, scheduler, risk rules, policy gates ejecutables, Fase C, `bot.py`, DB, env vars, Telegram real, ni activacion v1. Railway solo lectura.
+
+---
+
+## Sesión 330 - 8 de mayo de 2026 (Codex)
+
+**Clasificacion:** FULL controlado / TRADERS_INTELLIGENCE / runtime artifacts / no trading
+**Bloque:** Refresh canonico Railway de Traders Intelligence
+**Veredicto:** REFRESHED_CANONICAL / READY_CANDIDATE
+
+### Precheck
+
+- Repo local: HEAD `3e47f9a` (`data: correct traders intelligence traceability`).
+- `git status --short --untracked-files=all`: sin cambios versionados; solo untracked preexistente `2026-04-27]` y warning conocido de permisos `.pytest_cache`.
+- Railway: project `enchanting-respect`, environment `production`, service `polymarket-bot`.
+- Deployment activo: `035bb178-9a1c-4c79-ab9c-3346b42e7874`, status `SUCCESS`.
+- Volume: `polymarket-bot-volume`, mount path `/app/data`, attached to `polymarket-bot`.
+
+### Backup / listado previo
+
+- Snapshot read-only ejecutado con `powershell -ExecutionPolicy Bypass -File .\tools\railway_runtime_snapshot_pull.ps1`.
+- Listado/hash previo relevante:
+  - `/app/data/directional_trader_census.json` 125K, sha256 `48d4bbf222afcb192bccc4283e43177109415768fc0105b0745079d2ed5eed72`.
+  - `/app/data/directional_trader_enrichment.json` 62K, sha256 `c91d90a7349546eae8def7d9f64198db7fd7e4b64c55f024ed2f86f6d0c01bea`.
+  - `/app/data/traders_intelligence.json` 277K, sha256 `f2534b0661809c7db249a5c3b0373ed7c31f9e34d9ac76a02609a6748d3e6b03`.
+  - `/app/data/traders_intelligence_daily_summary_state.json` 403 bytes, sha256 `679054278515a051afe1fa14c6b04f2d384c39648c1523e5623bf4d0d701813c`.
+  - `/app/data/signals_crosscheck.jsonl` 23K, sha256 `2cce609ef9cb5bbbd575020b9b14a2b4c3da61e6909fef3e54eb0bfbbb45cf27`.
+- Backups remotos creados antes de sobrescribir:
+  - `/app/data/directional_trader_census.json.pre_traders_refresh_20260508T112621Z`
+  - `/app/data/directional_trader_enrichment.json.pre_traders_refresh_20260508T112621Z`
+  - `/app/data/traders_intelligence.json.pre_traders_refresh_20260508T112621Z`
+  - `/app/data/traders_intelligence_daily_summary_state.json.pre_traders_refresh_20260508T112621Z`
+
+### Refresh canonico
+
+- Ejecutado en Railway SSH dentro de `/app`, escribiendo en `/app/data`.
+- `python tools/directional_trader_census.py --json-output /app/data/directional_trader_census.json --md-output /app/data/directional_trader_census_latest.md`
+  - `n_scanned_markets=40`, `n_total_buy_trades=3609`, `n_unique_traders_raw=1089`, `n_traders_after_filter=4`.
+- `python tools/directional_trader_enrichment.py --input /app/data/directional_trader_census.json --json-output /app/data/directional_trader_enrichment.json --md-output /app/data/directional_trader_enrichment_latest.md`
+  - `n_traders_enriched=4`, `quality_reference_traders=1`, `active_directional_traders=2`, `health_status=usable_signal`, `likely_input_degraded=false`.
+- `python tools/traders_intelligence_report.py ... --crosscheck-series /app/data/signals_crosscheck.jsonl ... --json-output /app/data/traders_intelligence.json --md-output /app/data/traders_intelligence_latest.md`
+  - Fuente crosscheck confirmada: `/app/data/signals_crosscheck.jsonl`, no fallback local.
+  - Output: `health_status=usable_signal`, `n_traders_profiled=15`, warning unico `blocked_signals_resolutions.jsonl n=553 global; per-trader N varies`.
+- `python tools/traders_intelligence_daily_summary.py --intelligence /app/data/traders_intelligence.json --state-output /app/data/traders_intelligence_daily_summary_state.json --md-output /app/data/traders_intelligence_daily_summary_latest.md --dry-run`
+  - `telegram_result=dry_run`, `readiness_transition=true`, sin Telegram real.
+
+### Antes / despues
+
+- `census_stale_days`: `15` -> `0`.
+- `recent_crosscheck_runs`: `7` -> `7`.
+- `health_status`: `usable_signal` -> `usable_signal`.
+- `n_traders_profiled`: `77` -> `15`.
+- V1 readiness: `not_ready` -> `ready`.
+- Daily summary checks OK: health usable, census stale <=14, recent runs >=5, lead trader fuerte, >=2 traders fuertes, >=3 cities trader_only.
+
+### Traders fuertes finales
+
+- `Entire-Hood`: `active_now=38`, `blocked_wr=99.0`, `blocked_n=205`.
+- `Dimpled-Boy`: `active_now=9`, `blocked_wr=99.0`, `blocked_n=97`.
+- `Loyal-Aggression`: `active_now=6`, `blocked_wr=100.0`, `blocked_n=6`.
+- Cities trader_only relevantes: `Los Angeles`, `Miami`, `San Francisco`, `Tel Aviv`.
+
+### Artefactos runtime escritos
+
+- `/app/data/directional_trader_census.json`
+- `/app/data/directional_trader_census_latest.md`
+- `/app/data/directional_trader_enrichment.json`
+- `/app/data/directional_trader_enrichment_latest.md`
+- `/app/data/traders_intelligence.json`
+- `/app/data/traders_intelligence_latest.md`
+- `/app/data/traders_intelligence_daily_summary_state.json`
+- `/app/data/traders_intelligence_daily_summary_latest.md`
+
+### NO se toco
+
+Trading core, BANKROLL, sizing, whitelist, city modes, scheduler, risk rules, policy gates ejecutables, Fase C, `bot.py`, DB, env vars, Telegram real, ni activacion V1. Railway deploy no disparado por la operacion runtime.
+
+### Siguiente accion
+
+No activar V1 automaticamente. Ejecutar/acumular snapshots frescos con `python tools/traders_intelligence_snapshot.py` manual sobre `signals.json` fresco y mantener la evidencia como observabilidad antes de cualquier cambio semantico o ejecutable.
