@@ -4975,3 +4975,31 @@ Trading core, BANKROLL, sizing, whitelist, city modes, scheduler, risk rules, po
 ### Siguiente accion
 
 Acumular mas snapshots manuales con `signals.json` fresco antes de sacar conclusiones. Si se quiere ampliar scope a `Dimpled-Boy`, `Loyal-Aggression`, San Francisco o Tel Aviv, o conectar scheduler/Telegram/semantica ejecutable, parar y llevar a revision Opus.
+
+---
+
+## Sesión 333 - 8 de mayo de 2026 (Opus)
+
+**Clasificacion:** LITE / TRADERS_INTELLIGENCE / documentation-only / no runtime
+**Bloque:** Traders Intelligence roadmap V1 → V1.1 → V1.2 → recomendaciones
+**Veredicto:** ROADMAP_DOCUMENTED / NOT_IMPLEMENTED
+
+### Contenido
+
+Persistido el diseño estratégico de evolución de Traders Intelligence en `docs/traders-intelligence-roadmap.md`. Cubre V1.1 (collector automático LOG_ONLY con kill switch, cooldown, idempotencia), V1.2 (evidence scoreboard read-only con cohortes cruzadas n>=30), Telegram Andon (salud + REVIEW_READY, nunca BUY/SELL/SKIP), gates entre fases, riesgos, primer patch Codex y scope explícitamente fuera.
+
+### Cambios
+
+- Creado: `docs/traders-intelligence-roadmap.md`.
+- Actualizado: `docs/traders-intelligence-spec.md` (link al roadmap).
+- Actualizado: `docs/traders-intelligence-v1-snapshots.md` (link al roadmap).
+- Actualizado: `docs/traders-intelligence-v1-activation-package.md` (sección 10 con link).
+- Actualizado: `HISTORIAL_SESIONES.md`, `agent_events.jsonl`.
+
+### NO se toco
+
+Trading core, BANKROLL, sizing, whitelist, city modes, scheduler, risk rules, policy gates ejecutables, Fase C, `bot.py`, DB, env vars, Railway runtime, Telegram real, criterios de readiness ni código alguno. `CONTEXTO.md` no se modificó: roadmap documental no cambia estado vivo runtime.
+
+### Siguiente accion
+
+Roadmap es diseño durable. Para mover de `ROADMAP_DOCUMENTED` a `V1.1_IMPLEMENTED_LOG_ONLY` requiere autorización explícita y revisión separada del primer patch (sección 9 del roadmap), siguiendo gates V1 → V1.1.

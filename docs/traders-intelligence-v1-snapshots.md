@@ -3,6 +3,10 @@
 Activation contract: see
 `docs/traders-intelligence-v1-activation-package.md`.
 
+Evolution roadmap (V1 → V1.1 collector → V1.2 scoreboard → recomendaciones):
+see [`docs/traders-intelligence-roadmap.md`](traders-intelligence-roadmap.md).
+Roadmap is documented but **not implemented**.
+
 `tools/traders_intelligence_snapshot.py` is the minimal v1 archivist for
 external trader observation. It does not trade, does not edit `signals.json`,
 does not change policy, and does not emit executable signals.

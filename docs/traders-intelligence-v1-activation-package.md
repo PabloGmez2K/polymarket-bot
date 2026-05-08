@@ -156,3 +156,11 @@ separate confirmation step:
 6. Keep outputs observational-only and document the close.
 
 No step in this checklist authorizes trading or policy changes.
+
+## 10. Roadmap beyond V1
+
+Future evolution (V1.1 automatic collector, V1.2 evidence scoreboard, future
+human recommendations) is documented in
+[`docs/traders-intelligence-roadmap.md`](traders-intelligence-roadmap.md).
+The roadmap is design-only and does not authorize implementation, scheduler
+hooks, Telegram, or any runtime change.

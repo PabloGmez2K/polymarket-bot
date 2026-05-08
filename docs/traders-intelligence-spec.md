@@ -4,6 +4,11 @@
 > trading core, NOAA, scheduler ni policy. Esta spec es la fuente de verdad para
 > la implementación inicial (v0). v1 y v2 quedan pospuestos hasta que exista una
 > pregunta operativa concreta que los justifique.
+>
+> **Roadmap evolutivo durable:** ver
+> [`docs/traders-intelligence-roadmap.md`](traders-intelligence-roadmap.md)
+> para el diseño V1 → V1.1 → V1.2 → recomendaciones (no implementado, gates
+> y guardrails explícitos).
 
 ---
 
