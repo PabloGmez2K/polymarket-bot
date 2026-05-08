@@ -8959,6 +8959,14 @@ def run_tests():
         "DAILY_DIGEST_SCRIPT" in code and "timeout=120" in code,
     )
     test(
+        "daily digest: db throughput kill switch configurable",
+        'DB_THROUGHPUT_DIGEST_ENABLED = os.getenv("DB_THROUGHPUT_DIGEST_ENABLED", "1")' in code,
+    )
+    test(
+        "daily digest: db throughput pasa SQLite path read-only al runner",
+        '"--db-throughput-report"' in code and '"--db", SQLITE_DB_PATH' in code,
+    )
+    test(
         "v10.6.48: digest idempotente por fecha",
         '"last_sent_date"' in code and "maybe_send_daily_bot_digest" in code,
     )
@@ -8976,6 +8984,7 @@ def run_tests():
     print("\n DB Throughput Report LOG_ONLY")
     _db_throughput_path = os.path.join(os.path.dirname(__file__), "tools", "db_throughput_report.py")
     _db_throughput_doc_path = os.path.join(os.path.dirname(__file__), "docs", "db-throughput-report.md")
+    _daily_observability_run_path = os.path.join(os.path.dirname(__file__), "tools", "daily_bot_observability_run.py")
     _db_throughput_exists = os.path.exists(_db_throughput_path)
     _db_throughput_src = ""
     _db_throughput_ast_ok = False
@@ -8997,6 +9006,10 @@ def run_tests():
             _db_throughput_ast_detail = str(_exc)
 
     _db_throughput_doc = ""
+    _daily_observability_run_src = ""
+    if os.path.exists(_daily_observability_run_path):
+        with open(_daily_observability_run_path, encoding="utf-8") as _f:
+            _daily_observability_run_src = _f.read()
     if os.path.exists(_db_throughput_doc_path):
         with open(_db_throughput_doc_path, encoding="utf-8") as _f:
             _db_throughput_doc = _f.read()
@@ -9067,6 +9080,13 @@ def run_tests():
         "tools/db_throughput_report.py" in _db_throughput_doc
         and "LOG_ONLY" in _db_throughput_doc
         and "/app/data/polymarket.db" in _db_throughput_doc,
+    )
+    test(
+        "db_throughput_report: integrado en Daily Bot Digest LOG_ONLY",
+        "import db_throughput_report" in _daily_observability_run_src
+        and "summarize_db_throughput" in _daily_observability_run_src
+        and "--db-throughput-report" in _daily_observability_run_src
+        and "REVIEW_READY" in _daily_observability_run_src,
     )
 
     # ---- Resultado ----

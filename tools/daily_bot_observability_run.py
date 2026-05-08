@@ -15,10 +15,12 @@ from pathlib import Path
 from typing import Any
 
 import daily_bot_digest
+import db_throughput_report
 import leaderboard_pnl_snapshot
 
 
 DEFAULT_SNAPSHOT_PATH = leaderboard_pnl_snapshot.DEFAULT_SNAPSHOT_PATH
+DEFAULT_DB_PATH = Path("data") / "polymarket.db"
 
 
 class RunnerError(Exception):
@@ -50,6 +52,64 @@ def existing_rows(path: Path) -> list[dict[str, Any]]:
         raise RunnerError(str(exc)) from exc
 
 
+def summarize_db_throughput(report: dict[str, Any]) -> dict[str, Any]:
+    cycles = report.get("cycles") or {}
+    markets = report.get("markets") or {}
+    freshness = cycles.get("freshness") or {}
+    by_slot = cycles.get("by_slot_utc") or []
+    weak_slots = [
+        {
+            "slot_label": row.get("slot_label"),
+            "slot_utc": row.get("slot_utc"),
+            "cycles": row.get("cycles", 0),
+            "markets_evaluated": row.get("markets_evaluated", 0),
+            "buys": row.get("buys", 0),
+        }
+        for row in sorted(by_slot, key=lambda item: (item.get("buys", 0), -item.get("markets_evaluated", 0)))
+        if row.get("markets_evaluated", 0) and row.get("buys", 0) == 0
+    ][:3]
+    condition_distribution = markets.get("condition_distribution") or {}
+    condition_total = sum(int(value or 0) for value in condition_distribution.values())
+    dominant_condition = "unknown"
+    dominant_condition_count = 0
+    if condition_distribution:
+        dominant_condition, dominant_condition_count = max(
+            condition_distribution.items(),
+            key=lambda item: int(item[1] or 0),
+        )
+    bottlenecks = report.get("top_bottlenecks") or []
+    gap_count = len(cycles.get("gaps") or [])
+    status = "KEEP"
+    suggested_action = "Mantener observacion; no hay accion operativa."
+    if report.get("status") != "ok" or not freshness.get("is_fresh") or gap_count:
+        status = "WATCH"
+        suggested_action = "Revision manual de frescura/gaps antes de interpretar throughput."
+    if weak_slots or any(item.get("severity") == "WATCH_RISK" for item in bottlenecks):
+        status = "REVIEW_READY"
+        suggested_action = "Revision manual; si toca estrategia, llevar a Opus antes de cambiar nada."
+    return {
+        "mode": "LOG_ONLY",
+        "db_status": report.get("status"),
+        "source_quality": (report.get("source_quality") or {}).get("status"),
+        "fresh": bool(freshness.get("is_fresh")),
+        "hours_ago": freshness.get("hours_ago"),
+        "gap_count": gap_count,
+        "weak_slots": weak_slots,
+        "dominant_condition": dominant_condition,
+        "dominant_condition_count": int(dominant_condition_count or 0),
+        "condition_total": condition_total,
+        "review_status": status,
+        "suggested_action": suggested_action,
+    }
+
+
+def build_db_throughput_summary(args: argparse.Namespace) -> dict[str, Any] | None:
+    if not args.db_throughput_report:
+        return None
+    report = db_throughput_report.build_report(args.db)
+    return summarize_db_throughput(report)
+
+
 def build_run(args: argparse.Namespace) -> dict[str, Any]:
     path = Path(args.snapshot_file)
     payload = leaderboard_pnl_snapshot.build_snapshot(snapshot_args(args))
@@ -60,15 +120,17 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
     payload["usable_for_trend"] = True
 
     written = False
+    db_summary = build_db_throughput_summary(args)
+
     if args.write_snapshot:
         leaderboard_pnl_snapshot.append_snapshot(path, payload)
         written = True
-        digest = daily_bot_digest.build_digest(path)
+        digest = daily_bot_digest.build_digest(path, db_throughput=db_summary)
     else:
         rows = existing_rows(path)
         temp_payload = dict(payload)
         temp_payload["temporary_snapshot"] = True
-        digest = daily_bot_digest.build_digest_from_rows(rows + [temp_payload], path)
+        digest = daily_bot_digest.build_digest_from_rows(rows + [temp_payload], path, db_throughput=db_summary)
 
     telegram_send_result = {"sent": False, "reason": "not_attempted"}
     if args.send_telegram_manual:
@@ -86,6 +148,7 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
         "usable_for_digest": True,
         "usable_for_trend": True,
         "usable_for_bankroll": False,
+        "db_throughput": db_summary,
         "decision": {
             "bankroll": "No BANKROLL increase.",
             "operational_use": "Observability only.",
@@ -150,6 +213,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--json", action="store_true", help="Print structured JSON.")
     parser.add_argument("--snapshot-file", default=str(DEFAULT_SNAPSHOT_PATH), help="Leaderboard snapshot JSONL path.")
+    parser.add_argument(
+        "--db-throughput-report",
+        action="store_true",
+        help="Append a brief read-only DB throughput section to the digest.",
+    )
+    parser.add_argument("--db", default=str(DEFAULT_DB_PATH), help="SQLite DB path for --db-throughput-report.")
     parser.add_argument("--wallet", help="Manual wallet/proxy wallet override. Output only shows masked wallet.")
     parser.add_argument("--env-file", default=".env", help=argparse.SUPPRESS)
     parser.add_argument("--user", help="Optional manual user label override.")

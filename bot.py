@@ -168,6 +168,7 @@ WALLET_SNAPSHOT_TIMEOUT_SECONDS = int(os.getenv("WALLET_SNAPSHOT_TIMEOUT_SECONDS
 # 20 a SCHEDULE_HOURS_UTC en Railway. Sin ese slot el primer ciclo elegible es el de 23 UTC.
 DAILY_DIGEST_ENABLED = os.getenv("DAILY_DIGEST_ENABLED", "1").lower() in ("1", "true", "yes", "on")
 DAILY_DIGEST_HOUR_UTC = int(os.getenv("DAILY_DIGEST_HOUR_UTC", "20"))
+DB_THROUGHPUT_DIGEST_ENABLED = os.getenv("DB_THROUGHPUT_DIGEST_ENABLED", "1").lower() in ("1", "true", "yes", "on")
 UNSELLABLE_GUARD_MONITOR_ENABLED = os.getenv("UNSELLABLE_GUARD_MONITOR_ENABLED", "1").lower() in ("1", "true", "yes", "on")
 UNSELLABLE_GUARD_MONITOR_HOUR_UTC = int(os.getenv("UNSELLABLE_GUARD_MONITOR_HOUR_UTC", str(PNL_RECONCILIATION_HOUR_UTC)))
 UNSELLABLE_GUARD_MONITOR_TIMEOUT_SECONDS = int(os.getenv("UNSELLABLE_GUARD_MONITOR_TIMEOUT_SECONDS", "30"))
@@ -9393,9 +9394,13 @@ def maybe_send_daily_bot_digest(now=None):
             logger.warning(f"daily digest: skip (missing script: {DAILY_DIGEST_SCRIPT})")
         return False
 
+    command = [sys.executable, DAILY_DIGEST_SCRIPT, "--write-snapshot", "--send-telegram-manual"]
+    if DB_THROUGHPUT_DIGEST_ENABLED:
+        command.extend(["--db-throughput-report", "--db", SQLITE_DB_PATH])
+
     try:
         result = subprocess.run(
-            [sys.executable, DAILY_DIGEST_SCRIPT, "--write-snapshot", "--send-telegram-manual"],
+            command,
             cwd=os.path.dirname(os.path.abspath(__file__)),
             capture_output=True,
             text=True,

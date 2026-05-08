@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import shutil
+import sqlite3
 import subprocess
 import sys
 import uuid
@@ -70,6 +71,56 @@ def snapshot(**extra) -> dict:
 def write_jsonl(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(json.dumps(row, sort_keys=True) for row in rows) + "\n", encoding="utf-8")
+
+
+def create_throughput_db(path: Path) -> None:
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE cycle_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cycle_number INTEGER,
+            ts_utc TEXT NOT NULL,
+            markets_evaluated INTEGER,
+            buys_count INTEGER,
+            payload_json TEXT NOT NULL
+        );
+        CREATE TABLE market_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cycle_number INTEGER,
+            ts_utc TEXT NOT NULL,
+            city TEXT NOT NULL,
+            date_iso TEXT NOT NULL,
+            question TEXT,
+            payload_json TEXT NOT NULL
+        );
+        CREATE TABLE forecast_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cycle_number INTEGER,
+            ts_utc TEXT NOT NULL,
+            city TEXT NOT NULL,
+            target_date TEXT NOT NULL,
+            payload_json TEXT NOT NULL
+        );
+        """
+    )
+    conn.execute(
+        "INSERT INTO cycle_events (cycle_number, ts_utc, markets_evaluated, buys_count, payload_json) VALUES (?, ?, ?, ?, ?)",
+        (1, "2026-05-08T12:00:00Z", 141, 0, json.dumps({"scan": {"markets_evaluated": 141}})),
+    )
+    conn.execute(
+        "INSERT INTO market_snapshots (cycle_number, ts_utc, city, date_iso, question, payload_json) VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            1,
+            "2026-05-08T12:00:00Z",
+            "Chicago",
+            "2026-05-08",
+            "Will the highest temperature in Chicago be exactly 20C on May 8?",
+            "{}",
+        ),
+    )
+    conn.commit()
+    conn.close()
 
 
 def run_cli(*args: str, snapshot_file: Path) -> subprocess.CompletedProcess[str]:
@@ -231,6 +282,33 @@ def test_runner_output_keeps_no_bankroll_and_observability_only(monkeypatch):
     assert "usable_for_bankroll=false" in result["message"]
     assert "Observability only." in result["message"]
     assert "readiness" not in result["message"].lower()
+
+
+def test_runner_db_throughput_report_adds_log_only_digest_section(monkeypatch, tmp_path):
+    module = load_tool()
+    monkeypatch.setattr(module.leaderboard_pnl_snapshot, "build_snapshot", lambda args: snapshot())
+    db = tmp_path / "polymarket.db"
+    create_throughput_db(db)
+    path = tmp_path / "leaderboard_pnl_snapshots.jsonl"
+    args = module.parse_args([
+        "--dry-run",
+        "--db-throughput-report",
+        "--db",
+        str(db),
+        "--snapshot-file",
+        str(path),
+    ])
+    result = module.build_run(args)
+
+    db_summary = result["db_throughput"]
+    assert db_summary["mode"] == "LOG_ONLY"
+    assert db_summary["review_status"] == "REVIEW_READY"
+    assert db_summary["weak_slots"][0]["slot_label"] == "12h"
+    assert db_summary["dominant_condition"] == "exact"
+    assert "DB Throughput:" in result["message"]
+    assert "LOG_ONLY: No BANKROLL, no BUY/SELL/SKIP, no Fase C." in result["message"]
+    assert "DB <b>Throughput LOG_ONLY</b>" in result["telegram_preview"]
+    assert "Revision manual" in result["telegram_preview"]
 
 
 def test_runner_json_cli_with_fixture_path():

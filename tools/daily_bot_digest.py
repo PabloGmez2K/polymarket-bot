@@ -232,7 +232,11 @@ def normalized_latest(latest: dict[str, Any] | None) -> dict[str, Any] | None:
     return normalized
 
 
-def build_digest_from_rows(rows: list[dict[str, Any]], snapshot_file: str | Path) -> dict[str, Any]:
+def build_digest_from_rows(
+    rows: list[dict[str, Any]],
+    snapshot_file: str | Path,
+    db_throughput: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     latest = normalized_latest(rows[-1]) if rows else None
     valid_rows = valid_trend_snapshots(rows)
     latest_valid = normalized_latest(valid_rows[-1]) if valid_rows else None
@@ -261,14 +265,15 @@ def build_digest_from_rows(rows: list[dict[str, Any]], snapshot_file: str | Path
         "has_data": latest is not None,
         "latest_snapshot_query_status": latest.get("query_status") if latest else None,
         "no_previous_snapshot": latest_valid is not None and previous_valid is None,
+        "db_throughput": db_throughput,
     }
     payload["message"] = render_human_digest(payload)
     payload["telegram_preview"] = render_telegram_digest(payload)
     return payload
 
 
-def build_digest(path: Path) -> dict[str, Any]:
-    return build_digest_from_rows(read_snapshots(path), path)
+def build_digest(path: Path, db_throughput: dict[str, Any] | None = None) -> dict[str, Any]:
+    return build_digest_from_rows(read_snapshots(path), path, db_throughput=db_throughput)
 
 
 def parse_env_line(line: str) -> tuple[str, str] | None:
@@ -401,6 +406,56 @@ def send_telegram_manual(message: str) -> dict[str, Any]:
         }
 
 
+def render_db_throughput_human_lines(summary: dict[str, Any] | None) -> list[str]:
+    if not summary:
+        return []
+    weak_slots = summary.get("weak_slots") or []
+    weak_text = "none" if not weak_slots else "; ".join(
+        f"{slot.get('slot_label', '??')} eval={slot.get('markets_evaluated', 0)} buys={slot.get('buys', 0)}"
+        for slot in weak_slots[:3]
+    )
+    return [
+        "DB Throughput:",
+        f"status={summary.get('review_status', 'WATCH')}",
+        f"db_status={summary.get('db_status', 'unknown')}",
+        f"fresh={str(summary.get('fresh', False)).lower()} hours_ago={summary.get('hours_ago')}",
+        f"gaps={summary.get('gap_count', 0)}",
+        f"weak_slots={weak_text}",
+        (
+            f"dominant_condition={summary.get('dominant_condition', 'unknown')} "
+            f"({summary.get('dominant_condition_count', 0)}/{summary.get('condition_total', 0)})"
+        ),
+        f"action={summary.get('suggested_action', 'Manual review only.')}",
+        "LOG_ONLY: No BANKROLL, no BUY/SELL/SKIP, no Fase C.",
+    ]
+
+
+def render_db_throughput_telegram_lines(summary: dict[str, Any] | None) -> list[str]:
+    if not summary:
+        return []
+    weak_slots = summary.get("weak_slots") or []
+    if weak_slots:
+        weak_text = "; ".join(
+            f"{html_text(slot.get('slot_label', '??'))}: {slot.get('markets_evaluated', 0)} eval / {slot.get('buys', 0)} buys"
+            for slot in weak_slots[:3]
+        )
+    else:
+        weak_text = "sin slots flojos claros"
+    freshness = "fresh" if summary.get("fresh") else "con gaps/stale"
+    return [
+        "",
+        f"DB {bold('Throughput LOG_ONLY')}",
+        f"Estado: {html_text(summary.get('review_status', 'WATCH'))} ({freshness}, gaps={summary.get('gap_count', 0)})",
+        f"Slots flojos: {weak_text}",
+        (
+            "Condicion dominante: "
+            f"{html_text(summary.get('dominant_condition', 'unknown'))} "
+            f"({summary.get('dominant_condition_count', 0)}/{summary.get('condition_total', 0)})"
+        ),
+        f"Accion: {html_text(summary.get('suggested_action', 'Revision manual.'))}",
+    ]
+
+
 def render_human_digest(digest: dict[str, Any]) -> str:
     latest = digest.get("latest")
     previous = digest.get("previous")
@@ -443,6 +498,9 @@ def render_human_digest(digest: dict[str, Any]) -> str:
                 "No Fase C.",
             ]
         )
+        db_lines = render_db_throughput_human_lines(digest.get("db_throughput"))
+        if db_lines:
+            lines.extend(["", *db_lines])
         return "\n".join(lines)
 
     lines.extend(
@@ -495,6 +553,9 @@ def render_human_digest(digest: dict[str, Any]) -> str:
             "No Fase C.",
         ]
     )
+    db_lines = render_db_throughput_human_lines(digest.get("db_throughput"))
+    if db_lines:
+        lines.extend(["", *db_lines])
     return "\n".join(lines)
 
 
@@ -584,6 +645,7 @@ def render_telegram_digest(digest: dict[str, Any]) -> str:
         f"ℹ️ {bold('Nota')}",
         "Mensaje informativo. No cambia bankroll, no compra, no vende y no activa Fase C.",
     ]
+    lines.extend(render_db_throughput_telegram_lines(digest.get("db_throughput")))
     return "\n".join(lines)
 
 
