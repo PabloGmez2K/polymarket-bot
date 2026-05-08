@@ -183,6 +183,22 @@ Si todo está limpio y la tarea estaba autorizada para commit, proceder. Push **
 - Si Pablo ya eligió Railway / scheduler / Telegram / arquitectura, **no abrir discusión de alternativas** salvo bloqueo real o riesgo no comunicado.
 - Implementar la dirección elegida. Si hay un problema, reportar el problema concreto, no proponer rediseño.
 
+### Ciclo alarma → comprensión → cierre
+
+Cuando el usuario trae una alarma concreta o un comportamiento runtime que parece confuso, **no escalar a diseño grande ni abrir Opus por defecto**. Usar primero un ciclo corto:
+
+1. **Entender la duda** — ¿qué comportamiento se observó? ¿cuál es la contradicción aparente?
+2. **Verificar read-only** — leer código/logs/telemetría para confirmar qué hace cada ruta.
+3. **Decidir** — una de cuatro salidas:
+   - `KEEP`: no hay problema, documentar brevemente y cerrar.
+   - `COPY/observabilidad LOG_ONLY`: falta trazabilidad; aplicar cambio mínimo sin tocar semántica.
+   - `DESIGN`: falta cerrar ciclo de aprendizaje; diseñar antes de parchear.
+   - `ESCALATE_OPUS`: el diagnóstico confirma que hay que cambiar semántica ejecutable (trading, riesgo, guards, SL, BANKROLL, whitelist, sizing, scheduler, Fase C).
+4. **Aplicar el mínimo cambio útil** si la salida lo requiere y el scope lo permite.
+5. **Validar y cerrar** — diff, commit, push si autorizado.
+
+Escalar a Opus **solo** cuando el paso 3 lleva a `ESCALATE_OPUS`. No escalar por incertidumbre inicial.
+
 ### Anti-patrones a evitar
 
 - Pedir confirmación entre cada subpaso en tareas LITE/NORMAL.
@@ -191,6 +207,7 @@ Si todo está limpio y la tarea estaba autorizada para commit, proceder. Push **
 - Sobreexplicar implementación cuando el repo ya tiene el patrón.
 - Proponer alternativas de arquitectura cuando el usuario ya eligió dirección.
 - Fragmentar en micro-prompts una tarea FULL cuyo objetivo está claro y fue autorizado.
+- Saltar a Opus o diseño grande cuando la alarma solo necesita verificación read-only.
 
 ---
 
