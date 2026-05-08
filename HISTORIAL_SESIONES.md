@@ -5090,3 +5090,79 @@ Codigo, DB, trading core, BANKROLL, sizing, whitelist, city modes, risk rules, F
 ### Siguiente accion
 
 Patch acotado Codex: en `bot.py`, invocar `tools/traders_intelligence_collector.py` con `--signals` apuntando al `SIGNALS_FILE` runtime (`/app/data/signals.json` en Railway), y revisar que el evento runtime se escriba donde el scoreboard lo pueda recoger. Validar con dry-run/real controlado antes de reactivar `TRADERS_INTELLIGENCE_COLLECTOR=ON`.
+---
+
+## Sesión 336 - 8 de mayo de 2026 (Codex)
+
+**Clasificacion:** FULL controlado / TRADERS_INTELLIGENCE / patch + Railway env var / runtime validation
+**Bloque:** Correccion path canónico y reactivacion V1.1 collector LOG_ONLY
+**Veredicto:** V1.1_COLLECTOR_ACTIVE_LOG_ONLY / CANONICAL_SOURCE_CONFIRMED
+
+### Causa raiz
+
+`bot.py` invocaba `tools/traders_intelligence_collector.py` sin `--signals`, por lo que el collector usaba su default local `data/runtime_import/signals.json`. En Railway eso no era el canónico runtime. Además, el evento del collector iba al default efímero del repo en vez de `AGENT_EVENTS_FILE` del Volume.
+
+### Patch
+
+- `bot.py`: `maybe_run_traders_intelligence_collector()` ahora pasa explícitamente:
+  - `--signals SIGNALS_FILE` (`/app/data/signals.json` en Railway).
+  - `--agent-events AGENT_EVENTS_FILE` (`/app/data/agent_events.jsonl` en Railway).
+- `verify_before_deploy.py`: checks estructurales para asegurar que el hook usa `SIGNALS_FILE`, no `data/runtime_import`, y escribe eventos en `AGENT_EVENTS_FILE`.
+
+### Validacion local
+
+- `python tools/check_python_syntax.py bot.py verify_before_deploy.py tools/traders_intelligence_collector.py tests/test_traders_intelligence_collector.py`
+- `python -m pytest tests/test_traders_intelligence_collector.py -q -p no:cacheprovider` -> 7 passed.
+- `git diff --check` OK.
+- `python verify_before_deploy.py` -> 1162/1162 OK.
+
+### Deploy y runtime
+
+- Commit de patch: `13fe375 fix: use canonical signals for traders collector`.
+- Push a `origin/main`: si.
+- Railway deploy del patch: `73d0f992-f397-4ccc-a614-f0324ca91344` -> `SUCCESS`.
+- Dry-run runtime explícito con `/app/data/signals.json`:
+  - `signals_generated_at=2026-05-08T14:27:45.782018+00:00`.
+  - Sin writes.
+
+### Cuarentena de corrida no canonica
+
+Antes de reactivar se movio el directorio contaminado de la sesion 335:
+
+- De: `/app/data/traders_intelligence/`.
+- A: `/app/data/traders_intelligence_quarantine_noncanonical_20260508T141400Z/`.
+
+Contenido preservado: `collector_state.json`, `pseudo_lifecycle_runs.jsonl`, snapshot y report `20260508T141400Z-v11-collector`. No se borro evidencia.
+
+### Reactivacion
+
+- `TRADERS_INTELLIGENCE_COLLECTOR=ON`.
+- Railway deployment: `8d417a19-1641-43ab-979c-7408430e70ec` -> `SUCCESS`.
+- Logs: `traders intelligence collector: status=completed reason=none run_id=20260508T143136Z-v11-collector`.
+
+### Artefactos canonicos creados
+
+- `/app/data/traders_intelligence/collector_state.json`.
+- `/app/data/traders_intelligence/snapshots/20260508T143136Z-v11-collector.json`.
+- `/app/data/traders_intelligence/reports/20260508T143136Z-v11-collector.json`.
+- `/app/data/traders_intelligence/pseudo_lifecycle_runs.jsonl`.
+- Evento runtime en `/app/data/agent_events.jsonl`.
+
+Estado final del collector:
+
+- `last_run_id=20260508T143136Z-v11-collector`.
+- `last_signals_generated_at=2026-05-08T14:31:35.577924+00:00`.
+- `last_snapshot_at=2026-05-08T14:31:36+00:00`.
+- `consecutive_failures=0`.
+- `kill_switch_active=false`.
+- `n_current_signals=0`.
+- `prior_snapshots=0`.
+- `source_signals_path=/app/data/signals.json`.
+
+### NO se toco
+
+DB, trading core semantico, BUY/SELL/SKIP, BANKROLL, sizing, whitelist, city modes, risk rules, Fase C, scheduler core, Telegram accionable ni criterios/scope de Traders Intelligence.
+
+### Siguiente accion
+
+Dejar correr V1.1 con `TRADERS_INTELLIGENCE_COLLECTOR=ON` y revisar tras las proximas senales frescas. Si el scope fijo V1 sigue dando `n_current_signals=0` durante varias corridas, tratarlo como pregunta de scope/evidencia separada, no como fallo operativo.
