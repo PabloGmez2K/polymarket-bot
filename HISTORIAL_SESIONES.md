@@ -5166,3 +5166,57 @@ DB, trading core semantico, BUY/SELL/SKIP, BANKROLL, sizing, whitelist, city mod
 ### Siguiente accion
 
 Dejar correr V1.1 con `TRADERS_INTELLIGENCE_COLLECTOR=ON` y revisar tras las proximas senales frescas. Si el scope fijo V1 sigue dando `n_current_signals=0` durante varias corridas, tratarlo como pregunta de scope/evidencia separada, no como fallo operativo.
+
+## Sesión 337 - 8 de mayo de 2026 (Codex)
+
+**Clasificacion:** FULL controlado / WALLET_PNL / Railway runtime precheck / no write
+**Bloque:** Wallet cash flow attestation para P&L canonico futuro
+**Veredicto:** BLOCKED_NEEDS_MANUAL_WITHDRAWAL_CONFIRMATION
+
+### Precheck y evidencia Railway
+
+- Git inicial: working tree sin cambios versionados; untracked preexistente `2026-04-27]`; warning conocido de permisos en `.pytest_cache`.
+- HEAD inicial: `fbbbebe docs: record traders collector canonical activation`.
+- Railway service `polymarket-bot`: deployment `f1596e28-0045-4f9d-9ceb-a7d2f48b7aec`, `SUCCESS`.
+- `/app/data/wallet_cash_flows.jsonl`: missing.
+- `/app/data/wallet_portfolio_snapshots.jsonl`: existe.
+- `wallet_cash_flow_log.py show --data-dir /app/data --json`: `status=missing`, `row_count=0`.
+- `wallet_snapshot.py --report-only --json --data-dir /app/data`: 10 snapshots validos, 10 dias, `history_span_hours=201.81`, baseline `2026-05-01T08:00:30.743065+00:00`, latest `2026-05-08T08:01:04.117648+00:00`, `possible_deposits_7d_count=0`, `cash_flows.status=missing`, `phase2_ready=false`, `phase2_ready_reason=cash_flow_unknown`, `wallet_pnl_available=false`.
+- `pnl_report.py --data-dir /app/data --json`: `canonical_source=none`, `bankroll_readiness=blocked`, cashflow log missing, horizontes `blocked`, `promotes_canonical_source=false`.
+
+### Snapshot review
+
+Rango disponible completo: `2026-04-29T22:12:16.678244+00:00` a `2026-05-08T08:01:04.117648+00:00`.
+
+Valores `total_value`: 19.90, 18.89, 17.71, 17.68, 17.68, 19.61, 19.10, 18.94, 20.61, 22.54.
+
+Deltas aproximados: -1.01, -1.18, -0.03, 0.00, +1.93, -0.51, -0.16, +1.67, +1.93. Todos los snapshots tienen `possible_deposit=false`; no aparece salto grande compatible con deposito/retiro obvio, pero los snapshots por si solos no prueban ausencia de retiradas.
+
+### Comando dry-run propuesto
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 ssh "python tools/wallet_cash_flow_log.py append --type no_cash_flow_attestation --period-start 2026-04-29T22:12:16.678244Z --period-end 2026-05-08T08:01:04.117648Z --note 'Pablo manual attestation: no deposits after known 2026-03-30 deposit; Codex snapshot review found no possible_deposit=true or withdrawal-like suspicious jumps in available wallet snapshots. Withdrawal absence still requires Pablo confirmation before write.' --data-dir /app/data --json"
+```
+
+Resultado: dry-run OK, row schema v2, `actor=pablo_manual`, `type=no_cash_flow_attestation`, sin `amount_usdc`; no escribio runtime.
+
+### Criterio de parada aplicado
+
+Pablo confirmo el ultimo deposito conocido (`2026-03-30`, 15 USDC) y que no hubo depositos posteriores. No habia confirmacion explicita de que no hubiera retiradas ni otros cash flows durante `2026-04-29T22:12:16.678244Z` -> `2026-05-08T08:01:04.117648Z`. Por politica anti-falsificacion, no se ejecuto `--write --init`.
+
+### Estado final
+
+- Runtime escrito: no.
+- `/app/data/wallet_cash_flows.jsonl`: sigue missing.
+- `canonical_source`: `none`.
+- BANKROLL readiness: `blocked`.
+- BANKROLL $35: no autorizado.
+- Fase C: no autorizada.
+
+### NO se toco
+
+BANKROLL, Fase C, trading core, `bot.py`, scheduler, DB, env vars, sizing, whitelist, city modes, risk rules, Telegram real. No se creo deposito/retiro inventado ni attestation real.
+
+### Siguiente accion
+
+Pablo debe confirmar manualmente: "No hubo retiradas ni otros cash flows entre `2026-04-29T22:12:16.678244Z` y `2026-05-08T08:01:04.117648Z`." Con esa confirmacion, repetir el append con `--write --init --yes` contra `/app/data`, verificar JSONL y rerun `wallet_snapshot.py`/`pnl_report.py`.
