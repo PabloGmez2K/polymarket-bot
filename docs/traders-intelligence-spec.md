@@ -175,6 +175,13 @@ trading. El alcance queda limitado a `Thrifty-Original` y `Entire-Hood` en
 `Houston`, `Los Angeles`, `Manila` y `Miami`. La salida vive bajo
 `data/traders_intelligence/` como artefacto runtime/regenerable.
 
+Nota 2026-05-08: tras el refresh canonico Railway de sesion 330,
+Traders Intelligence queda `READY_CANDIDATE`. El paquete de activacion V1 vive
+en `docs/traders-intelligence-v1-activation-package.md` y define el estado
+`V1_PACKAGE_PREPARED / WAITING_CONFIRMATION`: V1 puede prepararse como
+observabilidad manual, pero no activa scheduler, Telegram accionable, trading,
+policy, BANKROLL ni Fase C.
+
 **Gatillo**: sólo si una pregunta operativa concreta lo justifica (ej. "¿copiamos
 la señal de salida de X?"). Si no hay esa pregunta, no se construye.
 

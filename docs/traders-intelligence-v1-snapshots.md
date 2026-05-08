@@ -1,5 +1,8 @@
 # Traders Intelligence v1 snapshots
 
+Activation contract: see
+`docs/traders-intelligence-v1-activation-package.md`.
+
 `tools/traders_intelligence_snapshot.py` is the minimal v1 archivist for
 external trader observation. It does not trade, does not edit `signals.json`,
 does not change policy, and does not emit executable signals.

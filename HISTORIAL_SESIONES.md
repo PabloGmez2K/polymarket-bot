@@ -4855,3 +4855,65 @@ Trading core, BANKROLL, sizing, whitelist, city modes, scheduler, risk rules, po
 ### Siguiente accion
 
 No activar V1 automaticamente. Ejecutar/acumular snapshots frescos con `python tools/traders_intelligence_snapshot.py` manual sobre `signals.json` fresco y mantener la evidencia como observabilidad antes de cualquier cambio semantico o ejecutable.
+
+---
+
+## Sesión 331 - 8 de mayo de 2026 (Codex)
+
+**Clasificacion:** NORMAL / TRADERS_INTELLIGENCE / documentation-contract / no runtime
+**Bloque:** Traders Intelligence V1 activation package
+**Veredicto:** V1_PACKAGE_PREPARED / WAITING_CONFIRMATION
+
+### Hallazgo
+
+El repo ya tenia una V1 minima implementada desde el 2026-05-01:
+
+- `tools/traders_intelligence_snapshot.py`
+- `docs/traders-intelligence-v1-snapshots.md`
+- guardrail en `tools/traders_intelligence_daily_summary.py` que, si readiness esta ready y la V1 minima existe, recomienda acumular snapshots frescos.
+
+La V1 existente no es ejecutable para trading. Es un archivador manual de `signals.json` filtrado que produce pseudo-lifecycle observacional.
+
+### Contrato preparado
+
+Se crea `docs/traders-intelligence-v1-activation-package.md` con este contrato:
+
+- `Traders Intelligence V1 active` significa permitir ejecucion manual de `tools/traders_intelligence_snapshot.py` contra `signals.json` fresco.
+- Outputs: `data/traders_intelligence/snapshots/<run_id>.json`, `data/traders_intelligence/reports/<run_id>.json`, `data/traders_intelligence/pseudo_lifecycle_runs.jsonl`.
+- Eventos permitidos: `appeared`, `still_present`, `disappeared_apparent`, `reappeared`.
+- `disappeared_apparent` no es salida confirmada.
+- Uso permitido: observabilidad, daily review, aprendizaje manual y preparacion de preguntas futuras.
+- Uso prohibido: BUY/SELL/SKIP automatico, seguir salidas de traders, cambiar policy, cambiar city modes, sizing, BANKROLL, Fase C, scheduler, DB, env vars o Telegram accionable.
+
+### Gates a mantener
+
+- `health_status=usable_signal`.
+- `census_stale_days <= 14`.
+- `recent_crosscheck_runs >= 5`.
+- `>=1` lead trader fuerte y muy activo.
+- `>=2` traders fuertes.
+- `>=3` cities trader_only entre traders fuertes.
+
+La evidencia actual que justifica el paquete viene de la sesion 330:
+
+- `census_stale_days=0`.
+- `recent_crosscheck_runs=7`.
+- `health_status=usable_signal`.
+- readiness `ready`.
+- strong traders: `Entire-Hood`, `Dimpled-Boy`, `Loyal-Aggression`.
+- trader-only cities: `Los Angeles`, `Miami`, `San Francisco`, `Tel Aviv`.
+
+### Cambios
+
+- Creado: `docs/traders-intelligence-v1-activation-package.md`.
+- Actualizado: `docs/traders-intelligence-v1-snapshots.md`.
+- Actualizado: `docs/traders-intelligence-spec.md`.
+- Actualizado: `CONTEXTO.md`, `HISTORIAL_SESIONES.md`, `agent_events.jsonl`.
+
+### NO se toco
+
+Trading core, BANKROLL, sizing, whitelist, city modes, scheduler, risk rules, policy gates ejecutables, Fase C, `bot.py`, DB, env vars, Railway runtime, Telegram real, ni criterios de readiness.
+
+### Siguiente accion
+
+Para pasar de `V1_PACKAGE_PREPARED` a `V1_ACTIVE_OBSERVATIONAL`: confirmacion separada, confirmar `signals.json` fresco, ejecutar `tools/traders_intelligence_snapshot.py --dry-run`, y si es coherente hacer una corrida manual real registrando run id, `n_current_signals`, status counts y artefactos escritos. Si se quiere ampliar scope, scheduler o uso ejecutable, parar y llevar a Opus.
