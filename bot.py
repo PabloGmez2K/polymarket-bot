@@ -8863,7 +8863,17 @@ def maybe_run_traders_intelligence_collector(now=None):
 
     try:
         result = subprocess.run(
-            [sys.executable, TRADERS_INTELLIGENCE_COLLECTOR_SCRIPT, "--json", "--now", now.replace(microsecond=0).isoformat()],
+            [
+                sys.executable,
+                TRADERS_INTELLIGENCE_COLLECTOR_SCRIPT,
+                "--json",
+                "--signals",
+                SIGNALS_FILE,
+                "--agent-events",
+                AGENT_EVENTS_FILE,
+                "--now",
+                now.replace(microsecond=0).isoformat(),
+            ],
             cwd=os.path.dirname(os.path.abspath(__file__)),
             capture_output=True,
             text=True,

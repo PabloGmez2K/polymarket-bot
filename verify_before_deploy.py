@@ -7875,6 +7875,17 @@ def run_tests():
         and "BANKROLL" not in traders_collector_src
         and "SCHEDULE_HOURS_UTC" not in traders_collector_src,
     )
+    test(
+        "traders_intelligence v1.1: hook usa signals canonico runtime",
+        '"--signals"' in traders_collector_src
+        and "SIGNALS_FILE" in traders_collector_src
+        and "data/runtime_import" not in traders_collector_src,
+    )
+    test(
+        "traders_intelligence v1.1: hook escribe eventos en AGENT_EVENTS_FILE",
+        '"--agent-events"' in traders_collector_src
+        and "AGENT_EVENTS_FILE" in traders_collector_src,
+    )
 
     # ---- Bot health check read-only CLI ----
     print("  Checks bot_health_check.py read-only CLI")
