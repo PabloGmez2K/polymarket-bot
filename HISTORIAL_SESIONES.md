@@ -5297,3 +5297,34 @@ La cadena de cashflow manual queda iniciada, pero no hay P&L canonico ni readine
 ### NO se toco
 
 BANKROLL, Fase C, trading core, `bot.py`, scheduler, DB schema, env vars, sizing, whitelist, city modes, risk rules, Telegram real.
+
+---
+
+## Sesión 339 - 8 de mayo de 2026 (Codex)
+
+**Clasificacion:** NORMAL / tooling observability / LOG_ONLY
+**Bloque:** DB Throughput Report reutilizable
+**Veredicto:** IMPLEMENTED_LOCAL_VALIDATED / RAILWAY_READ_ONLY_PENDING_POST_DEPLOY
+
+### Cambios
+
+- Creado `tools/db_throughput_report.py`.
+- Creado `tests/test_db_throughput_report.py`.
+- Creado `docs/db-throughput-report.md`.
+- Actualizado `verify_before_deploy.py` con guardrails estructurales del tool.
+
+### Contrato
+
+La CLI abre SQLite con URI `mode=ro` y `PRAGMA query_only=ON`. Emite JSON por defecto o con `--json`, Markdown con `--markdown`, y permite `--output` local opcional. El reporte cubre frescura DB, ciclos por slot UTC, markets evaluated, buys, buy rate, snapshots por ciudad, condicion nativa/payload/inferida desde `question`, distribucion `exact/range/at_or_above/at_or_below`, gaps y top cuellos. Si faltan tablas o columnas, degrada con `source_quality` y warnings.
+
+### Validacion local
+
+- `python tools/check_python_syntax.py tools/db_throughput_report.py tests/test_db_throughput_report.py verify_before_deploy.py` OK.
+- `python -m pytest tests/test_db_throughput_report.py -q -p no:cacheprovider --basetemp .tmp_pytest_db_throughput2` -> 7 passed. El primer intento sandboxed fallo por ACL de `%TEMP%`; se rerun fuera del sandbox y se limpiaron temporales.
+- `python tools/db_throughput_report.py --db data/polymarket.db --json` -> local DB ausente, `db_not_found` controlado.
+- `git diff --check` OK.
+- `python verify_before_deploy.py` -> 1171/1171.
+
+### NO se toco
+
+BANKROLL, Fase C, trading core, `bot.py`, scheduler, DB schema, env vars, sizing, whitelist, city modes, risk rules, Telegram.

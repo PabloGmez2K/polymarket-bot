@@ -8972,6 +8972,103 @@ def run_tests():
         and "execute_sell" not in code.split("def maybe_send_daily_bot_digest(", 1)[-1].split("def _classify_city_bucket", 1)[0],
     )
 
+    # ---- DB Throughput Report LOG_ONLY ----
+    print("\n DB Throughput Report LOG_ONLY")
+    _db_throughput_path = os.path.join(os.path.dirname(__file__), "tools", "db_throughput_report.py")
+    _db_throughput_doc_path = os.path.join(os.path.dirname(__file__), "docs", "db-throughput-report.md")
+    _db_throughput_exists = os.path.exists(_db_throughput_path)
+    _db_throughput_src = ""
+    _db_throughput_ast_ok = False
+    _db_throughput_ast_detail = ""
+    _db_throughput_imports = set()
+    if _db_throughput_exists:
+        with open(_db_throughput_path, encoding="utf-8") as _f:
+            _db_throughput_src = _f.read()
+        try:
+            _db_throughput_ast = ast.parse(_db_throughput_src)
+            _db_throughput_ast_ok = True
+            for _node in ast.walk(_db_throughput_ast):
+                if isinstance(_node, ast.Import):
+                    for _alias in _node.names:
+                        _db_throughput_imports.add(_alias.name.split(".", 1)[0])
+                elif isinstance(_node, ast.ImportFrom) and _node.module:
+                    _db_throughput_imports.add(_node.module.split(".", 1)[0])
+        except SyntaxError as _exc:
+            _db_throughput_ast_detail = str(_exc)
+
+    _db_throughput_doc = ""
+    if os.path.exists(_db_throughput_doc_path):
+        with open(_db_throughput_doc_path, encoding="utf-8") as _f:
+            _db_throughput_doc = _f.read()
+    _db_throughput_allowed_imports = {
+        "__future__", "argparse", "json", "re", "sqlite3", "sys",
+        "collections", "datetime", "pathlib", "typing", "urllib",
+    }
+    _db_throughput_forbidden_tokens = [
+        "import bot",
+        "from bot",
+        "execute_trade",
+        "manage_positions",
+        "intra_cycle_sl_check",
+        "OrderArgs",
+        "post_order",
+        "create_order",
+        "cancel_order",
+        "send_telegram",
+        "api.telegram.org",
+        "TELEGRAM_TOKEN",
+        "TELEGRAM_CHAT_ID",
+        "requests",
+        "httpx",
+        "aiohttp",
+        "railway",
+        "RAILWAY",
+    ]
+    test(
+        "db_throughput_report: tool existe y tiene sintaxis valida",
+        _db_throughput_exists and _db_throughput_ast_ok,
+        _db_throughput_ast_detail,
+    )
+    test(
+        "db_throughput_report: sqlite read-only mode=ro y query_only",
+        "?mode=ro" in _db_throughput_src and "PRAGMA query_only=ON" in _db_throughput_src,
+    )
+    test(
+        "db_throughput_report: soporta json markdown output",
+        "--json" in _db_throughput_src and "--markdown" in _db_throughput_src and "--output" in _db_throughput_src,
+    )
+    test(
+        "db_throughput_report: degrada con source_quality y warnings",
+        "source_quality" in _db_throughput_src and "warnings" in _db_throughput_src and "missing_table" in _db_throughput_src,
+    )
+    test(
+        "db_throughput_report: infiere condiciones desde question",
+        "def infer_condition" in _db_throughput_src
+        and "at_or_above" in _db_throughput_src
+        and "at_or_below" in _db_throughput_src
+        and "range" in _db_throughput_src
+        and "exact" in _db_throughput_src,
+    )
+    test(
+        "db_throughput_report: no importa bot.py ni trading core",
+        all(_token not in _db_throughput_src for _token in _db_throughput_forbidden_tokens[:9]),
+    )
+    test(
+        "db_throughput_report: sin Telegram, Railway ni red",
+        all(_token not in _db_throughput_src for _token in _db_throughput_forbidden_tokens[9:]),
+    )
+    test(
+        "db_throughput_report: stdlib-only imports",
+        _db_throughput_imports <= _db_throughput_allowed_imports,
+        f"imports={sorted(_db_throughput_imports - _db_throughput_allowed_imports)}",
+    )
+    test(
+        "db_throughput_report: documentacion de uso presente",
+        "tools/db_throughput_report.py" in _db_throughput_doc
+        and "LOG_ONLY" in _db_throughput_doc
+        and "/app/data/polymarket.db" in _db_throughput_doc,
+    )
+
     # ---- Resultado ----
     print(f"\n{'='*50}")
     total = passed + failed
