@@ -199,6 +199,15 @@ Cuando el usuario trae una alarma concreta o un comportamiento runtime que parec
 
 Escalar a Opus **solo** cuando el paso 3 lleva a `ESCALATE_OPUS`. No escalar por incertidumbre inicial.
 
+### Herramientas inteligentes automatizables
+
+- Si una herramienta aporta inteligencia operativa, no dejarla como CLI manual permanente: llevarla hacia ejecución automatizable.
+- Default seguro: `LOG_ONLY` con estado persistente, idempotencia, cooldown, kill switch y salida digest/Telegram. No activar efectos ejecutables sin gates.
+- Para prompts end-to-end, agrupar implementación + validación + deploy + activación segura en un solo bloque con gates claros y condiciones de parada.
+- Si solo falta confirmación humana, preparar continuaciones compactas: contexto mínimo, comando/decisión pendiente y criterio exacto para seguir.
+- Validar paths canónicos de runtime (`/app/data`) cuando haya persistencia o digest, para evitar mismatch local/Railway.
+- Tras cualquier push a `main`, observar Railway hasta estado claro (`SUCCESS` / `FAILED`), incluso si el cambio fue docs-only.
+
 ### Anti-patrones a evitar
 
 - Pedir confirmación entre cada subpaso en tareas LITE/NORMAL.
