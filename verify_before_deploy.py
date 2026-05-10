@@ -5373,7 +5373,7 @@ def run_tests():
                 except Exception:
                     pass
 
-    test("Version v10.6.49", 'BOT_VERSION = "v10.6.49"' in code)
+    test("Version v10.6.50", 'BOT_VERSION = "v10.6.50"' in code)
 
     # ---- v10.6.15: Quality-trader canary exact/range ----
     test(
@@ -5456,8 +5456,70 @@ def run_tests():
         "maybe_run_condition_monitor(state)" in code,
     )
     test(
+        "v10.6.16: monitor legacy retirado en 2026-05-10 (Phase 2 abre)",
+        "CANARY_RETIRED = _date(2026, 5, 10)" in code,
+    )
+    test(
         "v10.6.16: tools/condition_reopen_monitor.py existe",
         os.path.exists(os.path.join(os.path.dirname(__file__), "tools", "condition_reopen_monitor.py")),
+    )
+
+    # ---- v10.6.50: Phase 2 mixed-condition monitor ----
+    test(
+        "v10.6.50: _phase2_monitor_stats definida",
+        "def _phase2_monitor_stats(" in code,
+    )
+    test(
+        "v10.6.50: _build_phase2_monitor_message definida",
+        "def _build_phase2_monitor_message(" in code,
+    )
+    test(
+        "v10.6.50: maybe_run_phase2_monitor definida",
+        "def maybe_run_phase2_monitor(" in code,
+    )
+    test(
+        "v10.6.50: Phase 2 open date 2026-05-10 presente",
+        "date(2026, 5, 10)" in code,
+    )
+    test(
+        "v10.6.50: mixed kill-switch threshold WR<0.40 n>=20 presente",
+        "wr_mixed < 0.40" in code and "n_mixed >= 20" in code,
+    )
+    test(
+        "v10.6.50: exact kill-switch threshold WR<0.40 n>=10 presente",
+        "wr_exact < 0.40" in code and "n_exact >= 10" in code,
+    )
+    test(
+        "v10.6.50: range excluido de mixed conditions Phase 2",
+        '"range"' not in code.split("MIXED_CONDITIONS")[1].split("}")[0]
+        if "MIXED_CONDITIONS" in code else False,
+    )
+    test(
+        "v10.6.50: maybe_run_phase2_monitor integrado en ciclo diario",
+        "maybe_run_phase2_monitor(state)" in code,
+    )
+    _phase2_msg_marker = "def _build_phase2_monitor_message("
+    _phase2_msg_src = (
+        code[code.find(_phase2_msg_marker): code.find(_phase2_msg_marker) + 2000]
+        if _phase2_msg_marker in code else ""
+    )
+    test(
+        "v10.6.50: Phase 2 monitor no auto-modifica Railway",
+        bool(_phase2_msg_src)
+        and "set_variable" not in _phase2_msg_src
+        and "railway_safe" not in _phase2_msg_src.lower(),
+    )
+    test(
+        "v10.6.50: alarma Phase 2 rollback copy presente",
+        "Phase 2 mixed-condition rollback recommended" in code,
+    )
+    test(
+        "v10.6.50: alarma exact slice degraded copy presente",
+        "Exact slice degraded" in code,
+    )
+    test(
+        "v10.6.50: anti-spam phase2_monitor_last_sent en state",
+        '"phase2_monitor_last_sent"' in code,
     )
 
     # ---- v10.6.32: SL retrospective + daily briefing ----
@@ -7501,8 +7563,8 @@ def run_tests():
         and "def intra_cycle_sl_check(client):" in code,
     )
     test(
-        "v10.6.49: BOT_VERSION bumpeado a v10.6.49",
-        'BOT_VERSION = "v10.6.49"' in code,
+        "v10.6.50: BOT_VERSION bumpeado a v10.6.50",
+        'BOT_VERSION = "v10.6.50"' in code,
     )
 
     # ---- v10.6.46: Fase B1 — blocked_signals_audit.py ----

@@ -109,7 +109,7 @@ MAX_EXPOSURE_PCT = float(os.getenv("MAX_EXPOSURE_PCT", "0.40"))
 MIN_LIQUIDITY = 100
 MAX_DAYS_AHEAD = 5
 MIN_DAYS_AHEAD = int(os.getenv("MIN_DAYS_AHEAD", "-1"))  # -1 = automático
-BOT_VERSION = "v10.6.49"
+BOT_VERSION = "v10.6.50"
 LOGIC_SERIES = "10.6"
 REVIEW_READY_CLEAN_TRADES = 30
 PENDING_EXIT_ALERT_HOURS = 12.0
@@ -5526,6 +5526,15 @@ def run_observability_alerts():
         logger = globals().get("log")
         if logger:
             logger.warning(f"condition monitor: fallo ({e})")
+
+    # v10.6.50: monitor rolling Phase 2 mixed-condition (exact + at_or_above + at_or_below).
+    try:
+        if maybe_run_phase2_monitor(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"phase2 monitor: fallo ({e})")
 
     # v10.6.18: alerta one-shot observacion W17 (dispara el 2026-04-20).
     try:
@@ -12229,6 +12238,9 @@ def maybe_run_condition_monitor(state, now=None):
     - Cuando kill-switch se activa (WR<45% n>=20), diariamente hasta acción
     - Anti-spam: un envío por fecha de checkpoint; kill-switch se repite diariamente
 
+    Retirado el 2026-05-10: el canary original cerró con kill-switch en sesión 341.
+    Phase 2 abre esa fecha y su monitor (v10.6.50) toma el control.
+
     Retorna True si state fue mutado.
     """
     from datetime import date as _date
@@ -12240,6 +12252,10 @@ def maybe_run_condition_monitor(state, now=None):
     CANARY_OPEN = _date(2026, 4, 14)
     CHECKPOINT_DAY7 = _date(2026, 4, 21)
     CHECKPOINT_DAY14 = _date(2026, 4, 28)
+    CANARY_RETIRED = _date(2026, 5, 10)
+
+    if today >= CANARY_RETIRED:
+        return False  # canary legacy retirado; Phase 2 monitor (v10.6.50) gobierna desde esta fecha
 
     days_since = (today - CANARY_OPEN).days
     if days_since < 7:
@@ -12288,6 +12304,219 @@ def maybe_run_condition_monitor(state, now=None):
         "wr_pct": stats["wr_pct"],
         "n": stats["n_closed"],
         "verdict": stats["verdict"],
+    }
+    return True
+
+
+def _phase2_monitor_stats(today=None):
+    """
+    v10.6.50: Calcula WR Phase 2 mixed-condition desde apertura (2026-05-10).
+
+    Mixed: exact + at_or_above + at_or_below (range excluido).
+    Exact-slice: solo exact.
+
+    Kill-switches (rolling, sin fechas de checkpoint):
+    - mixed: WR < 40% con n >= 20 → rollback Phase 2
+    - exact: WR < 40% con n >= 10 → vaciar QUALITY_TRADER_CONDITIONS
+
+    El bot NO modifica Railway automáticamente. Solo alerta para acción manual.
+    """
+    from datetime import date as _date
+    if today is None:
+        today = _date.today()
+
+    PHASE2_OPEN = _date(2026, 5, 10)
+    days_since = (today - PHASE2_OPEN).days
+
+    result = {
+        "n_mixed": 0,
+        "n_mixed_wins": 0,
+        "wr_mixed": 0.0,
+        "wr_mixed_pct": "0.0",
+        "n_exact": 0,
+        "n_exact_wins": 0,
+        "wr_exact": 0.0,
+        "wr_exact_pct": "0.0",
+        "mixed_kill_switch": False,
+        "exact_kill_switch": False,
+        "days_since_open": days_since,
+        "file_found": False,
+    }
+
+    lifecycle_path = TRADE_LIFECYCLE_FILE
+    if not os.path.exists(lifecycle_path):
+        return result
+
+    result["file_found"] = True
+    try:
+        with open(lifecycle_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return result
+
+    records = data.get("records", []) if isinstance(data, dict) else []
+    phase2_start = PHASE2_OPEN.isoformat()
+
+    MIXED_CONDITIONS = {"exact", "at_or_above", "at_or_below"}
+
+    n_mixed_wins = 0
+    n_exact = 0
+    n_exact_wins = 0
+    trades_mixed = []
+
+    for r in records:
+        if not isinstance(r, dict):
+            continue
+        cond = r.get("condition", "")
+        if cond not in MIXED_CONDITIONS:
+            continue
+        opened = str(r.get("opened_at") or "")
+        if opened[:10] < phase2_start:
+            continue
+        if r.get("status") != "closed":
+            continue
+        trades_mixed.append(r)
+
+    for r in trades_mixed:
+        cc = r.get("close_context") or {}
+        pnl = cc.get("pnl_cash")
+        win = False
+        if pnl is not None:
+            try:
+                win = float(pnl) > 0
+            except (TypeError, ValueError):
+                pass
+        if not win:
+            win = cc.get("close_action") == "RESOLVED_WIN"
+        if win:
+            n_mixed_wins += 1
+        if r.get("condition") == "exact":
+            n_exact += 1
+            if win:
+                n_exact_wins += 1
+
+    n_mixed = len(trades_mixed)
+    wr_mixed = (n_mixed_wins / n_mixed) if n_mixed > 0 else 0.0
+    wr_exact = (n_exact_wins / n_exact) if n_exact > 0 else 0.0
+
+    mixed_kill_switch = wr_mixed < 0.40 and n_mixed >= 20
+    exact_kill_switch = wr_exact < 0.40 and n_exact >= 10
+
+    result.update({
+        "n_mixed": n_mixed,
+        "n_mixed_wins": n_mixed_wins,
+        "wr_mixed": wr_mixed,
+        "wr_mixed_pct": f"{wr_mixed * 100:.1f}",
+        "n_exact": n_exact,
+        "n_exact_wins": n_exact_wins,
+        "wr_exact": wr_exact,
+        "wr_exact_pct": f"{wr_exact * 100:.1f}",
+        "mixed_kill_switch": mixed_kill_switch,
+        "exact_kill_switch": exact_kill_switch,
+    })
+    return result
+
+
+def _build_phase2_monitor_message(stats):
+    """
+    v10.6.50: Construye alarma Telegram Phase 2 condition monitor.
+    Solo recomendación manual. No BUY/SELL/SKIP. No auto-mutación Railway.
+    """
+    mixed_kill = stats["mixed_kill_switch"]
+    exact_kill = stats["exact_kill_switch"]
+    days = stats["days_since_open"]
+    parts = []
+
+    if mixed_kill:
+        wr_pct = stats["wr_mixed_pct"]
+        n = stats["n_mixed"]
+        wins = stats["n_mixed_wins"]
+        parts.append(
+            f"\U0001f6a8 <b>Phase 2 mixed-condition rollback recommended</b>\n\n"
+            f"WR mixed (exact+at_or_above+at_or_below): {wr_pct}% ({wins}/{n})\n"
+            f"Threshold: &lt;40% con n≥20 → CUMPLIDO\n"
+            f"Días desde apertura Phase 2: {days}\n\n"
+            f"<b>Acción recomendada (manual):</b>\n"
+            f"<code>Revertir Railway env vars:\n"
+            f"QUALITY_TRADER_CONDITIONS=\n"
+            f"ACTIVE_TRADING_CITIES=NONE\n"
+            f"BLOCKED_CITIES=London</code>\n\n"
+            f"Este aviso se repetirá diariamente hasta acción manual."
+        )
+
+    if exact_kill:
+        wr_pct = stats["wr_exact_pct"]
+        n = stats["n_exact"]
+        wins = stats["n_exact_wins"]
+        parts.append(
+            f"⚠️ <b>Exact slice degraded — set QUALITY_TRADER_CONDITIONS=''</b>\n\n"
+            f"WR exact-slice: {wr_pct}% ({wins}/{n})\n"
+            f"Threshold: &lt;40% con n≥10 → CUMPLIDO\n"
+            f"Días desde apertura Phase 2: {days}\n\n"
+            f"<b>Acción recomendada (manual):</b>\n"
+            f"<code>Setear en Railway: QUALITY_TRADER_CONDITIONS=\n"
+            f"(at_or_above/at_or_below siguen activos en ALLOWED_CONDITIONS)</code>\n\n"
+            f"Este aviso se repetirá diariamente hasta acción manual."
+        )
+
+    return "\n\n---\n\n".join(parts) if parts else ""
+
+
+def maybe_run_phase2_monitor(state, now=None):
+    """
+    v10.6.50: Monitor rolling Phase 2 mixed-condition (exact + at_or_above + at_or_below).
+
+    Dispara diariamente si kill-switch activo. Anti-spam: un envío por día por tipo.
+    No auto-modifica Railway. Solo alerta para acción manual.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    today_str = now.date().isoformat()
+
+    try:
+        stats = _phase2_monitor_stats(today=now.date())
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"phase2 monitor: error calculando stats ({e})")
+        return False
+
+    if not stats["mixed_kill_switch"] and not stats["exact_kill_switch"]:
+        return False
+
+    last = state.get("phase2_monitor_last_sent") or {}
+    if isinstance(last, str):
+        last = {"date": last}
+
+    mixed_already_sent = last.get("date") == today_str and last.get("mixed_kill")
+    exact_already_sent = last.get("date") == today_str and last.get("exact_kill")
+
+    needs_send_mixed = stats["mixed_kill_switch"] and not mixed_already_sent
+    needs_send_exact = stats["exact_kill_switch"] and not exact_already_sent
+
+    if not needs_send_mixed and not needs_send_exact:
+        return False
+
+    msg = _build_phase2_monitor_message(stats)
+    if not msg:
+        return False
+
+    try:
+        send_telegram(msg)
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"phase2 monitor: fallo al enviar Telegram ({e})")
+        return False
+
+    state["phase2_monitor_last_sent"] = {
+        "date": today_str,
+        "mixed_kill": stats["mixed_kill_switch"],
+        "exact_kill": stats["exact_kill_switch"],
+        "wr_mixed_pct": stats["wr_mixed_pct"],
+        "wr_exact_pct": stats["wr_exact_pct"],
+        "n_mixed": stats["n_mixed"],
+        "n_exact": stats["n_exact"],
     }
     return True
 
