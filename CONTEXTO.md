@@ -1,7 +1,42 @@
 ﻿# CONTEXTO DEL PROYECTO — Bot Polymarket
 
-**Ultima actualizacion:** 9 de mayo de 2026 (Sesion 341 - Condition filtered kill-switch ejecutado, Claude Code)
-**Sesion 341 (9 may 2026, Claude Code):** Cierre operativo **EXECUTED_KILL_SWITCH / no trading core / no BANKROLL / no Fase C** del canary `condition_filtered` exact/range abierto en Sesion 175 (2026-04-14). Alarma diaria del monitor `condition_reopen_monitor` reportó **WR bot exact/range = 42.9% (9/21)** tras la compra CANARY de NO Shanghai 24°C ($2.25, edge=24%) que cerró por stop-loss con pérdida ~-38%. Kill-switch documentado en `docs/handoffs/condition-filtered-canary-implement-2026-04-14.md`: *"Si en cualquier momento WR < 45% con n ≥ 20 en ventana rolling → revertir sin esperar checkpoint"*. Ambas condiciones cumplidas (42.9% < 45% AND n=21 ≥ 20). Acción ejecutada en Railway (`tools/railway_safe.ps1 variable set`): `QUALITY_TRADER_CONDITIONS` pasa de `exact,range` a valor vacío (parser de `bot.py` filtra entradas vacías y produce set vacío, equivalente a kill-switch). Auto-deploy disparado por Railway al cambiar la env var. **Efecto operativo:** señales `exact`/`range` de quality traders en ciudades whitelist vuelven al skip binario `condition_filtered` original (la rama `_exact_range_canary` queda fuera porque `signal.condition not in QUALITY_TRADER_CONDITIONS` ahora es siempre verdadero); `ALLOWED_CONDITIONS=at_or_above,at_or_below` permanece intacto. No se tocó bot.py, trading core, NOAA, scheduler, sizing, whitelist, city modes, BANKROLL, Fase C, DB ni thresholds. Documentación en CONTEXTO.md/HISTORIAL_SESIONES.md/agent_events.jsonl alineada. Siguiente paso: análisis post-mortem por Opus si se reabre el frente (revisar gap bot vs traders, settlement gap, exit timing) — no automático, no autoriza promoción.
+**Ultima actualizacion:** 10 de mayo de 2026 (Sesion 342 - Phase 2 Recalibration ABIERTA, Claude Code)
+**Sesion 342 (10 may 2026, Claude Code):** **FULL controlado / Phase 2 Recalibration ABIERTA / no BANKROLL / no Fase C**. Phase 2 mixed-condition experiment abierto 2026-05-10, T+30 = 2026-06-09. Diseño Opus aprobado: `QUALITY_TRADER_CONDITIONS=exact` (exact vía quality-trader gate) + `ALLOWED_CONDITIONS=at_or_above,at_or_below` (sin cambio, default de código) — range queda no permitido por ningún path. Ciudades activas: Shanghai, Tokyo, Buenos Aires, Ankara. Ciudades bloqueadas: London, Paris, Atlanta, Chicago. `bot.py` bumpeado a v10.6.50 con tres cambios: (1) `_phase2_monitor_stats` / `_build_phase2_monitor_message` / `maybe_run_phase2_monitor` — monitor rolling Phase 2 que vigila WR mixed-condition y WR exact-slice, emite alarma Telegram de acción manual sin auto-mutación Railway; (2) `CANARY_RETIRED = date(2026, 5, 10)` en `maybe_run_condition_monitor` — retira el monitor legacy S341 desde la fecha de apertura Phase 2 para evitar que la cohorte pre-Phase2 (WR=42.9% n=21) continúe disparando alarmas contradictorias; (3) kill-switches Phase 2: mixed WR<40% n≥20 → rollback Phase 2, exact WR<40% n≥10 → vaciar `QUALITY_TRADER_CONDITIONS`. Validaciones: 20/20 tests `test_phase2_monitor.py`, 1187/1187 `verify_before_deploy.py`, syntax OK, `git diff --check` OK. Deploy Railway #1 (código): `8d4dd978` SUCCESS. Deploy Railway #2 (env vars): `13868d46` SUCCESS. No se tocó BANKROLL, Fase C, sigma, MIN_EDGE, low-price buffer, Kelly, sizing, exits, scheduler, NOAA, settlement logic ni DB.
+
+## Phase 2 Recalibration — ABIERTA 2026-05-10
+
+- **Estado:** ABIERTA — experimento mixed-condition activo.
+- **Inicio:** 2026-05-10.
+- **T+30 (cierre previsto):** 2026-06-09.
+- **Tipo de experimento:** mixed-condition: exact (vía `QUALITY_TRADER_CONDITIONS`) + at_or_above + at_or_below (vía `ALLOWED_CONDITIONS`). Range excluido.
+- **Env vars activas:**
+  - `QUALITY_TRADER_CONDITIONS=exact`
+  - `ACTIVE_TRADING_CITIES=Shanghai,Tokyo,Buenos Aires,Ankara`
+  - `BLOCKED_CITIES=London,Paris,Atlanta,Chicago`
+  - `ALLOWED_CONDITIONS` sin cambio (default `at_or_above,at_or_below`)
+- **Monitor runtime:** `maybe_run_phase2_monitor` v10.6.50 — rolling diario sin checkpoints fijos.
+  - Mixed kill-switch: WR<40% n≥20 → alarma rollback Phase 2.
+  - Exact kill-switch: WR<40% n≥10 → alarma para vaciar `QUALITY_TRADER_CONDITIONS`.
+  - No auto-mutación Railway; solo alerta para acción manual.
+- **Legacy monitor retirado:** `maybe_run_condition_monitor` silenciado desde 2026-05-10 (`CANARY_RETIRED`).
+- **BANKROLL:** HOLD $25.
+- **Fase C:** no autorizada.
+
+**Criterios T+30 (Opus aprobados):**
+- n trades cerrados mixed-condition ≥ 25
+- WR mixed-condition ≥ 45%
+- PnL absoluto ≥ +$5
+- drawdown máximo no peor que −$6
+- al menos 2 de 4 ciudades Active con n≥3 y WR≥40%
+- slice exact aislado: n≥10 y WR≥45%
+- si falla cualquiera: `RECOMMEND_KILL_MODEL_PATH` / pivot leaderboard intelligence
+
+**Rollback documentado:**
+```
+QUALITY_TRADER_CONDITIONS=       (vacío)
+ACTIVE_TRADING_CITIES=NONE
+BLOCKED_CITIES=London
+```
 
 ## Condition filtered reopen — CERRADO 2026-05-09
 

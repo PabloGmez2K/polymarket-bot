@@ -31,6 +31,7 @@ Comandos útiles:
 
 | Fecha | Tipo | Referencia | Commits clave | Resumen |
 |------|------|------------|---------------|---------|
+| 2026-05-10 | Explícita | Sesión 342 | feat: add Phase 2 mixed-condition monitor v10.6.50 | Claude Code abre Phase 2 Recalibration (T+30=2026-06-09). `bot.py` v10.6.50: `maybe_run_phase2_monitor` vigila WR mixed-condition (exact+at_or_above+at_or_below desde 2026-05-10) con kill-switches rolling mixed WR<40% n≥20 y exact WR<40% n≥10; `CANARY_RETIRED=date(2026,5,10)` retira monitor legacy S341 para evitar alarmas contradictorias con la cohorte pre-Phase2 (WR=42.9% n=21). Railway deploy #1 (código) `8d4dd978` SUCCESS; env vars `QUALITY_TRADER_CONDITIONS=exact`, `ACTIVE_TRADING_CITIES=Shanghai,Tokyo,Buenos Aires,Ankara`, `BLOCKED_CITIES=London,Paris,Atlanta,Chicago`; deploy #2 `13868d46` SUCCESS. 20/20 tests, 1187/1187 verify. No BANKROLL, Fase C, sigma, MIN_EDGE, sizing, exits, scheduler, NOAA ni DB. |
 | 2026-05-09 | Explícita | Sesión 341 | docs: close condition filtered kill-switch | Claude Code ejecuta cierre operativo del canary `condition_filtered` exact/range abierto en Sesión 175 (2026-04-14). Alarma diaria reporta WR bot=42.9% (9/21) tras compra CANARY NO Shanghai 24°C $2.25 edge=24% cerrada por stop-loss ~-38%. Kill-switch documentado en `docs/handoffs/condition-filtered-canary-implement-2026-04-14.md` cumplido: WR<45% con n≥20 → revertir sin esperar checkpoint. Acción ejecutada vía `tools/railway_safe.ps1 variable set`: `QUALITY_TRADER_CONDITIONS` pasa de `exact,range` a valor vacío (parser filtra entradas vacías → set vacío). Auto-deploy Railway disparado por la env var. CONTEXTO.md y agent_events.jsonl alineados. No se tocó bot.py, trading core, NOAA, scheduler, sizing, whitelist, city modes, BANKROLL, Fase C, DB ni thresholds. Reapertura futura requiere handoff nuevo + revisión Opus. |
 | 2026-05-08 | Explícita | Sesión 340 | feat: automate db throughput digest | Codex integra `tools/db_throughput_report.py` en el Daily Bot Digest automatico LOG_ONLY. `bot.py` añade kill switch `DB_THROUGHPUT_DIGEST_ENABLED` default 1 y pasa `--db-throughput-report --db SQLITE_DB_PATH` al runner existente; `tools/daily_bot_observability_run.py` resume frescura DB, gaps, top slots flojos, condicion dominante, status KEEP/WATCH/REVIEW_READY y accion manual/Opus; `tools/daily_bot_digest.py` lo muestra en digest humano y Telegram. Reutiliza `daily_digest_state.json`, sin scheduler/state paralelo. Validacion: syntax OK, pytest focalizado 38 passed, smoke CLI db_not_found controlado, `git diff --check` OK, `verify_before_deploy.py` 1174/1174. No cambia trading core semantico, BUY/SELL/SKIP, BANKROLL, Fase C, DB schema, env vars reales, city modes, whitelist, sizing, risk rules ni Telegram accionable. |
 | 2026-05-07 | Explícita | Sesión 319 | fix: block stale non-canonical pnl readiness | Codex cierra B4.2 Fix P&L Window Mismatch. Se corrige bug técnico de data-quality: `bankroll_scaling_check.py` bloquea P&L/WR/drawdown si la fuente es `non_canonical_telemetry`, añade blockers `runtime_data_stale`, `pnl_source_non_canonical` y `bankroll_readiness_score_stale`; `pnl_report.py` soporta BOM/payload `records` y marca lifecycle como contaminado; docs y tests focalizados actualizados. Conclusión: FIXED_TECHNICAL_BUG local, pero decisión operativa `BLOCKED_BY_DATA_QUALITY / WAITING_MORE_EVIDENCE`; no BANKROLL increase. No trading core, no bot.py, no Fase C, no DB, no env vars, no Railway. |
@@ -5330,3 +5331,71 @@ La CLI abre SQLite con URI `mode=ro` y `PRAGMA query_only=ON`. Emite JSON por de
 ### NO se toco
 
 BANKROLL, Fase C, trading core, `bot.py`, scheduler, DB schema, env vars, sizing, whitelist, city modes, risk rules, Telegram.
+
+---
+
+## Sesión 342 - 10 de mayo de 2026 (Claude Code)
+
+**Clasificacion:** FULL controlado / Phase 2 Recalibration / bot.py + Railway env vars
+**Bloque:** Phase 2 mixed-condition monitor v10.6.50 + apertura Phase 2
+**Veredicto:** PHASE2_RECALIBRATION_ABIERTA / T+30=2026-06-09
+
+### Contexto
+
+Opus aprobó Phase 2 Recalibration como experimento mixed-condition de 30 días tras kill-switch canary (Sesión 341, WR=42.9% n=21). Precheck reveló que el monitor legacy S341 hubiera disparado hoy 2026-05-10 sobre la cohorte pre-Phase2, contradiciendo Phase 2 → NEEDS_PATCH aplicado antes de Railway.
+
+### Cambios
+
+- `bot.py` v10.6.49 → v10.6.50:
+  - `_phase2_monitor_stats`: calcula WR mixed-condition (exact+at_or_above+at_or_below) y WR exact-slice desde 2026-05-10. Range excluido.
+  - `_build_phase2_monitor_message`: alarma Telegram con copy "Phase 2 mixed-condition rollback recommended" / "Exact slice degraded". Sin BUY/SELL/SKIP. Sin auto-mutación Railway.
+  - `maybe_run_phase2_monitor`: monitor rolling diario, anti-spam por tipo de kill-switch.
+  - `maybe_run_condition_monitor`: `CANARY_RETIRED = date(2026, 5, 10)` — retira el monitor legacy desde esta fecha. Evita que WR=42.9% n=21 continúe disparando alarmas contradictorias con Phase 2.
+  - Integrado en `run_alarms` con try/except.
+- `verify_before_deploy.py`: 13 guardrails nuevos v10.6.50 (1187/1187).
+- `tests/test_phase2_monitor.py`: 20 tests (retirement legacy + stats + message + monitor).
+
+### Kill-switches Phase 2
+
+- Mixed (exact+at_or_above+at_or_below): WR<40% con n≥20 → alarma rollback Phase 2.
+- Exact-slice: WR<40% con n≥10 → alarma para vaciar `QUALITY_TRADER_CONDITIONS`.
+- Sin auto-mutación Railway en ningún caso.
+
+### Railway
+
+- Deploy #1 (código v10.6.50): `8d4dd978-ad4f-4180-85a1-e37242ce0535` SUCCESS.
+- Env vars seteadas tras deploy #1:
+  - `QUALITY_TRADER_CONDITIONS`: `` (vacío) → `exact`
+  - `ACTIVE_TRADING_CITIES`: `NONE` → `Shanghai,Tokyo,Buenos Aires,Ankara`
+  - `BLOCKED_CITIES`: `London` → `London,Paris,Atlanta,Chicago`
+  - `ALLOWED_CONDITIONS`: sin cambio (default `at_or_above,at_or_below`)
+- Deploy #2 (env vars): `13868d46-7046-4b22-a86c-11d507a278fd` SUCCESS.
+
+### Validacion
+
+- `python -m pytest tests/test_phase2_monitor.py -q` → 20/20.
+- `python verify_before_deploy.py` → 1187/1187.
+- `git diff --check` → OK.
+- Runtime `/app/bot.py`: BOT_VERSION v10.6.50, CANARY_RETIRED, maybe_run_phase2_monitor confirmados.
+
+### Criterios T+30 (2026-06-09)
+
+- n trades cerrados mixed-condition ≥ 25
+- WR mixed-condition ≥ 45%
+- PnL absoluto ≥ +$5
+- drawdown máximo no peor que −$6
+- al menos 2 de 4 ciudades Active con n≥3 y WR≥40%
+- slice exact aislado: n≥10 y WR≥45%
+- si falla cualquiera: `RECOMMEND_KILL_MODEL_PATH` / pivot leaderboard intelligence
+
+### Rollback documentado
+
+```
+QUALITY_TRADER_CONDITIONS=       (vacío)
+ACTIVE_TRADING_CITIES=NONE
+BLOCKED_CITIES=London
+```
+
+### NO se toco
+
+BANKROLL, Fase C, sigma, MIN_EDGE, low-price buffer, Kelly, sizing, exits, scheduler, NOAA, settlement logic, DB, trading core semántico.
