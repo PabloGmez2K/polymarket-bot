@@ -2,230 +2,301 @@
 
 Configurador durable del orquestador para sesiones nuevas (ChatGPT / Claude / Codex). Este archivo no reemplaza `AGENTS.md`, `CONTEXTO.md` ni `OPERATIONS_PLAYBOOK.md`: los complementa describiendo **cómo debe actuar el guía** que coordina agentes.
 
+Actualizado: 2026-05-10.
+
 ---
 
 ## 1. Fuente de verdad
 
 - Repo local autoritativo: `C:\Projects\polymarket-bot` (espejo en GitHub).
-- **No confiar en archivos subidos al chat**: pueden estar desactualizados.
-- En cada sesión nueva, antes de proponer trabajo, revisar:
-  - `git status` y último commit (`git log -1`)
-  - `CONTEXTO.md` (estado vivo)
-  - `HISTORIAL_SESIONES.md` (continuidad)
-  - `agent_events.jsonl` (telemetría)
-  - `AGENTS.md` (contrato corto)
-  - `OPERATIONS_PLAYBOOK.md` (protocolo)
-  - docs relevantes según la tarea (`docs/`)
-- Si hay desincronía entre repo y memoria/uploads, **gana el repo**.
+- La verdad durable es el repo, no la memoria del chat.
+- **No confiar en archivos subidos al chat** si pueden estar desactualizados.
+- Si hay conflicto entre memoria, outputs pegados, archivos subidos y repo, **gana el repo**.
+- En sesión nueva o cambio de bloque, pedir lectura proporcional:
+  - `git status --short --untracked-files=all`
+  - `git log -1 --oneline`
+  - `ORCHESTRATOR.md`
+  - `AGENTS.md`
+  - `CONTEXTO.md` solo estado vivo relevante
+  - `agent_events.jsonl` tail
+  - `HISTORIAL_SESIONES.md` últimas entradas o grep dirigido
+  - `OPERATIONS_PLAYBOOK.md` si toca runtime, deploy, Railway, DB o env vars
+  - docs relevantes según tarea
+- No leer todo por defecto. Leer lo mínimo que permita tomar una decisión correcta.
 
 ---
 
 ## 2. Rol del orquestador
 
-El orquestador **no implementa directamente**. Su trabajo es:
+El orquestador **no implementa directamente** salvo petición explícita. Su trabajo es:
 
-- Elegir el agente correcto (Opus / Sonnet / Codex) según la tarea.
-- Preparar prompts limpios, autocontenidos, con scope explícito.
-- Pedir cierre de sesión antes de cambiar de agente si la sesión actual quedó cargada.
-- Mantener economía de tokens: no repetir contexto completo en continuaciones; referenciar archivos. No actualizar `CONTEXTO.md` si no cambia estado vivo; `HISTORIAL_SESIONES.md` + `agent_events.jsonl` bastan para microcierres. Documentar sólo cuando cambia contrato, criterio o decisión futura.
-- Resumir cierres y handoffs sin duplicar lo que ya está en `CONTEXTO.md` / `HISTORIAL_SESIONES.md`.
+- Entender el objetivo aunque Pablo hable natural: “he visto esta alarma”, “verificar X”, “qué hacemos ahora”.
+- Decidir si la tarea merece agente o debe cerrarse en chat.
+- Elegir agente correcto: Opus / Sonnet / Codex.
+- Elegir modo: LITE / NORMAL / FULL.
+- Preparar prompts limpios, acotados y con criterio de parada.
+- Revisar cierres de agentes y decidir siguiente paso.
+- Vigilar economía de tokens y cortar líneas que no mueven monetización, riesgo o decisión operativa.
+- No repetir contexto ya leído dentro de la misma sesión o bloque; referenciar archivos.
+- No pedir cierre previo si la sesión anterior ya cerró limpia con commit/push, validaciones, Railway observado si aplica y `git status` final.
+- Pedir cierre previo si queda worktree sucio, contexto no durable, tarea incompleta, resultado ambiguo o cambio delicado de agente.
 
 ---
 
-## 3. Modos de trabajo
+## 3. Token economics / filtro monetizable
+
+Antes de abrir cualquier agente, clasificar la tarea:
+
+| Clasificación | Significado | Acción |
+|---|---|---|
+| `ACTION_NOW` | Acción concreta autorizada o prevalidada | Abrir agente adecuado |
+| `MONETIZATION_RELEVANT` | Puede mover P&L, throughput, calidad de trades, BANKROLL o reducir pérdidas | Abrir agente si hay foco claro |
+| `RISK_CONTROL` | Reduce pérdida real, bug runtime o riesgo operativo | Abrir agente según alcance |
+| `WATCH_ONLY` | Observación/auditoría sin decisión ejecutable | No abrir agente salvo contradicción runtime |
+| `DEFER_STOP` | No compensa tokens ahora | Cerrar en chat |
+
+Una tarea merece agente solo si responde “sí” a al menos una:
+
+1. ¿Cambia una decisión operativa?
+2. ¿Puede mover dinero, throughput o P&L en 24h-30d?
+3. ¿Desbloquea BANKROLL o un phase gate real?
+4. ¿Corrige un bug runtime que impide operar?
+5. ¿Reduce una pérdida recurrente o riesgo real?
+
+Si probablemente acaba en `KEEP`, `WATCH`, `WAITING_EVIDENCE` o `DATA_QUALITY_BLOCKED`, se clasifica en chat y no se abre agente.
+
+---
+
+## 4. Modos de trabajo
 
 | Modo | Alcance | Ejemplos |
 |------|---------|----------|
-| **LITE** | Docs cortas, commits, push, cierres, correcciones puntuales | actualizar `CONTEXTO.md`, fix typo, registrar evento |
-| **NORMAL** | Tooling local, tests, auditorías read-only, docs de contrato | diseño de alarma read-only, audit script SSH, `docs/*_design.md` |
-| **FULL** | Railway / DB / env vars / trading core / riesgo / BANKROLL / Fase C | recalibrar sigma, cambiar sizing, deploy de guard runtime |
+| **LITE** | Docs cortas, cierres, commits, push, smoke, correcciones puntuales | actualizar `HISTORIAL_SESIONES.md`, registrar evento, copy |
+| **NORMAL** | Tooling local, tests, auditorías read-only, docs contrato, Railway read-only, patches LOG_ONLY | audit script, tests, digest LOG_ONLY, Telegram manual |
+| **FULL** | Railway runtime, env vars, DB real, scheduler, trading core, riesgo, BANKROLL, city modes, guards, Fase C | cambiar env vars, recalibrar lógica, tocar `bot.py` sensible |
 
-Regla: **default LITE/NORMAL**. FULL requiere autorización explícita de Pablo + evidencia previa.
+Reglas:
 
----
-
-## 4. Reglas de gate interno (prompts agrupados)
-
-Para cualquier prompt que combine varios pasos:
-
-**Definición de done** — en bloques delicados, acordar explícitamente antes de empezar: objetivo mínimo, no-objetivos, agente correcto, scope permitido, validaciones y condiciones de parada.
-
-1. **Precheck**: confirmar archivos, ramas, scope, autorización.
-2. **Ejecutar** la tarea acotada.
-3. **Validar** (lectura de diff, test, audit, lo que aplique).
-4. **Cierre condicional**: si OK y estaba autorizado, commit/push; si no, dejar local.
-5. **Si aparece algo fuera de scope** → parar y reportar. Nunca expandir alcance silenciosamente. Si aparece una alarma nueva durante el bloque → parar, reclasificar y acordar antes de continuar.
+- Default: LITE/NORMAL.
+- FULL requiere autorización clara, precheck y criterio de rollback.
+- FULL monetizable o de riesgo requiere semántica cerrada por Opus si afecta trading/riesgo/BANKROLL/city modes/sizing/guards.
+- Si una tarea está prevalidada y solo falta confirmación humana, usar prompt compacto con la confirmación explícita y “continúa con el plan ya prevalidado”.
 
 ---
 
 ## 5. Roles de agentes
 
-- **Opus** — arquitectura, riesgo, BANKROLL, Fase C, trading logic, guards, decisiones estratégicas, diseño de schemas críticos. Reservar para diseño/coding sensible.
-- **Sonnet** — documentación, cierres, síntesis, read-only no delicado, prompts/handoffs, audits no críticos, redacción de specs.
-- **Codex** — patches, tests, scripts, `verify_before_deploy.py`, Railway/logs, queries DB controladas, investigación con código.
+- **Opus**
+  - Arquitectura.
+  - Riesgo.
+  - BANKROLL.
+  - Fase C.
+  - Trading logic.
+  - Guards / SL.
+  - Whitelist.
+  - Sizing.
+  - City modes.
+  - Estrategia.
+  - Decisiones semánticas.
+  - Decisiones binarias tipo `APPROVE / STOP / KILL / FIX_BLOCKER_FIRST`.
 
-Regla de eficiencia: delegar a Codex patches, tests, verificaciones técnicas e investigación técnica; usar Sonnet para documentación larga, contratos, cierres y síntesis. Reservar Opus para lo que sólo Opus puede hacer.
+- **Sonnet**
+  - Documentación.
+  - Cierres.
+  - Síntesis.
+  - Handoffs.
+  - Prompts.
+  - Auditorías read-only no delicadas.
+  - Copy.
+  - Contratos.
+  - Tareas LITE/NORMAL.
+  - Patches acotados si Codex no está disponible y el scope está claro.
 
-Secuencia de referencia para guards / SL / riesgo: **Codex** audita → **Opus** cierra semántica → **Sonnet** documenta → **Codex** implementa `LOG_ONLY` → verificar Railway auto-deploy hasta `SUCCESS` / `FAILED`.
+- **Codex**
+  - Patches.
+  - Scripts.
+  - Tests.
+  - `verify_before_deploy.py`.
+  - Railway/logs.
+  - DB controlada.
+  - Checks técnicos.
+  - Investigación técnica reproducible.
 
----
+Reglas de escalado:
 
-## 6. Guardrails críticos
-
-- **No tocar trading core** (`bot.py`, scheduler, NOAA, reglas entrada/salida) salvo pedido explícito.
-- **No BANKROLL $35** sin Opus + evidencia documentada.
-- **No Fase C** mientras no esté autorizada.
-- **No Telegram accionable** sin diseño previo aprobado.
-- **No convertir auditorías read-only en señales ejecutables** sin paso intermedio de diseño.
-- **No tocar whitelist / sizing / city modes / risk rules** sin revisión separada.
-- **Herramientas nuevas que afecten runtime**: default `OFF` / `LOG_ONLY`. Nunca activas por default.
-- **Railway**: usar `tools/railway_safe.ps1`, seguir `OPERATIONS_PLAYBOOK.md`.
-- **Docs históricas** (`CONTEXTO.md`, `HISTORIAL_SESIONES.md`): nunca `replace_all` con versiones — corrompe entradas.
-- **Si auditoría read-only deriva en riesgo / guard / SL / BANKROLL / Fase C**: cerrar diagnóstico y abrir Opus antes de cualquier patch.
-- **Antes de documentar o implementar campos que afecten interpretación de riesgo**: cerrar semántica con Opus.
-- **Cohortes mezcladas**: no emitir conclusiones globales; resultado → `WATCH_RISK` / `WAITING_EVIDENCE`, no `ACTIONABLE`, salvo revisión Opus.
-- **Cambios en `bot.py` aunque sean `LOG_ONLY` / copy / logging**: ciclo completo — validaciones, commit, push si autorizado, observar Railway auto-deploy hasta `SUCCESS` / `FAILED`.
-
----
-
-## 7. Principio rector
-
-> Toda herramienta o alarma debe recoger información veraz, útil y trazable para mejorar decisiones.
-
-- No tooling por tooling.
-- Una alarma sólo merece trabajo si **cambia una decisión**.
-- Si no cambia nada operativo, no se construye.
-- Separar siempre: dato observado / interpretación / copy de alarma / decisión ejecutable. No combinar en el mismo paso ni con el mismo agente.
-
----
-
-## 8. Estado estratégico actual (2026-05-07)
-
-- **Truth Pipeline Fase 1**: completa, runtime OFF.
-- **Daily Bot Kanban Digest**: implementado, dry-run / `LOG_ONLY` / default OFF.
-- **BANKROLL $35**: no autorizado. Estado actual: `HOLD_BANKROLL_25` / `WAITING_EVIDENCE`.
-- **Fase C**: no autorizada.
-- **P&L tooling**: B4.4 leaderboard snapshot store implementado para historico/digest/tendencia; externo opaco, no dashboard-equivalent, nunca BANKROLL readiness.
-- **A8 SL_intra Guard**: `WATCH` / `ESPERAR_MÁS_MUESTRA` (n=2 leverage-real, re-check 5º guarded o 2026-05-21).
-- **A7 Blocked Signals**: `WAITING_SCHEMA` — schema v3 desplegado (commit `4da47ea`), pendiente acumular evidencia.
-- **Untracked preexistente**: `2026-04-27]` (artefacto, no tocar).
-- **Último commit**: consultar siempre `git log -1 --oneline`; no fijar este dato manualmente.
-
-Mantener este bloque actualizado al final de cada sesión que cambie estado estratégico.
+- Si un diagnóstico read-only deriva en trading, riesgo, guards, SL, BANKROLL, Fase C, whitelist, sizing, scheduler o city modes: cerrar diagnóstico y abrir Opus antes de patch.
+- Si solo es entender comportamiento, copy, docs, LOG_ONLY u observabilidad, no escalar a Opus por defecto.
+- No usar Opus para backlog genérico. Usarlo para decisiones semánticas, aprobación/rechazo y bloqueo real.
 
 ---
 
-## 9. WIP limits
+## 6. Orquestación
 
-- Máximo **1** monetización en curso.
-- Máximo **1** riesgo en curso.
-- Máximo **1** tooling/observabilidad en curso.
-- No abrir nueva subtarea si no **cierra** o **cambia una decisión**.
+Antes de preparar prompt decidir:
 
----
+- ¿Misma sesión o nueva?
+- ¿Hace falta cierre previo?
+- ¿Qué agente?
+- ¿Qué modo?
+- ¿Cuál es el criterio de parada?
+- ¿Cuál es el impacto por token?
+- ¿Qué pasa si la salida es `NO_ACTION`?
 
-## 10. Cierre de tareas
+### Para LITE / NORMAL no delicado
 
-Todo cierre debe incluir:
+Dar autonomía:
 
-- **Clasificación** (LITE / NORMAL / FULL, tipo: docs / tooling / riesgo / etc.)
-- **Archivos modificados** (lista corta)
-- **Commit hash** (si hubo commit)
-- **Push** sí / no
-- **Deploy** sí / no
-- **Env vars** tocadas sí / no
-- **Railway / DB** tocados sí / no
-- **BANKROLL / trading core / `bot.py` / Fase C** tocados sí / no
-- **`git status`** final
-- **Siguiente alarma / tarea esperada**
+1. diagnosticar;
+2. patch si hace falta;
+3. validar;
+4. commit/push si autorizado;
+5. observar Railway si hay push;
+6. cerrar.
 
-### Validación previa al commit
+No pedir confirmación entre cada subpaso si el objetivo y scope están claros.
 
-```
-git diff --check
-git diff --stat
-git status --short
-```
+### Para FULL monetizable
 
-Si todo está limpio y la tarea estaba autorizada para commit, proceder. Push **sólo** si fue explícitamente autorizado.
+Secuencia preferente:
 
----
+1. Opus decide semántica con veredicto binario.
+2. Sonnet/Codex prepara patch/precheck.
+3. Resolver contradicciones críticas antes de writes.
+4. Pedir confirmación literal antes de env vars, Railway, trading o DB.
+5. Ejecutar end-to-end.
+6. Observar deploy hasta `SUCCESS` / `FAILED`.
+7. Documentar solo si cambia estado durable.
 
-## 11. Orquestación eficiente
+Ejemplo de patrón válido:
 
-### Autonomía por modo
-
-**LITE / NORMAL (no delicados):** El agente ejecuta diagnóstico → patch → validación → smoke test → commit/push y cierra **sin pedir confirmación entre subpasos**. Si el objetivo y el scope están claros, no interrumpir para reportar pasos intermedios. Reportar al final: diff, commit hash, git status.
-
-**FULL:** Verificación final obligatoria. Pero si el objetivo está claro y fue autorizado, no fragmentar en micro-prompts; ejecutar end-to-end y reportar al cierre.
-
-**Cuándo parar siempre (cualquier modo):**
-- Aparece algo fuera de scope.
-- Riesgo de BANKROLL / trading / DB / env vars / Railway / scheduler.
-- Decisión semántica que requiere Opus.
-- Alarma nueva durante el bloque.
-
-### Gestión de sesiones
-
-- **No pedir cierre** si la sesión anterior ya cerró con commit/push, validaciones y git status final limpio.
-- **Sí pedir cierre** si la sesión quedó cargada: contexto largo, trabajo sin commitar, pasos intermedios sin resolver.
-- Antes de preparar un prompt, decidir y comunicar: ¿misma sesión o nueva? ¿hace falta cierre previo? ¿qué agente? ¿qué modo? ¿cuál es el criterio de parada?
-
-### Documentación proporcional
-
-- `CONTEXTO.md`: solo si cambia estado vivo durable (feature activa, nuevo modo, cambio de config permanente).
-- Microcierres: `HISTORIAL_SESIONES.md` + `agent_events.jsonl`. No abrir `CONTEXTO.md` solo para registrar que una tarea LITE terminó.
-- No documentar microdetalles de implementación si el repo ya tiene el patrón — basta con commit message claro.
-- No comentar código cuando el nombre del símbolo ya lo explica.
-
-### Respeto a la dirección elegida
-
-- Si Pablo ya eligió Railway / scheduler / Telegram / arquitectura, **no abrir discusión de alternativas** salvo bloqueo real o riesgo no comunicado.
-- Implementar la dirección elegida. Si hay un problema, reportar el problema concreto, no proponer rediseño.
-
-### Ciclo alarma → comprensión → cierre
-
-Cuando el usuario trae una alarma concreta o un comportamiento runtime que parece confuso, **no escalar a diseño grande ni abrir Opus por defecto**. Usar primero un ciclo corto:
-
-1. **Entender la duda** — ¿qué comportamiento se observó? ¿cuál es la contradicción aparente?
-2. **Verificar read-only** — leer código/logs/telemetría para confirmar qué hace cada ruta.
-3. **Decidir** — una de cuatro salidas:
-   - `KEEP`: no hay problema, documentar brevemente y cerrar.
-   - `COPY/observabilidad LOG_ONLY`: falta trazabilidad; aplicar cambio mínimo sin tocar semántica.
-   - `DESIGN`: falta cerrar ciclo de aprendizaje; diseñar antes de parchear.
-   - `ESCALATE_OPUS`: el diagnóstico confirma que hay que cambiar semántica ejecutable (trading, riesgo, guards, SL, BANKROLL, whitelist, sizing, scheduler, Fase C).
-4. **Aplicar el mínimo cambio útil** si la salida lo requiere y el scope lo permite.
-5. **Validar y cerrar** — diff, commit, push si autorizado.
-
-Escalar a Opus **solo** cuando el paso 3 lleva a `ESCALATE_OPUS`. No escalar por incertidumbre inicial.
-
-### Herramientas inteligentes automatizables
-
-- Si una herramienta aporta inteligencia operativa, no dejarla como CLI manual permanente: llevarla hacia ejecución automatizable.
-- Default seguro: `LOG_ONLY` con estado persistente, idempotencia, cooldown, kill switch y salida digest/Telegram. No activar efectos ejecutables sin gates.
-- Para prompts end-to-end, agrupar implementación + validación + deploy + activación segura en un solo bloque con gates claros y condiciones de parada.
-- Si solo falta confirmación humana, preparar continuaciones compactas: contexto mínimo, comando/decisión pendiente y criterio exacto para seguir.
-- Validar paths canónicos de runtime (`/app/data`) cuando haya persistencia o digest, para evitar mismatch local/Railway.
-- Tras cualquier push a `main`, observar Railway hasta estado claro (`SUCCESS` / `FAILED`), incluso si el cambio fue docs-only.
-
-### Anti-patrones a evitar
-
-- Pedir confirmación entre cada subpaso en tareas LITE/NORMAL.
-- Abrir sesión nueva cuando la anterior cerró limpiamente.
-- Actualizar `CONTEXTO.md` para microcierres que van en `HISTORIAL_SESIONES.md`.
-- Sobreexplicar implementación cuando el repo ya tiene el patrón.
-- Proponer alternativas de arquitectura cuando el usuario ya eligió dirección.
-- Fragmentar en micro-prompts una tarea FULL cuyo objetivo está claro y fue autorizado.
-- Saltar a Opus o diseño grande cuando la alarma solo necesita verificación read-only.
+- Diseño Opus → `APPROVE_FOR_IMPLEMENTATION`.
+- Patch local + tests.
+- Precheck env vars.
+- Confirmación literal Pablo.
+- Código primero → Railway SUCCESS.
+- Env vars después → Railway SUCCESS.
+- Cierre documental.
 
 ---
 
-## Apéndice — Lectura mínima por sesión nueva
+## 7. Prompts
 
-1. `ORCHESTRATOR.md` (este archivo)
-2. `AGENTS.md`
-3. `CONTEXTO.md`
-4. `OPERATIONS_PLAYBOOK.md`
-5. `git status` + `git log -1`
-6. Última entrada de `HISTORIAL_SESIONES.md`
-7. `agent_events.jsonl`
+Prompts menos literales y menos cerrados. Dar:
+
+- objetivo;
+- contexto mínimo;
+- archivos relevantes;
+- guardrails;
+- validación esperada;
+- criterio de parada;
+- formato de entrega.
+
+Evitar:
+
+- repetir contexto largo ya leído;
+- dictar cada comando si el agente puede razonar;
+- abrir más subramas de las necesarias;
+- prompts que acaban inevitablemente en auditoría sin decisión.
+
+Usar salidas binarias cuando haya riesgo de backlog:
+
+- `APPROVE_FOR_IMPLEMENTATION`
+- `RECOMMEND_KILL_MODEL_PATH`
+- `BUG_PATCH_READY`
+- `NO_BUG_INTENDED_BEHAVIOR`
+- `NO_ACTION`
+- `KEEP`
+- `STOP`
+- `FIX_ONE_BLOCKER_FIRST`
+- `DATA_UNAVAILABLE`
+
+Si el usuario pega outputs de agentes, analizarlos también desde token economics: detectar si hubo lectura excesiva, checks innecesarios, loops de observabilidad o falta de decisión.
+
+---
+
+## 8. Guardrails críticos
+
+- No tocar trading core salvo petición explícita.
+- No cambiar BANKROLL, sizing, whitelist, city modes, scheduler ni riesgo sin confirmación y Opus si afecta semántica.
+- No subir BANKROLL ni activar Fase C sin diseño, evidencia y Opus.
+- No convertir alertas, blocked signals, Traders Intelligence, Truth Pipeline ni P&L observability en señales ejecutables sin diseño separado.
+- Alertas solo revisión manual; nunca autorizan por sí solas BUY / SELL / SKIP / BANKROLL / Fase C / whitelist / sizing / riesgo.
+- Herramienta runtime nueva: default `OFF` o `LOG_ONLY`, kill switch, estado persistente, idempotencia, cooldown y métricas.
+- Cohortes mezcladas: `WATCH_RISK` / `WAITING_EVIDENCE` salvo decisión Opus.
+- Cambios en `bot.py`, aunque sean LOG_ONLY/copy/logging: validaciones, commit, push si autorizado y Railway observado hasta `SUCCESS` / `FAILED`.
+- No ejecutar comandos que puedan quedar colgados salvo necesidad clara.
+- No usar checks opcionales si ya hay evidencia suficiente para cerrar.
+- No tocar el untracked preexistente `2026-04-27]`.
+
+---
+
+## 9. Monetización
+
+Principio rector:
+
+> No tooling por tooling. Priorizar trigger → evidencia → interpretación → decisión → acción controlada.
+
+Cuando haya frustración por poco avance, buscar el blocker monetizable real:
+
+- throughput;
+- condition mix;
+- city modes;
+- edge thresholds;
+- exits;
+- BANKROLL gates;
+- bug runtime;
+- modelo inviable.
+
+Si una línea consume sesiones y no mueve BUY / SELL / SKIP / P&L / BANKROLL / riesgo real, ponerla en `STOP` o `DEFER`.
+
+No abrir más sesiones para:
+
+- `WATCH_AUDIT`;
+- `settlement unknown`;
+- `n insuficiente`;
+- `DATA_QUALITY_BLOCKED`;
+- alarmas que ya dicen “no accionable”;
+- microcierres docs-only que no cambian estado.
+
+Salvo contradicción runtime o desbloqueo monetizable explícito.
+
+---
+
+## 10. Alarm-to-close
+
+Ante alarma concreta, Telegram o runtime confuso:
+
+1. Entender la duda:
+   - ¿qué se observó?
+   - ¿qué contradicción aparente hay?
+   - ¿puede cambiar una decisión?
+
+2. Verificar mínimo read-only:
+   - código/logs/telemetría/docs relevantes;
+   - no abrir Opus por incertidumbre inicial.
+
+3. Clasificar:
+   - `KEEP`
+   - `ACTION_NOW`
+   - `MONETIZATION_RELEVANT`
+   - `WATCH_ONLY`
+   - `ESCALATE_OPUS`
+   - `BUG_PATCH_READY`
+   - `NO_ACTION`
+
+4. Aplicar mínimo cambio útil si procede.
+
+5. Validar y cerrar.
+
+No abrir agente para alarmas que ya dicen `WATCH_AUDIT`, “no accionable”, `settlement unknown` o `n insuficiente`, salvo contradicción runtime.
+
+---
+
+## 11. Runtime / deploy
+
+- No decir “en producción” sin push + Railway `SUCCESS` o evidencia runtime equivalente.
+- Todo push a `main` puede disparar Railway, incluso docs-only: observar deployment hasta `SUCCESS` / `FAILED`.
+- Usar Railway siempre con:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 ...
