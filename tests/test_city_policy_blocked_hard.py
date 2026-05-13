@@ -20,7 +20,8 @@ def _policy_namespace(blocked=None, active=None, canary=None, auto_canary=None):
         "BLOCKED_CITIES": {c.lower() for c in (blocked or [])},
         "ACTIVE_TRADING_CITIES": set(active or []),
         "CANARY_TRADING_CITIES": set(canary or []),
-        "OBSERVED_AUDIT_CITIES": {"Paris", "London", "Atlanta", "Chicago", "Munich", "Seoul"},
+        "OBSERVED_AUDIT_CITIES": {"Paris", "London", "Atlanta", "Chicago", "Munich", "Seoul", "Los Angeles"},
+        "AUTO_CANARY_REVIEW_REQUIRED_CITIES": {"Los Angeles": "manual_review_required_pre_canary"},
         "RESOLUTION_ICAO": {
             "Paris": {"noaa_station_id": "07157099999", "noaa_daily_station_id": "FRM00007149"},
             "London": {"noaa_station_id": "03768399999", "noaa_daily_station_id": "UKE00107650"},
@@ -28,6 +29,7 @@ def _policy_namespace(blocked=None, active=None, canary=None, auto_canary=None):
             "Chicago": {"noaa_station_id": "72530094846", "noaa_daily_station_id": "USW00094846"},
             "Munich": {"noaa_station_id": "10866099999", "noaa_daily_station_id": "GMM00010870"},
             "Seoul": {"noaa_station_id": "47113199999", "noaa_daily_station_id": "KS000047112"},
+            "Los Angeles": {"noaa_station_id": "72295023174", "noaa_daily_station_id": "USW00023174"},
             "No Proxy": {"icao": "XXXX"},
         },
         "load_city_policy_state": lambda: {
@@ -80,9 +82,19 @@ def test_canary_cities_remain_permitted_when_not_blocked():
     assert ns["get_effective_city_mode"]("Seoul") == "canary"
 
 
+def test_los_angeles_observed_but_auto_canary_requires_manual_review():
+    ns = _policy_namespace(auto_canary={"Los Angeles": {}, "Munich": {}})
+
+    assert ns["_city_has_observed_proxy"]("Los Angeles") is True
+    assert ns["_city_requires_manual_proxy_canary_review"]("Los Angeles") is True
+    assert ns["get_effective_city_mode"]("Los Angeles") == "shadow"
+    assert ns["get_effective_city_mode"]("Munich") == "canary"
+
+
 def test_admission_paths_use_hard_block_and_observation_split():
     code = BOT_PATH.read_text(encoding="utf-8")
     assert "if should_skip_observation(city):" in code
     assert "and not is_city_blocked(city)" in code
+    assert "and not needs_manual_proxy_review" in code
     assert "c[\"exact_range_canary\"] = True" in code
     assert "if not c.get(\"allowlisted\", True):" in code

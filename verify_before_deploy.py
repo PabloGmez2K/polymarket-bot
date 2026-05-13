@@ -6859,8 +6859,20 @@ def run_tests():
         and '"Los Angeles"' not in canary_src,
     )
     test(
-        "v10.6.48: Los Angeles no entra en RESOLUTION_ICAO ni OBSERVED_AUDIT_CITIES",
-        '"Los Angeles"' not in resolution_src and '"Los Angeles"' not in observed_src,
+        "v10.6.51: Los Angeles OBSERVED_AUDIT-only con KLAX daily NOAA",
+        '"Los Angeles":    {"icao": "KLAX", "wu_url": _wu_history_url("KLAX"), "noaa_station_id": "72295023174", "noaa_daily_station_id": "USW00023174"}' in resolution_src
+        and '"Los Angeles"' in observed_src,
+    )
+    test(
+        "v10.6.51: Los Angeles requiere revision manual antes de auto-canary",
+        "AUTO_CANARY_REVIEW_REQUIRED_CITIES" in code
+        and '"Los Angeles": "manual_review_required_pre_canary"' in code
+        and "and not needs_manual_proxy_review" in code,
+    )
+    test(
+        "v10.6.51: daily GHCND es fuente primaria para Los Angeles",
+        "GHCND daily is primary" in resolution_src
+        and "recent global-hourly returned empty" in resolution_src,
     )
 
     # ---- v10.6.25: low-price MIN_EDGE buffer + alarma Steps 2+3 ----

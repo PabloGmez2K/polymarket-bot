@@ -282,6 +282,13 @@ QUALITY_TRADER_CITIES_WHITELIST = {
 MIN_EDGE_EXACT_RANGE_BUFFER_PP = float(os.getenv("MIN_EDGE_EXACT_RANGE_BUFFER_PP", "5.0"))
 EXACT_RANGE_SIZE_SCALE = float(os.getenv("EXACT_RANGE_SIZE_SCALE", "0.50"))
 EXACT_RANGE_MIN_AMOUNT = float(os.getenv("EXACT_RANGE_MIN_AMOUNT", "2.50"))
+
+# OBSERVED_AUDIT-only cities that need explicit human review before canary.
+# They can accumulate NOAA/proxy evidence, but auto_canary must not promote them.
+AUTO_CANARY_REVIEW_REQUIRED_CITIES = {
+    "Los Angeles": "manual_review_required_pre_canary",
+}
+
 UNSELLABLE_GUARD_ENABLED = os.getenv("UNSELLABLE_GUARD_ENABLED", "0").lower() in ("1", "true", "yes", "on")
 UNSELLABLE_GUARD_LOG_ONLY = os.getenv("UNSELLABLE_GUARD_LOG_ONLY", "1").lower() in ("1", "true", "yes", "on")
 UNSELLABLE_GUARD_VERSION = "unsellable_v1"
@@ -343,8 +350,13 @@ def should_skip_observation(city):
 
 
 def _city_requires_manual_proxy_canary_review(city):
-    """True para ciudades ICAO-only observadas que no deben auto-promocionar."""
+    """True para ciudades observadas que no deben auto-promocionar sin revision."""
     city = str(city or "").strip()
+    review_required = globals().get("AUTO_CANARY_REVIEW_REQUIRED_CITIES", {})
+    if isinstance(review_required, dict) and city in review_required:
+        return True
+    if isinstance(review_required, (set, list, tuple)) and city in review_required:
+        return True
     if not city or city not in OBSERVED_AUDIT_CITIES:
         return False
     resolution_meta = RESOLUTION_ICAO.get(city, {}) if isinstance(globals().get("RESOLUTION_ICAO"), dict) else {}
@@ -7541,8 +7553,8 @@ def build_dashboard_city_decisions(city_observation=None, city_accuracy=None, sh
                 )
             elif needs_manual_proxy_review:
                 reason = (
-                    "ciudad ICAO-only en observacion via proxy; auto-canary bloqueado "
-                    "hasta revision manual con muestra Open-Meteo suficiente"
+                    "ciudad observada con revision manual requerida antes de canary; "
+                    "auto-canary bloqueado hasta decision humana explicita"
                 )
             elif shadow_seen > 0:
                 reason = (
@@ -8029,7 +8041,7 @@ def sync_city_policy_state(notify=True):
                 "city": city,
                 "from": "canary",
                 "to": "shadow",
-                "reason": "ICAO-only observation via proxy: auto-canary blocked until manual review",
+                "reason": "observed city requires manual review before auto-canary",
                 "action": "auto_canary_revoked",
             })
             changed = True
@@ -8037,13 +8049,13 @@ def sync_city_policy_state(notify=True):
                 send_telegram(
                     f"🧪 <b>Canary revertida a shadow</b>\n"
                     f"{city} vuelve a <b>shadow</b>.\n"
-                    "Ciudad ICAO-only en observacion via proxy: auto-canary bloqueado "
-                    "hasta revision manual con muestra Open-Meteo suficiente.\n"
+                    "Ciudad observada con revision manual requerida antes de canary: "
+                    "auto-canary bloqueado hasta decision humana explicita.\n"
                     "Sin BUY real por esta autopromocion."
                 )
             continue
 
-        if decision == "promote" and current_mode == "shadow" and city not in auto_blocked and city not in ACTIVE_TRADING_CITIES and not is_city_blocked(city):
+        if decision == "promote" and current_mode == "shadow" and city not in auto_blocked and city not in ACTIVE_TRADING_CITIES and not is_city_blocked(city) and not needs_manual_proxy_review:
             auto_canary[city] = {
                 "promoted_at": now_iso,
                 "reason": row.get("reason", ""),
@@ -15678,6 +15690,7 @@ RESOLUTION_STATIONS = {
     "Miami":          {"lat": 25.7954,  "lon": -80.2901,  "name": "Miami Intl"},
     "Madrid":         {"lat": 40.4936,  "lon": -3.5668,   "name": "Barajas"},
     "Seattle":        {"lat": 47.4499,  "lon": -122.3118, "name": "Sea-Tac"},
+    "Los Angeles":    {"lat": 33.93816, "lon": -118.3866, "name": "Los Angeles International Airport"},
     "Dallas":         {"lat": 32.8459,  "lon": -96.8510,  "name": "Dallas Love Field"},
     "Lucknow":        {"lat": 26.7606,  "lon": 80.8893,   "name": "Chaudhary Charan Singh"},
     "Sao Paulo":      {"lat": -23.4355, "lon": -46.4730,  "name": "Guarulhos"},
@@ -15745,6 +15758,9 @@ RESOLUTION_ICAO = {
     "Miami":          {"icao": "KMIA", "wu_url": _wu_history_url("KMIA"), "noaa_station_id": "72202012839", "noaa_daily_station_id": "USW00012839"},
     "Madrid":         {"icao": "LEMD", "wu_url": _wu_history_url("LEMD"), "noaa_station_id": "08221099999", "noaa_daily_station_id": "SPE00120278"},
     "Seattle":        {"icao": "KSEA", "wu_url": _wu_history_url("KSEA"), "noaa_station_id": "72793024233", "noaa_daily_station_id": "USW00024233"},
+    # Los Angeles OBSERVED_AUDIT-only: GHCND daily is primary; ISD hourly is metadata/fallback
+    # because recent global-hourly returned empty in the 2026-05-01 probe.
+    "Los Angeles":    {"icao": "KLAX", "wu_url": _wu_history_url("KLAX"), "noaa_station_id": "72295023174", "noaa_daily_station_id": "USW00023174"},
     "Dallas":         {"icao": "KDAL", "wu_url": _wu_history_url("KDAL"), "noaa_station_id": "72258303927", "noaa_daily_station_id": "USW00013960"},
     # ISD 72254013904 registrado hasta 2025-08-27 (feed migrado); GHCND USW00013904
     # verificado: 182 registros TMAX oct-2025/mar-2026. El bot usa daily path (prioridad 1).
@@ -15802,6 +15818,7 @@ OBSERVED_AUDIT_CITIES = {
     "Kuala Lumpur",
     "London",
     "Lucknow",
+    "Los Angeles",
     "Madrid",
     "Miami",
     "Milan",
