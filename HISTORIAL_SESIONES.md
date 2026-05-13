@@ -5426,3 +5426,37 @@ Auditoria read-only de las alarmas recientes confirma contradiccion runtime/poli
 ### NO se toco
 
 No hubo cambios de codigo. No se tocaron BANKROLL, whitelist, city modes, scheduler, trading core, env vars, Railway, DB ni runtime. `CONTEXTO.md` queda sin cambios hasta decision Opus.
+
+---
+
+## Sesión 346 - 14 de mayo de 2026 (Claude Code / Opus)
+
+**Clasificacion:** LITE / docs-only / diseño estratégico
+**Bloque:** City Intelligence v2 — diseño paraguas
+**Veredicto:** DESIGN_DOCUMENTED / IMPLEMENTATION_DEFERRED
+
+### Cambios
+
+- Creado `docs/city_intelligence_v2_design.md`.
+
+### Resumen del diseño
+
+City Intelligence v2 = paraguas, no monolito. Dos productores y un consumidor:
+
+- **Source Onboarding Scanner** (NEW, Fase A) — universo: ciudades fuera del flujo. Detecta candidatas a `OBSERVED_AUDIT` desde signals_crosscheck, blocked_signals, shadow_tracking, RESOLUTION_ICAO. Estados Fase A: `READY_FOR_SOURCE_AUDIT`, `WAITING_EVIDENCE`, `RANGE_ONLY_NOT_OPERABLE`, `SOURCE_BLOCKED`.
+- **City Lifecycle Review Monitor** (EXISTING, sin tocar) — universo: ciudades dentro del flujo.
+- **City Intelligence Digest** (NEW, Fase B) — un Telegram LOG_ONLY diario que une ambas salidas.
+
+Jurisdicción disjunta por construcción: el Scanner excluye `ACTIVE ∪ CANARY ∪ BLOCKED ∪ OBSERVED_AUDIT ∪ auto_canary ∪ auto_shadow ∪ shadow_tracking(cycles≥10) ∪ overrides.keys()`. Handoff con el Lifecycle Monitor vía edición manual de `city_lifecycle_overrides.json` por Pablo — sin import directo entre tools.
+
+Matices clave:
+- Fase A excluye `BLOCKED_CITIES` para mantener scope; *blocked source re-audit* diferido a v1.1.
+- Paths por CLI, sin dependencia conceptual de `runtime_import_derived`; debe poder apuntar a `/app/data` en runtime futuro.
+- Fallo de carga de `RESOLUTION_ICAO` ≠ `SOURCE_BLOCKED`. Si falla la herramienta: `degraded: true`, ciudades a `WAITING_EVIDENCE`, warning `RESOLUTION_ICAO_UNAVAILABLE`.
+- Sample mínimos heredados de A7 audit: blocked WR n≥20 + bot_evaluation poblada, trader consensus fuentes≥2 días≥3, shadow leak cycles≥10.
+
+Doc incluye prompt completo para Sonnet (Fase A) listo para pegar cuando Pablo autorice implementación.
+
+### NO se toco
+
+No hubo cambios de código. No se tocaron BANKROLL, whitelist, city modes, scheduler, trading core, env vars, Railway, DB, runtime, Telegram, ni `city_lifecycle_review_monitor.py`. `CONTEXTO.md` y `agent_events.jsonl` sin cambios (docs-only / sin estado vivo durable).
