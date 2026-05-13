@@ -9,8 +9,8 @@
 ## Estado de la cola (2026-05-13)
 
 - **P0 — CERRADO.** Veredicto Opus: `KEEP_BLOCKED + NEED_MORE_RUNTIME_EVIDENCE`. Cierre en [docs/p0_b5_b6_opus_review_2026_05_13.md](p0_b5_b6_opus_review_2026_05_13.md). BANKROLL **$25 KEEP**, **$35 no autorizado**. **No reabrir** hasta cumplir triggers: ≥28d `cash_flow` valid contiguo + ≥28 wallet snapshots + divergencia 1W vs `trade_lifecycle` reconciliada en documento corto + Pablo dispuesto a iniciar ciclo B5. Calendario estimado: **no antes de 2026-06-08**.
-- **Siguiente tarea activa: P1 — Codex — Readout unificado lifecycle + Hazard + INTRA-REEVAL** (NORMAL, read-only). Handoff: [docs/next_codex_p1_ori_readout_handoff_2026_05_13.md](next_codex_p1_ori_readout_handoff_2026_05_13.md).
-- **P2** opcional, batch-compatible si P1 cierra limpio y P2 sigue siendo read-only/reporting.
+- **P1 — CERRADO 2026-05-13.** Readout unificado lifecycle + Hazard + INTRA-REEVAL implementado en `tools/sl_intra_case_readout.py`, desplegado y smokeado contra `/app/data`.
+- **Siguiente tarea activa: P2 — Codex read-only — Verificar `review_alert_sent=false` en INTRA-REEVAL** (NORMAL, read-only/reporting primero).
 - **Los Angeles**: `WATCH_DIAGNOSTIC`, no P1.
 - **P3 SL Retrospective**, **P5 DB Throughput**, **P6 Blocked signals**: WATCH/DEFER según cada tarea más abajo.
 
@@ -393,8 +393,21 @@ Una opción:
 **Agente:** Codex  
 **Modo:** NORMAL  
 **Prioridad:** Alta-media  
-**Estado:** pendiente  
+**Estado:** **CERRADO 2026-05-13** — `NO_EXISTING_TOOL_PATCH_READY` implementado, desplegado y smoke runtime OK  
 **Batch compatible:** puede agruparse con P2 solo si P2 queda read-only/reporting.
+
+## Resultado 2026-05-13
+
+- Tool: `tools/sl_intra_case_readout.py`.
+- Commits:
+  - `5adc6d6` `feat: add sl intra case readout`
+  - `b6b2ead` `fix: classify intra reeval shadow losses`
+  - `ffec13b` `fix: prefer resolved action in case readout`
+- Deploy Railway final observado: `61528517-88df-44f9-b0cc-b2da0be6f955` → `SUCCESS`.
+- Smoke read-only runtime:
+  - Seoul 21°C May12 NO: `status=ok`, `case_count=1`, lifecycle + Hazard + guard + INTRA-REEVAL presentes, `would_sell=true`, tiers `deep/deteriorating/terminal`, `max_drawdown=-94.26`, final runtime `LOSS_TOTAL`, `pnl_cash=-2.34`, clasificación `REEVAL_GOOD_SHADOW`.
+  - Singapore 32°C May12 NO: `status=ok`, `case_count=1`, lifecycle + Hazard + guard presentes, tiers `deep/terminal`, `max_drawdown=-95.1`, final `RESOLVED_WIN`, `pnl_cash=+1.92`, clasificación `HAZARD_OBSERVED_WIN`.
+- Guardrails confirmados: no P0, no BANKROLL, no Fase C, no `bot.py`, no trading core, no SL/guards/INTRA ejecutable, no city modes, no whitelist, no scheduler, no env vars, no DB runtime writes, no Telegram real.
 
 ## Objetivo
 
@@ -814,8 +827,8 @@ Para. Esa parte requiere Opus/Pablo. Cierra la tarea actual y deja prompt corto 
 ## 10. Orden recomendado
 
 1. ~~`P0` con Opus.~~ **CERRADO 2026-05-13** (`KEEP_BLOCKED + NEED_MORE_RUNTIME_EVIDENCE`). No reabrir hasta cumplir triggers documentados.
-2. `P1` con Codex — readout unificado lifecycle + Hazard + INTRA-REEVAL.
-3. Si P1 termina limpio: `P2` con Codex read-only/reporting.
+2. ~~`P1` con Codex — readout unificado lifecycle + Hazard + INTRA-REEVAL.~~ **CERRADO 2026-05-13** (`NO_EXISTING_TOOL_PATCH_READY`).
+3. `P2` con Codex read-only/reporting.
 4. Mantener `P3-P6` en WATCH salvo alarma nueva.
 5. Ejecutar `M0` manual cuando haya `signals.json` fresco.
 
@@ -825,7 +838,8 @@ Para. Esa parte requiere Opus/Pablo. Cierra la tarea actual y deja prompt corto 
 
 - P0 cerrado por Opus: `KEEP_BLOCKED + NEED_MORE_RUNTIME_EVIDENCE`. Doc cierre `docs/p0_b5_b6_opus_review_2026_05_13.md`.
 - Renombrado canónico del backlog: ahora vive en `docs/BACKLOG_ORI_operational_readiness_intelligence.md`.
-- Handoff Codex P1 preparado: `docs/next_codex_p1_ori_readout_handoff_2026_05_13.md`.
+- P1 cerrado por Codex: readout unificado `tools/sl_intra_case_readout.py` implementado, desplegado y smokeado contra `/app/data`.
+- Siguiente activa: P2 read-only/reporting (`review_alert_sent=false` en INTRA-REEVAL).
 - No se tocaron: BANKROLL, Fase C, trading core, env vars Railway, DB runtime, sizing, whitelist, city modes, scheduler, SL, guards ni reglas BUY/SELL/SKIP.
 
 Veredicto general:
@@ -834,8 +848,8 @@ Veredicto general:
 BANKROLL $25: KEEP
 $35: BLOCKED — no reabrir antes de 2026-06-08 y solo si se cumplen los triggers documentados
 P0: CERRADO (KEEP_BLOCKED + NEED_MORE_RUNTIME_EVIDENCE)
-P1: siguiente activa (Codex, readout unificado lifecycle + Hazard + INTRA-REEVAL)
-P2: opcional batch tras P1 si sigue read-only
+P1: CERRADO (Codex, readout unificado lifecycle + Hazard + INTRA-REEVAL)
+P2: siguiente activa si sigue read-only/reporting
 Los Angeles: WATCH_DIAGNOSTIC, no P1 todavía
 SL Retrospective: seguir monitorizando
 Traders Intelligence: snapshots manuales
