@@ -2,7 +2,7 @@
 
 Configurador durable del orquestador para sesiones nuevas (ChatGPT / Claude / Codex). Este archivo no reemplaza `AGENTS.md`, `CONTEXTO.md` ni `OPERATIONS_PLAYBOOK.md`: los complementa describiendo **cómo debe actuar el guía** que coordina agentes.
 
-Actualizado: 2026-05-10.
+Actualizado: 2026-05-13.
 
 ---
 
@@ -81,6 +81,51 @@ Reglas:
 - FULL requiere autorización clara, precheck y criterio de rollback.
 - FULL monetizable o de riesgo requiere semántica cerrada por Opus si afecta trading/riesgo/BANKROLL/city modes/sizing/guards.
 - Si una tarea está prevalidada y solo falta confirmación humana, usar prompt compacto con la confirmación explícita y “continúa con el plan ya prevalidado”.
+
+### Cierre LITE / NORMAL / FULL
+
+El cierre no debe consumir mas tokens que la tarea principal. Elegir el primer
+nivel suficiente:
+
+**CIERRE LITE**. Para docs-only, backlog, veredictos ya decididos y cierres sin
+codigo. Maximo esperado:
+
+- `git status --short --untracked-files=all` y `git log -1 --oneline`;
+- editar los docs minimos;
+- `git diff --check`;
+- commit/push si procede;
+- Railway check breve si hubo push;
+- cierre breve.
+
+No usar en LITE salvo necesidad real:
+
+- `verify_before_deploy.py`;
+- `session-close-sync` completo;
+- memoria externa/Engram;
+- handoff extra si el backlog ya contiene la siguiente tarea;
+- `CONTEXTO.md` salvo cambio vivo durable;
+- `agent_events.jsonl` salvo evento operacional relevante;
+- smoke runtime tras deploy docs-only si el codigo ya fue validado.
+
+**CIERRE NORMAL**. Para patches `LOG_ONLY`/read-only, tools, tests y
+observabilidad. Debe incluir tests focales, syntax, `git diff --check`,
+`verify_before_deploy.py` una vez antes del push final si hay codigo,
+commit/push, Railway `SUCCESS` si el push dispara deploy y smoke runtime solo
+si el codigo lo requiere.
+
+**CIERRE FULL**. Para runtime, env vars, DB, trading core, riesgo, BANKROLL o
+Fase C. Requiere autorizacion clara, precheck, Railway observado y cierre
+completo.
+
+### Codex patch economics
+
+- Agrupar fixes antes de push/deploy.
+- Si un runtime smoke revela fallos, revisar todos los casos relacionados y
+  hacer un unico patch local antes de nuevo push.
+- No hacer push por cada micro-fix salvo urgencia.
+- Ejecutar verify completo una vez antes del push final cuando hay codigo.
+- Un cambio docs-only posterior a codigo ya validado no requiere repetir smoke
+  runtime.
 
 ---
 
@@ -247,6 +292,12 @@ Cuando haya frustración por poco avance, buscar el blocker monetizable real:
 - bug runtime;
 - modelo inviable.
 
+Throughput/estrategia es un workstream recurrente monetizable. No usar
+"mas observacion" como escape por defecto si el blocker real es throughput,
+condition mix, city modes, edge thresholds, exits o modelo. Cuando haya
+evidencia acumulada suficiente, proponer revision Opus para decidir la siguiente
+palanca controlada.
+
 Si una línea consume sesiones y no mueve BUY / SELL / SKIP / P&L / BANKROLL / riesgo real, ponerla en `STOP` o `DEFER`.
 
 No abrir más sesiones para:
@@ -295,7 +346,10 @@ No abrir agente para alarmas que ya dicen `WATCH_AUDIT`, “no accionable”, `s
 ## 11. Runtime / deploy
 
 - No decir “en producción” sin push + Railway `SUCCESS` o evidencia runtime equivalente.
-- Todo push a `main` puede disparar Railway, incluso docs-only: observar deployment hasta `SUCCESS` / `FAILED`.
+- Todo push a `main` puede disparar Railway. Para cambios con codigo, observar
+  deployment hasta `SUCCESS` / `FAILED`. Para docs-only, hacer solo
+  deployment list/check breve; si no aparece nuevo deployment claro, cerrar como
+  `no new deployment observed`.
 - Usar Railway siempre con:
 
 ```powershell

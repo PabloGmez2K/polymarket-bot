@@ -41,14 +41,18 @@ para que una ciudad shadow/active acumule datos en `observed_vs_forecast`.
 - Primero evidencia, luego copy o refactor.
 - Preferir `rg` y lecturas puntuales.
 - Para Railway, usar `tools/railway_safe.ps1`.
-- Antes de push/deploy, correr `python verify_before_deploy.py`.
+- Antes de push/deploy con cambios de codigo, correr `python verify_before_deploy.py`.
+- En docs-only/backlog/cierres sin codigo, usar cierre LITE: `git diff --check`, commit/push si procede y Railway check breve si hubo push; no ejecutar verify completo ni session-close-sync completo salvo necesidad real.
 
 ## Cierre
 
-Si la sesion cambia estado, workflow o trazabilidad, alinear:
+Si la sesion cambia estado vivo, workflow o trazabilidad operacional, alinear:
 
 - `CONTEXTO.md`
 - `HISTORIAL_SESIONES.md`
 - `agent_events.jsonl`
+
+Para docs-only o backlog sin estado vivo durable, no forzar `CONTEXTO.md`,
+`HISTORIAL_SESIONES.md` ni `agent_events.jsonl`.
 
 La memoria externa no sustituye la fuente de verdad del repo.

@@ -65,23 +65,46 @@ Objetivo: reducir ruido, evitar conversaciones demasiado anchas y dejar cierres 
 
 ## Checklist de cierre
 
-Toda sesion relevante debe cerrar estas capas, en este orden:
+El cierre debe ser proporcional. No debe consumir mas tokens que la tarea
+principal.
 
-1. Codigo y tests:
-   - implementar el cambio
-   - correr `python verify_before_deploy.py`
-2. Documentacion humana:
-   - actualizar `CONTEXTO.md`
-   - actualizar `HISTORIAL_SESIONES.md`
-3. Scoreboard:
-   - registrar al menos un evento en `agent_events.jsonl`
-   - si hubo aportacion multiagente, registrar el valor de cada agente por separado
-4. Consistencia:
-   - comprobar que la sesion documentada mas reciente tambien existe en `agent_events.jsonl`
-5. Deploy:
-   - si hay push/deploy, dejar anotado commit y estado esperado de Railway
+### Cierre LITE
 
-Regla: no cerrar una sesion con docs sin `agent_events.jsonl`, ni con `agent_events.jsonl` sin docs.
+Para docs-only, backlog, veredictos ya decididos y cierres sin codigo:
+
+1. Revisar `git status --short --untracked-files=all` y `git log -1 --oneline`.
+2. Editar solo los docs minimos.
+3. Correr `git diff --check`.
+4. Commit/push si procede.
+5. Si hubo push, hacer Railway deployment list/check breve.
+6. Cerrar breve.
+
+No ejecutar en LITE salvo necesidad real: `python verify_before_deploy.py`,
+`session-close-sync` completo, memoria externa/Engram, handoff extra si el
+backlog ya contiene la siguiente tarea, `CONTEXTO.md` salvo cambio vivo durable,
+`agent_events.jsonl` salvo evento operacional relevante, ni smoke runtime tras
+deploy docs-only si el codigo ya fue validado.
+
+### Cierre NORMAL
+
+Para patches `LOG_ONLY`/read-only, tools, tests y observabilidad:
+
+1. Tests focales y syntax.
+2. `git diff --check`.
+3. `python verify_before_deploy.py` una vez antes del push final si hay codigo.
+4. Commit/push.
+5. Railway `SUCCESS` si el push dispara deploy.
+6. Smoke runtime solo si el codigo lo requiere.
+
+### Cierre FULL
+
+Para runtime, env vars, DB, trading core, riesgo, BANKROLL o Fase C: requiere
+autorizacion clara, precheck, Railway observado y cierre completo con las capas
+durables que correspondan (`CONTEXTO.md`, `HISTORIAL_SESIONES.md`,
+`agent_events.jsonl`).
+
+Regla: no forzar `agent_events.jsonl` ni handoff documental en docs-only/backlog
+si no hay evento operacional relevante o cambio vivo durable.
 
 ---
 
@@ -127,7 +150,7 @@ Objetivo: reservar el gasto alto de contexto/modelo para tareas con tradeoffs re
 
 - `context-bootstrap`: abrir contexto minimo y elegir `1-3` artefactos fuente.
 - `operational-audit`: auditorias de dashboard/logs/Railway sin tocar logica core.
-- `session-close-sync`: cierre de sesion sin drift entre docs y scoreboard.
+- `session-close-sync`: cierre de sesion sin drift entre docs y scoreboard; no usar completo en cierre LITE salvo necesidad real.
 
 Regla: skills cortas, sin duplicar estado vivo ni inventar memoria.
 
@@ -227,16 +250,16 @@ Nota de verificacion externa: a 2 de abril de 2026, la guia publica de Engram pa
 
 Antes de `git push`:
 
-1. `python verify_before_deploy.py`
+1. `python verify_before_deploy.py` si hay cambios de codigo; omitir en docs-only
 2. `git status` limpio salvo cambios intencionales
-3. `CONTEXTO.md`, `HISTORIAL_SESIONES.md` y `agent_events.jsonl` alineados
+3. `CONTEXTO.md`, `HISTORIAL_SESIONES.md` y `agent_events.jsonl` alineados si hay cambio vivo durable o evento operacional relevante
 4. Si aplica, registrar evento nuevo con `tools/append_agent_event.py`
 5. Si el cambio toca logica core (`sigma`, `Kelly`, `MIN_EDGE`, `MAX_EXPOSURE`, exits, settlement mapping, execution o accounting), pasar antes el premortem corto de este playbook
 
 Despues de `git push`:
 
 1. confirmar commit enviado
-2. confirmar servicio Railway correcto
+2. confirmar servicio Railway correcto; en docs-only basta deployment list/check breve
 3. si el cambio afecta al scoreboard, recordar que el live se actualiza al reiniciar/desplegar el servicio porque `_sync_agent_events_seed()` mergea repo -> Volume al arranque
 
 ---
