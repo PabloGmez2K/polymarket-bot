@@ -11,8 +11,11 @@
 - **P0 — CERRADO.** Veredicto Opus: `KEEP_BLOCKED + NEED_MORE_RUNTIME_EVIDENCE`. Cierre en [docs/p0_b5_b6_opus_review_2026_05_13.md](p0_b5_b6_opus_review_2026_05_13.md). BANKROLL **$25 KEEP**, **$35 no autorizado**. **No reabrir** hasta cumplir triggers: ≥28d `cash_flow` valid contiguo + ≥28 wallet snapshots + divergencia 1W vs `trade_lifecycle` reconciliada en documento corto + Pablo dispuesto a iniciar ciclo B5. Calendario estimado: **no antes de 2026-06-08**.
 - **P1 — CERRADO 2026-05-13.** Readout unificado lifecycle + Hazard + INTRA-REEVAL implementado en `tools/sl_intra_case_readout.py`, desplegado y smokeado contra `/app/data`.
 - **P2 — CERRADO 2026-05-13.** `NO_ACTION operativo / REPORTING_GAP menor`: `/app/data/alerts_state.json` ya tiene `intra_reeval_review_alert_sent=true`; `shadow_log.review_alert_sent=false` en `intra_reeval_state.json` no es autoritativo.
-- **Los Angeles**: `WATCH_DIAGNOSTIC`, no P1.
-- **P3 SL Retrospective**, **P5 DB Throughput**, **P6 Blocked signals**: WATCH/DEFER según cada tarea más abajo.
+- **P3 — CERRADO 2026-05-13.** `KEEP_MONITORING`: no patch sin muestra post-guard mayor o decisión Opus.
+- **P5 — CERRADO 2026-05-13.** Veredicto Opus: `KEEP_CURRENT_STRATEGY_UNTIL_TRIGGER`; revisión obligatoria **2026-06-09** o antes solo si se cumplen triggers documentados de Phase 2.
+- **P4 Los Angeles** y **P6 Blocked signals**: `WATCH`.
+- **M0**: manual recurrente cuando haya `signals.json` fresco.
+- **Estado ORI:** cola activa cerrada; queda solo vigilancia residual P4/P6 y rutina manual M0.
 
 ---
 
@@ -654,13 +657,13 @@ Abrir auditoría Codex read-only solo si se repite en próximas 2-3 corridas con
 
 ---
 
-# P5 — Opus posterior — DB Throughput slots/condition mix strategy
+# P5 — Opus posterior — DB Throughput slots/condition mix strategy — **CERRADO 2026-05-13**
 
 **Clasificación:** `MONETIZATION_RELEVANT / STRATEGY_WATCH`  
 **Agente:** Opus  
 **Modo:** diseño/read-only  
 **Prioridad:** Baja-media  
-**Estado:** diferida
+**Estado:** cerrado por Opus — `KEEP_CURRENT_STRATEGY_UNTIL_TRIGGER`
 
 ## Contexto
 
@@ -688,12 +691,17 @@ Puede apuntar a:
 
 Cualquier cambio de estrategia requiere Opus.
 
-## Veredicto esperado
+## Veredicto
 
-- `KEEP_WATCH`
-- `NEED_MORE_DATA`
-- `STRATEGY_REVIEW_READY`
-- `NO_ACTION`
+Opus cierra P5 como `KEEP_CURRENT_STRATEGY_UNTIL_TRIGGER`.
+
+No cambiar slots, condition mix, city modes, whitelist ni scheduler por este backlog. La estrategia actual se mantiene hasta el primer trigger aplicable:
+
+- **Revisión obligatoria:** 2026-06-09 (T+30 de Phase 2 Recalibration).
+- **Rollback temprano mixed-condition:** WR mixed-condition <40% con n>=20 trades cerrados.
+- **Rollback temprano exact-slice:** WR exact <40% con n>=10 trades cerrados.
+- **Review T+30:** n mixed-condition >=25, WR mixed-condition >=45%, PnL absoluto >=+$5, drawdown maximo no peor que -$6, al menos 2/4 ciudades Active con n>=3 y WR>=40%, y slice exact n>=10 con WR>=45%.
+- **Si falla cualquier criterio T+30:** `RECOMMEND_KILL_MODEL_PATH` / pivot leaderboard intelligence.
 
 ---
 
@@ -854,8 +862,11 @@ Para. Esa parte requiere Opus/Pablo. Cierra la tarea actual y deja prompt corto 
 
 1. ~~`P0` con Opus.~~ **CERRADO 2026-05-13** (`KEEP_BLOCKED + NEED_MORE_RUNTIME_EVIDENCE`). No reabrir hasta cumplir triggers documentados.
 2. ~~`P1` con Codex — readout unificado lifecycle + Hazard + INTRA-REEVAL.~~ **CERRADO 2026-05-13** (`NO_EXISTING_TOOL_PATCH_READY`).
-3. Mantener `P3-P6` en WATCH salvo alarma nueva.
-4. Ejecutar `M0` manual cuando haya `signals.json` fresco.
+3. ~~`P2`.~~ **CERRADO 2026-05-13** (`NO_ACTION operativo / REPORTING_GAP menor`).
+4. ~~`P3`.~~ **CERRADO 2026-05-13** (`KEEP_MONITORING`).
+5. ~~`P5`.~~ **CERRADO 2026-05-13** (`KEEP_CURRENT_STRATEGY_UNTIL_TRIGGER`; review 2026-06-09 o triggers Phase 2).
+6. Mantener `P4/P6` en WATCH salvo alarma nueva.
+7. Ejecutar `M0` manual cuando haya `signals.json` fresco.
 
 ---
 
@@ -866,6 +877,9 @@ Para. Esa parte requiere Opus/Pablo. Cierra la tarea actual y deja prompt corto 
 - P1 cerrado por Codex: readout unificado `tools/sl_intra_case_readout.py` implementado, desplegado y smokeado contra `/app/data`.
 - P2 cerrado: `NO_ACTION operativo / REPORTING_GAP menor`; no hay bug scheduler actual.
 - P3 triage Codex: `KEEP_MONITORING`; no patch sin muestra post-guard mayor o decision Opus.
+- P5 cerrado por Opus: `KEEP_CURRENT_STRATEGY_UNTIL_TRIGGER`; revisión obligatoria 2026-06-09 o triggers Phase 2 documentados.
+- P4/P6 quedan `WATCH`; M0 sigue como manual recurrente.
+- ORI deja de ser backlog activo: no hay P0-P6 accionable abierto.
 - No se tocaron: BANKROLL, Fase C, trading core, env vars Railway, DB runtime, sizing, whitelist, city modes, scheduler, SL, guards ni reglas BUY/SELL/SKIP.
 
 Veredicto general:
@@ -878,7 +892,9 @@ P1: CERRADO (Codex, readout unificado lifecycle + Hazard + INTRA-REEVAL)
 P2: CERRADO (NO_ACTION operativo / REPORTING_GAP menor)
 Los Angeles: WATCH_DIAGNOSTIC, no P1 todavía
 SL Retrospective: KEEP_MONITORING
+DB Throughput: CERRADO — KEEP_CURRENT_STRATEGY_UNTIL_TRIGGER; review 2026-06-09 o triggers Phase 2
+Los Angeles: WATCH_DIAGNOSTIC
 Traders Intelligence: snapshots manuales
 Blocked signals: WATCH_AUDIT
-DB Throughput: strategy watch, no acción sin Opus
+ORI backlog activo: CERRADO
 ```
