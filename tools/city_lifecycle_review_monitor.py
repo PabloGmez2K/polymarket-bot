@@ -14,6 +14,10 @@ Inputs (read-only):
 Outputs:
   --json-output       data/city_lifecycle_review.json
   --md-output         docs/city_lifecycle_review_latest.md
+
+Transition hierarchy (weakest to strongest):
+  none < preliminary_review_candidate < canary_review / active_review
+                                      < manual_review_pending (override path)
 """
 
 import argparse
@@ -40,10 +44,27 @@ LOG_ONLY_DISCLAIMER = (
     "Transitions proposed require explicit human review before any policy change."
 )
 
-# T2 gate thresholds (v1)
+# T2 gate thresholds v1.1 (shadow/observed_audit → canary candidate)
 T2_MIN_EDGE_HITS = 5
 T2_MIN_BEST_EDGE_PCT = 20
 T2_MIN_CYCLES = 10
+
+# T3 gate thresholds (canary → active candidate)
+# Uses auto_canary entry metrics at promotion time, not shadow_tracking stats.
+T3_MIN_SHADOW_EDGES_AT_PROMOTION = 5
+T3_MIN_BEST_EDGE_PCT_AT_PROMOTION = 30
+
+# Promotion-gate gate_status values that confirm an active canary (T3 path).
+_T3_CONFIRM_STATUSES = {"observe_runtime_canary"}
+
+# Promotion-gate statuses that block canary_review even if T2 stats pass (T2 path).
+_T2_BLOCKING_STATUSES = {
+    "background_watch",
+    "needs_shadow_validation",
+    "watch_closely",
+    "observe_with_source_caution",
+    "audit_trader_input",
+}
 
 
 def parse_args(argv=None):
@@ -64,11 +85,10 @@ def _load_json_optional(path_str, label):
     if not path.exists():
         return None, f"{label} not found: {path_str}"
     try:
-        text = path.read_bytes()
-        # Handle optional UTF-8 BOM
-        if text.startswith(b"\xef\xbb\xbf"):
-            text = text[3:]
-        return json.loads(text.decode("utf-8")), None
+        raw = path.read_bytes()
+        if raw.startswith(b"\xef\xbb\xbf"):   # strip optional UTF-8 BOM
+            raw = raw[3:]
+        return json.loads(raw.decode("utf-8")), None
     except Exception as exc:
         return None, f"{label} parse error: {exc}"
 
@@ -109,6 +129,19 @@ def _parse_env_list(val):
     return {c.strip() for c in str(val).split(",") if c.strip()}
 
 
+def _has_non_range_edge(recent_edges):
+    """Return True if at least one recent edge has edge_hit=True and is not a range condition.
+
+    Range condition: question contains "between" (e.g. "between 44-45°F").
+    Cities whose only operable signals are range conditions are excluded — range is
+    not tradeable under current Phase 2 policy.
+    """
+    for edge in recent_edges or []:
+        if edge.get("edge_hit") and "between" not in edge.get("question", "").lower():
+            return True
+    return False
+
+
 def classify_lifecycle_stage(city, active_cities, blocked_cities, canary_cities,
                               auto_canary_cities, auto_shadow_cities, overrides):
     """Classify city into a lifecycle stage (priority order)."""
@@ -128,8 +161,11 @@ def classify_lifecycle_stage(city, active_cities, blocked_cities, canary_cities,
 def check_t2_gates(shadow_data):
     """Check T2 gates: shadow/observed_audit → canary candidate.
 
+    Gate 1-3: cumulative shadow statistics.
+    Gate 4: at least one recent edge_hit=True with a non-range condition.
+             Range-only cities are excluded — they are not operable under Phase 2.
+
     Returns (passed, gates_failed_list, details_dict).
-    Range condition is excluded — does not trigger canary_review on its own.
     """
     if not shadow_data:
         return False, ["no_shadow_data"], {}
@@ -137,6 +173,7 @@ def check_t2_gates(shadow_data):
     edge_hits = int(shadow_data.get("edge_hits", 0) or 0)
     best_edge_pct = float(shadow_data.get("best_edge_pct", 0) or 0)
     cycles_seen = int(shadow_data.get("cycles_seen", 0) or 0)
+    recent_edges = shadow_data.get("recent_edges") or []
 
     details = {
         "edge_hits": edge_hits,
@@ -155,7 +192,70 @@ def check_t2_gates(shadow_data):
     if cycles_seen < T2_MIN_CYCLES:
         failed.append(f"cycles_seen<{T2_MIN_CYCLES}(got {cycles_seen})")
 
+    if not _has_non_range_edge(recent_edges):
+        if recent_edges:
+            failed.append("no_non_range_edge_hit(range_only_or_all_filtered)")
+        else:
+            failed.append("no_recent_edges_to_verify_condition")
+
     return len(failed) == 0, failed, details
+
+
+def check_t3_gates(auto_canary_entry, promo_gate_row, has_promotion_gate):
+    """Check T3 gates: canary → active_review candidate.
+
+    Uses auto_canary entry metrics (shadow_edges, best_edge_pct at promotion time),
+    NOT shadow_tracking stats. Also requires promotion_gate confirmation.
+
+    Returns (proposed_transition, gates_failed, details, notes).
+    """
+    if not auto_canary_entry:
+        return "none", ["no_auto_canary_entry"], {}, [
+            "T3: city not in auto_canary — no promotion evidence"
+        ]
+
+    shadow_edges = int(auto_canary_entry.get("shadow_edges", 0) or 0)
+    best_edge_pct = float(auto_canary_entry.get("best_edge_pct", 0) or 0)
+
+    details = {
+        "shadow_edges_at_promotion": shadow_edges,
+        "best_edge_pct_at_promotion": best_edge_pct,
+        "t3_min_shadow_edges": T3_MIN_SHADOW_EDGES_AT_PROMOTION,
+        "t3_min_best_edge_pct": T3_MIN_BEST_EDGE_PCT_AT_PROMOTION,
+    }
+
+    failed = []
+    if shadow_edges < T3_MIN_SHADOW_EDGES_AT_PROMOTION:
+        failed.append(
+            f"shadow_edges_at_promotion<{T3_MIN_SHADOW_EDGES_AT_PROMOTION}(got {shadow_edges})"
+        )
+    if best_edge_pct < T3_MIN_BEST_EDGE_PCT_AT_PROMOTION:
+        failed.append(
+            f"best_edge_pct_at_promotion<{T3_MIN_BEST_EDGE_PCT_AT_PROMOTION}(got {best_edge_pct})"
+        )
+
+    if failed:
+        return "none", failed, details, ["T3: promotion metrics below threshold"]
+
+    if not has_promotion_gate:
+        return "preliminary_review_candidate", [], details, [
+            "T3: promotion metrics pass but promotion_gate unavailable — insufficient for active_review"
+        ]
+
+    if promo_gate_row is None:
+        return "preliminary_review_candidate", ["city_not_in_promotion_gate"], details, [
+            "T3: promotion metrics pass but city absent from promotion_gate"
+        ]
+
+    gate_status = promo_gate_row.get("gate_status", "")
+    if gate_status in _T3_CONFIRM_STATUSES:
+        return "active_review", [], {**details, "promotion_gate_status": gate_status}, [
+            f"T3: active canary confirmed, promotion_gate={gate_status}"
+        ]
+
+    return "preliminary_review_candidate", [f"promotion_gate={gate_status}"], {
+        **details, "promotion_gate_status": gate_status
+    }, [f"T3: metrics pass but promotion_gate='{gate_status}' — insufficient for active_review"]
 
 
 def detect_silent_promotion(city, auto_canary_cities, blocked_cities):
@@ -167,10 +267,10 @@ def detect_silent_promotion(city, auto_canary_cities, blocked_cities):
 
 def propose_transition(city, stage, shadow_data, override,
                        auto_canary_cities, blocked_cities, active_cities,
-                       silent_promo, silent_reason):
+                       silent_promo, silent_reason,
+                       auto_canary_entry=None,
+                       promo_gate_row=None, has_promotion_gate=False):
     """Propose lifecycle transition. Returns (proposed, gates_failed, gate_details, notes)."""
-    notes = []
-
     if silent_promo:
         return "silent_promotion_detected", [], {}, [f"reason: {silent_reason}"]
 
@@ -178,25 +278,45 @@ def propose_transition(city, stage, shadow_data, override,
         return "none", [], {}, ["WATCH: source/proxy data needed for T1 observed_audit_review"]
 
     if stage in ("observed_audit", "shadow"):
+        # T2: shadow/observed_audit → canary candidate
         t2_pass, gates_failed, gate_details = check_t2_gates(shadow_data)
         if not t2_pass:
             return "none", gates_failed, gate_details, ["T2 gates not satisfied"]
 
+        # Override takes priority — checked before promotion_gate requirement
         if override.get("manual_review_required_pre_canary"):
             reason = override.get("reason", "override")
-            notes.append(f"manual_review_required_pre_canary=true ({reason})")
-            notes.append("OBSERVED_AUDIT does not authorize trading")
-            return "manual_review_pending", [], gate_details, notes
+            return "manual_review_pending", [], gate_details, [
+                f"manual_review_required_pre_canary=true ({reason})",
+                "OBSERVED_AUDIT does not authorize trading",
+            ]
 
-        return "canary_review", [], gate_details, notes
+        # Beyond shadow stats, promotion_gate evidence is required
+        if not has_promotion_gate:
+            return "preliminary_review_candidate", [], gate_details, [
+                "T2 gates pass but promotion_gate unavailable — insufficient for canary_review"
+            ]
+
+        if promo_gate_row is None:
+            return "preliminary_review_candidate", ["city_not_in_promotion_gate"], gate_details, [
+                "T2 gates pass but city absent from promotion_gate"
+            ]
+
+        gate_status = promo_gate_row.get("gate_status", "")
+        if gate_status in _T2_BLOCKING_STATUSES:
+            return "preliminary_review_candidate", [f"promotion_gate={gate_status}"], gate_details, [
+                f"T2 stats pass but promotion_gate='{gate_status}' — insufficient for canary_review"
+            ]
+
+        return "canary_review", [], {**gate_details, "promotion_gate_status": gate_status}, [
+            f"T2 gates pass, promotion_gate={gate_status}"
+        ]
 
     if stage == "canary":
         if city in active_cities:
             return "none", [], {}, ["already active"]
-        t2_pass, gates_failed, gate_details = check_t2_gates(shadow_data)
-        if t2_pass:
-            return "active_review", [], gate_details, ["T3: canary with sufficient evidence"]
-        return "none", gates_failed, gate_details, ["T3: insufficient evidence for active_review"]
+        # T3: canary → active candidate (independent from T2 shadow stats)
+        return check_t3_gates(auto_canary_entry, promo_gate_row, has_promotion_gate)
 
     if stage == "active":
         return "none", [], {}, ["already active — no transition needed"]
@@ -215,9 +335,23 @@ def build_city_records(inputs):
     active_cities = _parse_env_list(variables.get("ACTIVE_TRADING_CITIES"))
     blocked_cities = _parse_env_list(variables.get("BLOCKED_CITIES"))
     canary_cities = _parse_env_list(variables.get("CANARY_TRADING_CITIES"))
-    auto_canary_cities = set(policy_state.get("auto_canary_cities", {}).keys())
+    auto_canary_dict = policy_state.get("auto_canary_cities", {})
+    auto_canary_cities = set(auto_canary_dict.keys())
     auto_shadow_cities = set(policy_state.get("auto_shadow_cities", {}).keys())
     shadow_cities_data = shadow_tracking.get("cities", {})
+
+    # Build promotion gate index (only when runtime inputs are available)
+    promo_gate_data = inputs.get("promotion_gate")
+    has_promotion_gate = False
+    promo_gate_by_city = {}
+    if promo_gate_data:
+        pg_summary = promo_gate_data.get("summary", {})
+        if pg_summary.get("runtime_inputs_status", "missing") == "available":
+            has_promotion_gate = True
+            for row in promo_gate_data.get("cities", []):
+                city_name = row.get("city")
+                if city_name:
+                    promo_gate_by_city[city_name] = row
 
     all_cities = set()
     all_cities.update(active_cities)
@@ -232,6 +366,7 @@ def build_city_records(inputs):
     for city in sorted(all_cities):
         shadow_data = shadow_cities_data.get(city)
         override = overrides.get(city, {})
+        auto_canary_entry = auto_canary_dict.get(city)
 
         stage = classify_lifecycle_stage(
             city, active_cities, blocked_cities, canary_cities,
@@ -242,10 +377,15 @@ def build_city_records(inputs):
             city, auto_canary_cities, blocked_cities,
         )
 
+        promo_gate_row = promo_gate_by_city.get(city) if has_promotion_gate else None
+
         transition, gates_failed, gate_details, notes = propose_transition(
             city, stage, shadow_data, override,
             auto_canary_cities, blocked_cities, active_cities,
             silent_promo, silent_reason,
+            auto_canary_entry=auto_canary_entry,
+            promo_gate_row=promo_gate_row,
+            has_promotion_gate=has_promotion_gate,
         )
 
         records.append({
@@ -285,16 +425,27 @@ def render_markdown(payload):
         )
     lines += [
         "",
-        "## Manual Review Queue",
+        "## Review Queue",
         "",
-        "Cities requiring human action:",
+        "Cities requiring human attention (strongest signal first):",
         "",
     ]
     action_transitions = {
         "manual_review_pending", "canary_review", "active_review",
-        "observed_audit_review", "silent_promotion_detected", "regression_detected",
+        "observed_audit_review", "preliminary_review_candidate",
+        "silent_promotion_detected", "regression_detected",
     }
+    priority_order = [
+        "silent_promotion_detected", "manual_review_pending",
+        "active_review", "canary_review",
+        "preliminary_review_candidate", "observed_audit_review",
+    ]
     queue = [r for r in payload["cities"] if r["transition_proposed"] in action_transitions]
+    queue.sort(key=lambda r: (
+        priority_order.index(r["transition_proposed"])
+        if r["transition_proposed"] in priority_order else 99,
+        r["city"],
+    ))
     if queue:
         for r in queue:
             notes_str = "; ".join(r["notes"]) if r["notes"] else r["transition_proposed"]

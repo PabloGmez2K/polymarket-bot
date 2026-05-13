@@ -9244,6 +9244,18 @@ def run_tests():
         and "manual_review_pending" in _clrm_src,
     )
     test(
+        "city_lifecycle_review_monitor: T3 independiente de T2 con check_t3_gates",
+        "check_t3_gates" in _clrm_src
+        and "T3_MIN_SHADOW_EDGES_AT_PROMOTION" in _clrm_src
+        and "T3_MIN_BEST_EDGE_PCT_AT_PROMOTION" in _clrm_src,
+    )
+    test(
+        "city_lifecycle_review_monitor: G4 non-range condition presente",
+        "_has_non_range_edge" in _clrm_src
+        and "between" in _clrm_src
+        and "preliminary_review_candidate" in _clrm_src,
+    )
+    test(
         "city_lifecycle_review_monitor: data/city_lifecycle_overrides.json valido con LA",
         _clrm_overrides_ok,
         _clrm_overrides_detail,
