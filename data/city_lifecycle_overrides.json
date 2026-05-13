@@ -1,0 +1,7 @@
+{
+  "Los Angeles": {
+    "manual_review_required_pre_canary": true,
+    "reason": "OBSERVED_AUDIT-only authorization 2026-05-13",
+    "scope": ["pre_canary", "pre_active"]
+  }
+}

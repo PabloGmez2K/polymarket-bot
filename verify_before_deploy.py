@@ -9191,6 +9191,64 @@ def run_tests():
         and "REVIEW_READY" in _daily_observability_run_src,
     )
 
+    # ---- city_lifecycle_review_monitor ----
+    _clrm_path = os.path.join(os.path.dirname(__file__), "tools", "city_lifecycle_review_monitor.py")
+    _clrm_exists = os.path.exists(_clrm_path)
+    _clrm_src = ""
+    _clrm_ast_ok = False
+    _clrm_ast_detail = "file not found"
+    if _clrm_exists:
+        with open(_clrm_path, encoding="utf-8") as _f:
+            _clrm_src = _f.read()
+        try:
+            ast.parse(_clrm_src)
+            _clrm_ast_ok = True
+            _clrm_ast_detail = ""
+        except SyntaxError as _exc:
+            _clrm_ast_detail = str(_exc)
+
+    _clrm_overrides_path = os.path.join(os.path.dirname(__file__), "data", "city_lifecycle_overrides.json")
+    _clrm_overrides_ok = False
+    _clrm_overrides_detail = "file not found"
+    if os.path.exists(_clrm_overrides_path):
+        try:
+            with open(_clrm_overrides_path, encoding="utf-8") as _f:
+                _clrm_overrides_data = json.load(_f)
+            _clrm_overrides_ok = (
+                "Los Angeles" in _clrm_overrides_data
+                and _clrm_overrides_data["Los Angeles"].get("manual_review_required_pre_canary") is True
+            )
+            _clrm_overrides_detail = "" if _clrm_overrides_ok else "Los Angeles override missing or incomplete"
+        except Exception as _exc:
+            _clrm_overrides_detail = str(_exc)
+
+    _clrm_forbidden = [
+        "execute_trade", "post_order", "create_order", "cancel_order",
+        "send_telegram", "api.telegram.org", "TELEGRAM_TOKEN",
+        "requests.post", "httpx", "aiohttp", "railway", "RAILWAY",
+    ]
+    test(
+        "city_lifecycle_review_monitor: tool existe y tiene sintaxis valida",
+        _clrm_exists and _clrm_ast_ok,
+        _clrm_ast_detail,
+    )
+    test(
+        "city_lifecycle_review_monitor: LOG_ONLY disclaimer presente y no trading",
+        "LOG_ONLY" in _clrm_src
+        and "log_only" in _clrm_src
+        and all(_tok not in _clrm_src for _tok in _clrm_forbidden),
+    )
+    test(
+        "city_lifecycle_review_monitor: manual_review_pending nunca canary_review con override",
+        "manual_review_required_pre_canary" in _clrm_src
+        and "manual_review_pending" in _clrm_src,
+    )
+    test(
+        "city_lifecycle_review_monitor: data/city_lifecycle_overrides.json valido con LA",
+        _clrm_overrides_ok,
+        _clrm_overrides_detail,
+    )
+
     # ---- Resultado ----
     print(f"\n{'='*50}")
     total = passed + failed
