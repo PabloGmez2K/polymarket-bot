@@ -10,7 +10,7 @@
 
 - **P0 — CERRADO.** Veredicto Opus: `KEEP_BLOCKED + NEED_MORE_RUNTIME_EVIDENCE`. Cierre en [docs/p0_b5_b6_opus_review_2026_05_13.md](p0_b5_b6_opus_review_2026_05_13.md). BANKROLL **$25 KEEP**, **$35 no autorizado**. **No reabrir** hasta cumplir triggers: ≥28d `cash_flow` valid contiguo + ≥28 wallet snapshots + divergencia 1W vs `trade_lifecycle` reconciliada en documento corto + Pablo dispuesto a iniciar ciclo B5. Calendario estimado: **no antes de 2026-06-08**.
 - **P1 — CERRADO 2026-05-13.** Readout unificado lifecycle + Hazard + INTRA-REEVAL implementado en `tools/sl_intra_case_readout.py`, desplegado y smokeado contra `/app/data`.
-- **Siguiente tarea activa: P2 — Codex read-only — Verificar `review_alert_sent=false` en INTRA-REEVAL** (NORMAL, read-only/reporting primero).
+- **P2 — CERRADO 2026-05-13.** `NO_ACTION operativo / REPORTING_GAP menor`: `/app/data/alerts_state.json` ya tiene `intra_reeval_review_alert_sent=true`; `shadow_log.review_alert_sent=false` en `intra_reeval_state.json` no es autoritativo.
 - **Los Angeles**: `WATCH_DIAGNOSTIC`, no P1.
 - **P3 SL Retrospective**, **P5 DB Throughput**, **P6 Blocked signals**: WATCH/DEFER según cada tarea más abajo.
 
@@ -508,7 +508,7 @@ Nombre orientativo; Codex puede proponer otro si encaja mejor.
 **Agente:** Codex  
 **Modo:** NORMAL read-only primero  
 **Prioridad:** Media  
-**Estado:** pendiente  
+**Estado:** CERRADO 2026-05-13
 **Batch compatible:** P1, solo si no requiere cambio ejecutable.
 
 ## Contexto
@@ -533,6 +533,18 @@ Hay que confirmar si:
 - `BUG_PATCH_READY`
 - `NO_ACTION`
 
+## Cierre 2026-05-13
+
+Veredicto: `NO_ACTION operativo / REPORTING_GAP menor`.
+
+Evidencia:
+
+- `/app/data/alerts_state.json` contiene `intra_reeval_review_alert_sent=true`.
+- El campo `shadow_log.review_alert_sent=false` en `intra_reeval_state.json` no es autoritativo; la idempotencia real de la review vive en `alerts_state`.
+- No hay bug de scheduler actual.
+
+Siguiente: P3 queda solo como `WATCH_RISK / triage`.
+
 ## Guardrails
 
 - Read-only primero.
@@ -550,7 +562,7 @@ Hay que confirmar si:
 **Agente:** Opus si se interpreta semántica; Codex si solo se audita reporte  
 **Modo:** NORMAL/FULL según alcance  
 **Prioridad:** Media-baja  
-**Estado:** diferida  
+**Estado:** WATCH / triage read-only 2026-05-13
 **Batch:** no abrir salvo nueva alarma o si P1 revela métrica accionable.
 
 ## Contexto
@@ -581,6 +593,20 @@ Motivos:
 - `REPORTING_PATCH_READY`
 - `ESCALATE_OPUS_RISK_DECISION`
 - `NO_ACTION`
+
+## Triage Codex 2026-05-13
+
+Veredicto: `KEEP_MONITORING`.
+
+Evidencia minima:
+
+- El bloque actual ya separa la config post-guard v10.6.40 y la muestra sigue pequena (`n=7`, `resueltos=6`, `pendientes=1`).
+- `tools/sl_retrospective.py` ya tiene bloque de config actual post-guard y veredicto de muestra insuficiente / zona gris antes de sacar conclusiones.
+- Cualquier cambio de SL ejecutable o interpretacion de si una falsa salida era estrategicamente realizable requiere decision semantica de Opus.
+
+No patch. No cambiar SL/guards. Reabrir solo con muestra post-guard mayor o nueva alarma.
+
+Prompt corto para Opus si se reabre: "Revisar P3 SL Retrospective post-guard: con muestra F3 actualizada, decidir si la tasa de falsas salidas justifica cambio semantico de SL o si se mantiene monitorizacion; no tocar BANKROLL/Fase C sin evidencia separada."
 
 ---
 
@@ -828,9 +854,8 @@ Para. Esa parte requiere Opus/Pablo. Cierra la tarea actual y deja prompt corto 
 
 1. ~~`P0` con Opus.~~ **CERRADO 2026-05-13** (`KEEP_BLOCKED + NEED_MORE_RUNTIME_EVIDENCE`). No reabrir hasta cumplir triggers documentados.
 2. ~~`P1` con Codex — readout unificado lifecycle + Hazard + INTRA-REEVAL.~~ **CERRADO 2026-05-13** (`NO_EXISTING_TOOL_PATCH_READY`).
-3. `P2` con Codex read-only/reporting.
-4. Mantener `P3-P6` en WATCH salvo alarma nueva.
-5. Ejecutar `M0` manual cuando haya `signals.json` fresco.
+3. Mantener `P3-P6` en WATCH salvo alarma nueva.
+4. Ejecutar `M0` manual cuando haya `signals.json` fresco.
 
 ---
 
@@ -839,7 +864,8 @@ Para. Esa parte requiere Opus/Pablo. Cierra la tarea actual y deja prompt corto 
 - P0 cerrado por Opus: `KEEP_BLOCKED + NEED_MORE_RUNTIME_EVIDENCE`. Doc cierre `docs/p0_b5_b6_opus_review_2026_05_13.md`.
 - Renombrado canónico del backlog: ahora vive en `docs/BACKLOG_ORI_operational_readiness_intelligence.md`.
 - P1 cerrado por Codex: readout unificado `tools/sl_intra_case_readout.py` implementado, desplegado y smokeado contra `/app/data`.
-- Siguiente activa: P2 read-only/reporting (`review_alert_sent=false` en INTRA-REEVAL).
+- P2 cerrado: `NO_ACTION operativo / REPORTING_GAP menor`; no hay bug scheduler actual.
+- P3 triage Codex: `KEEP_MONITORING`; no patch sin muestra post-guard mayor o decision Opus.
 - No se tocaron: BANKROLL, Fase C, trading core, env vars Railway, DB runtime, sizing, whitelist, city modes, scheduler, SL, guards ni reglas BUY/SELL/SKIP.
 
 Veredicto general:
@@ -849,9 +875,9 @@ BANKROLL $25: KEEP
 $35: BLOCKED — no reabrir antes de 2026-06-08 y solo si se cumplen los triggers documentados
 P0: CERRADO (KEEP_BLOCKED + NEED_MORE_RUNTIME_EVIDENCE)
 P1: CERRADO (Codex, readout unificado lifecycle + Hazard + INTRA-REEVAL)
-P2: siguiente activa si sigue read-only/reporting
+P2: CERRADO (NO_ACTION operativo / REPORTING_GAP menor)
 Los Angeles: WATCH_DIAGNOSTIC, no P1 todavía
-SL Retrospective: seguir monitorizando
+SL Retrospective: KEEP_MONITORING
 Traders Intelligence: snapshots manuales
 Blocked signals: WATCH_AUDIT
 DB Throughput: strategy watch, no acción sin Opus
