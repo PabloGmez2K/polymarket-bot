@@ -336,13 +336,26 @@ def pnl_cash(record: dict[str, Any]) -> float | None:
 
 def pnl_pct(record: dict[str, Any]) -> float | None:
     close = record.get("close_context") or {}
-    explicit = as_float(first_present(record.get("pnl_pct"), close.get("pnl_pct")))
-    if explicit is not None:
-        return explicit
     cash = pnl_cash(record)
     amount = total_amount(record)
     if cash is not None and amount:
         return round((cash / amount) * 100.0, 1)
+    explicit = as_float(first_present(record.get("pnl_pct"), close.get("pnl_pct")))
+    if explicit is not None:
+        return explicit
+    return None
+
+
+def close_price(record: dict[str, Any]) -> float | None:
+    close = record.get("close_context") or {}
+    price = as_float(first_present(record.get("close_price"), close.get("close_price")))
+    if price is not None:
+        return price
+    action = close_action(record)
+    if action == "RESOLVED_WIN":
+        return 1.0
+    if action == "LOSS_TOTAL":
+        return 0.0
     return None
 
 
@@ -397,6 +410,14 @@ def classify_case(record: dict[str, Any], hazards: list[dict[str, Any]], reevals
             if outcome.get("classification") == "GOOD_SHADOW":
                 return "REEVAL_GOOD_SHADOW"
             if outcome.get("classification") == "BAD_SHADOW":
+                return "REEVAL_BAD_SHADOW"
+        trigger_prices = [as_float(row.get("cur_price")) for row in reevals]
+        trigger_prices = [value for value in trigger_prices if value is not None]
+        final_price = close_price(record)
+        if final_price is not None and trigger_prices:
+            if final_price < min(trigger_prices):
+                return "REEVAL_GOOD_SHADOW"
+            if final_price > max(trigger_prices):
                 return "REEVAL_BAD_SHADOW"
     if has_hazard and final_win:
         return "HAZARD_OBSERVED_WIN"

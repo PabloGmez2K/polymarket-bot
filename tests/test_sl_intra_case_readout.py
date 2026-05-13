@@ -223,3 +223,54 @@ def test_cli_markdown_output(tmp_path: Path) -> None:
     assert "# SL_intra Case Readout" in result.stdout
     assert "REEVAL_WOULD_SELL_BUT_FINAL_WIN" in result.stdout
     assert "LOG_ONLY readout" in result.stdout
+
+
+def test_would_sell_before_final_loss_is_good_shadow(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    write_json(
+        data_dir / "trade_lifecycle.json",
+        {
+            "records": [
+                {
+                    "token_id": "tok-loss",
+                    "question": "Will the highest temperature in Seoul be 21C on May 12?",
+                    "city": "Seoul",
+                    "side": "NO",
+                    "status": "closed",
+                    "total_amount": 4.75,
+                    "entry_context": {"condition": "exact", "edge_pct": 21.9},
+                    "close_context": {
+                        "close_action": "LOSS_TOTAL",
+                        "close_reason": "micro_position_unsellable",
+                        "pnl_cash": -2.34,
+                    },
+                }
+            ]
+        },
+    )
+    write_json(
+        data_dir / "intra_reeval_state.json",
+        {
+            "shadow_log": {
+                "triggers": [
+                    {
+                        "token_id": "tok-loss",
+                        "city": "Seoul",
+                        "cur_price": 0.12,
+                        "fresh_edge_pct": -7.1,
+                        "entry_edge_pct": 21.9,
+                        "would_sell": True,
+                    }
+                ]
+            }
+        },
+    )
+    module = load_tool_module()
+
+    args = module.parse_args(["--data-dir", str(data_dir), "--token-id", "tok-loss"])
+    report = module.build_report(args)
+
+    case = report["cases"][0]
+    assert case["classification"] == "REEVAL_GOOD_SHADOW"
+    assert case["real_pnl_pct"] == -49.3
