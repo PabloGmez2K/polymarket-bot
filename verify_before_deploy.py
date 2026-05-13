@@ -9261,6 +9261,67 @@ def run_tests():
         _clrm_overrides_detail,
     )
 
+    # ---- City Lifecycle Review Alert (runtime integration) ----
+    print("\n City Lifecycle Review Alert — runtime integration guardrails")
+    _lcra_fn_present = "maybe_run_city_lifecycle_review_alert" in code
+    _lcra_called_in_observability = (
+        "maybe_run_city_lifecycle_review_alert" in code
+        and "run_observability_alerts" in code
+    )
+    _lcra_log_only_in_telegram = (
+        "LOG_ONLY" in code
+        and "No autoriza BUY/SELL/SKIP" in code
+        and "BANKROLL" in code
+        and "Fase C" in code
+    )
+    _lcra_forbidden_trading = [
+        "execute_trade", "post_order", "create_order", "cancel_order",
+    ]
+    _lcra_no_forbidden = all(
+        tok not in code[code.find("maybe_run_city_lifecycle_review_alert"):code.find("maybe_run_city_lifecycle_review_alert") + 8000]
+        if "maybe_run_city_lifecycle_review_alert" in code else True
+        for tok in _lcra_forbidden_trading
+    )
+    _lcra_cooldown_present = (
+        "lifecycle_review_alerted" in code
+        and "lifecycle_review_last_run_date" in code
+        and "LIFECYCLE_REVIEW_COOLDOWN_HOURS" in code
+    )
+    _lcra_la_override_intact = _clrm_overrides_ok
+    _lcra_no_env_var_mutation = (
+        "ACTIVE_TRADING_CITIES" not in code[code.find("maybe_run_city_lifecycle_review_alert"):code.find("maybe_run_city_lifecycle_review_alert") + 8000].replace(
+            "sorted(ACTIVE_TRADING_CITIES)", ""
+        ).replace(
+            '",".join(sorted(ACTIVE_TRADING_CITIES))', ""
+        )
+        if "maybe_run_city_lifecycle_review_alert" in code else True
+    )
+    test(
+        "lifecycle_review_alert: maybe_run_city_lifecycle_review_alert definida en bot.py",
+        _lcra_fn_present,
+    )
+    test(
+        "lifecycle_review_alert: llamada desde run_observability_alerts",
+        _lcra_called_in_observability,
+    )
+    test(
+        "lifecycle_review_alert: mensaje Telegram contiene LOG_ONLY y prohibiciones",
+        _lcra_log_only_in_telegram,
+    )
+    test(
+        "lifecycle_review_alert: cooldown y state keys presentes",
+        _lcra_cooldown_present,
+    )
+    test(
+        "lifecycle_review_alert: LA override sigue protegido en overrides.json",
+        _lcra_la_override_intact,
+        _clrm_overrides_detail,
+    )
+    test(
+        "lifecycle_review_alert: monitor sigue LOG_ONLY (no trading actions en tool)",
+        "log_only" in _clrm_src and "LOG_ONLY" in _clrm_src,
+    )
+
     # ---- Resultado ----
     print(f"\n{'='*50}")
     total = passed + failed

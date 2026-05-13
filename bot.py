@@ -784,6 +784,19 @@ CITY_INTELLIGENCE_RUNTIME_BRIDGE_ENABLED = os.getenv("CITY_INTELLIGENCE_RUNTIME_
 CITY_INTELLIGENCE_RUNTIME_BRIDGE_HOUR_UTC = int(os.getenv("CITY_INTELLIGENCE_RUNTIME_BRIDGE_HOUR_UTC", "7"))
 BLOCKED_SIGNALS_FILE = _data_path("blocked_signals_resolutions.jsonl")
 TRADERS_DB_FILE = _seed_data_file("traders_db.json")
+LIFECYCLE_REVIEW_JSON_FILE = _data_path("city_lifecycle_review.json")
+LIFECYCLE_REVIEW_COOLDOWN_HOURS = 24
+_LIFECYCLE_MONITOR_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "tools",
+    "city_lifecycle_review_monitor.py",
+)
+_LIFECYCLE_REVIEW_ALERT_TRANSITIONS = {
+    "manual_review_pending",
+    "canary_review",
+    "active_review",
+    "silent_promotion_detected",
+}
 
 
 def load_performance_history():
@@ -1196,6 +1209,8 @@ def load_alerts_state():
         "unsellable_guard_action_review_sent": False,
         "unsellable_guard_safety_alert_sent": False,
         "unsellable_guard_safety_last_seen_at": None,
+        "lifecycle_review_last_run_date": None,
+        "lifecycle_review_alerted": {},
     }
     if not os.path.exists(ALERTS_FILE):
         return default
@@ -1248,6 +1263,8 @@ def load_alerts_state():
         state.setdefault("unsellable_guard_action_review_sent", False)
         state.setdefault("unsellable_guard_safety_alert_sent", False)
         state.setdefault("unsellable_guard_safety_last_seen_at", None)
+        state.setdefault("lifecycle_review_last_run_date", None)
+        state.setdefault("lifecycle_review_alerted", {})
         return state
     except Exception:
         return default
@@ -5055,6 +5072,159 @@ def maybe_run_recorder_health_alert(state: dict) -> bool:
     return changed
 
 
+def maybe_run_city_lifecycle_review_alert(state: dict) -> bool:
+    """City Lifecycle Review Monitor — integración runtime (LOG_ONLY).
+
+    Ejecuta el monitor una vez por día y avisa por Telegram si hay transiciones
+    relevantes (manual_review_pending, canary_review, active_review,
+    silent_promotion_detected) con cooldown de 24h por ciudad+transición.
+
+    LOG_ONLY: no toca BUY/SELL/SKIP, whitelist, city modes, BANKROLL, Fase C.
+    No escribe en /app/data salvo city_lifecycle_review.json y el cooldown en alerts_state.
+    Retorna True si se modificó el state.
+    """
+    import importlib.util
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if state.get("lifecycle_review_last_run_date") == today:
+        return False
+
+    if not os.path.exists(_LIFECYCLE_MONITOR_SCRIPT):
+        log.warning("lifecycle review: tools/city_lifecycle_review_monitor.py no encontrado")
+        return False
+
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "city_lifecycle_review_monitor", _LIFECYCLE_MONITOR_SCRIPT
+        )
+        monitor_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(monitor_mod)
+    except Exception as e:
+        log.warning(f"lifecycle review: error importando monitor ({e})")
+        return False
+
+    try:
+        policy_state = load_city_policy_state()
+        shadow_tracking = load_shadow_city_tracking()
+
+        policy_env = {
+            "variables": {
+                "ACTIVE_TRADING_CITIES": ",".join(sorted(ACTIVE_TRADING_CITIES)),
+                "CANARY_TRADING_CITIES": ",".join(sorted(CANARY_TRADING_CITIES)),
+                "BLOCKED_CITIES": ",".join(sorted(BLOCKED_CITIES)),
+            }
+        }
+
+        overrides_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "data", "city_lifecycle_overrides.json",
+        )
+        overrides = {}
+        if os.path.exists(overrides_path):
+            try:
+                with open(overrides_path, "r", encoding="utf-8") as _f:
+                    overrides = json.load(_f)
+            except Exception:
+                pass
+
+        promo_gate = None
+        promo_gate_path = _data_path("city_promotion_gate.json")
+        if os.path.exists(promo_gate_path):
+            try:
+                with open(promo_gate_path, "r", encoding="utf-8") as _f:
+                    promo_gate = json.load(_f)
+            except Exception:
+                pass
+
+        inputs = {
+            "policy_env": policy_env,
+            "policy_state": policy_state,
+            "shadow_tracking": shadow_tracking,
+            "overrides": overrides,
+            "promotion_gate": promo_gate,
+        }
+        records = monitor_mod.build_city_records(inputs)
+    except Exception as e:
+        log.warning(f"lifecycle review: error construyendo records ({e})")
+        return False
+
+    try:
+        stage_counts = {}
+        transition_counts = {}
+        for r in records:
+            stage_counts[r["lifecycle_stage"]] = stage_counts.get(r["lifecycle_stage"], 0) + 1
+            transition_counts[r["transition_proposed"]] = transition_counts.get(r["transition_proposed"], 0) + 1
+        payload = {
+            "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            "log_only": True,
+            "disclaimer": monitor_mod.LOG_ONLY_DISCLAIMER,
+            "summary": {
+                "n_cities": len(records),
+                "stage_counts": stage_counts,
+                "transition_counts": transition_counts,
+            },
+            "cities": records,
+        }
+        outdir = os.path.dirname(LIFECYCLE_REVIEW_JSON_FILE)
+        if outdir:
+            os.makedirs(outdir, exist_ok=True)
+        with open(LIFECYCLE_REVIEW_JSON_FILE, "w", encoding="utf-8") as _f:
+            json.dump(payload, _f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        log.warning(f"lifecycle review: error guardando JSON ({e})")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    now_dt = datetime.now(timezone.utc)
+    alerted = state.setdefault("lifecycle_review_alerted", {})
+    changed = False
+
+    for record in records:
+        transition = record.get("transition_proposed", "")
+        if transition not in _LIFECYCLE_REVIEW_ALERT_TRANSITIONS:
+            continue
+
+        city = record.get("city", "?")
+        cooldown_key = f"{city}|{transition}"
+        last_sent = alerted.get(cooldown_key)
+        if last_sent:
+            try:
+                last_dt = datetime.fromisoformat(last_sent)
+                if (now_dt - last_dt).total_seconds() < LIFECYCLE_REVIEW_COOLDOWN_HOURS * 3600:
+                    continue
+            except Exception:
+                pass
+
+        stage = record.get("lifecycle_stage", "?")
+        override = record.get("override") or {}
+        notes = record.get("notes") or []
+        gates_failed = record.get("gates_failed") or []
+
+        override_tag = " [OVERRIDE]" if override else ""
+        notes_str = "\n".join(f"• {n}" for n in notes[:3]) if notes else "—"
+        gates_str = ", ".join(gates_failed[:3]) if gates_failed else "—"
+
+        message = "\n".join([
+            "<b>City Lifecycle Review</b> (LOG_ONLY)",
+            "",
+            f"<b>{city}</b>{override_tag} → <code>{transition}</code>",
+            f"Stage actual: <code>{stage}</code>",
+            "",
+            "<b>Notas:</b>",
+            notes_str,
+            f"<b>Gates fallidos:</b> {gates_str}",
+            "",
+            "<i>LOG_ONLY — No autoriza BUY/SELL/SKIP, whitelist, canary, active, BANKROLL ni Fase C.</i>",
+            "<i>Requiere revisión humana explícita antes de cualquier cambio de policy.</i>",
+        ])
+
+        send_telegram(message)
+        alerted[cooldown_key] = now_iso
+        changed = True
+
+    state["lifecycle_review_last_run_date"] = today
+    return changed
+
+
 def run_observability_alerts():
     """
     Alertas one-shot de observabilidad y review readiness.
@@ -5712,6 +5882,15 @@ def run_observability_alerts():
         logger = globals().get("log")
         if logger:
             logger.warning(f"recorder health alert: fallo ({e})")
+
+    # City Lifecycle Review Monitor — LOG_ONLY, daily, Telegram cooldown 24h/ciudad+transición.
+    try:
+        if maybe_run_city_lifecycle_review_alert(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"lifecycle review alert: fallo ({e})")
 
     if changed:
         save_alerts_state(state)
