@@ -75,10 +75,7 @@ Score actual 38.4%, umbral 40%. La dimensión crítica es D1 (WR Confidence = 0/
 
 **Acción concreta:** Pablo ejecuta:
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 ssh `
-  "python tools/wallet_cash_flow_log.py --write --actor pablo_manual `
-   --note 'No deposits or withdrawals 2026-05-11 to 2026-05-13' `
-   --period-start 2026-05-11T08:00:53Z --period-end 2026-05-13T20:00:00Z 2>&1"
+powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 ssh "python tools/wallet_cash_flow_log.py append --type no_cash_flow_attestation --period-start 2026-05-11T08:00:53Z --period-end 2026-05-13T08:00:48Z --note 'Pablo manual attestation: no deposits, withdrawals, or other external Polymarket cash flows during this period.' --data-dir /app/data --write --yes --json"
 ```
 
 **Impacto:** Cierra la brecha de attestation. `pnl_report.py` 1W podría pasar de `blocked` a `provisional` con coverage >7d. No promueve a `canonical` ni desbloquea BANKROLL — solo mejora la calidad de observabilidad.
