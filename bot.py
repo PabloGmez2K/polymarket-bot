@@ -217,10 +217,10 @@ BLOCKED_CITIES = {
     city.strip().lower()
     for city in os.getenv(
         "BLOCKED_CITIES",
-        # ⚠ BLOCKED_CITIES = fuente de datos rota o irrecuperable.
-        # Estas ciudades se IGNORAN COMPLETAMENTE: sin trading, sin forecast, sin NOAA.
-        # Usar SOLO cuando el pipeline de datos (WU/Open-Meteo/resolución) es estructuralmente
-        # infiable para esa ciudad. No usar para "no quiero operar por ahora".
+        # BLOCKED_CITIES = hard block de trading/admission.
+        # Estas ciudades NO pueden abrir BUY ni como active, canary, auto_canary
+        # ni por quality-trader gate. La observacion NOAA/shadow queda separada:
+        # si existe proxy observado valido, pueden seguir acumulando forecast audit.
         #
         # Para "no operar pero sí observar/acumular NOAA":
         #   → No incluir en ACTIVE_TRADING_CITIES (quedan en shadow automáticamente).
@@ -230,7 +230,7 @@ BLOCKED_CITIES = {
         #   active  → opera + observa  (en ACTIVE_TRADING_CITIES)
         #   canary  → opera pequeño + observa  (en CANARY_TRADING_CITIES o auto_canary)
         #   shadow  → solo observa, no opera  (default si no está en ninguna lista)
-        #   blocked → ignorada por completo  (en BLOCKED_CITIES o auto_blocked)
+        #   blocked → sin trading/admission  (en BLOCKED_CITIES o auto_blocked)
         "London,Miami,Seattle,Paris,Tel Aviv,Wellington,Toronto,Madrid,Singapore,Ankara"
     ).split(",")
     if city.strip()
@@ -309,13 +309,11 @@ def get_min_days_ahead():
 
 
 def is_city_blocked(city):
-    """Devuelve True si la ciudad está bloqueada operativamente."""
+    """Devuelve True si la ciudad esta bloqueada para trading/admission."""
     city = str(city or "").strip()
     if not city:
         return False
-    observed_proxy_helper = globals().get("_city_has_observed_proxy")
-    has_observed_proxy = observed_proxy_helper(city) if callable(observed_proxy_helper) else False
-    return city.lower() in BLOCKED_CITIES and not has_observed_proxy
+    return city.lower() in BLOCKED_CITIES
 
 
 def _city_has_observed_proxy(city):
@@ -330,6 +328,18 @@ def _city_has_observed_proxy(city):
         resolution_meta.get("noaa_station_id")
         or resolution_meta.get("noaa_daily_station_id")
     )
+
+
+def should_skip_observation(city):
+    """True si una ciudad bloqueada no tiene proxy observado util para auditar."""
+    city = str(city or "").strip()
+    if not city:
+        return False
+    if not is_city_blocked(city):
+        return False
+    observed_proxy_helper = globals().get("_city_has_observed_proxy")
+    has_observed_proxy = observed_proxy_helper(city) if callable(observed_proxy_helper) else False
+    return not has_observed_proxy
 
 
 def _city_requires_manual_proxy_canary_review(city):
@@ -8033,7 +8043,7 @@ def sync_city_policy_state(notify=True):
                 )
             continue
 
-        if decision == "promote" and current_mode == "shadow" and city not in auto_blocked and city not in ACTIVE_TRADING_CITIES and city.lower() not in (globals().get("BLOCKED_CITIES") or set()):
+        if decision == "promote" and current_mode == "shadow" and city not in auto_blocked and city not in ACTIVE_TRADING_CITIES and not is_city_blocked(city):
             auto_canary[city] = {
                 "promoted_at": now_iso,
                 "reason": row.get("reason", ""),
@@ -20150,7 +20160,7 @@ def main(client):
         # v10.3: min_days PER-CITY según zona horaria (Bug #5 fix)
         city = parsed["city"]
         city_mode = get_effective_city_mode(city, policy_state=policy_state)
-        if city_mode == "blocked":
+        if should_skip_observation(city):
             blocked_city_skip += 1
             blocked_seen.add(city)
             skip_log_entries.append(_make_skip_entry(
@@ -20290,7 +20300,7 @@ def main(client):
     if city_window_skipped:
         dl.append(f"VENTANA: {city_window_skipped} mercados same-day fuera de ventana ({', '.join(sorted(city_window_cities))})")
     if blocked_seen:
-        dl.append(f"  🚫 Ciudades bloqueadas operativamente: {', '.join(sorted(blocked_seen))} (sin NOAA utilizable para observacion)")
+        dl.append(f"  🚫 Ciudades bloqueadas operativamente: {', '.join(sorted(blocked_seen))} (sin proxy observado util)")
     if allowlist_seen:
         dl.append(f"  ✅ Allowlist activa: {', '.join(sorted(ACTIVE_TRADING_CITIES))}")
 

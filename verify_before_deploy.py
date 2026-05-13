@@ -560,6 +560,11 @@ def run_tests():
          'if not allowlisted:' in code
          and 'SHADOW {city}: fuera de ACTIVE_TRADING_CITIES (se observa, no se compra)' in code)
     test("is_city_blocked definida", "def is_city_blocked(" in code)
+    test("should_skip_observation definida", "def should_skip_observation(" in code)
+    test("BLOCKED_CITIES hard-block desacoplado de observacion",
+         "return city.lower() in BLOCKED_CITIES" in get_function_source(module_ast, code_lines, "is_city_blocked")
+         and "not has_observed_proxy" not in get_function_source(module_ast, code_lines, "is_city_blocked")
+         and "not has_observed_proxy" in get_function_source(module_ast, code_lines, "should_skip_observation"))
     test("parse_market_date_iso definida", "def parse_market_date_iso(" in code)
     test("format_postmortem_label definida", "def format_postmortem_label(" in code)
 
@@ -788,7 +793,8 @@ def run_tests():
 
     print("\n Bloqueo London")
     test("main filtra ciudades bloqueadas", "blocked_city_skip" in code and "Ciudades bloqueadas operativamente" in code)
-    test("London se bloquea por helper", 'if is_city_blocked(city):' in code)
+    test("scan separa hard block de skip observacion", "if should_skip_observation(city):" in code)
+    test("auto_canary no promueve ciudades bloqueadas", "and not is_city_blocked(city)" in code)
 
     # ---- Test 15: Integridad de COMMANDS (todos los botones siguen presentes) ----
     print("\n Integridad de COMMANDS")
@@ -852,8 +858,20 @@ def run_tests():
         exec(get_function_source(module_ast, code_lines, "parse_market_date_iso"), ns)
         exec(get_function_source(module_ast, code_lines, "format_market_date_short"), ns)
         exec(get_function_source(module_ast, code_lines, "format_postmortem_label"), ns)
-        helper_ns = {"BLOCKED_CITIES": {"london", "paris", "miami", "seattle", "tel aviv", "wellington", "toronto", "madrid", "singapore", "ankara"}}
+        helper_ns = {
+            "BLOCKED_CITIES": {"london", "paris", "atlanta", "chicago", "no proxy"},
+            "OBSERVED_AUDIT_CITIES": {"Paris", "London", "Atlanta", "Chicago"},
+            "RESOLUTION_ICAO": {
+                "Paris": {"noaa_station_id": "07157099999"},
+                "London": {"noaa_station_id": "03768399999"},
+                "Atlanta": {"noaa_station_id": "72219013874"},
+                "Chicago": {"noaa_station_id": "72530094846"},
+                "No Proxy": {"icao": "XXXX"},
+            },
+        }
         exec(get_function_source(module_ast, code_lines, "is_city_blocked"), helper_ns)
+        exec(get_function_source(module_ast, code_lines, "_city_has_observed_proxy"), helper_ns)
+        exec(get_function_source(module_ast, code_lines, "should_skip_observation"), helper_ns)
 
         label_paris = ns["_parse_position_label"](
             "Will the temperature in Paris be 11°C on March 29?",
@@ -871,8 +889,16 @@ def run_tests():
              helper_ns["is_city_blocked"]("London") and helper_ns["is_city_blocked"]("london"))
         test("blocked city helper: Paris bloqueada",
              helper_ns["is_city_blocked"]("Paris"))
-        test("blocked city helper: Chicago permitida",
-             not helper_ns["is_city_blocked"]("Chicago"))
+        test("blocked city helper: Atlanta y Chicago bloqueadas",
+             helper_ns["is_city_blocked"]("Atlanta") and helper_ns["is_city_blocked"]("Chicago"))
+        test("blocked city con proxy NOAA sigue observable",
+             not helper_ns["should_skip_observation"]("Paris")
+             and not helper_ns["should_skip_observation"]("London")
+             and not helper_ns["should_skip_observation"]("Atlanta")
+             and not helper_ns["should_skip_observation"]("Chicago"))
+        test("blocked city sin proxy se salta de observacion",
+             helper_ns["is_city_blocked"]("No Proxy") is True
+             and helper_ns["should_skip_observation"]("No Proxy") is True)
 
         fd, tmp_cycles = tempfile.mkstemp(
             dir=_verify_tmp_dir(),
@@ -1711,6 +1737,7 @@ def run_tests():
             },
             "save_city_policy_state": lambda data: transition_messages.append(("save", data)),
             "get_effective_city_mode": lambda city, policy_state=None: "shadow" if city == "New York City" else "active",
+            "is_city_blocked": lambda city: False,
             "send_telegram": lambda text, with_menu=False, custom_keyboard=None: transition_messages.append(("msg", text)),
         }
         exec(get_function_source(module_ast, code_lines, "_build_auto_city_shadow_policy"), sync_policy_ns)
@@ -1789,6 +1816,7 @@ def run_tests():
             },
             "save_city_policy_state": lambda data: canary_remove_messages.append(("save", data)),
             "get_effective_city_mode": lambda city, policy_state=None: "canary",
+            "is_city_blocked": lambda city: False,
             "send_telegram": lambda text, with_menu=False, custom_keyboard=None: canary_remove_messages.append(("msg", text)),
         }
         exec(get_function_source(module_ast, code_lines, "_build_auto_city_shadow_policy"), canary_remove_ns)

@@ -36,7 +36,14 @@ def classify_collision(env_mode, runtime_mode, cross_mode, effective_mode, drift
     runtime_effective = RUNTIME_TO_EFFECTIVE.get(runtime_mode)
 
     if "env_runtime_collision" in drift_flags:
+        if env_mode == "blocked" and effective_mode == "blocked":
+            return "documented_drift"
+        if env_mode in {"active", "canary"} and runtime_effective in {"active", "canary"} and effective_mode in {"active", "canary"}:
+            return "documented_drift"
         return "blocking_operational_collision"
+
+    if env_mode == "blocked" and effective_mode == "blocked" and cross_mode in {"active", "canary"}:
+        return "documented_drift"
 
     if cross_mode in {"active", "canary"} and effective_mode in {"shadow", "blocked"}:
         return "blocking_operational_collision"
