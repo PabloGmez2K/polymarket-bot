@@ -348,14 +348,14 @@ def pnl_pct(record: dict[str, Any]) -> float | None:
 
 def close_price(record: dict[str, Any]) -> float | None:
     close = record.get("close_context") or {}
-    price = as_float(first_present(record.get("close_price"), close.get("close_price")))
-    if price is not None:
-        return price
     action = close_action(record)
     if action == "RESOLVED_WIN":
         return 1.0
     if action == "LOSS_TOTAL":
         return 0.0
+    price = as_float(first_present(record.get("close_price"), close.get("close_price")))
+    if price is not None:
+        return price
     return None
 
 
