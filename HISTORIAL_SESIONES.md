@@ -5401,3 +5401,25 @@ BLOCKED_CITIES=London
 ### NO se toco
 
 BANKROLL, Fase C, sigma, MIN_EDGE, low-price buffer, Kelly, sizing, exits, scheduler, NOAA, settlement logic, DB, trading core semántico.
+
+---
+
+## Sesión 345 - 13 de mayo de 2026 22:11 +02:00 (Codex)
+
+**Clasificacion:** ACTION_NOW / ESCALATE_OPUS
+**Bloque:** Auditoria read-only alarmas Telegram / runtime policy
+**Veredicto:** PARIS_BLOCKED_ENV_BOUGHT_AS_CANARY / OPUS_REVIEW_REQUIRED
+
+### Resumen
+
+Auditoria read-only de las alarmas recientes confirma contradiccion runtime/policy: Railway tenia `BLOCKED_CITIES=London,Paris,Atlanta,Chicago`, pero el ciclo #304 (`2026-05-13T06:39:03Z`) compro Paris NO como `city_mode=canary`. Causa tecnica localizada: `is_city_blocked()` no aplica bloqueo duro si la ciudad tiene observed/NOAA proxy, por lo que Paris cae por `auto_canary_cities` pese al env blocked. Esto contradice el contrato operativo documentado de que `blocked` no tradea ni observa.
+
+- Paris: contradiccion runtime/policy; escalar a Opus antes de cualquier patch.
+- Munich: CANARY permitido por diseno; ciclo #304 compro Munich NO y cerro TP intra con PnL positivo.
+- Seoul: CANARY esperado; ciclo #301 compro Seoul YES con sizing canary y luego cerro por `stop_loss_intra`.
+- Los Angeles: gap operativo real en traders-vs-bot; no esta en whitelist, `RESOLUTION_ICAO` ni `OBSERVED_AUDIT_CITIES`, y requiere paquete de revision humana/Opus antes de cualquier cambio.
+- L2 Hazard e INTRA-REEVAL SHADOW en Paris: LOG_ONLY correcto; no ejecutaron SELL ni tocaron lifecycle/trading, aunque operaron sobre una posicion que no deberia existir bajo bloqueo duro.
+
+### NO se toco
+
+No hubo cambios de codigo. No se tocaron BANKROLL, whitelist, city modes, scheduler, trading core, env vars, Railway, DB ni runtime. `CONTEXTO.md` queda sin cambios hasta decision Opus.
