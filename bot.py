@@ -16364,7 +16364,7 @@ RESOLUTION_ICAO = {
     "Amsterdam":      {"icao": "EHAM", "wu_url": _wu_history_url("EHAM")},
     "Jeddah":         {"icao": "OEJN", "wu_url": _wu_history_url("OEJN")},
     "Helsinki":       {"icao": "EFHK", "wu_url": _wu_history_url("EFHK")},
-    "Istanbul":       {"icao": "LTFM", "wu_url": _wu_history_url("LTFM")},
+    "Istanbul":       {"icao": "LTFM", "wu_url": _wu_history_url("LTFM"), "weather_gov_timeseries_site": "LTFM"},
     # Añadida en v10.6.29 — Busan TRADER_ONLY 7/7; WU/RKPK es fuente Polymarket (confirmado Apr-21-2026)
     # NOAA global-hourly 2026: 404 para 47158099999; WU historical "No data" = artefacto JS no renderizado
     "Busan":          {"icao": "RKPK", "wu_url": _wu_history_url("RKPK")},

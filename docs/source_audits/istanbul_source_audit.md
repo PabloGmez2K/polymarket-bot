@@ -2,7 +2,7 @@
 
 Generated: 2026-05-14
 
-Status: `SOURCE_CONFIRMED_LTFM / TECHNICAL_SOURCE_SUPPORT_REVIEW`
+Status: `SOURCE_CONFIRMED_LTFM / APPROVE_WRH_ONLY_AS_SHADOW_SOURCE`
 
 > LOG_ONLY human review package. This package does not authorize execution,
 > policy edits, city-mode changes, automation, bankroll changes, or Phase C.
@@ -19,18 +19,18 @@ read-only Railway checks against `/app/data` on 2026-05-14.
 
 ## Verdict
 
-`SOURCE_CONFIRMED_LTFM / TECHNICAL_SOURCE_SUPPORT_REVIEW`
+`SOURCE_CONFIRMED_LTFM / APPROVE_WRH_ONLY_AS_SHADOW_SOURCE`
 
 Istanbul has strong trader/resolution evidence, mature shadow evidence, and
 Polymarket Gamma API metadata confirming the intended source as NOAA at
 Istanbul Airport via `weather.gov/wrh/timeseries?site=LTFM`.
 
 This does not authorize city-mode changes, policy changes, trading decisions,
-bankroll changes, Phase C, or changes to `bot.py`. The remaining blocker is
-technical: local mappings still lack `noaa_station_id` and
-`noaa_daily_station_id`, so a read-only source-support audit must confirm whether
-the system can use `weather.gov/wrh?site=LTFM` directly or needs an explicit new
-source path.
+bankroll changes, Phase C, active/canary promotion, observed-audit inclusion, or
+promotion gates. Opus verdict: WRH/weather.gov timeseries is not approved as a
+primary source equivalent to NCEI. It is approved only as a separate shadow
+source when Polymarket explicitly cites
+`weather.gov/wrh/timeseries?site=<ICAO>`.
 
 ## Runtime Trader Evidence
 
@@ -103,6 +103,13 @@ Missing source fields:
 - `noaa_station_id`: absent
 - `noaa_daily_station_id`: absent
 
+WRH metadata:
+
+- `weather_gov_timeseries_site`: `LTFM`
+- `observed_dataset`: `weather_gov_wrh_timeseries` for any future WRH shadow
+  records.
+- This metadata is not currently consumed by runtime.
+
 Existing local comment notes Istanbul/LTFM as ICAO-only and states LTFM is absent
 from the NOAA ISD history used by the system. Treat this as local historical
 context, not as final manual source verification.
@@ -146,21 +153,53 @@ event notes `NOAA Istanbul Airport (LTFM) readings`, and the May 7 event says
 
 ## Source And Settlement Risk
 
-Risk: `medium-low source identity / medium technical support`
+Risk: `low source identity / medium technical support / promotion not approved`
 
 Reasons:
 
 - Polymarket source identity is now confirmed as NOAA at Istanbul Airport via
   `site=LTFM`.
+- WRH/weather.gov timeseries is approved only as a distinct shadow dataset,
+  `weather_gov_wrh_timeseries`; it must not be mixed with NCEI.
+- WRH is not a primary equivalent to NCEI and does not feed ranking, promotion
+  gates, city modes, BUY/SELL/SKIP, active/canary eligibility, or
+  `OBSERVED_AUDIT_CITIES`.
 - The current local mapping still lacks `noaa_station_id` and
-  `noaa_daily_station_id`, so the existing observed-audit path may not be able
-  to use the source without a technical adaptation or explicit source contract.
+  `noaa_daily_station_id`, so the existing observed-audit path must not treat
+  WRH as the current NOAA/NCEI station-id contract.
 - Runtime blocked rows still carry `settlement_source=unknown` and
   `settlement_fidelity_status=unverified`; the Gamma API evidence resolves the
   source lookup question but does not update runtime row metadata retroactively.
 - Local mapping uses a WU URL template for `LTFM`, while Polymarket rules cite
   `weather.gov/wrh/timeseries?site=LTFM`; this difference must be reviewed
   before any observed-audit patch.
+
+## WRH Shadow Source Contract
+
+Approved scope:
+
+- WRH may be stored only as a separate shadow source when a Polymarket market
+  explicitly cites `weather.gov/wrh/timeseries?site=<ICAO>`.
+- For Istanbul, the explicit site is `LTFM`, the station label is Istanbul
+  Airport, and the source column is `Temp`.
+- Future WRH observations must carry
+  `observed_dataset=weather_gov_wrh_timeseries`.
+
+Not approved:
+
+- No primary-source equivalence with NCEI.
+- No mixing WRH rows into NCEI observed datasets.
+- No ranking, promotion gates, city modes, active/canary changes,
+  BUY/SELL/SKIP changes, or `OBSERVED_AUDIT_CITIES` changes from this verdict.
+
+Re-evaluation criteria:
+
+- `N >= 20` resolved Istanbul markets with observed WRH values recorded.
+- Mean absolute delta `|Delta C| <= 0.5` against settlement outcomes.
+- No directional bias greater than `0.3 C`.
+- Aggregation rule documented for how WRH hourly `Temp` maps to market
+  settlement.
+- At least one second candidate city with explicit WRH source evidence.
 
 ## Required Manual Confirmation
 
@@ -180,10 +219,10 @@ a technical source-support audit should confirm:
 
 ## Recommended Next Step
 
-Run a read-only technical audit of source support for
-`weather.gov/wrh/timeseries?site=LTFM`. If that audit confirms a robust data path,
-open a separate reviewed patch proposal for source mapping or observed-audit
-handling.
+Implementing a future WRH fetcher or observed-audit comparator requires a
+separate reviewed patch. This package only records the source decision and the
+metadata contract for Istanbul.
 
-Do not change city mode, environment variables, trading settings, or `bot.py`
-from this package alone.
+Do not change city mode, environment variables, trading settings, promotion
+gates, `OBSERVED_AUDIT_CITIES`, or runtime data handling from this package
+alone.
