@@ -2,7 +2,7 @@
 
 Generated: 2026-05-14
 
-Status: `NEEDS_MANUAL_SOURCE_LOOKUP`
+Status: `SOURCE_CONFIRMED_LTFM / TECHNICAL_SOURCE_SUPPORT_REVIEW`
 
 > LOG_ONLY human review package. This package does not authorize execution,
 > policy edits, city-mode changes, automation, bankroll changes, or Phase C.
@@ -10,21 +10,27 @@ Status: `NEEDS_MANUAL_SOURCE_LOOKUP`
 ## Scope
 
 This package captures the runtime evidence that made Istanbul a City Intelligence
-candidate and the source metadata still missing before any later observed-audit
-decision.
+candidate, the Polymarket source metadata now confirmed for recent markets, and
+the technical source-support review still required before any later
+observed-audit decision.
 
 No runtime data was copied into this repo. Evidence below is summarized from
 read-only Railway checks against `/app/data` on 2026-05-14.
 
 ## Verdict
 
-`NEEDS_MANUAL_SOURCE_LOOKUP`
+`SOURCE_CONFIRMED_LTFM / TECHNICAL_SOURCE_SUPPORT_REVIEW`
 
-Istanbul has strong trader/resolution evidence and mature shadow evidence, but
-the current source mapping is ICAO/WU-only. The package is not ready to support
-an observed-audit decision until a human confirms the exact settlement source
-and whether a valid NOAA station identifier exists or should remain explicitly
-absent.
+Istanbul has strong trader/resolution evidence, mature shadow evidence, and
+Polymarket Gamma API metadata confirming the intended source as NOAA at
+Istanbul Airport via `weather.gov/wrh/timeseries?site=LTFM`.
+
+This does not authorize city-mode changes, policy changes, trading decisions,
+bankroll changes, Phase C, or changes to `bot.py`. The remaining blocker is
+technical: local mappings still lack `noaa_station_id` and
+`noaa_daily_station_id`, so a read-only source-support audit must confirm whether
+the system can use `weather.gov/wrh?site=LTFM` directly or needs an explicit new
+source path.
 
 ## Runtime Trader Evidence
 
@@ -101,42 +107,83 @@ Existing local comment notes Istanbul/LTFM as ICAO-only and states LTFM is absen
 from the NOAA ISD history used by the system. Treat this as local historical
 context, not as final manual source verification.
 
+## Polymarket Gamma API Evidence
+
+Lookup method:
+
+- `GET https://gamma-api.polymarket.com/markets/slug/<slug>`
+- The older `GET /markets?slug=<slug>` pattern returned no rows for these
+  closed Istanbul markets during the read-only check.
+
+Confirmed slugs:
+
+- `highest-temperature-in-istanbul-on-may-6-2026-20c`
+- `highest-temperature-in-istanbul-on-may-6-2026-17c`
+- `highest-temperature-in-istanbul-on-may-7-2026-22c`
+- `highest-temperature-in-istanbul-on-may-7-2026-23c`
+- `highest-temperature-in-istanbul-on-may-13-2026-23c`
+
+All five market descriptions confirm the same resolution source pattern:
+
+- Source authority: `NOAA`
+- Station/source name: `Istanbul Airport`
+- Source URL: `https://www.weather.gov/wrh/timeseries?site=LTFM`
+- Data field: highest reading under the `Temp` column
+- Unit handling: switch the table to metric units so it displays degrees Celsius
+- Precision: whole degrees Celsius
+
+Relevant source wording from the market metadata:
+
+> This market will resolve to the temperature range that contains the highest
+> temperature recorded by NOAA at the Istanbul Airport
+
+> The resolution source for this market will be information from NOAA,
+> specifically the highest reading under the `Temp` column
+
+Event metadata also references Istanbul Airport / `LTFM`; for example, the May 6
+event notes `NOAA Istanbul Airport (LTFM) readings`, and the May 7 event says
+`Official NOAA observations at Istanbul Airport`.
+
 ## Source And Settlement Risk
 
-Risk: `medium`
+Risk: `medium-low source identity / medium technical support`
 
 Reasons:
 
-- The city has a plausible airport source (`LTFM`) and a WU daily-history URL.
-- The current mapping lacks NOAA station IDs, so the observed-audit path cannot
-  use the stronger NOAA station contract without a manual exception or explicit
-  confirmation that no NOAA-compatible station exists.
-- Runtime blocked rows have `settlement_source=unknown` and
-  `settlement_fidelity_status=unverified` on newer Istanbul rows.
-- Polymarket settlement source must be confirmed against market rules for
-  Istanbul, especially whether the intended source is `LTFM`, WU `LTFM`, a NOAA
-  weather.gov endpoint, or another named station/source.
+- Polymarket source identity is now confirmed as NOAA at Istanbul Airport via
+  `site=LTFM`.
+- The current local mapping still lacks `noaa_station_id` and
+  `noaa_daily_station_id`, so the existing observed-audit path may not be able
+  to use the source without a technical adaptation or explicit source contract.
+- Runtime blocked rows still carry `settlement_source=unknown` and
+  `settlement_fidelity_status=unverified`; the Gamma API evidence resolves the
+  source lookup question but does not update runtime row metadata retroactively.
+- Local mapping uses a WU URL template for `LTFM`, while Polymarket rules cite
+  `weather.gov/wrh/timeseries?site=LTFM`; this difference must be reviewed
+  before any observed-audit patch.
 
 ## Required Manual Confirmation
 
 Before Istanbul can be promoted from this package to an observed-audit candidate,
-a human source audit should confirm:
+a technical source-support audit should confirm:
 
-- The exact Polymarket settlement source used for Istanbul temperature markets.
-- Whether the settlement source is Istanbul Airport / `LTFM`.
-- Whether the source exposes a stable daily high-temperature record compatible
-  with the system's observed-audit process.
+- Whether the system can query `weather.gov/wrh/timeseries?site=LTFM` directly
+  and extract finalized hourly `Temp` values in Celsius.
 - Whether a valid `noaa_station_id` or `noaa_daily_station_id` exists. If not,
-  document Istanbul as an explicit ICAO/WU-only case and require a separate
-  human decision before observed-audit inclusion.
-- Whether recent resolved rows settle consistently with the candidate source.
+  document Istanbul as an explicit `weather.gov`/ICAO source case and require a
+  separate human decision before observed-audit inclusion.
+- Whether observed-audit tooling can distinguish `weather.gov site=LTFM` from
+  the current NOAA station-id contract without weakening existing source
+  fidelity checks.
+- Whether recent resolved rows settle consistently with the confirmed
+  `weather.gov/wrh/timeseries?site=LTFM` source.
 
 ## Recommended Next Step
 
-Prepare a manual source lookup for Istanbul/LTFM using the latest resolved
-Polymarket market rules and source pages. If that lookup confirms the settlement
-source and resolves the NOAA-ID absence, open a separate reviewed patch proposal
-for source mapping or observed-audit handling.
+Run a read-only technical audit of source support for
+`weather.gov/wrh/timeseries?site=LTFM`. If that audit confirms a robust data path,
+open a separate reviewed patch proposal for source mapping or observed-audit
+handling.
 
 Do not change city mode, environment variables, trading settings, or `bot.py`
 from this package alone.
