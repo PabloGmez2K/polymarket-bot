@@ -5225,6 +5225,181 @@ def maybe_run_city_lifecycle_review_alert(state: dict) -> bool:
     return changed
 
 
+# ---------------------------------------------------------------------------
+# City Intelligence Digest — LOG_ONLY daily unified digest (Fase 1, Telegram wired)
+# ---------------------------------------------------------------------------
+
+_DIGEST_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "tools",
+    "city_intelligence_digest.py",
+)
+_DIGEST_JSON_FILE = _data_path("city_intelligence_digest.json")
+_DIGEST_COOLDOWN_HOURS = 24
+
+# Onboarding states that surface in digest Telegram
+_DIGEST_TELEGRAM_ONBOARDING_STATES = {"READY_FOR_SOURCE_AUDIT"}
+# Audit statuses that surface in digest Telegram
+_DIGEST_TELEGRAM_AUDIT_STATUSES = {"NEEDS_MANUAL_SOURCE_LOOKUP", "READY_FOR_OBSERVED_AUDIT_REVIEW"}
+
+
+def maybe_run_city_intelligence_digest_alert(state: dict) -> bool:
+    """City Intelligence Digest — integración runtime (LOG_ONLY).
+
+    Ejecuta el digest una vez por día y envía UN único Telegram con:
+      - Source Onboarding candidates (no overlap con lifecycle individual alerts)
+      - Source Audit packages pendientes
+      - Review Queue summary (sólo conteo, lifecycle ya envió alerts per-city)
+      - Drift / policy conflicts
+
+    LOG_ONLY: no toca BUY/SELL/SKIP, whitelist, city modes, env vars, BANKROLL, Fase C.
+    No duplica lifecycle alerts: sección Review Queue es sólo resumen de conteo.
+    Retorna True si se modificó el state.
+    """
+    import importlib.util
+    import glob as _glob
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if state.get("digest_last_run_date") == today:
+        return False
+
+    if not os.path.exists(_DIGEST_SCRIPT):
+        log.warning("city_intelligence_digest: tools/city_intelligence_digest.py no encontrado")
+        return False
+
+    try:
+        spec = importlib.util.spec_from_file_location("city_intelligence_digest", _DIGEST_SCRIPT)
+        digest_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(digest_mod)
+    except Exception as e:
+        log.warning(f"city_intelligence_digest: error importando modulo ({e})")
+        return False
+
+    try:
+        lifecycle_path = _data_path("city_lifecycle_review.json")
+        onboarding_path = _data_path("source_onboarding.json")
+        audits_dir = _data_path("source_audits")
+
+        argv = [
+            "--lifecycle-review", lifecycle_path,
+            "--source-onboarding", onboarding_path,
+            "--source-audits-dir", audits_dir,
+            "--json-output", _DIGEST_JSON_FILE,
+        ]
+        try:
+            md_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "docs", "city_intelligence_digest_latest.md",
+            )
+            argv += ["--md-output", md_path]
+        except Exception:
+            pass
+
+        digest_mod.main(argv)
+    except Exception as e:
+        log.warning(f"city_intelligence_digest: error ejecutando digest ({e})")
+
+    # Load the generated digest JSON to build the Telegram message
+    try:
+        if not os.path.exists(_DIGEST_JSON_FILE):
+            state["digest_last_run_date"] = today
+            return True
+
+        with open(_DIGEST_JSON_FILE, "r", encoding="utf-8") as _f:
+            digest_data = json.load(_f)
+    except Exception as e:
+        log.warning(f"city_intelligence_digest: error leyendo JSON generado ({e})")
+        state["digest_last_run_date"] = today
+        return True
+
+    try:
+        summary = digest_data.get("summary", {})
+        review_queue = digest_data.get("review_queue", [])
+        onboarding = digest_data.get("onboarding", {})
+        audit_section = digest_data.get("source_audits", {})
+        drift = digest_data.get("drift", [])
+
+        # Only send Telegram if there's something noteworthy
+        has_content = (
+            len(onboarding.get("ready", [])) > 0
+            or len(audit_section.get("actionable", [])) > 0
+            or len(drift) > 0
+            or summary.get("review_queue_count", 0) > 0
+        )
+        if not has_content:
+            state["digest_last_run_date"] = today
+            return True
+
+        lines = [
+            f"<b>City Intelligence Digest — {today}</b> (LOG_ONLY)",
+            "",
+        ]
+
+        # Review Queue: summary only (per-city alerts sent individually by lifecycle)
+        rq_count = summary.get("review_queue_count", 0)
+        if rq_count > 0:
+            strongest = review_queue[0] if review_queue else None
+            strongest_str = ""
+            if strongest:
+                strongest_str = f" — strongest: <b>{strongest['city']}</b> → {strongest['transition_proposed']}"
+            lines.append(f"<b>Review Queue:</b> {rq_count} ciudad(es) en revisión{strongest_str}")
+            lines.append("<i>(alerts individuales enviados por lifecycle monitor)</i>")
+            lines.append("")
+
+        # Source Onboarding: full detail for READY candidates
+        ready_cities = onboarding.get("ready", [])
+        if ready_cities:
+            lines.append("<b>Source Onboarding — READY_FOR_SOURCE_AUDIT:</b>")
+            for c in ready_cities[:5]:
+                t = c.get("trader", {})
+                b = c.get("blocked_signals", {})
+                wr_str = f"WR={b['wr']:.0%} n={b['n']}" if b.get("wr") is not None and b.get("qualifies") else f"n={b.get('n', 0)}"
+                lines.append(
+                    f"• <b>{c['city']}</b> score={c.get('priority_score', 0):.2f}"
+                    f" {c.get('source_feasibility', '?')}"
+                    f" traders={t.get('n_sources', 0)}/{t.get('n_days', 0)}d {wr_str}"
+                )
+            if len(ready_cities) > 5:
+                lines.append(f"  ... y {len(ready_cities) - 5} más")
+            lines.append("")
+
+        waiting = onboarding.get("waiting_count", 0)
+        if waiting > 0:
+            lines.append(f"<i>Onboarding quiet: {waiting} WAITING_EVIDENCE/RANGE_ONLY</i>")
+            lines.append("")
+
+        # Source Audit packages
+        actionable = audit_section.get("actionable", [])
+        if actionable:
+            lines.append("<b>Source Audit Packages pendientes:</b>")
+            for a in actionable[:5]:
+                next_step = a.get("proposed_next_step") or a.get("recommendation") or "-"
+                lines.append(f"• <b>{a['city']}</b> <code>{a['status']}</code> — {next_step}")
+            lines.append("")
+
+        # Drift / Policy conflicts
+        if drift:
+            lines.append("<b>⚠ Drift / Policy conflicts:</b>")
+            for r in drift[:3]:
+                notes_str = "; ".join(r.get("notes", [])[:1]) or "-"
+                lines.append(f"• <b>{r['city']}</b> <code>silent_promotion_detected</code> — {notes_str}")
+            lines.append("")
+
+        lines += [
+            "<i>LOG_ONLY — No autoriza BUY/SELL/SKIP, whitelist, canary, active, "
+            "env vars, BANKROLL ni Fase C.</i>",
+            "<i>Requiere revisión humana explícita antes de cualquier cambio de policy.</i>",
+        ]
+
+        message = "\n".join(lines)
+        send_telegram(message)
+    except Exception as e:
+        log.warning(f"city_intelligence_digest: error construyendo Telegram ({e})")
+
+    state["digest_last_run_date"] = today
+    return True
+
+
 def run_observability_alerts():
     """
     Alertas one-shot de observabilidad y review readiness.
@@ -5891,6 +6066,15 @@ def run_observability_alerts():
         logger = globals().get("log")
         if logger:
             logger.warning(f"lifecycle review alert: fallo ({e})")
+
+    # City Intelligence Digest — LOG_ONLY, daily unified digest (source onboarding + lifecycle summary).
+    try:
+        if maybe_run_city_intelligence_digest_alert(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"city intelligence digest alert: fallo ({e})")
 
     if changed:
         save_alerts_state(state)

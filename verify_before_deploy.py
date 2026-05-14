@@ -9495,6 +9495,139 @@ def run_tests():
         "log_only" in _clrm_src and "LOG_ONLY" in _clrm_src,
     )
 
+    # ---- city_intelligence_digest ----
+    print("\n City Intelligence Digest v1 LOG_ONLY")
+    _cid_path = os.path.join(os.path.dirname(__file__), "tools", "city_intelligence_digest.py")
+    _cid_exists = os.path.exists(_cid_path)
+    _cid_src = ""
+    _cid_ast_ok = False
+    _cid_ast_detail = "file not found"
+    _cid_imports = set()
+    if _cid_exists:
+        with open(_cid_path, encoding="utf-8") as _f:
+            _cid_src = _f.read()
+        try:
+            _cid_ast_parsed = ast.parse(_cid_src)
+            _cid_ast_ok = True
+            _cid_ast_detail = ""
+            for _node in ast.walk(_cid_ast_parsed):
+                if isinstance(_node, ast.Import):
+                    for _alias in _node.names:
+                        _cid_imports.add(_alias.name.split(".", 1)[0])
+                elif isinstance(_node, ast.ImportFrom) and _node.module:
+                    _cid_imports.add(_node.module.split(".", 1)[0])
+        except SyntaxError as _exc:
+            _cid_ast_detail = str(_exc)
+
+    _cid_forbidden_tokens = [
+        "execute_trade", "post_order", "create_order", "cancel_order",
+        "send_telegram", "api.telegram.org", "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID",
+        "requests", "httpx", "aiohttp", "urllib.request", "railway", "RAILWAY",
+        "/app/data", "os.getenv", "sqlite3", "psycopg",
+    ]
+    # source_audit_workbench must not be imported or called (import/subprocess/exec)
+    _cid_no_saw_call = (
+        "import source_audit_workbench" not in _cid_src
+        and "source_audit_workbench.main" not in _cid_src
+        and "subprocess" not in _cid_src
+    )
+    # city_lifecycle_review_monitor must not be imported or called
+    _cid_no_monitor_call = (
+        "import city_lifecycle_review_monitor" not in _cid_src
+        and "city_lifecycle_review_monitor.main" not in _cid_src
+        and "city_lifecycle_review_monitor.build_city_records" not in _cid_src
+    )
+    _cid_allowed_imports = {
+        "__future__", "argparse", "json", "sys",
+        "collections", "datetime", "pathlib", "glob",
+    }
+    _cid_gitignore_src = _sos_gitignore_src  # reuse already-loaded .gitignore
+    test(
+        "city_intelligence_digest: tool existe y tiene sintaxis valida",
+        _cid_exists and _cid_ast_ok,
+        _cid_ast_detail,
+    )
+    test(
+        "city_intelligence_digest: LOG_ONLY disclaimer presente y completo",
+        "LOG_ONLY" in _cid_src
+        and "log_only" in _cid_src
+        and "No BUY" in _cid_src
+        and "BANKROLL" in _cid_src
+        and "Phase C" in _cid_src or "Fase C" in _cid_src,
+    )
+    test(
+        "city_intelligence_digest: no Telegram/Railway/env vars/DB/red tokens",
+        all(_tok not in _cid_src for _tok in _cid_forbidden_tokens),
+        f"forbidden={[t for t in _cid_forbidden_tokens if t in _cid_src]}",
+    )
+    test(
+        "city_intelligence_digest: stdlib-only imports",
+        _cid_imports <= _cid_allowed_imports,
+        f"imports={sorted(_cid_imports - _cid_allowed_imports)}",
+    )
+    test(
+        "city_intelligence_digest: no ejecuta source_audit_workbench automaticamente",
+        _cid_no_saw_call,
+    )
+    test(
+        "city_intelligence_digest: no importa ni modifica city_lifecycle_review_monitor",
+        _cid_no_monitor_call,
+    )
+    test(
+        "city_intelligence_digest: data/city_intelligence_digest.json en .gitignore",
+        "data/city_intelligence_digest.json" in _cid_gitignore_src,
+    )
+    test(
+        "city_intelligence_digest: outputs en docs/*_latest.md cubiertos por .gitignore",
+        "docs/*_latest.md" in _cid_gitignore_src,
+    )
+
+    # ---- maybe_run_city_intelligence_digest_alert en bot.py ----
+    print("\n City Intelligence Digest — runtime integration guardrails")
+    _cida_fn_present = "maybe_run_city_intelligence_digest_alert" in code
+    _cida_called = (
+        "maybe_run_city_intelligence_digest_alert(state)" in code
+    )
+    _cida_log_only = (
+        "LOG_ONLY" in code
+        and "digest_last_run_date" in code
+        and "_DIGEST_COOLDOWN_HOURS" in code
+    )
+    _cida_no_trading = all(
+        tok not in code[
+            max(0, code.find("maybe_run_city_intelligence_digest_alert")):
+            code.find("maybe_run_city_intelligence_digest_alert") + 10000
+        ]
+        if "maybe_run_city_intelligence_digest_alert" in code else True
+        for tok in ["execute_trade", "post_order", "create_order", "cancel_order"]
+    )
+    _cida_disclaimer = (
+        "No autoriza BUY/SELL/SKIP" in code
+        and "env vars" in code
+        and "BANKROLL" in code
+        and "Fase C" in code
+    )
+    test(
+        "city_intelligence_digest: maybe_run_city_intelligence_digest_alert definida en bot.py",
+        _cida_fn_present,
+    )
+    test(
+        "city_intelligence_digest: llamada desde run_observability_alerts",
+        _cida_called,
+    )
+    test(
+        "city_intelligence_digest: cooldown y state keys presentes",
+        _cida_log_only,
+    )
+    test(
+        "city_intelligence_digest: no trading actions en funcion",
+        _cida_no_trading,
+    )
+    test(
+        "city_intelligence_digest: Telegram mensaje contiene prohibiciones",
+        _cida_disclaimer,
+    )
+
     # ---- Resultado ----
     print(f"\n{'='*50}")
     total = passed + failed
