@@ -37,6 +37,8 @@ OFF_VALUES = {"0", "false", "no", "off"}
 DEFAULT_DAILY_DIGEST_HOUR_UTC = 8
 DEFAULT_STALE_HOURS = 26.0
 DEFAULT_ERROR_COOLDOWN_MINUTES = 360
+DEFAULT_INITIAL_ACTIVITY_SNAPSHOTS = 5
+DEFAULT_LOW_BOT_N_REVIEW = 10
 LOG_ONLY_DISCLAIMER = (
     "LOG_ONLY. No BUY/SELL/SKIP. No city mode changes. Human review required."
 )
@@ -159,6 +161,15 @@ def answerability_map(report: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def telegram_answerability_map(report: dict[str, Any]) -> dict[str, str]:
+    answers = answerability_map(report)
+    summary = report.get("summary") or {}
+    snapshots = int(summary.get("distinct_snapshot_at", 0) or 0)
+    if answers.get("activity_by_hour") == "YES" and snapshots < DEFAULT_INITIAL_ACTIVITY_SNAPSHOTS:
+        answers["activity_by_hour"] = "INITIAL"
+    return answers
+
+
 def row_key(row: dict[str, Any], *fields: str) -> str:
     return "|".join(str(row.get(field, "")) for field in fields)
 
@@ -233,14 +244,22 @@ def run_report(args: argparse.Namespace) -> dict[str, Any]:
 def build_telegram_message(report: dict[str, Any], reasons: list[str], staleness: dict[str, Any]) -> str:
     summary = report.get("summary") or {}
     tables = report.get("tables") or {}
-    answers = answerability_map(report)
+    answers = telegram_answerability_map(report)
     snapshot_count = summary.get("distinct_snapshot_at", 0)
+    raw_answers = answerability_map(report)
 
     lines = [
         "<b>Traders Operational Intelligence</b> (LOG_ONLY)",
-        f"Reasons: {', '.join(reasons)}",
-        f"Snapshots: {snapshot_count} | rows={summary.get('snapshot_rows', 0)}",
-        "Answerability: "
+        "",
+        "<b>Motivo del aviso</b>",
+        f"- {', '.join(reasons)}",
+        "",
+        "<b>Estado de evidencia</b>",
+        f"- Snapshots: {snapshot_count} | rows={summary.get('snapshot_rows', 0)}",
+        "- WR traders: blocked_signals_resolutions win_for_trader/resolved; no es WR realized externo.",
+        "",
+        "<b>Preguntas operativas</b>",
+        "- "
         + ", ".join(
             f"{key}={value}" for key, value in answers.items()
         ),
@@ -249,50 +268,72 @@ def build_telegram_message(report: dict[str, Any], reasons: list[str], staleness
     if staleness.get("stale"):
         age = staleness.get("age_hours")
         age_text = "unknown" if age is None else f"{age:.1f}h"
-        lines.append(f"signals.json stale: age={age_text} reason={staleness.get('reason')}")
+        lines.append(f"- signals.json stale: age={age_text} reason={staleness.get('reason')}")
 
-    if answers.get("activity_by_hour") == "NO":
+    lines.extend(["", "<b>Actividad por hora</b>"])
+    if raw_answers.get("activity_by_hour") == "NO":
         lines.append(
-            "Activity by hour: NO "
+            "- NO "
             f"(snapshots={snapshot_count}; needs at least 2 distinct full snapshots)."
         )
     elif tables.get("top_activity_hours_utc"):
         top_hour = tables["top_activity_hours_utc"][0]
         lines.append(
-            "Activity by hour: "
+            "- "
             f"{top_hour.get('hour_utc')} new={top_hour.get('new_signal_appearances')}"
         )
+        if answers.get("activity_by_hour") == "INITIAL":
+            lines.append("- Primera ventana detectada. Aun falta mas historico para saber si es un patron real.")
 
+    lines.extend(["", "<b>Traders mas activos</b>"])
     top_traders = tables.get("top_traders_by_activity") or []
     if top_traders:
-        parts = []
         for row in top_traders[:3]:
             wr = row.get("blocked_wr_pct")
-            wr_text = "WR=n/a" if wr is None else f"WR={wr}%"
-            parts.append(f"{row.get('trader')} sig={row.get('current_signals')} {wr_text} n={row.get('blocked_n')}")
-        lines.append("Top traders: " + " | ".join(parts))
+            wr_text = "n/a" if wr is None else f"{wr}%"
+            lines.append(
+                f"- {row.get('trader')}: sig={row.get('current_signals')} "
+                f"blocked_signal_wr={wr_text} n={row.get('blocked_n')}"
+            )
+        lines.append("- Caveat: WR segun blocked resolved disponible; revisar antes de conclusiones estrategicas.")
+    else:
+        lines.append("- Sin datos.")
 
+    lines.extend(["", "<b>Ciudad no observada con senal trader</b>"])
     not_observed = tables.get("trader_winning_not_observed") or []
     if not_observed:
         row = not_observed[0]
         lines.append(
-            "Top trader-winning-not-observed: "
+            "- "
             f"{row.get('city')} WR={row.get('trader_wr_pct')}% n={row.get('trader_n')}"
         )
+        lines.append("- Fuente: blocked resolved por ciudad; no implica cambio de modo.")
+    else:
+        lines.append("- Sin candidata destacada.")
 
+    lines.extend(["", "<b>Gaps trader vs bot</b>"])
     gaps = tables.get("trader_winning_bot_gap") or []
     if gaps:
-        gap_parts = []
         for row in gaps[:3]:
             label = row.get("classification")
-            if label == "TRADER_WINNING_BOT_INSUFFICIENT_N":
-                label = "INSUFFICIENT_N"
-            gap_parts.append(
-                f"{row.get('city')} {label} trader={row.get('trader_wr_pct')}%/{row.get('trader_n')} "
-                f"bot_n={row.get('bot_n')}"
+            bot_n = int(row.get("bot_n") or 0)
+            if bot_n < DEFAULT_LOW_BOT_N_REVIEW:
+                label_text = "posible gap a revisar; muestra bot baja"
+            elif label == "TRADER_WINNING_BOT_NOT_WINNING":
+                label_text = "posible gap a revisar"
+            elif label == "TRADER_WINNING_BOT_INSUFFICIENT_N":
+                label_text = "INSUFFICIENT_N"
+            else:
+                label_text = "mixto/ok preliminar"
+            lines.append(
+                f"- {row.get('city')}: {label_text}; "
+                f"trader={row.get('trader_wr_pct')}%/{row.get('trader_n')} "
+                f"bot_wr={row.get('bot_wr_pct')} bot_n={bot_n}"
             )
-        lines.append("Trader-vs-bot gaps: " + " | ".join(gap_parts))
+    else:
+        lines.append("- Sin gaps destacados.")
 
+    lines.extend(["", "<b>No autorizado</b>"])
     lines.append(LOG_ONLY_DISCLAIMER)
     return "\n".join(lines)
 

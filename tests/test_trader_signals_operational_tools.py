@@ -378,7 +378,7 @@ def test_monitor_detects_activity_by_hour_transition_to_yes():
         assert result["should_notify"] is True
 
 
-def test_monitor_telegram_payload_labels_low_bot_n_insufficient():
+def test_monitor_telegram_payload_labels_low_bot_n_as_review():
     module = load_module(MONITOR_PATH, "traders_operational_intelligence_monitor")
     with local_tmp_dir() as tmp_dir:
         args = monitor_args(module, tmp_dir)
@@ -386,8 +386,57 @@ def test_monitor_telegram_payload_labels_low_bot_n_insufficient():
         result = module.build_run(args, env={"TRADERS_OPERATIONAL_INTELLIGENCE_ENABLED": "true"})
 
         assert result["should_notify"] is True
-        assert "INSUFFICIENT_N" in result["telegram_message"]
+        assert "<b>Gaps trader vs bot</b>" in result["telegram_message"]
+        assert "muestra bot baja" in result["telegram_message"]
+        assert "blocked_signal_wr" in result["telegram_message"]
         assert "No BUY/SELL/SKIP" in result["telegram_message"]
+
+
+def test_monitor_telegram_renders_initial_activity_with_two_snapshots():
+    module = load_module(MONITOR_PATH, "traders_operational_intelligence_monitor")
+    report = {
+        "summary": {"distinct_snapshot_at": 2, "snapshot_rows": 140},
+        "questions": [
+            {"answerability": "YES"},
+            {"answerability": "YES"},
+            {"answerability": "YES"},
+            {"answerability": "YES"},
+            {"answerability": "PARTIAL"},
+            {"answerability": "PARTIAL"},
+        ],
+        "tables": {
+            "top_activity_hours_utc": [{"hour_utc": "16:00Z", "new_signal_appearances": 70}],
+            "top_traders_by_activity": [
+                {"trader": "Thrifty-Original", "current_signals": 31, "blocked_wr_pct": 95.4, "blocked_n": 109}
+            ],
+            "trader_winning_not_observed": [
+                {"city": "Istanbul", "trader_wr_pct": 100.0, "trader_n": 22}
+            ],
+            "trader_winning_bot_gap": [
+                {
+                    "city": "London",
+                    "classification": "TRADER_WINNING_BOT_NOT_WINNING",
+                    "trader_wr_pct": 100.0,
+                    "trader_n": 24,
+                    "bot_wr_pct": 40.0,
+                    "bot_n": 5,
+                }
+            ],
+        },
+    }
+
+    message = module.build_telegram_message(
+        report,
+        ["activity_by_hour_NO_to_YES"],
+        {"stale": False},
+    )
+
+    assert "activity_by_hour=INITIAL" in message
+    assert "Primera ventana detectada" in message
+    assert "<b>Motivo del aviso</b>" in message
+    assert "<b>Estado de evidencia</b>" in message
+    assert "<b>No autorizado</b>" in message
+    assert "posible gap a revisar; muestra bot baja" in message
 
 
 def test_monitor_kill_switch_disables_without_error():
