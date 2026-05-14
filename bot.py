@@ -5226,6 +5226,103 @@ def maybe_run_city_lifecycle_review_alert(state: dict) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Source Onboarding Scanner — LOG_ONLY daily runtime integration (genera JSON para digest)
+# ---------------------------------------------------------------------------
+
+_SOURCE_ONBOARDING_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "tools",
+    "source_onboarding_scanner.py",
+)
+_SOURCE_ONBOARDING_JSON_FILE = _data_path("source_onboarding.json")
+
+
+def maybe_run_source_onboarding_scanner(state: dict) -> bool:
+    """Source Onboarding Scanner — integración runtime (LOG_ONLY).
+
+    Ejecuta el scanner una vez por día UTC y genera /app/data/source_onboarding.json
+    que City Intelligence Digest consume en el mismo ciclo.
+
+    LOG_ONLY: no toca BUY/SELL/SKIP, whitelist, city modes, env vars, BANKROLL, Fase C.
+    No envía Telegram propio. No ejecuta source_audit_workbench.
+    Si faltan inputs críticos, loguea warning y degrada limpiamente (el digest leerá
+    el JSON anterior o degradará por su cuenta).
+    Retorna True si se modificó el state.
+    """
+    import importlib.util
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if state.get("source_onboarding_last_run_date") == today:
+        return False
+
+    if not os.path.exists(_SOURCE_ONBOARDING_SCRIPT):
+        log.warning("source_onboarding_scanner: tools/source_onboarding_scanner.py no encontrado")
+        state["source_onboarding_last_run_date"] = today
+        return True
+
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "source_onboarding_scanner", _SOURCE_ONBOARDING_SCRIPT
+        )
+        scanner_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(scanner_mod)
+    except Exception as e:
+        log.warning(f"source_onboarding_scanner: error importando modulo ({e})")
+        state["source_onboarding_last_run_date"] = today
+        return True
+
+    # Sintetizar policy_env_snapshot desde globals (solo city lists, sin secretos)
+    policy_env_path = _data_path("policy_env_snapshot.json")
+    try:
+        policy_env_data = {
+            "variables": {
+                "ACTIVE_TRADING_CITIES": ",".join(sorted(ACTIVE_TRADING_CITIES)),
+                "CANARY_TRADING_CITIES": ",".join(sorted(CANARY_TRADING_CITIES)),
+                "BLOCKED_CITIES": ",".join(sorted(BLOCKED_CITIES)),
+            }
+        }
+        with open(policy_env_path, "w", encoding="utf-8") as _f:
+            json.dump(policy_env_data, _f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        log.warning(f"source_onboarding_scanner: no se pudo escribir policy_env_snapshot ({e})")
+        state["source_onboarding_last_run_date"] = today
+        return True
+
+    overrides_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "data", "city_lifecycle_overrides.json",
+    )
+    md_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "docs", "source_onboarding_latest.md",
+    )
+
+    argv = [
+        "--signals-crosscheck", _data_path("signals_crosscheck.jsonl"),
+        "--blocked-resolutions", _data_path("blocked_signals_resolutions.jsonl"),
+        "--shadow-tracking", _data_path("shadow_city_tracking.json"),
+        "--policy-env", policy_env_path,
+        "--policy-state", _data_path("city_policy_state.json"),
+        "--overrides", overrides_path,
+        "--json-output", _SOURCE_ONBOARDING_JSON_FILE,
+        "--md-output", md_path,
+    ]
+
+    try:
+        result = scanner_mod.main(argv)
+        if result and result != 0:
+            log.warning(
+                f"source_onboarding_scanner: main() returned {result} "
+                "(inputs criticos ausentes — digest degradara limpiamente)"
+            )
+    except Exception as e:
+        log.warning(f"source_onboarding_scanner: error ejecutando scanner ({e})")
+
+    state["source_onboarding_last_run_date"] = today
+    return True
+
+
+# ---------------------------------------------------------------------------
 # City Intelligence Digest — LOG_ONLY daily unified digest (Fase 1, Telegram wired)
 # ---------------------------------------------------------------------------
 
@@ -6066,6 +6163,15 @@ def run_observability_alerts():
         logger = globals().get("log")
         if logger:
             logger.warning(f"lifecycle review alert: fallo ({e})")
+
+    # Source Onboarding Scanner — LOG_ONLY, daily, genera source_onboarding.json para el digest.
+    try:
+        if maybe_run_source_onboarding_scanner(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"source onboarding scanner: fallo ({e})")
 
     # City Intelligence Digest — LOG_ONLY, daily unified digest (source onboarding + lifecycle summary).
     try:

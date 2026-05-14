@@ -9495,6 +9495,119 @@ def run_tests():
         "log_only" in _clrm_src and "LOG_ONLY" in _clrm_src,
     )
 
+    # ---- Source Onboarding Scanner — runtime integration guardrails ----
+    print("\n Source Onboarding Scanner — runtime integration guardrails")
+    _sos_runtime_fn_present = "def maybe_run_source_onboarding_scanner(" in code
+    _sos_runtime_state_key = "source_onboarding_last_run_date" in code
+    _sos_runtime_uses_data_path = (
+        "_data_path(" in code[
+            max(0, code.find("def maybe_run_source_onboarding_scanner(")):
+            code.find("def maybe_run_source_onboarding_scanner(") + 6000
+        ]
+        if _sos_runtime_fn_present else False
+    )
+    _sos_runtime_no_hardcoded_app_data = (
+        '"/app/data' not in code[
+            max(0, code.find("def maybe_run_source_onboarding_scanner(")):
+            code.find("def maybe_run_source_onboarding_scanner(") + 6000
+        ]
+        if _sos_runtime_fn_present else True
+    )
+    _sos_runtime_no_telegram = (
+        "send_telegram" not in code[
+            max(0, code.find("def maybe_run_source_onboarding_scanner(")):
+            code.find("def maybe_run_source_onboarding_scanner(") + 6000
+        ]
+        if _sos_runtime_fn_present else True
+    )
+    _sos_runtime_fn_body = code[
+        max(0, code.find("def maybe_run_source_onboarding_scanner(")):
+        code.find("def maybe_run_source_onboarding_scanner(") + 6000
+    ] if _sos_runtime_fn_present else ""
+    # Mention in docstring is OK; actual import/invocation is not
+    _sos_runtime_no_workbench = (
+        "import source_audit_workbench" not in _sos_runtime_fn_body
+        and "source_audit_workbench.main" not in _sos_runtime_fn_body
+        and "source_audit_workbench_script" not in _sos_runtime_fn_body
+    )
+    _sos_runtime_no_trading = all(
+        tok not in code[
+            max(0, code.find("def maybe_run_source_onboarding_scanner(")):
+            code.find("def maybe_run_source_onboarding_scanner(") + 6000
+        ]
+        if _sos_runtime_fn_present else True
+        for tok in ["execute_trade", "post_order", "create_order", "cancel_order", "execute_buy", "execute_sell"]
+    )
+
+    # Order check: scanner called before digest in run_observability_alerts
+    _obs_body = ""
+    _obs_start = code.find("def run_observability_alerts(")
+    _obs_end = code.find("\ndef ", _obs_start + 1) if _obs_start != -1 else -1
+    if _obs_start != -1 and _obs_end != -1:
+        _obs_body = code[_obs_start:_obs_end]
+    _sos_runtime_called = "maybe_run_source_onboarding_scanner(state)" in _obs_body
+    _sos_runtime_before_digest = (
+        _obs_body.find("maybe_run_source_onboarding_scanner(state)") <
+        _obs_body.find("maybe_run_city_intelligence_digest_alert(state)")
+        if _sos_runtime_called and "maybe_run_city_intelligence_digest_alert(state)" in _obs_body
+        else False
+    )
+    _sos_runtime_after_lifecycle = (
+        _obs_body.find("maybe_run_city_lifecycle_review_alert(state)") <
+        _obs_body.find("maybe_run_source_onboarding_scanner(state)")
+        if _sos_runtime_called and "maybe_run_city_lifecycle_review_alert(state)" in _obs_body
+        else False
+    )
+
+    test(
+        "source_onboarding_runtime: maybe_run_source_onboarding_scanner definida en bot.py",
+        _sos_runtime_fn_present,
+    )
+    test(
+        "source_onboarding_runtime: state key source_onboarding_last_run_date presente",
+        _sos_runtime_state_key,
+    )
+    test(
+        "source_onboarding_runtime: usa _data_path() para rutas runtime",
+        _sos_runtime_uses_data_path,
+    )
+    test(
+        "source_onboarding_runtime: no hardcodea /app/data (usa _data_path)",
+        _sos_runtime_no_hardcoded_app_data,
+    )
+    test(
+        "source_onboarding_runtime: no envia Telegram propio",
+        _sos_runtime_no_telegram,
+    )
+    test(
+        "source_onboarding_runtime: no ejecuta source_audit_workbench automaticamente",
+        _sos_runtime_no_workbench,
+    )
+    test(
+        "source_onboarding_runtime: no contiene acciones de trading",
+        _sos_runtime_no_trading,
+    )
+    test(
+        "source_onboarding_runtime: llamada desde run_observability_alerts",
+        _sos_runtime_called,
+    )
+    test(
+        "source_onboarding_runtime: llamada ANTES del digest en run_observability_alerts",
+        _sos_runtime_before_digest,
+    )
+    test(
+        "source_onboarding_runtime: llamada DESPUES de lifecycle review en run_observability_alerts",
+        _sos_runtime_after_lifecycle,
+    )
+    test(
+        "source_onboarding_runtime: sigue LOG_ONLY (no BUY/SELL/SKIP en nombre/disclaimer)",
+        "source_onboarding_last_run_date" in code and "LOG_ONLY" in _sos_src,
+    )
+    test(
+        "source_onboarding_runtime: data/source_onboarding.json en .gitignore",
+        "data/source_onboarding.json" in _sos_gitignore_src,
+    )
+
     # ---- city_intelligence_digest ----
     print("\n City Intelligence Digest v1 LOG_ONLY")
     _cid_path = os.path.join(os.path.dirname(__file__), "tools", "city_intelligence_digest.py")
