@@ -9261,6 +9261,73 @@ def run_tests():
         _clrm_overrides_detail,
     )
 
+    # ---- source_onboarding_scanner ----
+    _sos_path = os.path.join(os.path.dirname(__file__), "tools", "source_onboarding_scanner.py")
+    _sos_exists = os.path.exists(_sos_path)
+    _sos_src = ""
+    _sos_ast_ok = False
+    _sos_ast_detail = "file not found"
+    if _sos_exists:
+        with open(_sos_path, encoding="utf-8") as _f:
+            _sos_src = _f.read()
+        try:
+            ast.parse(_sos_src)
+            _sos_ast_ok = True
+            _sos_ast_detail = ""
+        except SyntaxError as _exc:
+            _sos_ast_detail = str(_exc)
+
+    _sos_forbidden = [
+        "execute_trade", "post_order", "create_order", "cancel_order",
+        "send_telegram", "api.telegram.org", "TELEGRAM_TOKEN",
+        "requests.post", "requests.get", "httpx", "aiohttp",
+        "railway", "RAILWAY", "/app/data",
+        "import urllib.request", "urllib.request",
+    ]
+    _sos_fase_a_states = [
+        "READY_FOR_SOURCE_AUDIT", "WAITING_EVIDENCE",
+        "RANGE_ONLY_NOT_OPERABLE", "SOURCE_BLOCKED",
+    ]
+    _sos_gitignore_path = os.path.join(os.path.dirname(__file__), ".gitignore")
+    _sos_gitignore_src = ""
+    if os.path.exists(_sos_gitignore_path):
+        with open(_sos_gitignore_path, encoding="utf-8") as _f:
+            _sos_gitignore_src = _f.read()
+
+    test(
+        "source_onboarding_scanner: tool existe y tiene sintaxis valida",
+        _sos_exists and _sos_ast_ok,
+        _sos_ast_detail,
+    )
+    test(
+        "source_onboarding_scanner: LOG_ONLY disclaimer presente y no trading/network",
+        "LOG_ONLY" in _sos_src
+        and "log_only" in _sos_src
+        and all(_tok not in _sos_src for _tok in _sos_forbidden),
+    )
+    test(
+        "source_onboarding_scanner: estados Fase A presentes",
+        all(state in _sos_src for state in _sos_fase_a_states),
+    )
+    test(
+        "source_onboarding_scanner: degraded + JURISDICTION_LEAK defensas presentes",
+        "degraded" in _sos_src
+        and "JURISDICTION_LEAK" in _sos_src
+        and "RESOLUTION_ICAO_UNAVAILABLE" in _sos_src,
+    )
+    test(
+        "source_onboarding_scanner: no modifica city_lifecycle_review_monitor",
+        "city_lifecycle_review_monitor" not in _sos_src,
+    )
+    test(
+        "source_onboarding_scanner: data/source_onboarding.json en .gitignore",
+        "data/source_onboarding.json" in _sos_gitignore_src,
+    )
+    test(
+        "source_onboarding_scanner: docs/*_latest.md en .gitignore (cubre output MD)",
+        "docs/*_latest.md" in _sos_gitignore_src,
+    )
+
     # ---- City Lifecycle Review Alert (runtime integration) ----
     print("\n City Lifecycle Review Alert — runtime integration guardrails")
     _lcra_fn_present = "maybe_run_city_lifecycle_review_alert" in code

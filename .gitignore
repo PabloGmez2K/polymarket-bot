@@ -62,6 +62,7 @@ data/signals_crosscheck_daily_summary_state.json
 data/city_phase5_contrast.json
 data/city_probe_visibility_tracker.json
 data/city_lifecycle_review.json
+data/source_onboarding.json
 data/city_promotion_gate.json
 data/city_validation_ledger.json
 data/city_watch_reinforced.json
