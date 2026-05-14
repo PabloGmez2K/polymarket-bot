@@ -12,6 +12,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 COLLECTOR_PATH = REPO_ROOT / "tools" / "trader_signals_full_snapshot_collector.py"
 REPORT_PATH = REPO_ROOT / "tools" / "traders_operational_questions_report.py"
+MONITOR_PATH = REPO_ROOT / "tools" / "traders_operational_intelligence_monitor.py"
 
 
 @contextmanager
@@ -119,6 +120,50 @@ def report_args(module, tmp_dir: Path, *, snapshots: Path | None = None, lifecyc
             "--md-output",
             str(tmp_dir / "report.md"),
             "--dry-run",
+        ]
+    )
+
+
+def monitor_args(module, tmp_dir: Path, *, now: str = "2026-05-14T09:00:00+00:00"):
+    signals = tmp_dir / "signals.json"
+    snapshots = tmp_dir / "snapshots.jsonl"
+    blocked = tmp_dir / "blocked.jsonl"
+    fallback = tmp_dir / "missing_fallback.jsonl"
+    lifecycle = tmp_dir / "trade_lifecycle.json"
+    state = tmp_dir / "monitor_state.json"
+    agent_events = tmp_dir / "agent_events.jsonl"
+    write_json(signals, sample_signals())
+    write_jsonl(
+        blocked,
+        [
+            {"city": "Seattle", "trader": "Thrifty-Original", "resolved": True, "win_for_trader": True},
+            {"city": "Seattle", "trader": "Thrifty-Original", "resolved": True, "win_for_trader": True},
+            {"city": "Seattle", "trader": "Entire-Hood", "resolved": True, "win_for_trader": True},
+        ],
+    )
+    write_json(lifecycle, {"records": [{"city": "Seattle", "close_context": {"close_action": "LOSS_TOTAL"}}]})
+    return module.parse_args(
+        [
+            "--signals",
+            str(signals),
+            "--snapshots",
+            str(snapshots),
+            "--blocked-resolutions",
+            str(blocked),
+            "--blocked-fallback",
+            str(fallback),
+            "--trade-lifecycle",
+            str(lifecycle),
+            "--report-json",
+            str(tmp_dir / "report.json"),
+            "--report-md",
+            str(tmp_dir / "report.md"),
+            "--state",
+            str(state),
+            "--agent-events",
+            str(agent_events),
+            "--now",
+            now,
         ]
     )
 
@@ -265,3 +310,94 @@ def test_report_marks_bot_gap_low_bot_n_as_insufficient_n():
         assert seattle["trader_wr_pct"] == 100.0
         assert seattle["bot_n"] == 1
         assert seattle["classification"] == "TRADER_WINNING_BOT_INSUFFICIENT_N"
+
+
+def test_monitor_does_not_duplicate_snapshot_for_seen_generated():
+    module = load_module(MONITOR_PATH, "traders_operational_intelligence_monitor")
+    with local_tmp_dir() as tmp_dir:
+        args = monitor_args(module, tmp_dir)
+
+        first = module.build_run(args, env={"TRADERS_OPERATIONAL_INTELLIGENCE_ENABLED": "true"})
+        second = module.build_run(args, env={"TRADERS_OPERATIONAL_INTELLIGENCE_ENABLED": "true"})
+
+        rows = [json.loads(line) for line in Path(args.snapshots).read_text(encoding="utf-8").splitlines()]
+        assert first["collector_result"]["status"] == "completed"
+        assert second["collector_result"]["status"] == "skipped"
+        assert second["collector_result"]["reason"] == "duplicate_snapshot"
+        assert len(rows) == 2
+
+
+def test_monitor_respects_no_spam_when_no_relevant_change():
+    module = load_module(MONITOR_PATH, "traders_operational_intelligence_monitor")
+    with local_tmp_dir() as tmp_dir:
+        args = monitor_args(module, tmp_dir)
+
+        first = module.build_run(args, env={"TRADERS_OPERATIONAL_INTELLIGENCE_ENABLED": "true"})
+        second = module.build_run(args, env={"TRADERS_OPERATIONAL_INTELLIGENCE_ENABLED": "true"})
+
+        assert first["should_notify"] is True
+        assert second["should_notify"] is False
+        assert second["telegram_message"] is None
+
+
+def test_monitor_detects_activity_by_hour_transition_to_yes():
+    module = load_module(MONITOR_PATH, "traders_operational_intelligence_monitor")
+    with local_tmp_dir() as tmp_dir:
+        args = monitor_args(module, tmp_dir, now="2026-05-14T09:00:00+00:00")
+        write_jsonl(
+            Path(args.snapshots),
+            [
+                {
+                    "row_type": "signal",
+                    "snapshot_at": "2026-05-14T08:00:00+00:00",
+                    "trader": "Entire-Hood",
+                    "city": "Houston",
+                    "signal_id": "Houston|2026-05-13|at_or_above|80|F",
+                    "match_key": "Houston|2026-05-13|at_or_above|80|F",
+                    "source_generated_at": "2026-05-14T08:00:00+00:00",
+                }
+            ],
+        )
+        write_json(
+            Path(args.state),
+            {
+                "schema_version": module.SCHEMA_VERSION,
+                "last_success_at": "2026-05-14T08:00:00+00:00",
+                "last_activity_answerability": "NO",
+                "last_digest_date": "2026-05-14",
+                "known_not_observed_keys": ["Seattle"],
+                "known_gap_sufficient_keys": [],
+                "last_stale": False,
+            },
+        )
+
+        result = module.build_run(args, env={"TRADERS_OPERATIONAL_INTELLIGENCE_ENABLED": "true"})
+
+        assert result["answerability"]["activity_by_hour"] == "YES"
+        assert "activity_by_hour_NO_to_YES" in result["notification_reasons"]
+        assert result["should_notify"] is True
+
+
+def test_monitor_telegram_payload_labels_low_bot_n_insufficient():
+    module = load_module(MONITOR_PATH, "traders_operational_intelligence_monitor")
+    with local_tmp_dir() as tmp_dir:
+        args = monitor_args(module, tmp_dir)
+
+        result = module.build_run(args, env={"TRADERS_OPERATIONAL_INTELLIGENCE_ENABLED": "true"})
+
+        assert result["should_notify"] is True
+        assert "INSUFFICIENT_N" in result["telegram_message"]
+        assert "No BUY/SELL/SKIP" in result["telegram_message"]
+
+
+def test_monitor_kill_switch_disables_without_error():
+    module = load_module(MONITOR_PATH, "traders_operational_intelligence_monitor")
+    with local_tmp_dir() as tmp_dir:
+        args = monitor_args(module, tmp_dir)
+
+        result = module.build_run(args, env={"TRADERS_OPERATIONAL_INTELLIGENCE_ENABLED": "false"})
+
+        assert result["ok"] is True
+        assert result["status"] == "skipped"
+        assert result["reason"] == "env_off"
+        assert result["should_notify"] is False

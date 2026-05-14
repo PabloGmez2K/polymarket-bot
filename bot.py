@@ -182,6 +182,8 @@ BANKROLL_SCALING_MONITOR_ENABLED = os.getenv("BANKROLL_SCALING_MONITOR_ENABLED",
 BANKROLL_SCALING_MONITOR_EVERY_CYCLES = int(os.getenv("BANKROLL_SCALING_MONITOR_EVERY_CYCLES", "6"))
 BANKROLL_SCALING_MONITOR_ON_STATUS_CHANGE = os.getenv("BANKROLL_SCALING_MONITOR_ON_STATUS_CHANGE", "1").lower() in ("1", "true", "yes", "on")
 BANKROLL_SCALING_MONITOR_TIMEOUT_SECONDS = int(os.getenv("BANKROLL_SCALING_MONITOR_TIMEOUT_SECONDS", "12"))
+TRADERS_OPERATIONAL_INTELLIGENCE_ENABLED = os.getenv("TRADERS_OPERATIONAL_INTELLIGENCE_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+TRADERS_OPERATIONAL_INTELLIGENCE_TIMEOUT_SECONDS = int(os.getenv("TRADERS_OPERATIONAL_INTELLIGENCE_TIMEOUT_SECONDS", "180"))
 # Cutoff de stats por ciudad: "Dallas=2026-04-06,Chicago=2026-03-01"
 # Trades cerrados ANTES de la fecha indicada se ignoran en get_city_accuracy().
 CITY_STATS_CUTOFF: dict[str, str] = {}
@@ -727,6 +729,11 @@ TRADERS_INTELLIGENCE_COLLECTOR_SCRIPT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "tools",
     "traders_intelligence_collector.py",
+)
+TRADERS_OPERATIONAL_INTELLIGENCE_MONITOR_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "tools",
+    "traders_operational_intelligence_monitor.py",
 )
 SL_RETROSPECTIVE_SCRIPT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
@@ -5973,6 +5980,15 @@ def run_observability_alerts():
         if logger:
             logger.warning(f"traders intelligence summary: fallo ({e})")
 
+    # Traders Operational Intelligence: LOG_ONLY snapshots + six-question digest, default ON.
+    try:
+        if maybe_run_traders_operational_intelligence_monitor():
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"traders operational intelligence: fallo ({e})")
+
     # v10.6.14 (M3): alerta one-shot cuando las precondiciones para v2 se cumplen.
     try:
         if maybe_alert_v2_trigger(state):
@@ -9402,6 +9418,87 @@ def maybe_run_traders_intelligence_collector(now=None):
     if logger:
         logger.info(f"traders intelligence collector: status={status} reason={reason} run_id={run_id}")
     return status == "completed"
+
+
+def maybe_run_traders_operational_intelligence_monitor(now=None):
+    """
+    Ejecuta Traders Operational Intelligence LOG_ONLY con estado propio.
+    El monitor archiva snapshots completos, regenera el reporte de seis preguntas
+    y devuelve un Telegram corto solo cuando hay transición, error/stale o digest diario.
+    """
+    logger = globals().get("log")
+    if not TRADERS_OPERATIONAL_INTELLIGENCE_ENABLED:
+        if logger:
+            logger.info("traders operational intelligence: skip (TRADERS_OPERATIONAL_INTELLIGENCE_ENABLED=false)")
+        return False
+    if now is None:
+        now = datetime.now(timezone.utc)
+    if not os.path.exists(TRADERS_OPERATIONAL_INTELLIGENCE_MONITOR_SCRIPT):
+        if logger:
+            logger.warning(
+                "traders operational intelligence: skip "
+                f"(missing script: {TRADERS_OPERATIONAL_INTELLIGENCE_MONITOR_SCRIPT})"
+            )
+        return False
+
+    intelligence_dir = _data_path("intelligence")
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                TRADERS_OPERATIONAL_INTELLIGENCE_MONITOR_SCRIPT,
+                "--json",
+                "--signals",
+                SIGNALS_FILE,
+                "--snapshots",
+                os.path.join(intelligence_dir, "trader_signals_snapshots.jsonl"),
+                "--report-json",
+                os.path.join(intelligence_dir, "traders_operational_questions_report.json"),
+                "--state",
+                os.path.join(intelligence_dir, "traders_operational_monitor_state.json"),
+                "--agent-events",
+                AGENT_EVENTS_FILE,
+                "--blocked-resolutions",
+                BLOCKED_SIGNALS_FILE,
+                "--blocked-fallback",
+                _data_path("runtime_import_derived/blocked_signals_resolutions.jsonl"),
+                "--trade-lifecycle",
+                TRADE_LIFECYCLE_FILE,
+                "--now",
+                now.replace(microsecond=0).isoformat(),
+            ],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            capture_output=True,
+            text=True,
+            timeout=TRADERS_OPERATIONAL_INTELLIGENCE_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except Exception as exc:
+        if logger:
+            logger.warning(f"traders operational intelligence: fallo ejecutando monitor ({exc})")
+        return False
+
+    if result.returncode != 0:
+        if logger:
+            detail = (result.stderr or result.stdout or "sin detalle").strip()
+            logger.warning(f"traders operational intelligence: fallo ({detail[:500]})")
+        return False
+
+    try:
+        payload = json.loads(result.stdout or "{}")
+    except Exception:
+        payload = {}
+
+    if payload.get("should_notify") and payload.get("telegram_message"):
+        send_telegram(payload["telegram_message"])
+
+    if logger:
+        reasons = ",".join(payload.get("notification_reasons") or []) or "none"
+        logger.info(
+            "traders operational intelligence: "
+            f"status={payload.get('status')} notify={payload.get('should_notify')} reasons={reasons}"
+        )
+    return payload.get("status") == "completed"
 
 
 def maybe_run_city_intelligence_runtime_summary(state, now=None):

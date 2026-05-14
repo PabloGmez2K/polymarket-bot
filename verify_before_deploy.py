@@ -171,6 +171,7 @@ def run_tests():
     traders_report_path = os.path.join(os.path.dirname(__file__), "tools", "traders_intelligence_report.py")
     traders_snapshot_path = os.path.join(os.path.dirname(__file__), "tools", "traders_intelligence_snapshot.py")
     traders_collector_path = os.path.join(os.path.dirname(__file__), "tools", "traders_intelligence_collector.py")
+    traders_operational_monitor_path = os.path.join(os.path.dirname(__file__), "tools", "traders_operational_intelligence_monitor.py")
     traders_snapshot_doc_path = os.path.join(os.path.dirname(__file__), "docs", "traders-intelligence-v1-snapshots.md")
     trader_code = ""
     finder_code = ""
@@ -187,6 +188,7 @@ def run_tests():
     traders_report_code = ""
     traders_snapshot_code = ""
     traders_collector_code = ""
+    traders_operational_monitor_code = ""
     traders_snapshot_doc = ""
     agent_event_rows = []
     if os.path.exists(trader_analyzer_path):
@@ -243,6 +245,9 @@ def run_tests():
     if os.path.exists(traders_collector_path):
         with open(traders_collector_path, "r", encoding="utf-8") as f:
             traders_collector_code = f.read()
+    if os.path.exists(traders_operational_monitor_path):
+        with open(traders_operational_monitor_path, "r", encoding="utf-8") as f:
+            traders_operational_monitor_code = f.read()
     if os.path.exists(traders_snapshot_doc_path):
         with open(traders_snapshot_doc_path, "r", encoding="utf-8") as f:
             traders_snapshot_doc = f.read()
@@ -7987,6 +7992,85 @@ def run_tests():
         "traders_intelligence v1.1: hook escribe eventos en AGENT_EVENTS_FILE",
         '"--agent-events"' in traders_collector_src
         and "AGENT_EVENTS_FILE" in traders_collector_src,
+    )
+
+    print("  Checks traders operational intelligence monitor LOG_ONLY")
+    traders_operational_forbidden = [
+        "execute_trade",
+        "execute_buy",
+        "execute_sell",
+        "create_order",
+        "post_order",
+        "cancel_order",
+        "OrderArgs",
+        "BANKROLL",
+        "QUALITY_TRADER_CITIES_WHITELIST",
+        "ACTIVE_TRADING_CITIES",
+        "CANARY_TRADING_CITIES",
+        "BLOCKED_CITIES",
+        "SCHEDULE_HOURS_UTC",
+        "TELEGRAM_TOKEN",
+        "TELEGRAM_CHAT_ID",
+    ]
+    test(
+        "traders operational intelligence: monitor tool existe",
+        bool(traders_operational_monitor_code)
+        and "traders_operational_intelligence_monitor_state_v1" in traders_operational_monitor_code
+        and "trader_signals_full_snapshot_collector.py" in traders_operational_monitor_code
+        and "traders_operational_questions_report.py" in traders_operational_monitor_code,
+    )
+    test(
+        "traders operational intelligence: default ON y kill switch false",
+        'ENV_FLAG = "TRADERS_OPERATIONAL_INTELLIGENCE_ENABLED"' in traders_operational_monitor_code
+        and 'str(value if value is not None else "true")' in traders_operational_monitor_code
+        and "env_off" in traders_operational_monitor_code,
+    )
+    test(
+        "traders operational intelligence: state/idempotencia/cooldown",
+        "traders_operational_monitor_state.json" in traders_operational_monitor_code
+        and "last_signals_generated_at" in traders_operational_monitor_code
+        and "known_not_observed_keys" in traders_operational_monitor_code
+        and "known_gap_sufficient_keys" in traders_operational_monitor_code
+        and "last_digest_date" in traders_operational_monitor_code
+        and "error_cooldown_minutes" in traders_operational_monitor_code,
+    )
+    test(
+        "traders operational intelligence: payload LOG_ONLY no accionable",
+        "LOG_ONLY. No BUY/SELL/SKIP. No city mode changes. Human review required." in traders_operational_monitor_code
+        and "INSUFFICIENT_N" in traders_operational_monitor_code
+        and "activity_by_hour" in traders_operational_monitor_code,
+    )
+    test(
+        "traders operational intelligence: no toca trading/core/Telegram directo",
+        all(token not in traders_operational_monitor_code for token in traders_operational_forbidden),
+    )
+    try:
+        traders_operational_hook_src = code.split("def maybe_run_traders_operational_intelligence_monitor(", 1)[1].split(
+            "def maybe_run_city_intelligence_runtime_summary(", 1
+        )[0]
+    except IndexError:
+        traders_operational_hook_src = ""
+    test(
+        "traders operational intelligence: hook bot.py default ON",
+        "TRADERS_OPERATIONAL_INTELLIGENCE_MONITOR_SCRIPT" in code
+        and 'os.getenv("TRADERS_OPERATIONAL_INTELLIGENCE_ENABLED", "true")' in code
+        and "def maybe_run_traders_operational_intelligence_monitor(" in code
+        and '"--signals"' in traders_operational_hook_src
+        and "SIGNALS_FILE" in traders_operational_hook_src,
+    )
+    test(
+        "traders operational intelligence: hook usa data/intelligence y AGENT_EVENTS_FILE",
+        '"intelligence"' in traders_operational_hook_src
+        and "traders_operational_monitor_state.json" in traders_operational_hook_src
+        and '"--agent-events"' in traders_operational_hook_src
+        and "AGENT_EVENTS_FILE" in traders_operational_hook_src,
+    )
+    test(
+        "traders operational intelligence: hook no compra/vende ni toca bankroll",
+        "execute_buy" not in traders_operational_hook_src
+        and "execute_sell" not in traders_operational_hook_src
+        and "BANKROLL" not in traders_operational_hook_src
+        and "SCHEDULE_HOURS_UTC" not in traders_operational_hook_src,
     )
 
     # ---- Bot health check read-only CLI ----
