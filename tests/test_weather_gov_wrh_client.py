@@ -86,3 +86,48 @@ def test_defensive_no_tabular_rows_does_not_invent_data():
     assert payload["daily_max_c"] is None
     assert payload["confidence"] == "none"
     assert "no parseable tabular rows found" in payload["warnings"]
+
+
+def test_synoptic_json_parser_calculates_daily_max():
+    data = {
+        "SUMMARY": {"RESPONSE_CODE": 1},
+        "STATION": [{
+            "STID": "LTFM",
+            "TIMEZONE": "Europe/Istanbul",
+            "OBSERVATIONS": {
+                "date_time": [
+                    "2026-05-12T23:50:00+0300",
+                    "2026-05-13T03:20:00+0300",
+                    "2026-05-13T12:50:00+0300",
+                    "2026-05-14T00:20:00+0300",
+                ],
+                "air_temp_set_1": [18, 19, 23, 20],
+            },
+        }],
+    }
+
+    payload = wrh.parse_synoptic_timeseries_json(data, "LTFM", "2026-05-13")
+
+    assert payload["temp_column_found"] is True
+    assert payload["temp_column"] == "air_temp_set_1"
+    assert payload["daily_max_c"] == 23
+    assert payload["raw_rows_count"] == 4
+    assert payload["confidence"] == "high"
+
+
+def test_synoptic_url_fetches_padding_around_local_date():
+    url = wrh.build_synoptic_data_url("LTFM", "2026-05-13", "TOKEN")
+
+    assert "STID=LTFM" in url
+    assert "start=202605120000" in url
+    assert "end=202605142359" in url
+    assert "obtimezone=local" in url
+
+
+def test_synoptic_data_url_redacts_token_for_payload():
+    redacted = wrh._redact_token_from_url(
+        "https://api.synopticdata.com/v2/stations/timeseries?STID=LTFM&token=SECRET&obtimezone=local"
+    )
+
+    assert "SECRET" not in redacted
+    assert "token=<redacted>" in redacted
