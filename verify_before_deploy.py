@@ -9328,6 +9328,112 @@ def run_tests():
         "docs/*_latest.md" in _sos_gitignore_src,
     )
 
+    # ---- source_audit_workbench ----
+    print("\n Source Audit Workbench LOG_ONLY")
+    _saw_path = os.path.join(os.path.dirname(__file__), "tools", "source_audit_workbench.py")
+    _saw_tests_path = os.path.join(os.path.dirname(__file__), "tests", "test_source_audit_workbench.py")
+    _saw_doc_path = os.path.join(os.path.dirname(__file__), "docs", "source_audit_workbench_design.md")
+    _saw_exists = os.path.exists(_saw_path)
+    _saw_tests_exist = os.path.exists(_saw_tests_path)
+    _saw_doc_exists = os.path.exists(_saw_doc_path)
+    _saw_src = ""
+    _saw_ast_ok = False
+    _saw_ast_detail = "file not found"
+    _saw_imports = set()
+    if _saw_exists:
+        with open(_saw_path, encoding="utf-8") as _f:
+            _saw_src = _f.read()
+        try:
+            _saw_ast = ast.parse(_saw_src)
+            _saw_ast_ok = True
+            _saw_ast_detail = ""
+            for _node in ast.walk(_saw_ast):
+                if isinstance(_node, ast.Import):
+                    for _alias in _node.names:
+                        _saw_imports.add(_alias.name.split(".", 1)[0])
+                elif isinstance(_node, ast.ImportFrom) and _node.module:
+                    _saw_imports.add(_node.module.split(".", 1)[0])
+        except SyntaxError as _exc:
+            _saw_ast_detail = str(_exc)
+
+    _saw_tests_src = ""
+    if _saw_tests_exist:
+        with open(_saw_tests_path, encoding="utf-8") as _f:
+            _saw_tests_src = _f.read()
+    _saw_doc_src = ""
+    if _saw_doc_exists:
+        with open(_saw_doc_path, encoding="utf-8") as _f:
+            _saw_doc_src = _f.read()
+
+    _saw_allowed_imports = {
+        "__future__", "argparse", "ast", "json", "re", "sys",
+        "collections", "datetime", "pathlib",
+    }
+    _saw_forbidden_tokens = [
+        "import bot", "from bot", "execute_trade", "manage_positions",
+        "intra_cycle_sl_check", "post_order", "create_order", "cancel_order",
+        "send_telegram", "api.telegram.org", "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID",
+        "requests", "httpx", "aiohttp", "urllib.request", "railway", "RAILWAY",
+        "/app/data", "os.getenv", "sqlite3", "psycopg", "BUY", "SELL", "SKIP",
+        "BANKROLL", "Fase C",
+    ]
+    _saw_statuses = [
+        "SOURCE_AUDIT_PASS", "SOURCE_AUDIT_FAIL", "NEEDS_MANUAL_SOURCE_LOOKUP",
+        "READY_FOR_OBSERVED_AUDIT_REVIEW", "ALREADY_OBSERVED", "OUT_OF_SCOPE",
+    ]
+    test(
+        "source_audit_workbench: tool existe y tiene sintaxis valida",
+        _saw_exists and _saw_ast_ok,
+        _saw_ast_detail,
+    )
+    test(
+        "source_audit_workbench: LOG_ONLY y estados presentes",
+        "LOG_ONLY" in _saw_src and all(_state in _saw_src for _state in _saw_statuses),
+    )
+    test(
+        "source_audit_workbench: no Telegram/Railway/env vars/DB/red/trading tokens",
+        all(_token not in _saw_src for _token in _saw_forbidden_tokens),
+        f"forbidden={[t for t in _saw_forbidden_tokens if t in _saw_src]}",
+    )
+    test(
+        "source_audit_workbench: stdlib-only imports",
+        _saw_imports <= _saw_allowed_imports,
+        f"imports={sorted(_saw_imports - _saw_allowed_imports)}",
+    )
+    test(
+        "source_audit_workbench: no importa ni modifica bot.py",
+        "import bot" not in _saw_src and "from bot" not in _saw_src,
+    )
+    test(
+        "source_audit_workbench: no auto-patch de ciudades ni modos",
+        "RESOLUTION_ICAO =" not in _saw_src
+        and "OBSERVED_AUDIT_CITIES =" not in _saw_src
+        and "ACTIVE_TRADING_CITIES =" not in _saw_src
+        and "CANARY_TRADING_CITIES =" not in _saw_src
+        and "BLOCKED_CITIES =" not in _saw_src,
+    )
+    test(
+        "source_audit_workbench: tests focales existen y cubren no-network",
+        _saw_tests_exist
+        and "test_city_already_observed_returns_already_observed" in _saw_tests_src
+        and "test_candidate_without_source_or_ids_needs_manual_lookup" in _saw_tests_src
+        and "test_city_with_cli_icao_and_noaa_daily_is_review_ready" in _saw_tests_src
+        and "test_range_only_sets_risk_and_does_not_recommend_canary" in _saw_tests_src
+        and "urllib.request" in _saw_tests_src
+        and "--no-network" in _saw_tests_src,
+    )
+    test(
+        "source_audit_workbench: doc de diseno presente",
+        _saw_doc_exists
+        and "Source Audit Workbench v1.0" in _saw_doc_src
+        and "Source Onboarding Scanner" in _saw_doc_src
+        and "City Lifecycle Review Monitor" in _saw_doc_src,
+    )
+    test(
+        "source_audit_workbench: outputs JSON generados ignorados",
+        "data/source_audits/" in _sos_gitignore_src,
+    )
+
     # ---- City Lifecycle Review Alert (runtime integration) ----
     print("\n City Lifecycle Review Alert — runtime integration guardrails")
     _lcra_fn_present = "maybe_run_city_lifecycle_review_alert" in code
