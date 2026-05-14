@@ -32,6 +32,10 @@ LOG_ONLY_DISCLAIMER = (
     "LOG_ONLY offline source-parity report. This does not authorize execution, "
     "policy changes, city-mode changes, observed-audit inclusion, promotion, or bankroll changes."
 )
+OPUS_MIN_UNIQUE_MARKETS = 20
+OPUS_MAX_MEAN_ABS_DELTA_C = 0.5
+OPUS_MAX_ABS_BIAS_C = 0.3
+OPUS_SECOND_WRH_CITY_CONFIRMED = False
 
 CONFIRMED_LTFM_SLUGS = {
     "highest-temperature-in-istanbul-on-may-6-2026-20c",
@@ -136,7 +140,7 @@ def extract_candidate(row):
         "strike_c": strike if str(unit).upper() == "C" else None,
         "unit": unit,
         "slug": slug,
-        "market_id": _get_first(row, ("market_id", "market_slug", "condition_id", "token_id")),
+        "market_id": _get_first(row, ("market_id", "marketId", "id")),
         "condition_id": _get_first(row, ("condition_id",)),
         "row_outcome_yes": outcome_yes,
         "source_citation_match": bool(slug and slug in CONFIRMED_LTFM_SLUGS),
@@ -181,6 +185,100 @@ def default_fetcher(site, date_local):
         source_url=source_url,
         data_url=wrh_client._redact_token_from_url(data_url),
     )
+
+
+def _canonical_market_key(row):
+    for field in ("condition_id", "market_id", "slug"):
+        value = row.get(field)
+        if value not in (None, ""):
+            return f"{field}:{value}"
+    return None
+
+
+def _fallback_market_key(row):
+    outcome = (
+        "YES" if row.get("polymarket_outcome_yes") is True
+        else "NO" if row.get("polymarket_outcome_yes") is False
+        else "UNKNOWN"
+    )
+    return "|".join(
+        str(part)
+        for part in (
+            row.get("date_local") or "",
+            row.get("condition") or "",
+            row.get("strike_c") if row.get("strike_c") is not None else "",
+            outcome,
+        )
+    )
+
+
+def _unique_counts(report_rows):
+    canonical_keys = {
+        key for key in (_canonical_market_key(row) for row in report_rows) if key
+    }
+    fallback_keys = {_fallback_market_key(row) for row in report_rows}
+    return {
+        "unique_market_n": len(canonical_keys),
+        "canonical_unique_market_n": len(canonical_keys),
+        "fallback_estimated_unique_market_n": len(fallback_keys),
+        "rows_without_canonical_market_id_n": sum(
+            1 for row in report_rows if _canonical_market_key(row) is None
+        ),
+        "unique_market_key_strategy": "canonical condition_id/market_id/slug; fallback estimate date|condition|strike|outcome",
+    }
+
+
+def build_opus_gate(metrics):
+    reasons = []
+    canonical_n = metrics.get("canonical_unique_market_n", 0) or 0
+    fallback_n = metrics.get("fallback_estimated_unique_market_n", 0) or 0
+    mean_abs_delta = metrics.get("mean_abs_delta")
+    bias = metrics.get("bias")
+
+    unique_markets_ok = canonical_n >= OPUS_MIN_UNIQUE_MARKETS
+    mean_delta_ok = mean_abs_delta is not None and mean_abs_delta <= OPUS_MAX_MEAN_ABS_DELTA_C
+    bias_ok = bias is not None and abs(bias) <= OPUS_MAX_ABS_BIAS_C
+    second_city_ok = OPUS_SECOND_WRH_CITY_CONFIRMED
+
+    if not unique_markets_ok:
+        reasons.append(
+            "no_20_demonstrable_unique_markets:"
+            f" canonical_unique_market_n={canonical_n}, "
+            f"fallback_estimated_unique_market_n={fallback_n}, "
+            f"required={OPUS_MIN_UNIQUE_MARKETS}"
+        )
+    if not mean_delta_ok:
+        reasons.append(
+            "mean_abs_delta_above_threshold:"
+            f" mean_abs_delta={mean_abs_delta}, "
+            f"threshold={OPUS_MAX_MEAN_ABS_DELTA_C}"
+        )
+    if not bias_ok:
+        reasons.append(
+            "directional_bias_above_threshold:"
+            f" bias={bias}, "
+            f"max_abs_bias={OPUS_MAX_ABS_BIAS_C}"
+        )
+    if not second_city_ok:
+        reasons.append("missing_second_explicit_wrh_candidate_city")
+
+    gate_met = unique_markets_ok and mean_delta_ok and bias_ok and second_city_ok
+    return {
+        "OPUS_REEVALUATION_GATE_MET": gate_met,
+        "gate_met": gate_met,
+        "reasons": reasons,
+        "criteria": {
+            "min_demonstrable_unique_markets": OPUS_MIN_UNIQUE_MARKETS,
+            "max_mean_abs_delta_c": OPUS_MAX_MEAN_ABS_DELTA_C,
+            "max_abs_bias_c": OPUS_MAX_ABS_BIAS_C,
+            "requires_second_explicit_wrh_candidate_city": True,
+        },
+        "notes": [
+            "WRH_PARITY_PASS_PRELIMINARY is outcome parity only; it is not operational authorization.",
+            "Delta metrics measure distance between WRH daily max and strike, not direct parity failure when expected outcome matches resolution.",
+            "Zero mismatches is positive source evidence, not promotion approval.",
+        ],
+    }
 
 
 def build_report(rows, *, fetcher=default_fetcher, site=WRH_SITE, generated_at=None, input_path=None):
@@ -242,7 +340,11 @@ def build_report(rows, *, fetcher=default_fetcher, site=WRH_SITE, generated_at=N
     n_compared = len(comparable)
     n_match = sum(1 for row in comparable if row["parity_match"] is True)
     n_unknown = sum(1 for row in report_rows if row["status"] == "unknown")
+    unique_counts = _unique_counts(report_rows)
     metrics = {
+        "input_row_n": len(rows),
+        "candidate_row_n": len(candidates),
+        "compared_row_n": n_compared,
         "n_rows_input": len(rows),
         "n_candidates": len(candidates),
         "n_compared": n_compared,
@@ -253,8 +355,10 @@ def build_report(rows, *, fetcher=default_fetcher, site=WRH_SITE, generated_at=N
         "max_abs_delta": round(max(abs(delta) for delta in deltas), 3) if deltas else None,
         "bias": round(sum(deltas) / len(deltas), 3) if deltas else None,
         "unique_dates_fetched": len(date_cache),
+        **unique_counts,
     }
     verdict = determine_verdict(metrics)
+    opus_gate = build_opus_gate(metrics)
     if not candidates:
         warnings.append("no Istanbul exact resolved candidates found in input")
 
@@ -269,6 +373,8 @@ def build_report(rows, *, fetcher=default_fetcher, site=WRH_SITE, generated_at=N
         "input_path": str(input_path) if input_path else None,
         "disclaimer": LOG_ONLY_DISCLAIMER,
         "verdict": verdict,
+        "outcome_parity_verdict": verdict,
+        "opus_reevaluation_gate": opus_gate,
         "metrics": metrics,
         "rows": report_rows,
         "warnings": warnings,
@@ -296,6 +402,10 @@ def render_markdown(report):
         "",
         f"Verdict: `{report['verdict']}`",
         "",
+        "This verdict is about preliminary outcome parity only. It is not an",
+        "observed-audit approval, source promotion, city-mode change, or trading",
+        "authorization.",
+        "",
         "## Scope",
         "",
         report["disclaimer"],
@@ -303,23 +413,53 @@ def render_markdown(report):
         "- Source is `weather_gov_wrh_synoptic`.",
         f"- Observed dataset is `{OBSERVED_DATASET}`.",
         "- This is separate from NCEI and does not write observed audit data.",
+        "- `WRH_PARITY_PASS_PRELIMINARY` means compared outcomes matched; Opus",
+        "  re-evaluation gates are evaluated separately below.",
         "",
-        "## Metrics",
+        "## Outcome Parity Metrics",
         "",
-        f"- n_compared: `{metrics['n_compared']}`",
+        f"- input_row_n: `{metrics['input_row_n']}`",
+        f"- candidate_row_n: `{metrics['candidate_row_n']}`",
+        f"- compared_row_n: `{metrics['compared_row_n']}`",
         f"- n_match: `{metrics['n_match']}`",
         f"- n_mismatch: `{metrics['n_mismatch']}`",
         f"- n_unknown: `{metrics['n_unknown']}`",
+        f"- unique_market_n: `{metrics['unique_market_n']}`",
+        f"- canonical_unique_market_n: `{metrics['canonical_unique_market_n']}`",
+        f"- fallback_estimated_unique_market_n: `{metrics['fallback_estimated_unique_market_n']}`",
+        f"- rows_without_canonical_market_id_n: `{metrics['rows_without_canonical_market_id_n']}`",
+        f"- unique_market_key_strategy: `{metrics['unique_market_key_strategy']}`",
         f"- mean_abs_delta: `{metrics['mean_abs_delta']}`",
         f"- max_abs_delta: `{metrics['max_abs_delta']}`",
         f"- bias: `{metrics['bias']}`",
         f"- unique_dates_fetched: `{metrics['unique_dates_fetched']}`",
         "",
+        "Delta metrics measure the distance between WRH daily max and the market",
+        "strike. They are not mismatches when the expected YES/NO outcome still",
+        "matches the resolved outcome.",
+        "",
+        "## Opus Re-Evaluation Gate",
+        "",
+        f"- OPUS_REEVALUATION_GATE_MET: `{report['opus_reevaluation_gate']['OPUS_REEVALUATION_GATE_MET']}`",
+        "",
+        "Reasons:",
+    ]
+    gate_reasons = report["opus_reevaluation_gate"].get("reasons") or []
+    if gate_reasons:
+        lines.extend(f"- `{reason}`" for reason in gate_reasons)
+    else:
+        lines.append("- none")
+    lines.extend([
+        "",
+        "A zero-mismatch outcome parity result is positive source evidence, but it",
+        "does not authorize observed-audit inclusion, promotion gates, city modes,",
+        "BUY/SELL/SKIP, BANKROLL, or Phase C changes.",
+        "",
         "## Rows",
         "",
         "| Date | Strike C | WRH max C | Expected | Outcome | Match | Source citation | Warnings |",
         "|---|---:|---:|---|---|---|---|---|",
-    ]
+    ])
     for row in report["rows"]:
         expected = "YES" if row["expected_yes"] is True else "NO" if row["expected_yes"] is False else "UNKNOWN"
         outcome = (

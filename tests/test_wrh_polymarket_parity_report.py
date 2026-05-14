@@ -8,8 +8,8 @@ sys.path.insert(0, str(REPO_ROOT / "tools"))
 import wrh_polymarket_parity_report as parity
 
 
-def _row(date_local, strike, outcome="Yes"):
-    return {
+def _row(date_local, strike, outcome="Yes", **extra):
+    row = {
         "match_key": f"Istanbul|{date_local}|exact|{strike}|C",
         "city": "Istanbul",
         "date": date_local,
@@ -17,6 +17,8 @@ def _row(date_local, strike, outcome="Yes"):
         "outcome": outcome,
         "resolved": True,
     }
+    row.update(extra)
+    return row
 
 
 def _fetcher(values, calls=None):
@@ -67,6 +69,9 @@ def test_multiple_rows_same_day_use_single_fetch():
     assert report["metrics"]["unique_dates_fetched"] == 1
     assert report["metrics"]["n_compared"] == 2
     assert report["metrics"]["n_match"] == 2
+    assert report["metrics"]["input_row_n"] == 2
+    assert report["metrics"]["candidate_row_n"] == 2
+    assert report["metrics"]["compared_row_n"] == 2
 
 
 def test_report_marks_weather_gov_wrh_dataset():
@@ -86,3 +91,67 @@ def test_missing_daily_max_row_unknown_not_invented():
     assert row["parity_match"] is None
     assert row["status"] == "unknown"
     assert report["verdict"] == "NEED_MORE_DATA"
+
+
+def test_dedupe_separates_canonical_unique_markets_from_rows():
+    rows = [
+        _row(
+            "2026-05-07",
+            23,
+            "No",
+            market_id="2162211",
+            condition_id="0xabc",
+            slug="highest-temperature-in-istanbul-on-may-7-2026-23c",
+        ),
+        _row(
+            "2026-05-07",
+            23,
+            "No",
+            market_id="2162211",
+            condition_id="0xabc",
+            slug="highest-temperature-in-istanbul-on-may-7-2026-23c",
+        ),
+        _row("2026-04-13", 14, "No"),
+    ]
+
+    report = parity.build_report(rows, fetcher=_fetcher({"2026-05-07": 22, "2026-04-13": 12}))
+    metrics = report["metrics"]
+
+    assert metrics["candidate_row_n"] == 3
+    assert metrics["compared_row_n"] == 3
+    assert metrics["canonical_unique_market_n"] == 1
+    assert metrics["unique_market_n"] == 1
+    assert metrics["fallback_estimated_unique_market_n"] == 2
+    assert metrics["rows_without_canonical_market_id_n"] == 1
+
+
+def test_preliminary_outcome_pass_does_not_meet_opus_gate():
+    rows = [
+        _row("2026-05-06", 17, "Yes", condition_id="0x17"),
+        _row("2026-05-06", 20, "No", condition_id="0x20"),
+        _row("2026-05-07", 22, "Yes", condition_id="0x22"),
+        _row("2026-05-07", 23, "No", condition_id="0x23"),
+        _row("2026-05-13", 23, "Yes", condition_id="0x13"),
+    ]
+
+    report = parity.build_report(
+        rows,
+        fetcher=_fetcher({"2026-05-06": 17, "2026-05-07": 22, "2026-05-13": 23}),
+    )
+
+    assert report["verdict"] == "WRH_PARITY_PASS_PRELIMINARY"
+    gate = report["opus_reevaluation_gate"]
+    assert gate["OPUS_REEVALUATION_GATE_MET"] is False
+    assert any(reason.startswith("no_20_demonstrable_unique_markets") for reason in gate["reasons"])
+    assert any(reason == "missing_second_explicit_wrh_candidate_city" for reason in gate["reasons"])
+
+
+def test_markdown_names_outcome_parity_and_opus_gate_separately():
+    report = parity.build_report([_row("2026-05-06", 17, "Yes")], fetcher=_fetcher({"2026-05-06": 17}))
+
+    markdown = parity.render_markdown(report)
+
+    assert "## Outcome Parity Metrics" in markdown
+    assert "## Opus Re-Evaluation Gate" in markdown
+    assert "OPUS_REEVALUATION_GATE_MET" in markdown
+    assert "not authorize observed-audit inclusion" in markdown
