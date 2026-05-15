@@ -24,11 +24,13 @@ Solo ciudades **no presentes** en: `ACTIVE` | `CANARY` | `BLOCKED` | `auto_canar
 | `--policy-env` | `data/runtime_import/policy_env_snapshot.json` |
 | `--policy-state` | `data/runtime_import/city_policy_state.json` |
 | `--overrides` | `data/city_lifecycle_overrides.json` |
+| `--traders-report` | `data/intelligence/traders_operational_questions_report.json` |
 | `--json-output` | `data/source_onboarding.json` |
 | `--md-output` | `docs/source_onboarding_latest.md` |
 
 `RESOLUTION_ICAO` se carga via AST parse de `bot.py` (no import completo).
 Si falla: `degraded=true`, `source_feasibility=unknown`, sin `SOURCE_BLOCKED`.
+`OBSERVED_AUDIT_CITIES` tambien se lee via AST para excluir ciudades ya dentro del flujo observado.
 
 ## Estados Fase A
 

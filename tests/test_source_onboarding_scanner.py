@@ -2,7 +2,6 @@
 
 import json
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -315,71 +314,67 @@ def test_blocked_signals_above_min_n_contributes_score():
 # Integration: main() with temp files
 # ---------------------------------------------------------------------------
 
-def test_main_writes_json_and_markdown_with_minimal_inputs():
+def test_main_writes_json_and_markdown_with_minimal_inputs(tmp_path):
     """main() with minimal valid inputs exits 0 and writes valid LOG_ONLY outputs."""
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp)
+    (tmp_path / "policy_env.json").write_text(json.dumps({
+        "variables": {
+            "ACTIVE_TRADING_CITIES": "Shanghai",
+            "BLOCKED_CITIES": "",
+            "CANARY_TRADING_CITIES": None,
+        }
+    }), encoding="utf-8")
+    (tmp_path / "policy_state.json").write_text(json.dumps({
+        "auto_canary_cities": {}, "auto_shadow_cities": {},
+    }), encoding="utf-8")
+    (tmp_path / "shadow_tracking.json").write_text(
+        json.dumps({"cities": {}}), encoding="utf-8"
+    )
 
-        (tmp_path / "policy_env.json").write_text(json.dumps({
-            "variables": {
-                "ACTIVE_TRADING_CITIES": "Shanghai",
-                "BLOCKED_CITIES": "",
-                "CANARY_TRADING_CITIES": None,
-            }
-        }), encoding="utf-8")
-        (tmp_path / "policy_state.json").write_text(json.dumps({
-            "auto_canary_cities": {}, "auto_shadow_cities": {},
-        }), encoding="utf-8")
-        (tmp_path / "shadow_tracking.json").write_text(
-            json.dumps({"cities": {}}), encoding="utf-8"
-        )
+    json_out = tmp_path / "onboarding.json"
+    md_out = tmp_path / "onboarding.md"
 
-        json_out = tmp_path / "onboarding.json"
-        md_out = tmp_path / "onboarding.md"
+    result = main([
+        "--signals-crosscheck", str(tmp_path / "nonexistent_signals.jsonl"),
+        "--blocked-resolutions", str(tmp_path / "nonexistent_blocked.jsonl"),
+        "--shadow-tracking", str(tmp_path / "shadow_tracking.json"),
+        "--policy-env", str(tmp_path / "policy_env.json"),
+        "--policy-state", str(tmp_path / "policy_state.json"),
+        "--overrides", str(tmp_path / "nonexistent_overrides.json"),
+        "--traders-report", str(tmp_path / "nonexistent_traders_report.json"),
+        "--json-output", str(json_out),
+        "--md-output", str(md_out),
+    ])
 
-        result = main([
-            "--signals-crosscheck", str(tmp_path / "nonexistent_signals.jsonl"),
-            "--blocked-resolutions", str(tmp_path / "nonexistent_blocked.jsonl"),
-            "--shadow-tracking", str(tmp_path / "shadow_tracking.json"),
-            "--policy-env", str(tmp_path / "policy_env.json"),
-            "--policy-state", str(tmp_path / "policy_state.json"),
-            "--overrides", str(tmp_path / "nonexistent_overrides.json"),
-            "--json-output", str(json_out),
-            "--md-output", str(md_out),
-        ])
+    assert result == 0 or result is None
+    assert json_out.exists()
+    assert md_out.exists()
 
-        assert result == 0 or result is None
-        assert json_out.exists()
-        assert md_out.exists()
-
-        data = json.loads(json_out.read_text(encoding="utf-8"))
-        assert data["log_only"] is True
-        assert "LOG_ONLY" in data["disclaimer"]
-        assert "No BUY" in data["disclaimer"]
-        assert "No BANKROLL" in data["disclaimer"]
-        assert "cities" in data
+    data = json.loads(json_out.read_text(encoding="utf-8"))
+    assert data["log_only"] is True
+    assert "LOG_ONLY" in data["disclaimer"]
+    assert "No BUY" in data["disclaimer"]
+    assert "No BANKROLL" in data["disclaimer"]
+    assert "cities" in data
 
 
-def test_main_fails_clean_on_missing_critical_policy_env():
+def test_main_fails_clean_on_missing_critical_policy_env(tmp_path):
     """main() with missing policy_env returns 1 without writing outputs."""
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp)
-        (tmp_path / "shadow_tracking.json").write_text(json.dumps({"cities": {}}), encoding="utf-8")
-        (tmp_path / "policy_state.json").write_text(json.dumps({"auto_canary_cities": {}, "auto_shadow_cities": {}}), encoding="utf-8")
+    (tmp_path / "shadow_tracking.json").write_text(json.dumps({"cities": {}}), encoding="utf-8")
+    (tmp_path / "policy_state.json").write_text(json.dumps({"auto_canary_cities": {}, "auto_shadow_cities": {}}), encoding="utf-8")
 
-        json_out = tmp_path / "onboarding.json"
-        md_out = tmp_path / "onboarding.md"
+    json_out = tmp_path / "onboarding.json"
+    md_out = tmp_path / "onboarding.md"
 
-        result = main([
-            "--policy-env", str(tmp_path / "nonexistent_env.json"),
-            "--policy-state", str(tmp_path / "policy_state.json"),
-            "--shadow-tracking", str(tmp_path / "shadow_tracking.json"),
-            "--json-output", str(json_out),
-            "--md-output", str(md_out),
-        ])
+    result = main([
+        "--policy-env", str(tmp_path / "nonexistent_env.json"),
+        "--policy-state", str(tmp_path / "policy_state.json"),
+        "--shadow-tracking", str(tmp_path / "shadow_tracking.json"),
+        "--json-output", str(json_out),
+        "--md-output", str(md_out),
+    ])
 
-        assert result == 1
-        assert not json_out.exists()
+    assert result == 1
+    assert not json_out.exists()
 
 
 # ---------------------------------------------------------------------------
