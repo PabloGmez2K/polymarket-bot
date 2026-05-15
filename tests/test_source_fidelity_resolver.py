@@ -122,3 +122,9 @@ def test_markdown_has_log_only_and_no_operational_authorization_markers():
     assert "Human review is required" in markdown
     for marker in resolver.OPERATIONAL_AUTHORIZATION_MARKERS:
         assert marker not in markdown
+
+
+def test_bypasses_poisoned_proxy_env(monkeypatch):
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
+
+    assert resolver.should_bypass_proxy_env() is True

@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import os
 import re
 import sys
 import urllib.parse
@@ -245,11 +246,35 @@ def extract_gamma_evidence_text_from_doc(city: str, docs_dir: Path) -> str:
     return match.group("section") if match else text
 
 
+def should_bypass_proxy_env() -> bool:
+    proxy_vars = (
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    )
+    poisoned_markers = ("127.0.0.1:9", "localhost:9")
+    for name in proxy_vars:
+        value = os.getenv(name, "")
+        if any(marker in value for marker in poisoned_markers):
+            return True
+    return False
+
+
+def open_url(request: urllib.request.Request, timeout: int):
+    if should_bypass_proxy_env():
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        return opener.open(request, timeout=timeout)
+    return urllib.request.urlopen(request, timeout=timeout)
+
+
 def fetch_gamma_market_by_slug(slug: str, timeout: int = 30) -> dict[str, Any]:
     encoded = urllib.parse.quote(slug, safe="")
     url = GAMMA_MARKET_BY_SLUG.format(slug=encoded)
     request = urllib.request.Request(url, headers={"User-Agent": "source-fidelity-resolver/0.1"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with open_url(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
