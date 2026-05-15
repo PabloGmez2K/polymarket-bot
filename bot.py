@@ -184,6 +184,8 @@ BANKROLL_SCALING_MONITOR_ON_STATUS_CHANGE = os.getenv("BANKROLL_SCALING_MONITOR_
 BANKROLL_SCALING_MONITOR_TIMEOUT_SECONDS = int(os.getenv("BANKROLL_SCALING_MONITOR_TIMEOUT_SECONDS", "12"))
 TRADERS_OPERATIONAL_INTELLIGENCE_ENABLED = os.getenv("TRADERS_OPERATIONAL_INTELLIGENCE_ENABLED", "true").lower() in ("1", "true", "yes", "on")
 TRADERS_OPERATIONAL_INTELLIGENCE_TIMEOUT_SECONDS = int(os.getenv("TRADERS_OPERATIONAL_INTELLIGENCE_TIMEOUT_SECONDS", "180"))
+SOURCE_ONBOARDING_ANDON_ENABLED = os.getenv("SOURCE_ONBOARDING_ANDON_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+SOURCE_ONBOARDING_ANDON_TIMEOUT_SECONDS = int(os.getenv("SOURCE_ONBOARDING_ANDON_TIMEOUT_SECONDS", "45"))
 # Cutoff de stats por ciudad: "Dallas=2026-04-06,Chicago=2026-03-01"
 # Trades cerrados ANTES de la fecha indicada se ignoran en get_city_accuracy().
 CITY_STATS_CUTOFF: dict[str, str] = {}
@@ -734,6 +736,11 @@ TRADERS_OPERATIONAL_INTELLIGENCE_MONITOR_SCRIPT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "tools",
     "traders_operational_intelligence_monitor.py",
+)
+SOURCE_ONBOARDING_ANDON_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "tools",
+    "source_onboarding_andon.py",
 )
 SL_RETROSPECTIVE_SCRIPT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
@@ -6189,7 +6196,16 @@ def run_observability_alerts():
         if logger:
             logger.warning(f"source onboarding scanner: fallo ({e})")
 
-    # City Intelligence Digest — LOG_ONLY, daily unified digest (source onboarding + lifecycle summary).
+    # Source Onboarding Andon: LOG_ONLY, idempotent Telegram for human source actions.
+    try:
+        if maybe_run_source_onboarding_andon():
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"source onboarding andon: fallo ({e})")
+
+    # City Intelligence Digest: LOG_ONLY daily unified digest after Andon.
     try:
         if maybe_run_city_intelligence_digest_alert(state):
             changed = True
@@ -9496,6 +9512,79 @@ def maybe_run_traders_operational_intelligence_monitor(now=None):
         reasons = ",".join(payload.get("notification_reasons") or []) or "none"
         logger.info(
             "traders operational intelligence: "
+            f"status={payload.get('status')} notify={payload.get('should_notify')} reasons={reasons}"
+        )
+    return payload.get("status") == "completed"
+
+
+def maybe_run_source_onboarding_andon(now=None):
+    """
+    Ejecuta Source Onboarding Andon LOG_ONLY sobre source_onboarding.json.
+    El Andon mantiene estado idempotente y devuelve Telegram solo cuando una
+    ciudad candidata requiere accion humana clara. No toca trading ni policy.
+    """
+    logger = globals().get("log")
+    if not SOURCE_ONBOARDING_ANDON_ENABLED:
+        if logger:
+            logger.info("source onboarding andon: skip (SOURCE_ONBOARDING_ANDON_ENABLED=false)")
+        return False
+    if now is None:
+        now = datetime.now(timezone.utc)
+    if not os.path.exists(SOURCE_ONBOARDING_ANDON_SCRIPT):
+        if logger:
+            logger.warning(
+                "source onboarding andon: skip "
+                f"(missing script: {SOURCE_ONBOARDING_ANDON_SCRIPT})"
+            )
+        return False
+
+    output_dir = _data_path("source_onboarding")
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                SOURCE_ONBOARDING_ANDON_SCRIPT,
+                "--json",
+                "--source-json",
+                _SOURCE_ONBOARDING_JSON_FILE,
+                "--state",
+                os.path.join(output_dir, "andon_state.json"),
+                "--output",
+                os.path.join(output_dir, "andon_latest.json"),
+                "--agent-events",
+                AGENT_EVENTS_FILE,
+                "--now",
+                now.replace(microsecond=0).isoformat(),
+            ],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            capture_output=True,
+            text=True,
+            timeout=SOURCE_ONBOARDING_ANDON_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except Exception as exc:
+        if logger:
+            logger.warning(f"source onboarding andon: fallo ejecutando monitor ({exc})")
+        return False
+
+    if result.returncode != 0:
+        if logger:
+            detail = (result.stderr or result.stdout or "sin detalle").strip()
+            logger.warning(f"source onboarding andon: fallo ({detail[:500]})")
+        return False
+
+    try:
+        payload = json.loads(result.stdout or "{}")
+    except Exception:
+        payload = {}
+
+    if payload.get("should_notify") and payload.get("telegram_message"):
+        send_telegram(payload["telegram_message"])
+
+    if logger:
+        reasons = ",".join(payload.get("notification_reasons") or []) or "none"
+        logger.info(
+            "source onboarding andon: "
             f"status={payload.get('status')} notify={payload.get('should_notify')} reasons={reasons}"
         )
     return payload.get("status") == "completed"
