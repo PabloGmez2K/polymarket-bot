@@ -54,13 +54,40 @@ MIN_TRADER_SOURCES = 2
 MIN_TRADER_DAYS = 3
 MIN_SHADOW_CYCLES = 10
 
-# Fase A states
-STATE_READY = "READY_FOR_SOURCE_AUDIT"
+# Fase A v0.2 states
+STATE_READY = "READY_FOR_HUMAN_SOURCE_AUDIT"
+STATE_READY_LEGACY = "READY_FOR_SOURCE_AUDIT"
 STATE_WAITING = "WAITING_EVIDENCE"
+STATE_MARKET_IDS_MISSING = "MARKET_IDS_MISSING"
+STATE_SOURCE_TEXT_MISSING = "SOURCE_TEXT_MISSING"
+STATE_MAPPING_MISSING = "MAPPING_MISSING"
+STATE_SOURCE_DISCOVERY_READY = "SOURCE_DISCOVERY_READY"
+STATE_SOURCE_AUDIT_POSSIBLE = "SOURCE_AUDIT_POSSIBLE"
+STATE_SOURCE_CONFIRMED_WAITING_SHADOW = "SOURCE_CONFIRMED_WAITING_SHADOW"
+STATE_OBSERVATION_WAITING_EVIDENCE = "OBSERVATION_WAITING_EVIDENCE"
+STATE_SOURCE_AMBIGUOUS = "SOURCE_AMBIGUOUS"
+STATE_SOURCE_MISMATCH = "SOURCE_MISMATCH"
+STATE_NEEDS_OPUS_REVIEW = "NEEDS_OPUS_REVIEW"
 STATE_RANGE_ONLY = "RANGE_ONLY_NOT_OPERABLE"
 STATE_SOURCE_BLOCKED = "SOURCE_BLOCKED"
 
-VALID_STATES = {STATE_READY, STATE_WAITING, STATE_RANGE_ONLY, STATE_SOURCE_BLOCKED}
+VALID_STATES = {
+    STATE_READY,
+    STATE_READY_LEGACY,
+    STATE_WAITING,
+    STATE_MARKET_IDS_MISSING,
+    STATE_SOURCE_TEXT_MISSING,
+    STATE_MAPPING_MISSING,
+    STATE_SOURCE_DISCOVERY_READY,
+    STATE_SOURCE_AUDIT_POSSIBLE,
+    STATE_SOURCE_CONFIRMED_WAITING_SHADOW,
+    STATE_OBSERVATION_WAITING_EVIDENCE,
+    STATE_SOURCE_AMBIGUOUS,
+    STATE_SOURCE_MISMATCH,
+    STATE_NEEDS_OPUS_REVIEW,
+    STATE_RANGE_ONLY,
+    STATE_SOURCE_BLOCKED,
+}
 
 
 def parse_args(argv=None):
@@ -358,7 +385,12 @@ def _build_trader_report_stats(traders_report):
 
 
 def _collect_market_identifiers(blocked_rows):
-    by_city = defaultdict(lambda: {"slugs": set(), "market_ids": set(), "condition_ids": set()})
+    by_city = defaultdict(lambda: {
+        "slugs": set(),
+        "market_ids": set(),
+        "condition_ids": set(),
+        "source_texts": set(),
+    })
     for row in blocked_rows:
         city = row.get("city") or row.get("market_city")
         if not city:
@@ -367,9 +399,188 @@ def _collect_market_identifiers(blocked_rows):
             value = row.get(key)
             if value:
                 by_city[str(city)][target].add(str(value))
+        for key in ("source_text", "source_rules", "market_rules", "resolution_source", "settlement_source"):
+            value = row.get(key)
+            if value:
+                by_city[str(city)]["source_texts"].add(str(value))
     return {
         city: {key: sorted(values) for key, values in values_by_key.items()}
         for city, values_by_key in by_city.items()
+    }
+
+
+def _has_market_identifiers(ids):
+    return bool(ids.get("slugs") or ids.get("market_ids") or ids.get("condition_ids"))
+
+
+def _has_source_text(ids):
+    return bool(ids.get("source_texts"))
+
+
+def _trader_evidence_status(t, b, trader_report):
+    trader_n = trader_report.get("trader_n")
+    trader_wr_pct = trader_report.get("trader_wr_pct")
+    if trader_n is not None and trader_wr_pct is not None:
+        try:
+            if int(trader_n) >= 5 and float(trader_wr_pct) >= 70.0:
+                return "TRADER_EVIDENCE_READY"
+        except (TypeError, ValueError):
+            pass
+
+    if b.get("n", 0) >= MIN_BLOCKED_N and b.get("n_evaluated", 0) > 0 and (b.get("wr") or 0.0) >= 0.70:
+        return "TRADER_EVIDENCE_READY"
+
+    if len(t.get("sources", set())) >= MIN_TRADER_SOURCES and len(t.get("days", set())) >= MIN_TRADER_DAYS:
+        return "TRADER_EVIDENCE_PARTIAL"
+
+    if t.get("total_count", 0) or b.get("n", 0) or trader_report:
+        return "TRADER_EVIDENCE_WEAK"
+
+    return "TRADER_EVIDENCE_MISSING"
+
+
+def _shadow_evidence_status(shadow):
+    cycles = int(shadow.get("cycles_seen", 0) or 0)
+    edges = int(shadow.get("edge_hits", 0) or 0)
+    if cycles >= MIN_SHADOW_CYCLES and edges > 0:
+        return "SHADOW_EVIDENCE_READY"
+    if cycles > 0 or edges > 0:
+        return "SHADOW_EVIDENCE_PARTIAL"
+    return "SHADOW_EVIDENCE_MISSING"
+
+
+def _mapping_status(source_feasibility):
+    if source_feasibility == "icao_and_station":
+        return "MAPPING_READY"
+    if source_feasibility == "icao_only":
+        return "MAPPING_ICAO_ONLY"
+    if source_feasibility == "no_icao":
+        return STATE_MAPPING_MISSING
+    return "MAPPING_UNKNOWN"
+
+
+def _source_discovery_status(ids):
+    if _has_source_text(ids):
+        return "SOURCE_TEXT_AVAILABLE"
+    if _has_market_identifiers(ids):
+        return STATE_SOURCE_DISCOVERY_READY
+    return STATE_MARKET_IDS_MISSING
+
+
+def _source_audit_status(ids, mapping_status):
+    if mapping_status == STATE_MAPPING_MISSING:
+        return STATE_MAPPING_MISSING
+    if _has_source_text(ids):
+        return STATE_READY
+    if _has_market_identifiers(ids):
+        return STATE_SOURCE_AUDIT_POSSIBLE
+    return STATE_SOURCE_TEXT_MISSING
+
+
+def _observation_pipeline_status(shadow_status, mapping_status):
+    if mapping_status == STATE_MAPPING_MISSING:
+        return STATE_MAPPING_MISSING
+    if shadow_status == "SHADOW_EVIDENCE_READY":
+        return "OBSERVATION_READY"
+    if shadow_status == "SHADOW_EVIDENCE_PARTIAL":
+        return STATE_OBSERVATION_WAITING_EVIDENCE
+    return "OBSERVATION_NOT_STARTED"
+
+
+def _build_readiness(
+    score,
+    range_fraction,
+    source_feasibility,
+    degraded,
+    t,
+    b,
+    trader_report,
+    ids,
+    shadow,
+):
+    trader_status = _trader_evidence_status(t, b, trader_report)
+    shadow_status = _shadow_evidence_status(shadow)
+    mapping_status = _mapping_status(source_feasibility)
+    source_discovery_status = _source_discovery_status(ids)
+    source_audit_status = _source_audit_status(ids, mapping_status)
+    observation_status = _observation_pipeline_status(shadow_status, mapping_status)
+
+    missing_inputs = []
+    blocking_reasons = []
+
+    if trader_status in ("TRADER_EVIDENCE_MISSING", "TRADER_EVIDENCE_WEAK"):
+        missing_inputs.append("trader_evidence")
+    if source_discovery_status == STATE_MARKET_IDS_MISSING:
+        missing_inputs.append("market_ids_or_slugs")
+    if not _has_source_text(ids):
+        missing_inputs.append("source_text")
+    if mapping_status == STATE_MAPPING_MISSING:
+        missing_inputs.append("resolution_icao_mapping")
+        blocking_reasons.append(STATE_MAPPING_MISSING)
+    elif mapping_status == "MAPPING_ICAO_ONLY":
+        missing_inputs.append("noaa_station_id")
+    if shadow_status != "SHADOW_EVIDENCE_READY":
+        missing_inputs.append("shadow_cycles_or_edges")
+
+    source_discovery_recommended = _has_market_identifiers(ids) and not _has_source_text(ids)
+    gamma_check_recommended = source_discovery_recommended
+    source_audit_recommended = source_audit_status in {STATE_SOURCE_AUDIT_POSSIBLE, STATE_READY}
+    observation_review_recommended = shadow_status == "SHADOW_EVIDENCE_PARTIAL"
+    opus_review_required = False
+
+    if range_fraction >= RANGE_ONLY_THRESHOLD:
+        primary_status = STATE_RANGE_ONLY
+        next_best_action = "Review condition mix; do not treat range-heavy evidence as an operable exact source."
+    elif mapping_status == STATE_MAPPING_MISSING:
+        primary_status = STATE_MAPPING_MISSING
+        next_best_action = "Add defensible local mapping before any source audit or observation pipeline work."
+    elif source_discovery_status == STATE_MARKET_IDS_MISSING:
+        primary_status = STATE_MARKET_IDS_MISSING
+        next_best_action = "Collect market slugs, market_ids, or condition_ids for Gamma/source lookup."
+    elif trader_status in ("TRADER_EVIDENCE_MISSING", "TRADER_EVIDENCE_WEAK") or score < SCORE_WAITING:
+        primary_status = STATE_WAITING
+        next_best_action = "Wait for stronger trader or blocked-resolution evidence."
+    elif source_audit_status == STATE_READY and shadow_status == "SHADOW_EVIDENCE_READY":
+        primary_status = STATE_READY
+        next_best_action = "Prepare human source audit packet; keep operational action LOG_ONLY."
+    elif source_audit_status == STATE_READY:
+        primary_status = STATE_SOURCE_CONFIRMED_WAITING_SHADOW
+        next_best_action = "Review observation evidence before any policy discussion."
+    elif shadow_status == "SHADOW_EVIDENCE_PARTIAL" and trader_status == "TRADER_EVIDENCE_READY":
+        primary_status = STATE_OBSERVATION_WAITING_EVIDENCE
+        next_best_action = "Run source discovery/Gamma check, then wait for enough shadow observation evidence."
+    elif source_audit_status == STATE_SOURCE_AUDIT_POSSIBLE:
+        primary_status = STATE_SOURCE_AUDIT_POSSIBLE
+        next_best_action = "Fetch source text from market identifiers and route to human source audit if it matches."
+    elif source_discovery_status == STATE_SOURCE_DISCOVERY_READY:
+        primary_status = STATE_SOURCE_DISCOVERY_READY
+        next_best_action = "Use identifiers to discover source text; no operational change."
+    else:
+        primary_status = STATE_WAITING
+        next_best_action = "Keep collecting evidence; no operational change."
+
+    if primary_status in {STATE_SOURCE_AMBIGUOUS, STATE_SOURCE_MISMATCH, STATE_NEEDS_OPUS_REVIEW, STATE_SOURCE_BLOCKED}:
+        opus_review_required = True
+
+    if degraded:
+        blocking_reasons.append("RESOLUTION_ICAO_DEGRADED")
+
+    return {
+        "primary_status": primary_status,
+        "trader_evidence_status": trader_status,
+        "shadow_evidence_status": shadow_status,
+        "source_discovery_status": source_discovery_status,
+        "mapping_status": mapping_status,
+        "source_audit_status": source_audit_status,
+        "observation_pipeline_status": observation_status,
+        "missing_inputs": sorted(set(missing_inputs)),
+        "blocking_reasons": blocking_reasons,
+        "next_best_action": next_best_action,
+        "source_discovery_recommended": source_discovery_recommended,
+        "gamma_check_recommended": gamma_check_recommended,
+        "source_audit_recommended": source_audit_recommended,
+        "observation_review_recommended": observation_review_recommended,
+        "opus_review_required": opus_review_required,
     }
 
 
@@ -463,12 +674,14 @@ def score_city(city, trader_stats, blocked_stats, shadow_data, resolution_icao, 
 
 
 def classify_state(score, range_fraction, source_feasibility, degraded):
-    """Classify city into Fase A state."""
-    # SOURCE_BLOCKED only when RESOLUTION_ICAO loaded correctly and city has no ICAO
-    if not degraded and source_feasibility == "no_icao":
-        return STATE_SOURCE_BLOCKED
+    """Legacy coarse classifier kept for older tests/imports.
 
-    # Range-only check before score threshold
+    v0.2 primary_status is computed by _build_readiness(). SOURCE_BLOCKED is no
+    longer emitted for a merely missing mapping; that is MAPPING_MISSING.
+    """
+    if not degraded and source_feasibility == "no_icao":
+        return STATE_MAPPING_MISSING
+
     if range_fraction >= RANGE_ONLY_THRESHOLD:
         return STATE_RANGE_ONLY
 
@@ -525,9 +738,26 @@ def build_records(inputs, resolution_icao, degraded):
         total_signals = t.get("total_count", 0)
         range_fraction = (range_count / total_signals) if total_signals > 0 else 0.0
 
-        state = classify_state(score, range_fraction, source_feasibility, degraded)
+        shadow_summary = {
+            "cycles_seen": int(shadow_data.get("cycles_seen", 0) or 0) if shadow_data else 0,
+            "edge_hits": int(shadow_data.get("edge_hits", 0) or 0) if shadow_data else 0,
+            "best_edge_pct": shadow_data.get("best_edge_pct") if shadow_data else None,
+            "last_seen_at": shadow_data.get("last_seen_at") if shadow_data else None,
+        }
+        readiness = _build_readiness(
+            score,
+            range_fraction,
+            source_feasibility,
+            degraded,
+            t,
+            b,
+            trader_report,
+            ids,
+            shadow_summary,
+        )
+        state = readiness["primary_status"]
         if state is None:
-            continue  # below SCORE_WAITING floor
+            continue
 
         reason_detected = []
         if city in trader_report_stats:
@@ -541,17 +771,33 @@ def build_records(inputs, resolution_icao, degraded):
 
         record = {
             "city": city,
+            "primary_status": state,
             "state": state,
             "recommended_state": state,
             "priority_score": round(score, 4),
             "reason_detected": reason_detected,
             "source_feasibility": source_feasibility,
-            "internal_mapping_status": source_feasibility,
+            "internal_mapping_status": readiness["mapping_status"],
+            "trader_evidence_status": readiness["trader_evidence_status"],
+            "shadow_evidence_status": readiness["shadow_evidence_status"],
+            "source_discovery_status": readiness["source_discovery_status"],
+            "mapping_status": readiness["mapping_status"],
+            "source_audit_status": readiness["source_audit_status"],
+            "observation_pipeline_status": readiness["observation_pipeline_status"],
+            "missing_inputs": readiness["missing_inputs"],
+            "blocking_reasons": readiness["blocking_reasons"],
+            "next_best_action": readiness["next_best_action"],
+            "source_discovery_recommended": readiness["source_discovery_recommended"],
+            "gamma_check_recommended": readiness["gamma_check_recommended"],
+            "source_audit_recommended": readiness["source_audit_recommended"],
+            "observation_review_recommended": readiness["observation_review_recommended"],
+            "opus_review_required": readiness["opus_review_required"],
             "bot_seen": bool(shadow_data),
             "observed_by_us": bool(trader_report.get("observed_by_us", False)),
             "human_review_required": True,
             "operational_action": "NO_ACTION / LOG_ONLY",
-            "source_evidence_available": bool(ids.get("slugs") or ids.get("market_ids") or ids.get("condition_ids")),
+            "source_evidence_available": _has_market_identifiers(ids),
+            "source_text_available": _has_source_text(ids),
             "gamma_source_rules_summary": "not_consulted",
             "trader": {
                 "n_sources": len(t.get("sources", set())),
@@ -571,16 +817,12 @@ def build_records(inputs, resolution_icao, degraded):
                 "wr": round(b["wr"], 4) if b.get("wr") is not None else None,
                 "qualifies": b.get("n", 0) >= MIN_BLOCKED_N and b.get("n_evaluated", 0) > 0,
             },
-            "shadow": {
-                "cycles_seen": int(shadow_data.get("cycles_seen", 0) or 0) if shadow_data else 0,
-                "edge_hits": int(shadow_data.get("edge_hits", 0) or 0) if shadow_data else 0,
-                "best_edge_pct": shadow_data.get("best_edge_pct") if shadow_data else None,
-                "last_seen_at": shadow_data.get("last_seen_at") if shadow_data else None,
-            },
+            "shadow": shadow_summary,
             "market_identifiers": {
                 "slugs": ids.get("slugs", []),
                 "market_ids": ids.get("market_ids", []),
                 "condition_ids": ids.get("condition_ids", []),
+                "source_texts": ids.get("source_texts", []),
             },
             "score_components": {k: round(v, 4) for k, v in components.items()},
         }
@@ -612,8 +854,8 @@ def render_markdown(payload):
         "",
         "## Onboarding Candidates",
         "",
-        "| City | Reason | Trader WR | Bot seen | Shadow | Source evidence | Mapping | Recommended state | Human review | Operational action |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| City | Primary | Trader | Shadow | Source | Mapping | Missing | Next action | Operational action |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for r in payload["cities"]:
         t = r["trader"]
@@ -626,13 +868,26 @@ def render_markdown(payload):
             trader_wr = f"{b['wr']:.0%} ({b['n_evaluated']}/{b['n']})"
         shadow = r.get("shadow", {})
         shadow_text = f"cycles={shadow.get('cycles_seen', 0)} edges={shadow.get('edge_hits', 0)}"
-        source_text = "yes" if r.get("source_evidence_available") else "no"
+        source_text = "ids" if r.get("source_evidence_available") else "missing ids"
+        if r.get("source_text_available"):
+            source_text = "source text"
+        flags = []
+        if r.get("source_discovery_recommended"):
+            flags.append("discover")
+        if r.get("source_audit_recommended"):
+            flags.append("audit")
+        if r.get("gamma_check_recommended"):
+            flags.append("gamma")
+        flag_text = ",".join(flags) if flags else "-"
         lines.append(
-            f"| {r['city']} | {', '.join(r.get('reason_detected', [])) or '-'}"
-            f" | {trader_wr} | {r.get('bot_seen')} | {shadow_text}"
-            f" | {source_text}; Gamma={r.get('gamma_source_rules_summary')}"
-            f" | {r.get('internal_mapping_status')} | {r.get('recommended_state')}"
-            f" | {r.get('human_review_required')} | {r.get('operational_action')} |"
+            f"| {r['city']} | {r.get('primary_status')}"
+            f" | {r.get('trader_evidence_status')} {trader_wr}"
+            f" | {r.get('shadow_evidence_status')} {shadow_text}"
+            f" | {r.get('source_discovery_status')} ({source_text}; {flag_text})"
+            f" | {r.get('mapping_status')}"
+            f" | {', '.join(r.get('missing_inputs', [])) or '-'}"
+            f" | {r.get('next_best_action')}"
+            f" | {r.get('operational_action')} |"
         )
 
     lines += [

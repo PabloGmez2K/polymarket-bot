@@ -18,8 +18,11 @@ from source_onboarding_scanner import (
     RANGE_ONLY_THRESHOLD,
     SCORE_READY,
     SCORE_WAITING,
+    STATE_MAPPING_MISSING,
+    STATE_OBSERVATION_WAITING_EVIDENCE,
     STATE_RANGE_ONLY,
     STATE_READY,
+    STATE_SOURCE_AUDIT_POSSIBLE,
     STATE_SOURCE_BLOCKED,
     STATE_WAITING,
     _build_jurisdiction_set,
@@ -45,6 +48,7 @@ def _make_inputs(
     overrides=None,
     signals_rows=None,
     blocked_rows=None,
+    traders_report=None,
 ):
     return {
         "policy_env": {
@@ -62,6 +66,7 @@ def _make_inputs(
         "overrides": overrides or {},
         "signals_rows": signals_rows or [],
         "blocked_rows": blocked_rows or [],
+        "traders_report": traders_report or {},
     }
 
 
@@ -189,11 +194,11 @@ def test_range_fraction_below_threshold_not_classified_range_only():
 
 
 # ---------------------------------------------------------------------------
-# Test 3: Ciudad sin ICAO con RESOLUTION_ICAO cargado → SOURCE_BLOCKED
+# Test 3: Ciudad sin ICAO con RESOLUTION_ICAO cargado → MAPPING_MISSING
 # ---------------------------------------------------------------------------
 
-def test_city_without_icao_in_loaded_resolution_icao_gives_source_blocked():
-    """City absent from RESOLUTION_ICAO (loaded correctly) → SOURCE_BLOCKED."""
+def test_city_without_icao_in_loaded_resolution_icao_gives_mapping_missing():
+    """City absent from RESOLUTION_ICAO (loaded correctly) is not a hard source block."""
     city = "Ulan Bator"
     # resolution_icao is loaded (not degraded) but city is absent
     resolution_icao = {
@@ -205,10 +210,12 @@ def test_city_without_icao_in_loaded_resolution_icao_gives_source_blocked():
     inputs = _make_inputs(signals_rows=rows)
     records, _, _ = build_records(inputs, resolution_icao=resolution_icao, degraded=False)
     city_records = [r for r in records if r["city"] == city]
-    assert city_records, f"No record for {city} — it should appear as SOURCE_BLOCKED"
-    assert city_records[0]["state"] == STATE_SOURCE_BLOCKED, (
-        f"Expected SOURCE_BLOCKED for city with no ICAO, got {city_records[0]['state']}"
+    assert city_records, f"No record for {city} — it should appear as MAPPING_MISSING"
+    assert city_records[0]["state"] == STATE_MAPPING_MISSING, (
+        f"Expected MAPPING_MISSING for city with no ICAO, got {city_records[0]['state']}"
     )
+    assert city_records[0]["source_audit_status"] == STATE_MAPPING_MISSING
+    assert city_records[0]["operational_action"] == "NO_ACTION / LOG_ONLY"
 
 
 def test_city_with_icao_loaded_not_source_blocked():
@@ -223,6 +230,47 @@ def test_city_with_icao_loaded_not_source_blocked():
     city_records = [r for r in records if r["city"] == city]
     if city_records:
         assert city_records[0]["state"] != STATE_SOURCE_BLOCKED
+
+
+def test_trader_ready_with_ids_and_partial_shadow_waits_on_observation_not_source():
+    """Strong trader evidence plus identifiers should separate source readiness from observation readiness."""
+    city = "Chongqing"
+    blocked_rows = _blocked_rows(city, n=25, wr_wins_fraction=0.96)
+    for idx, row in enumerate(blocked_rows):
+        row["slug"] = f"chongqing-weather-may-{idx}"
+        row["market_id"] = f"market-{idx}"
+    traders_report = {
+        "tables": {
+            "trader_winning_not_observed": [{
+                "city": city,
+                "trader_wins": 24,
+                "trader_n": 25,
+                "trader_wr_pct": 96.0,
+                "observed_by_us": False,
+            }]
+        }
+    }
+    inputs = _make_inputs(
+        shadow_cities={city: {"cycles_seen": 9, "edge_hits": 1, "best_edge_pct": 18.0}},
+        blocked_rows=blocked_rows,
+        traders_report=traders_report,
+    )
+    records, _, _ = build_records(
+        inputs,
+        resolution_icao={city: {"icao": "ZUCK"}},
+        degraded=False,
+    )
+
+    rec = next(r for r in records if r["city"] == city)
+    assert rec["primary_status"] == STATE_OBSERVATION_WAITING_EVIDENCE
+    assert rec["trader_evidence_status"] == "TRADER_EVIDENCE_READY"
+    assert rec["source_discovery_status"] == "SOURCE_DISCOVERY_READY"
+    assert rec["source_audit_status"] == STATE_SOURCE_AUDIT_POSSIBLE
+    assert rec["source_discovery_recommended"] is True
+    assert rec["gamma_check_recommended"] is True
+    assert rec["source_audit_recommended"] is True
+    assert rec["observation_review_recommended"] is True
+    assert rec["operational_action"] == "NO_ACTION / LOG_ONLY"
 
 
 # ---------------------------------------------------------------------------
