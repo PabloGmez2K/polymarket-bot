@@ -354,3 +354,73 @@ No abrir agente para alarmas que ya dicen `WATCH_AUDIT`, “no accionable”, `s
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 ...
+
+---
+
+## 12. Token Economics Gate (mayo 2026)
+
+Antes de abrir **cualquier agente**, emitir uno de estos veredictos:
+
+| Veredicto | Condición |
+|---|---|
+| `CODEX_OK` | Hay código real, tests, deploy o policy fix con trigger documentado |
+| `SONNET_ONLY` | Docs, cierre LITE, síntesis, handoff, contrato, candidate pack |
+| `CHAT_CLOSE` | La respuesta es obvia con el contexto actual |
+| `DEFER_STOP` | Sin trigger accionable en ≤30 días |
+| `OPUS_REQUIRED` | Riesgo, BANKROLL, Fase C, city promotion, trading core |
+
+### Pre-agent gate (obligatorio)
+
+Responder las tres antes de abrir Codex:
+
+1. ¿Si acaba en `NO_ACTION` / `WAIT` / `LOG_ONLY`, vale la sesión?
+2. ¿Hay evidencia suficiente para que el resultado sea accionable?
+3. ¿Cambia una decisión operativa en 24h–30d?
+
+Si alguna es "no" → `DEFER_STOP` o `CHAT_CLOSE`.
+
+### Si el veredicto es `CODEX_OK`, indicar
+
+- **Trigger**: qué evidencia o alarma lo justifica
+- **Decisión que desbloquea**: qué cambia tras la sesión
+- **Coste estimado**: bajo / medio / alto
+- **Criterio de parada**: cuándo cerrar aunque no esté todo
+- **Por qué no basta Sonnet/ChatGPT**
+
+### Codex Budget Lock
+
+Si Pablo indica poco uso semanal disponible, modo ahorro activo:
+
+- Codex solo para: `ACTION_NOW`, `RISK_CONTROL` real, bug runtime, patch crítico, Railway/DB técnico imprescindible.
+- Fuera de Codex: docs-only, cierres, prompts, síntesis, auditorías `NO_ACTION`, Railway check docs-only.
+- Límite blando: 3–5 sesiones Codex/semana. Si hay 4+ sesiones Codex en un día → `STOP` por defecto.
+
+### Docs-only
+
+- Agente: Sonnet.
+- No ejecutar `verify_before_deploy.py`.
+- `git diff --check` es suficiente.
+- Railway check breve solo si hubo push y workflow lo requiere.
+
+### Tooling rule
+
+No crear herramienta nueva si no acaba en ≤30 días en:
+- alerta Telegram / digest / Andon
+- gate de decisión
+- reducción de riesgo real
+- métrica que cambie una decisión
+
+### Tool-before-data rule
+
+Antes de implementar parity report / comparator / scanner nuevo, verificar por SSH:
+- n real en `/app/data`
+- slugs / source text disponibles
+- gate alcanzable
+- trigger accionable
+
+Si no se cumplen → `DEFER_STOP`.
+
+### rtk / engram
+
+- **rtk** `KEEP_WITH_RULES`: usar para git/grep/log dentro de sesiones. Si falla con PowerShell, usar comando directo sin debuggear rtk.
+- **engram** `USE_AFTER_REPO`: orden obligatorio: `git status` → `ORCHESTRATOR.md` → `CONTEXTO.md` → engram solo si quedan gaps. No antes que el repo.
