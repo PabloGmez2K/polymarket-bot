@@ -2,7 +2,7 @@
 
 Generated: 2026-05-14
 
-Status: `SOURCE_CONFIRMED_LTFM / APPROVE_WRH_ONLY_AS_SHADOW_SOURCE`
+Status: `SOURCE_CONFIRMED_LTFM / WRH_SHADOW_SOURCE`
 
 > LOG_ONLY human review package. This package does not authorize execution,
 > policy edits, city-mode changes, automation, bankroll changes, or Phase C.
@@ -19,7 +19,7 @@ read-only Railway checks against `/app/data` on 2026-05-14.
 
 ## Verdict
 
-`SOURCE_CONFIRMED_LTFM / APPROVE_WRH_ONLY_AS_SHADOW_SOURCE`
+`SOURCE_CONFIRMED_LTFM / WRH_SHADOW_SOURCE`
 
 Istanbul has strong trader/resolution evidence, mature shadow evidence, and
 Polymarket Gamma API metadata confirming the intended source as NOAA at
@@ -31,6 +31,11 @@ promotion gates. Opus verdict: WRH/weather.gov timeseries is not approved as a
 primary source equivalent to NCEI. It is approved only as a separate shadow
 source when Polymarket explicitly cites
 `weather.gov/wrh/timeseries?site=<ICAO>`.
+
+The runtime WRH parity follow-up is positive for outcome parity but does not
+change that status: `WRH_PARITY_PASS_PRELIMINARY` means the compared YES/NO
+outcomes matched. It does not authorize observed audit inclusion, canary,
+active, trading, promotion gates, BANKROLL, or Phase C.
 
 ## Runtime Trader Evidence
 
@@ -56,6 +61,38 @@ Source: `/app/data/blocked_signals_resolutions.jsonl`
 - `win_for_trader=true`: `22`
 - Note: the `22` also matches shadow `markets_seen`, but the trader WR sample is
   sourced from blocked resolved rows, not from shadow counters.
+
+## Runtime WRH Parity Follow-Up
+
+Source checked read-only: `/app/data/blocked_signals_resolutions.jsonl`
+
+- Istanbul candidate rows: `22`
+- `n_compared`: `22`
+- `n_match`: `22`
+- mismatches: `0`
+- Outcome parity: preliminarily perfect on compared rows.
+- Runtime outcome parity verdict: `WRH_PARITY_PASS_PRELIMINARY`.
+
+Interpretation:
+
+- `WRH_PARITY_PASS_PRELIMINARY` is positive source evidence for Istanbul/LTFM,
+  not operational approval.
+- The delta metrics measure distance between WRH daily max and the market
+  strike. `mean_abs_delta`, `max_abs_delta`, and `bias` are not direct parity
+  failures when the expected YES/NO outcome still matches the resolved outcome.
+- A zero-mismatch result does not authorize `OBSERVED_AUDIT_CITIES`, canary,
+  active, BUY/SELL/SKIP, BANKROLL, Phase C, promotion gates, city modes, env
+  vars, scheduler, or trading changes.
+
+Opus re-evaluation gate remains `false`:
+
+- There are not 20 demonstrable unique markets.
+- Runtime `canonical_unique_market_n` is only `5` using non-null
+  `condition_id`/`market_id`/slug.
+- Runtime `fallback_estimated_unique_market_n` is approximately `17`.
+- `mean_abs_delta=0.909`, above the `0.5` threshold.
+- `bias=-0.818`, above the allowed absolute bias threshold `0.3`.
+- A second explicit WRH candidate city is still missing for generalization.
 
 ## Shadow Evidence
 
@@ -159,6 +196,8 @@ Reasons:
 
 - Polymarket source identity is now confirmed as NOAA at Istanbul Airport via
   `site=LTFM`.
+- Runtime WRH parity found `22/22` compared rows matching the expected
+  Polymarket outcome, with `0` mismatches.
 - WRH/weather.gov timeseries is approved only as a distinct shadow dataset,
   `weather_gov_wrh_timeseries`; it must not be mixed with NCEI.
 - WRH is not a primary equivalent to NCEI and does not feed ranking, promotion
@@ -167,6 +206,8 @@ Reasons:
 - The current local mapping still lacks `noaa_station_id` and
   `noaa_daily_station_id`, so the existing observed-audit path must not treat
   WRH as the current NOAA/NCEI station-id contract.
+- Runtime parity still does not meet Opus re-evaluation gates: unique markets,
+  mean absolute delta, bias, and second-city generalization remain blockers.
 - Runtime blocked rows still carry `settlement_source=unknown` and
   `settlement_fidelity_status=unverified`; the Gamma API evidence resolves the
   source lookup question but does not update runtime row metadata retroactively.
@@ -190,7 +231,8 @@ Not approved:
 - No primary-source equivalence with NCEI.
 - No mixing WRH rows into NCEI observed datasets.
 - No ranking, promotion gates, city modes, active/canary changes,
-  BUY/SELL/SKIP changes, or `OBSERVED_AUDIT_CITIES` changes from this verdict.
+  BUY/SELL/SKIP changes, BANKROLL changes, Phase C, env var changes, scheduler
+  changes, or `OBSERVED_AUDIT_CITIES` changes from this verdict.
 
 Re-evaluation criteria:
 
@@ -200,6 +242,12 @@ Re-evaluation criteria:
 - Aggregation rule documented for how WRH hourly `Temp` maps to market
   settlement.
 - At least one second candidate city with explicit WRH source evidence.
+
+Current gate status:
+
+- `OPUS_REEVALUATION_GATE_MET=false`.
+- Outcome parity is encouraging, but it is not enough to promote WRH into
+  observed audit or city-mode decisions.
 
 ## Required Manual Confirmation
 
