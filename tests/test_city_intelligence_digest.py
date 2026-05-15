@@ -310,6 +310,65 @@ def test_silent_promotion_appears_in_review_queue_and_drift():
     assert "Chicago" in drift_section
 
 
+def test_canary_watch_is_grouped_and_keeps_review_queue_count():
+    lifecycle_cities = [
+        {
+            "city": "Toronto",
+            "lifecycle_stage": "canary",
+            "transition_proposed": "canary_watch",
+            "effective_policy_status": "canary",
+            "override": None,
+            "gates_failed": ["canary_closed_trades<5(got 0)"],
+            "gate_details": {
+                "canary_closed_trades": 0,
+                "canary_wr_closed": None,
+                "canary_realized_pnl": 0.0,
+            },
+            "notes": ["Canary watch, not active-ready", "NO_ACTION / LOG_ONLY. Do not promote."],
+        }
+    ]
+    inputs = _make_inputs(lifecycle_cities=lifecycle_cities)
+    digest = build_digest(inputs)
+    assert len(digest["review_queue"]) == 1
+    assert digest["review_queue"][0]["transition_proposed"] == "canary_watch"
+
+    md = render_markdown(
+        {"generated_at": "2026-05-14T10:00:00+00:00", "log_only": True},
+        digest,
+        [],
+    )
+    assert "Canary Watch" in md
+    assert "not active-ready" in md
+    assert "Toronto" in md
+
+
+def test_reporting_drift_blocked_effective_appears_in_drift_no_action():
+    lifecycle_cities = [
+        {
+            "city": "Paris",
+            "lifecycle_stage": "blocked_by_source",
+            "effective_policy_status": "blocked",
+            "transition_proposed": "reporting_drift_blocked_effective",
+            "override": None,
+            "gates_failed": [],
+            "gate_details": {"operational_action": "NO_ACTION_LOG_ONLY"},
+            "notes": ["Blocked effective - no action, reporting drift", "NO_ACTION / LOG_ONLY. Do not promote."],
+        }
+    ]
+    inputs = _make_inputs(lifecycle_cities=lifecycle_cities)
+    digest = build_digest(inputs)
+    assert digest["drift"][0]["city"] == "Paris"
+    assert digest["drift"][0]["transition_proposed"] == "reporting_drift_blocked_effective"
+
+    md = render_markdown(
+        {"generated_at": "2026-05-14T10:00:00+00:00", "log_only": True},
+        digest,
+        [],
+    )
+    assert "REPORTING_DRIFT_BLOCKED_EFFECTIVE" in md
+    assert "NO_ACTION / LOG_ONLY" in md
+
+
 # ---------------------------------------------------------------------------
 # Integration test: main() writes JSON + MD files
 # ---------------------------------------------------------------------------

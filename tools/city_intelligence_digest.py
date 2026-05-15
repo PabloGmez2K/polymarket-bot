@@ -47,10 +47,12 @@ LOG_ONLY_DISCLAIMER = (
 
 # Lifecycle transitions that go into the Review Queue (strongest first)
 _REVIEW_QUEUE_PRIORITY = [
+    "reporting_drift_blocked_effective",
     "silent_promotion_detected",
     "manual_review_pending",
     "active_review",
     "canary_review",
+    "canary_watch",
     "preliminary_review_candidate",
     "observed_audit_review",
 ]
@@ -221,7 +223,13 @@ def build_source_audit_section(source_audits):
 
 def build_drift_section(review_queue):
     """Extract policy conflict / silent promotion items from review queue."""
-    return [r for r in review_queue if r.get("transition_proposed") == "silent_promotion_detected"]
+    return [
+        r for r in review_queue
+        if r.get("transition_proposed") in {
+            "silent_promotion_detected",
+            "reporting_drift_blocked_effective",
+        }
+    ]
 
 
 def build_digest(inputs):
@@ -291,8 +299,38 @@ def render_markdown(payload, digest, warnings):
         "",
     ]
     if review_queue:
+        drift_rows = [
+            r for r in review_queue
+            if r.get("transition_proposed") == "reporting_drift_blocked_effective"
+        ]
+        canary_watch = [r for r in review_queue if r.get("transition_proposed") == "canary_watch"]
+        if drift_rows:
+            lines.append("### Reporting Drift / Blocked Effective")
+            lines.append("")
+            for r in drift_rows:
+                notes = r.get("notes") or []
+                notes_str = "; ".join(notes[:2]) if notes else "Blocked effective - no action."
+                lines.append(f"- **{r.get('city', '?')}** `REPORTING_DRIFT_BLOCKED_EFFECTIVE` - {notes_str}")
+            lines.append("")
+        if canary_watch:
+            lines.append("### Canary Watch")
+            lines.append("")
+            lines.append(
+                f"- {len(canary_watch)} runtime canary candidates are grouped here as canary_watch, not active-ready."
+            )
+            for r in canary_watch[:8]:
+                details = r.get("gate_details") or {}
+                lines.append(
+                    f"  - **{r.get('city', '?')}** closed={details.get('canary_closed_trades')} "
+                    f"WR={details.get('canary_wr_closed')} PnL={details.get('canary_realized_pnl')}"
+                )
+            if len(canary_watch) > 8:
+                lines.append(f"  - ... and {len(canary_watch) - 8} more")
+            lines.append("")
         for r in review_queue:
             transition = r.get("transition_proposed", "?")
+            if transition in {"canary_watch", "reporting_drift_blocked_effective"}:
+                continue
             city = r.get("city", "?")
             stage = r.get("lifecycle_stage", "?")
             notes = r.get("notes") or []
@@ -378,11 +416,12 @@ def render_markdown(payload, digest, warnings):
         "",
     ]
     if drift:
+        lines.append("**NO_ACTION / LOG_ONLY - blocked effective reporting drift does not authorize promotion.**")
         lines.append("**ACTION REQUIRED — Policy inconsistency detected:**")
         lines.append("")
         for r in drift:
             notes_str = "; ".join(r.get("notes", [])) or "-"
-            lines.append(f"- **{r['city']}** `silent_promotion_detected` — {notes_str}")
+            lines.append(f"- **{r['city']}** `{r.get('transition_proposed')}` - {notes_str}")
     else:
         lines.append("- No policy conflicts detected.")
 

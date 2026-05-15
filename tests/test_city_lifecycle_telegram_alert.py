@@ -36,6 +36,7 @@ def _make_inputs(
     shadow_cities=None,
     overrides=None,
     promotion_gate=None,
+    trade_lifecycle=None,
 ):
     return {
         "policy_env": {
@@ -52,6 +53,7 @@ def _make_inputs(
         "shadow_tracking": {"cities": shadow_cities or {}},
         "overrides": overrides or {},
         "promotion_gate": promotion_gate,
+        "trade_lifecycle": trade_lifecycle,
     }
 
 
@@ -127,7 +129,7 @@ def _build_alert_fn(monitor_mod, inputs, tmp_path, telegram_calls):
         now_dt = datetime.now(timezone.utc)
         changed = False
         alert_transitions = {
-            "manual_review_pending", "canary_review",
+            "manual_review_pending",
             "active_review", "silent_promotion_detected",
         }
 
@@ -195,6 +197,27 @@ class TestNoAlertWhenNoTransitions:
         state = {}
         fn(state)
         assert len(sent) == 0
+
+    def test_canary_watch_is_grouped_not_individual_alert(self, monitor_mod, tmp_path):
+        inputs = _make_inputs(
+            auto_canary={
+                "Toronto": {"shadow_edges": 9, "best_edge_pct": 39.8}
+            },
+            shadow_cities={"Toronto": _passing_shadow_data("Toronto")},
+            promotion_gate={
+                "summary": {"runtime_inputs_status": "available"},
+                "cities": [{"city": "Toronto", "gate_status": "observe_runtime_canary"}],
+            },
+        )
+        records = monitor_mod.build_city_records(inputs)
+        toronto = next(r for r in records if r["city"] == "Toronto")
+        assert toronto["transition_proposed"] == "canary_watch"
+
+        fn, sent = _build_alert_fn(monitor_mod, inputs, tmp_path, None)
+        state = {}
+        result = fn(state)
+        assert not result
+        assert sent == []
 
 
 class TestManualReviewPendingAlert:

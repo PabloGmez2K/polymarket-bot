@@ -19,6 +19,7 @@ from city_lifecycle_review_monitor import (
     T3_MIN_BEST_EDGE_PCT_AT_PROMOTION,
     T3_MIN_SHADOW_EDGES_AT_PROMOTION,
     _has_non_range_edge,
+    build_canary_trade_metrics,
     build_city_records,
     check_t2_gates,
     check_t3_gates,
@@ -41,6 +42,7 @@ def _make_inputs(
     shadow_cities=None,
     overrides=None,
     promotion_gate=None,
+    trade_lifecycle=None,
 ):
     return {
         "policy_env": {
@@ -57,6 +59,7 @@ def _make_inputs(
         "shadow_tracking": {"cities": shadow_cities or {}},
         "overrides": overrides or {},
         "promotion_gate": promotion_gate,
+        "trade_lifecycle": trade_lifecycle,
     }
 
 
@@ -230,7 +233,7 @@ def test_t3_metrics_pass_no_promo_gate_gives_preliminary():
     assert "insufficient for active_review" in " ".join(notes)
 
 
-def test_t3_metrics_pass_observe_runtime_canary_gives_active_review():
+def test_t3_metrics_pass_observe_runtime_canary_gives_canary_watch_without_sample():
     """T3 metrics pass + promotion_gate observe_runtime_canary → active_review."""
     entry = {
         "shadow_edges": T3_MIN_SHADOW_EDGES_AT_PROMOTION + 2,
@@ -238,8 +241,28 @@ def test_t3_metrics_pass_observe_runtime_canary_gives_active_review():
     }
     promo_row = {"city": "Dubai", "gate_status": "observe_runtime_canary"}
     proposed, failed, details, notes = check_t3_gates(entry, promo_row, has_promotion_gate=True)
-    assert proposed == "active_review"
+    assert proposed == "canary_watch"
     assert details.get("promotion_gate_status") == "observe_runtime_canary"
+    assert any("canary_closed_trades" in f for f in failed)
+    assert "not active-ready" in " ".join(notes)
+
+
+def test_t3_metrics_pass_with_closed_trade_sample_gives_active_review():
+    """active_review requires promotion metrics plus enough closed canary evidence."""
+    entry = {
+        "shadow_edges": T3_MIN_SHADOW_EDGES_AT_PROMOTION + 2,
+        "best_edge_pct": T3_MIN_BEST_EDGE_PCT_AT_PROMOTION + 10,
+    }
+    promo_row = {"city": "Dubai", "gate_status": "observe_runtime_canary"}
+    proposed, failed, details, _ = check_t3_gates(
+        entry,
+        promo_row,
+        has_promotion_gate=True,
+        canary_metrics={"closed": 5, "wins": 3, "wr_closed": 60.0, "realized_pnl": 0.0},
+    )
+    assert proposed == "active_review"
+    assert failed == []
+    assert details["canary_closed_trades"] == 5
 
 
 def test_t3_metrics_pass_other_gate_status_gives_preliminary():
@@ -370,7 +393,7 @@ def test_canary_without_promotion_gate_gives_preliminary():
     assert dubai["transition_proposed"] == "preliminary_review_candidate"
 
 
-def test_canary_with_observe_runtime_canary_gives_active_review():
+def test_canary_with_observe_runtime_canary_gives_canary_watch_without_sample():
     """Canary city with promotion_gate observe_runtime_canary → active_review."""
     inputs = _make_inputs(
         auto_canary={
@@ -388,7 +411,8 @@ def test_canary_with_observe_runtime_canary_gives_active_review():
     records = build_city_records(inputs)
     dubai = next(r for r in records if r["city"] == "Dubai")
     assert dubai["lifecycle_stage"] == "canary"
-    assert dubai["transition_proposed"] == "active_review"
+    assert dubai["transition_proposed"] == "canary_watch"
+    assert any("canary_closed_trades" in f for f in dubai["gates_failed"])
 
 
 def test_canary_low_t3_metrics_gives_none():
@@ -424,7 +448,40 @@ def test_silent_promotion_detected_auto_canary_and_blocked():
     )
     records = build_city_records(inputs)
     paris = next(r for r in records if r["city"] == "Paris")
-    assert paris["transition_proposed"] == "silent_promotion_detected"
+    assert paris["transition_proposed"] == "reporting_drift_blocked_effective"
+    assert paris["effective_policy_status"] == "blocked"
+    assert paris["operational_action"] == "NO_ACTION_LOG_ONLY"
+
+
+def test_blocked_effective_wins_over_auto_canary_regardless_of_city_casing():
+    inputs = _make_inputs(
+        blocked_cities="paris",
+        auto_canary={
+            "Paris": {"shadow_edges": 5, "best_edge_pct": 50.4}
+        },
+        shadow_cities={"Paris": _passing_shadow_data("Paris")},
+        promotion_gate={
+            "summary": {"runtime_inputs_status": "available"},
+            "cities": [{"city": "Paris", "gate_status": "observe_runtime_canary"}],
+        },
+        trade_lifecycle={
+            "records": [
+                {
+                    "city": "Paris",
+                    "opened_at": "2026-05-01T00:00:00+00:00",
+                    "status": "closed",
+                    "close_context": {"pnl_cash": 1.0},
+                }
+            ]
+        },
+    )
+    records = build_city_records(inputs)
+    paris_rows = [r for r in records if r["city"].lower() == "paris"]
+    assert len(paris_rows) == 1
+    paris = paris_rows[0]
+    assert paris["effective_policy_status"] == "blocked"
+    assert paris["transition_proposed"] == "reporting_drift_blocked_effective"
+    assert paris["transition_proposed"] != "active_review"
 
 
 # ---------------------------------------------------------------------------

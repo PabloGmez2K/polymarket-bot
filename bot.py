@@ -807,7 +807,6 @@ _LIFECYCLE_MONITOR_SCRIPT = os.path.join(
 )
 _LIFECYCLE_REVIEW_ALERT_TRANSITIONS = {
     "manual_review_pending",
-    "canary_review",
     "active_review",
     "silent_promotion_detected",
 }
@@ -5150,12 +5149,22 @@ def maybe_run_city_lifecycle_review_alert(state: dict) -> bool:
             except Exception:
                 pass
 
+        trade_lifecycle = None
+        trade_lifecycle_path = _data_path("trade_lifecycle.json")
+        if os.path.exists(trade_lifecycle_path):
+            try:
+                with open(trade_lifecycle_path, "r", encoding="utf-8") as _f:
+                    trade_lifecycle = json.load(_f)
+            except Exception:
+                pass
+
         inputs = {
             "policy_env": policy_env,
             "policy_state": policy_state,
             "shadow_tracking": shadow_tracking,
             "overrides": overrides,
             "promotion_gate": promo_gate,
+            "trade_lifecycle": trade_lifecycle,
         }
         records = monitor_mod.build_city_records(inputs)
     except Exception as e:
@@ -5450,11 +5459,22 @@ def maybe_run_city_intelligence_digest_alert(state: dict) -> bool:
         rq_count = summary.get("review_queue_count", 0)
         if rq_count > 0:
             strongest = review_queue[0] if review_queue else None
+            transitions = summary.get("review_queue_transitions", {}) or {}
+            canary_watch_count = int(transitions.get("canary_watch", 0) or 0)
+            drift_count = int(transitions.get("reporting_drift_blocked_effective", 0) or 0)
             strongest_str = ""
             if strongest:
                 strongest_str = f" — strongest: <b>{strongest['city']}</b> → {strongest['transition_proposed']}"
             lines.append(f"<b>Review Queue:</b> {rq_count} ciudad(es) en revisión{strongest_str}")
-            lines.append("<i>(alerts individuales enviados por lifecycle monitor)</i>")
+            if canary_watch_count:
+                lines.append(
+                    f"<i>Canary watch grouped: {canary_watch_count} candidate(s), not active-ready.</i>"
+                )
+            if drift_count:
+                lines.append(
+                    f"<i>Blocked effective reporting drift: {drift_count} item(s), NO_ACTION / LOG_ONLY.</i>"
+                )
+            lines.append("<i>Alertas individuales solo para manual_review_pending, active_review real o silent promotion.</i>")
             lines.append("")
 
         # Source Onboarding: full detail for READY candidates
@@ -5493,7 +5513,9 @@ def maybe_run_city_intelligence_digest_alert(state: dict) -> bool:
             lines.append("<b>⚠ Drift / Policy conflicts:</b>")
             for r in drift[:3]:
                 notes_str = "; ".join(r.get("notes", [])[:1]) or "-"
-                lines.append(f"• <b>{r['city']}</b> <code>silent_promotion_detected</code> — {notes_str}")
+                transition = r.get("transition_proposed") or "policy_drift"
+                lines.append(f"• <b>{r['city']}</b> <code>{transition}</code> — {notes_str}")
+            lines.append("<i>NO_ACTION / LOG_ONLY. Do not promote.</i>")
             lines.append("")
 
         lines += [
