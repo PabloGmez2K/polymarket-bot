@@ -5468,3 +5468,29 @@ Doc incluye prompt completo para Sonnet (Fase A) listo para pegar cuando Pablo a
 ### NO se toco
 
 No hubo cambios de código. No se tocaron BANKROLL, whitelist, city modes, scheduler, trading core, env vars, Railway, DB, runtime, Telegram, ni `city_lifecycle_review_monitor.py`. `CONTEXTO.md` y `agent_events.jsonl` sin cambios (docs-only / sin estado vivo durable).
+
+---
+
+## Sesión 357 - 15 de mayo de 2026 (Codex)
+
+**Clasificacion:** LITE / RISK_CONTROL / docs-only + higiene
+**Bloque:** Phase 2 T+30 contamination precheck — Paris #304
+**Veredicto:** PARIS_304_EXCLUDED_FROM_T30_SCORING / HARD_BLOCK_POST_S347_CONFIRMED
+
+### Resumen
+
+Cierre LITE de la auditoria read-only Phase 2 contamination precheck. Railway live conserva `BLOCKED_CITIES=London,Paris,Atlanta,Chicago`; `/app/data/city_policy_state.json` conserva overlays stale `auto_canary_cities.Paris`, `auto_canary_cities.Chicago` y `auto_shadow_cities.Atlanta`. La evidencia runtime posterior a S347 muestra Paris con `city_mode=blocked` y `allowlisted=false`, por lo que los overlays stale ya no habilitan nuevas admisiones/trades blocked.
+
+Paris #304 queda marcado como contaminado pre-fix para scoring T+30: token `90540818137674278987146948237136603818166030618576062534092750591125921298198`, `Paris 14°C May13 NO`, `exact`, opened `2026-05-13T06:39:02.955596Z`, `cycle_number=304`, `city_mode=canary` en `cycles_history`, cerrado `LOSS_TOTAL / micro_position_unsellable`, `pnl_cash=-2.19`.
+
+### Regla T+30
+
+Excluir exactamente Paris #304 de la cohorte Phase 2 al scoring del `2026-06-09`, con motivo `trade contaminado por bug de admision pre-S347`. No excluir otros trades salvo evidencia clara equivalente.
+
+### Higiene repo
+
+Se elimino `cutoff]`, artifact accidental de la auditoria con salida `SyntaxError` de un one-liner Python remoto mal quoteado. No se toco `2026-04-27]`.
+
+### NO se toco
+
+No se tocaron codigo, runtime, Railway writes, env vars, DB, BANKROLL, Fase C, city modes, scheduler, whitelist, promotion gates, source fidelity blocked cities ni nuevos experimentos.
