@@ -6,7 +6,7 @@
   "current_strategy": "silenciar -> observar -> pausar -> apagar",
   "canonical_runtime_service": "polymarket-bot",
   "reminder_channel": "city_intelligence_daily_summary",
-  "phase": "legacy_services_paused",
+  "phase": "transition_closed",
   "applied_actions": [
     {
       "timestamp": "2026-04-23T08:05:00Z",
@@ -106,10 +106,11 @@
     {
       "id": "transition_closeout_2026_05_07",
       "due_date": "2026-05-07",
-      "status": "pending",
+      "status": "resolved",
+      "resolved_at": "2026-05-17T00:00:00Z",
       "label": "Cierre de transformacion",
       "reminder": "Archivar docs phase5, cerrar trazabilidad en CONTEXTO/HISTORIAL/agent_events y mover foco a exact/range + position management.",
-      "decision": "Cerrar transicion o abrir follow-up si quedo algun emisor/escritor duplicado."
+      "decision": "Transicion cerrada. Precheck 2026-05-17 confirmo: city-intelligence y phase5-visibility borrados de Railway (Service not found); city-intelligence-volume y phase5-visibility-volume borrados (no aparecen en volume list --json); solo polymarket-bot (SUCCESS) y polymarket-bot-volume (115.67MB) existen. runtime_inputs_status=available confirmado en city_validation_ledger y city_promotion_gate con timestamp 2026-05-17T08:00:xx. Scripts/docs preservados en repo: 7 tools/city_intelligence_*, 5 tools/*phase5*, 9 docs/phase5*, 7 docs/city_intelligence*. Trazabilidad cerrada en HISTORIAL_SESIONES.md. No quedan emisores duplicados ni servicios legacy activos."
     }
   ]
 }

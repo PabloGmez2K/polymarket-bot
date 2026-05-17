@@ -5498,3 +5498,24 @@ Se elimino `cutoff]`, artifact accidental de la auditoria con salida `SyntaxErro
 ### NO se toco
 
 No se tocaron codigo, runtime, Railway writes, env vars, DB, BANKROLL, Fase C, city modes, scheduler, whitelist, promotion gates, source fidelity blocked cities ni nuevos experimentos.
+
+---
+
+## Sesión 362 - 17 de mayo de 2026 (Sonnet 4.6)
+
+**Clasificacion:** LITE / docs-only / cierre trazabilidad
+**Bloque:** Legacy cleanup city-intelligence / phase5-visibility — cierre definitivo
+**Veredicto:** TRANSITION_CLOSED
+
+### Resumen
+
+Precheck read-only confirmó que el cleanup Railway ya estaba ejecutado antes de esta sesion: `city-intelligence` y `phase5-visibility` borrados del proyecto (Service not found); `city-intelligence-volume` y `phase5-visibility-volume` borrados (no aparecen en `railway volume list --json`). Unico servicio vivo: `polymarket-bot` (SUCCESS). Unico volumen vivo: `polymarket-bot-volume` (115.67MB). Runtime bridge operacional: `runtime_inputs_status=available`, `city_intelligence_pipeline`, `city_validation_ledger` y `city_promotion_gate` con timestamp 2026-05-17T08:00:xx.
+
+### Cambios
+
+- `data/service_transition_followup.json`: checkpoint `transition_closeout_2026_05_07` marcado `resolved`; `phase` actualizado a `transition_closed`.
+- `HISTORIAL_SESIONES.md`: esta entrada.
+
+### NO se toco
+
+No se tocaron codigo, Railway, env vars, DB, BANKROLL, Fase C, city modes, scheduler, whitelist, promotion gates, trading core ni CONTEXTO.md (sin estado vivo durable que cambiar).
