@@ -93,3 +93,64 @@ def test_report_remains_log_only_and_avoids_trading_or_canonical(tmp_path):
     assert "does not authorize runtime integration" in markdown
     assert "canonical source changes" in markdown
     assert "BUY/SELL/SKIP" in markdown
+
+
+def test_operational_readout_surfaces_coverage_drift_om_and_lucknow_watch(tmp_path):
+    metar_dir = tmp_path / "metar"
+    metar_dir.mkdir()
+    (metar_dir / "ZBAA_2026-05-13.json").write_text(
+        json.dumps(
+            {
+                "city": "Beijing",
+                "icao": "ZBAA",
+                "date_local": "2026-05-13",
+                "status": "ok",
+                "tmax_c": 30.0,
+                "coverage": {"coverage_ok": True, "obs_count": 24},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (metar_dir / "ZUCK_2026-05-13.json").write_text(
+        json.dumps(
+            {
+                "city": "Chongqing",
+                "icao": "ZUCK",
+                "date_local": "2026-05-13",
+                "status": "insufficient_metar_coverage",
+                "tmax_c": None,
+                "coverage": {"coverage_ok": False, "obs_count": 3},
+            }
+        ),
+        encoding="utf-8",
+    )
+    wu_csv = tmp_path / "wu.csv"
+    wu_csv.write_text(
+        "icao,date,wu_high_c\n"
+        "ZBAA,2026-05-13,28.5\n",
+        encoding="utf-8",
+    )
+    om_csv = tmp_path / "om.csv"
+    om_csv.write_text(
+        "icao,date,open_meteo_max_c\n"
+        "ZBAA,2026-05-13,28.7\n",
+        encoding="utf-8",
+    )
+    args = SimpleNamespace(
+        metar_dir=str(metar_dir),
+        icao=None,
+        wu_csv=str(wu_csv),
+        gamma_csv=None,
+        open_meteo_csv=str(om_csv),
+    )
+
+    payload = report.build_report(args)
+    markdown = report.render_markdown(payload)
+    codes = {alert["code"] for alert in payload["alerts"]}
+
+    assert "## Operational Readout" in markdown
+    assert "A_METAR_PARITY_DRIFT" in codes
+    assert "A_METAR_COVERAGE_GAP" in codes
+    assert "A_METAR_VS_OM_DELTA" in codes
+    assert "LUCKNOW_COMPARABLE_DAYS_WATCH" in codes
+    assert payload["station_summary"][0]["parity_status"] in {"DRIFT", "COVERAGE_GAP"}

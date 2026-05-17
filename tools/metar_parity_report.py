@@ -17,11 +17,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_METAR_DIR = REPO_ROOT / "data" / "metar_shadow"
 DEFAULT_MD_OUTPUT = REPO_ROOT / "docs" / "source_audits" / "metar_measurement_layer_report.md"
 DEFAULT_CSV_OUTPUT = REPO_ROOT / "data" / "metar_shadow_report.csv"
+DEFAULT_JSON_OUTPUT = REPO_ROOT / "data" / "metar_shadow_report.json"
 
 FUTURE_MIN_N = 30
 FUTURE_MAX_MEDIAN_ABS_DELTA_C = 0.3
 FUTURE_MAX_ABS_DELTA_C = 1.0
 FUTURE_MIN_COVERAGE_PCT = 80.0
+METAR_OPEN_METEO_DELTA_ALERT_C = 1.0
 
 LOG_ONLY_DISCLAIMER = (
     "LOG_ONLY METAR/AviationWeather measurement-layer report. This does not "
@@ -135,6 +137,112 @@ def compute_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _pct(numerator: int, denominator: int) -> float | None:
+    return round(100.0 * numerator / denominator, 1) if denominator else None
+
+
+def build_station_summary(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault((str(row.get("city") or ""), str(row.get("icao") or "")), []).append(row)
+
+    summary = []
+    for (city, icao), station_rows in sorted(grouped.items(), key=lambda item: (item[0][0], item[0][1])):
+        coverage_ok = sum(1 for row in station_rows if row.get("coverage_ok"))
+        comparable = [row for row in station_rows if row.get("metar_wu_delta_c") is not None]
+        abs_deltas = [abs(float(row["metar_wu_delta_c"])) for row in comparable]
+        om_abs_deltas = [
+            abs(float(row["metar_open_meteo_delta_c"]))
+            for row in station_rows
+            if row.get("metar_open_meteo_delta_c") is not None
+        ]
+        insufficient = [
+            row for row in station_rows
+            if row.get("metar_status") == "insufficient_metar_coverage" or not row.get("coverage_ok")
+        ]
+        summary.append(
+            {
+                "city": city or None,
+                "icao": icao,
+                "n_rows": len(station_rows),
+                "coverage_ok_rows": coverage_ok,
+                "coverage_pct": _pct(coverage_ok, len(station_rows)),
+                "n_compared_metar_wu": len(comparable),
+                "median_abs_metar_wu_delta_c": _median(abs_deltas),
+                "max_abs_metar_wu_delta_c": round(max(abs_deltas), 2) if abs_deltas else None,
+                "max_abs_metar_open_meteo_delta_c": round(max(om_abs_deltas), 2) if om_abs_deltas else None,
+                "insufficient_coverage_rows": len(insufficient),
+                "parity_status": _station_parity_status(len(comparable), abs_deltas, len(insufficient)),
+            }
+        )
+    return summary
+
+
+def build_city_summary(station_summary: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for station in station_summary:
+        grouped.setdefault(str(station.get("city") or "Unknown"), []).append(station)
+
+    cities = []
+    for city, stations in sorted(grouped.items()):
+        rows = sum(int(station.get("n_rows") or 0) for station in stations)
+        coverage_ok = sum(int(station.get("coverage_ok_rows") or 0) for station in stations)
+        compared = sum(int(station.get("n_compared_metar_wu") or 0) for station in stations)
+        max_abs = [
+            float(station["max_abs_metar_wu_delta_c"])
+            for station in stations
+            if station.get("max_abs_metar_wu_delta_c") is not None
+        ]
+        max_om_abs = [
+            float(station["max_abs_metar_open_meteo_delta_c"])
+            for station in stations
+            if station.get("max_abs_metar_open_meteo_delta_c") is not None
+        ]
+        insufficient = sum(int(station.get("insufficient_coverage_rows") or 0) for station in stations)
+        cities.append(
+            {
+                "city": city,
+                "stations": [station.get("icao") for station in stations],
+                "n_rows": rows,
+                "coverage_pct": _pct(coverage_ok, rows),
+                "n_compared_metar_wu": compared,
+                "max_abs_metar_wu_delta_c": round(max(max_abs), 2) if max_abs else None,
+                "max_abs_metar_open_meteo_delta_c": round(max(max_om_abs), 2) if max_om_abs else None,
+                "insufficient_coverage_rows": insufficient,
+                "parity_status": _city_parity_status(stations),
+            }
+        )
+    return cities
+
+
+def _station_parity_status(n_compared: int, abs_deltas: list[float], insufficient_coverage_rows: int) -> str:
+    if insufficient_coverage_rows:
+        return "COVERAGE_GAP"
+    if not n_compared:
+        return "WAITING_WU_OR_GAMMA"
+    if max(abs_deltas) > FUTURE_MAX_ABS_DELTA_C:
+        return "DRIFT"
+    if n_compared < FUTURE_MIN_N:
+        return "WATCH_MORE_DATA"
+    median_abs = statistics.median(abs_deltas)
+    if median_abs > FUTURE_MAX_MEDIAN_ABS_DELTA_C:
+        return "DRIFT"
+    return "PROMISING_LOG_ONLY"
+
+
+def _city_parity_status(stations: list[dict[str, Any]]) -> str:
+    statuses = {str(station.get("parity_status") or "") for station in stations}
+    if "COVERAGE_GAP" in statuses:
+        return "COVERAGE_GAP"
+    if "DRIFT" in statuses:
+        return "DRIFT"
+    if statuses == {"PROMISING_LOG_ONLY"}:
+        return "PROMISING_LOG_ONLY"
+    if "WATCH_MORE_DATA" in statuses:
+        return "WATCH_MORE_DATA"
+    return "WAITING_WU_OR_GAMMA"
+
+
 def classify_parity_drift(metrics: dict[str, Any]) -> tuple[str, list[str]]:
     reasons = []
     n = metrics.get("n_compared_metar_wu") or 0
@@ -166,6 +274,71 @@ def classify_parity_drift(metrics: dict[str, Any]) -> tuple[str, list[str]]:
     return "METAR_PARITY_LOG_ONLY_PROMISING", ["future criteria met; still no promotion authorization"]
 
 
+def build_alerts(report: dict[str, Any]) -> list[dict[str, Any]]:
+    alerts: list[dict[str, Any]] = []
+    for station in report.get("station_summary", []):
+        city = station.get("city")
+        icao = station.get("icao")
+        coverage_pct = station.get("coverage_pct")
+        if station.get("insufficient_coverage_rows") or (coverage_pct is not None and coverage_pct < FUTURE_MIN_COVERAGE_PCT):
+            alerts.append(
+                {
+                    "code": "A_METAR_COVERAGE_GAP",
+                    "city": city,
+                    "icao": icao,
+                    "severity": "watch",
+                    "message": (
+                        f"{city or icao} {icao}: coverage={coverage_pct}% "
+                        f"insufficient_rows={station.get('insufficient_coverage_rows')}"
+                    ),
+                    "operational_action": "NO_ACTION_LOG_ONLY",
+                }
+            )
+        max_abs = station.get("max_abs_metar_wu_delta_c")
+        if max_abs is not None and max_abs > FUTURE_MAX_ABS_DELTA_C:
+            alerts.append(
+                {
+                    "code": "A_METAR_PARITY_DRIFT",
+                    "city": city,
+                    "icao": icao,
+                    "severity": "review",
+                    "message": f"{city or icao} {icao}: max abs METAR-WU delta={max_abs}C",
+                    "operational_action": "NO_ACTION_LOG_ONLY",
+                }
+            )
+        max_om_abs = station.get("max_abs_metar_open_meteo_delta_c")
+        if max_om_abs is not None and max_om_abs >= METAR_OPEN_METEO_DELTA_ALERT_C:
+            alerts.append(
+                {
+                    "code": "A_METAR_VS_OM_DELTA",
+                    "city": city,
+                    "icao": icao,
+                    "severity": "info",
+                    "message": f"{city or icao} {icao}: max abs METAR-Open-Meteo delta={max_om_abs}C",
+                    "operational_action": "NO_ACTION_LOG_ONLY",
+                }
+            )
+
+    lucknow_compared = sum(
+        1
+        for row in report.get("rows", [])
+        if str(row.get("city") or "").strip().lower() == "lucknow"
+        and row.get("metar_wu_delta_c") is not None
+    )
+    if lucknow_compared < FUTURE_MIN_N:
+        alerts.append(
+            {
+                "code": "LUCKNOW_COMPARABLE_DAYS_WATCH",
+                "city": "Lucknow",
+                "icao": None,
+                "severity": "watch",
+                "message": f"Lucknow comparable-days watch: n={lucknow_compared}/{FUTURE_MIN_N}; outside Wave 1 until threshold is met.",
+                "operational_action": "NO_ACTION_LOG_ONLY",
+            }
+        )
+    return alerts
+
+
 def render_markdown(report: dict[str, Any]) -> str:
     metrics = report["metrics"]
     lines = [
@@ -190,6 +363,52 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"| median abs METAR-Open-Meteo delta C | {metrics.get('median_abs_metar_open_meteo_delta_c')} |",
         f"| max abs METAR-Open-Meteo delta C | {metrics.get('max_abs_metar_open_meteo_delta_c')} |",
         "",
+        "## Operational Readout",
+        "",
+        "### By City",
+        "",
+        "| City | Stations | Coverage | Compared | Max METAR-WU | Max METAR-OM | Insufficient | Status |",
+        "|---|---|---:|---:|---:|---:|---:|---|",
+    ]
+    for city in report.get("city_summary", []):
+        lines.append(
+            f"| {city.get('city')} | {', '.join(city.get('stations') or [])} | {city.get('coverage_pct')} | "
+            f"{city.get('n_compared_metar_wu')} | {city.get('max_abs_metar_wu_delta_c')} | "
+            f"{city.get('max_abs_metar_open_meteo_delta_c')} | {city.get('insufficient_coverage_rows')} | "
+            f"{city.get('parity_status')} |"
+        )
+    lines.extend(
+        [
+            "",
+            "### By Station",
+            "",
+            "| City | ICAO | Coverage | Compared | Median METAR-WU | Max METAR-WU | Max METAR-OM | Insufficient | Status |",
+            "|---|---|---:|---:|---:|---:|---:|---:|---|",
+        ]
+    )
+    for station in report.get("station_summary", []):
+        lines.append(
+            f"| {station.get('city') or ''} | {station.get('icao')} | {station.get('coverage_pct')} | "
+            f"{station.get('n_compared_metar_wu')} | {station.get('median_abs_metar_wu_delta_c')} | "
+            f"{station.get('max_abs_metar_wu_delta_c')} | {station.get('max_abs_metar_open_meteo_delta_c')} | "
+            f"{station.get('insufficient_coverage_rows')} | {station.get('parity_status')} |"
+        )
+    lines.extend(
+        [
+            "",
+            "### LOG_ONLY Alerts",
+            "",
+        ]
+    )
+    if report.get("alerts"):
+        for alert in report["alerts"]:
+            target = f"{alert.get('city') or ''} {alert.get('icao') or ''}".strip()
+            lines.append(f"- `{alert.get('code')}` {target}: {alert.get('message')}")
+    else:
+        lines.append("- None.")
+    lines.extend(
+        [
+            "",
         "## Future Criteria",
         "",
         f"- rolling n >= {FUTURE_MIN_N}",
@@ -198,7 +417,8 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"- coverage >= {FUTURE_MIN_COVERAGE_PCT}%",
         "",
         "Reasons:",
-    ]
+        ]
+    )
     lines.extend(f"- {reason}" for reason in report["verdict_reasons"])
     lines.extend(["", "## Rows", "", "| City | ICAO | Date | METAR | WU/Gamma | Delta | Coverage | Open-Meteo | METAR-OM | Status |", "|---|---|---|---:|---:|---:|---|---:|---:|---|"])
     for row in report["rows"]:
@@ -250,7 +470,9 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     rows = build_rows(metar, wu, open_meteo, gamma)
     metrics = compute_metrics(rows)
     verdict, reasons = classify_parity_drift(metrics)
-    return {
+    station_summary = build_station_summary(rows)
+    city_summary = build_city_summary(station_summary)
+    report = {
         "generated_at": _now_iso(),
         "log_only": True,
         "disclaimer": LOG_ONLY_DISCLAIMER,
@@ -263,8 +485,12 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         "metrics": metrics,
         "verdict": verdict,
         "verdict_reasons": reasons,
+        "city_summary": city_summary,
+        "station_summary": station_summary,
         "rows": rows,
     }
+    report["alerts"] = build_alerts(report)
+    return report
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -276,7 +502,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--open-meteo-csv", help="Optional CSV with icao,date,open_meteo_max_c.")
     parser.add_argument("--md-out", default=str(DEFAULT_MD_OUTPUT))
     parser.add_argument("--csv-out", default=str(DEFAULT_CSV_OUTPUT))
+    parser.add_argument("--json-out", default=str(DEFAULT_JSON_OUTPUT))
     parser.add_argument("--no-write-csv", action="store_true")
+    parser.add_argument("--no-write-json", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -288,7 +516,21 @@ def main(argv: list[str] | None = None) -> int:
     md_path.write_text(render_markdown(report), encoding="utf-8", newline="\n")
     if not args.no_write_csv:
         write_csv(report["rows"], Path(args.csv_out))
-    print(json.dumps({"verdict": report["verdict"], "metrics": report["metrics"], "md_out": str(md_path)}, ensure_ascii=False))
+    if not getattr(args, "no_write_json", False):
+        json_path = Path(getattr(args, "json_out", DEFAULT_JSON_OUTPUT))
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        json_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
+    print(
+        json.dumps(
+            {
+                "verdict": report["verdict"],
+                "metrics": report["metrics"],
+                "alerts": len(report.get("alerts", [])),
+                "md_out": str(md_path),
+            },
+            ensure_ascii=False,
+        )
+    )
     return 0
 
 

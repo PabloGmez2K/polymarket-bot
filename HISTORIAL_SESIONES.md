@@ -5553,3 +5553,33 @@ Measurement Layer / METAR (sesión 2026-05-17): detectó blocker, generalizó so
 ### NO se toco
 
 No se tocaron codigo, runtime, Railway, env vars, DB, BANKROLL, Fase C, city modes, scheduler, whitelist, promotion gates, trading core, AGENTS.md ni CONTEXTO.md.
+---
+
+## Sesión 364 - 17 de mayo de 2026 (Codex)
+
+**Clasificacion:** NORMAL / LOG_ONLY tooling / METAR Measurement Layer
+**Veredicto:** IMPLEMENTED
+
+### Objetivo
+
+Cerrar el deployment pendiente del ultimo push docs-only y, si Railway estaba `SUCCESS`, implementar una salida operativa LOG_ONLY para parity/coverage METAR que reduzca revision manual ad hoc sin tocar runtime de trading.
+
+### Cambios
+
+- Confirmado Railway deployment `861f017d-bfbd-4a6e-ae32-13e8f9c8f25e` en `SUCCESS` antes de tocar codigo.
+- `tools/metar_parity_report.py` ahora genera readout por ciudad y estacion con coverage, insufficient coverage, `parity_status`, delta METAR-WU, delta METAR-Open-Meteo y alertas LOG_ONLY estructuradas.
+- Nuevo output JSON manual `data/metar_shadow_report.json` (gitignored) para consumo seguro por revision manual o digest futuro.
+- Alertas emitidas: `A_METAR_PARITY_DRIFT`, `A_METAR_COVERAGE_GAP`, `A_METAR_VS_OM_DELTA`, `LUCKNOW_COMPARABLE_DAYS_WATCH`.
+- `docs/metar_measurement_layer.md` documenta el contrato operativo nuevo.
+
+### Validacion
+
+- `python -m py_compile tools\metar_parity_report.py tools\metar_shadow_fetch.py`
+- `python -m pytest tests\test_metar_measurement_layer.py` -> 6 passed
+- `python tools\metar_parity_report.py --md-out data\metar_shadow_report.md` -> `METAR_PARITY_INSUFFICIENT_DATA`, 11 rows, coverage 100%, 1 alert Lucknow watch
+- `git diff --check` OK
+- `verify_before_deploy.py` se re-ejecuta tras alinear trazabilidad
+
+### Guardrails
+
+No se tocaron `bot.py`, trading core, BUY/SELL/SKIP, BANKROLL, Fase C, Truth Pipeline, env vars, DB, city modes, whitelist, scheduler automatico, Telegram runtime, NOAA runtime ni promotion gates.

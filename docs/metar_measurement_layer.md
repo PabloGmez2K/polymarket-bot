@@ -6,7 +6,7 @@ METAR/AviationWeather is approved only as a LOG_ONLY experimental measurement la
 
 `tools/metar_shadow_fetch.py` fetches read-only AviationWeather METAR observations for one ICAO/date, reconstructs the local-day observed temperatures, and derives `tmax_c`/`tmin_c` only when coverage is materially complete. If coverage is thin, the output status is `insufficient_metar_coverage` and no TMAX/TMIN is invented.
 
-`tools/metar_parity_report.py` reads those local LOG_ONLY files plus optional WU, Gamma-derived settlement, and Open-Meteo CSV inputs. It reports rolling METAR-vs-WU deltas, coverage, and informational METAR-vs-Open-Meteo deltas. It does not connect to runtime or promotion gates.
+`tools/metar_parity_report.py` reads those local LOG_ONLY files plus optional WU, Gamma-derived settlement, and Open-Meteo CSV inputs. It reports rolling METAR-vs-WU deltas, coverage, informational METAR-vs-Open-Meteo deltas, per-city/per-station operational readout, and JSON alert rows that can be reviewed manually or consumed by a future digest. It does not connect to runtime, Telegram, schedulers, or promotion gates.
 
 ## Wave 1 Mapping
 
@@ -27,7 +27,7 @@ Lucknow is outside Wave 1 until it has at least 30 comparable observations. Any 
 - Collects local JSON files under `data/metar_shadow/`.
 - Preserves raw METAR text, timestamps, parsed temperatures, coverage, and derived TMAX/TMIN when coverage is sufficient.
 - Produces Markdown/CSV reports for measurement-layer review.
-- Emits only informational labels such as `A_METAR_PARITY_DRIFT`, `A_METAR_COVERAGE_GAP`, and `A_METAR_VS_OM_DELTA` for future monitoring design.
+- Emits only informational LOG_ONLY alert rows such as `A_METAR_PARITY_DRIFT`, `A_METAR_COVERAGE_GAP`, `A_METAR_VS_OM_DELTA`, and `LUCKNOW_COMPARABLE_DAYS_WATCH`.
 
 ## What LOG_ONLY Does Not Do
 
@@ -77,14 +77,18 @@ Operational cadence is a manual weekly run. There is no scheduler hook.
 
 Outputs:
 - `data/metar_shadow/<ICAO>_<YYYY-MM-DD>.json` (LOG_ONLY, gitignored)
-- `data/metar_shadow_report.md` / `data/metar_shadow_report.csv` (LOG_ONLY, gitignored)
+- `data/metar_shadow_report.csv` / `data/metar_shadow_report.json` (LOG_ONLY, gitignored)
+- Markdown report via `--md-out` (default `docs/source_audits/metar_measurement_layer_report.md`)
 
 What to inspect each run:
 - coverage % per station
+- coverage % per city
+- parity status per city/station
 - median and max `|METAR-WU|` delta
 - count of rows with `|delta| >= 1C`
 - METAR vs Open-Meteo informational delta
 - any `insufficient_metar_coverage` rows
+- LOG_ONLY alerts: `A_METAR_PARITY_DRIFT`, `A_METAR_COVERAGE_GAP`, `A_METAR_VS_OM_DELTA`, `LUCKNOW_COMPARABLE_DAYS_WATCH`
 - warnings emitted by `metar_shadow_fetch.py` or `metar_parity_report.py`
 
 If WU CSV is not yet supplied, the report verdict will surface `METAR_PARITY_INSUFFICIENT_DATA`. That is expected, not a failure.
