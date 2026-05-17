@@ -25,6 +25,33 @@ def test_parse_metar_temperature_supports_negative_and_missing():
     assert fetch.parse_metar_temperature("not a metar") == (None, None)
 
 
+def test_wave2_station_metadata_is_log_only_and_wave1_remains_intact():
+    assert set(fetch.WAVE1_STATIONS) == {
+        "ZBAA",
+        "ZSPD",
+        "ZSSS",
+        "RJTT",
+        "RJAA",
+        "OEJN",
+        "SABE",
+        "SAEZ",
+        "LTAC",
+        "ZUCK",
+    }
+    assert fetch.WAVE2_STATIONS == {
+        "RKSI": {"city": "Seoul", "tz": "Asia/Seoul"},
+        "WSSS": {"city": "Singapore", "tz": "Asia/Singapore"},
+        "CYYZ": {"city": "Toronto", "tz": "America/Toronto"},
+        "NZWN": {"city": "Wellington", "tz": "Pacific/Auckland"},
+        "LEMD": {"city": "Madrid", "tz": "Europe/Madrid"},
+        "LIMC": {"city": "Milan", "tz": "Europe/Rome"},
+        "EDDM": {"city": "Munich", "tz": "Europe/Berlin"},
+    }
+    assert fetch.station_city("RKSI") == "Seoul"
+    assert fetch.station_timezone("WSSS") == "Asia/Singapore"
+    assert fetch.station_city("ZBAA") == "Beijing"
+
+
 def test_daily_aggregation_derives_tmax_tmin_with_coverage():
     rows = [_row(hour, 10 + (hour % 8)) for hour in range(0, 24, 2)]
     rows.append(_row(23, 25))

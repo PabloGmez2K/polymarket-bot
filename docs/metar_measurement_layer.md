@@ -22,6 +22,32 @@ METAR/AviationWeather is approved only as a LOG_ONLY experimental measurement la
 
 Lucknow is outside Wave 1 until it has at least 30 comparable observations. Any city without an ICAO matched to the market sensor is outside scope.
 
+## Wave 2 Mapping
+
+Wave 2 is a LOG_ONLY coverage expansion for canary WU/ICAO gaps identified in
+the METAR Coverage & Candidate Expansion Audit. It keeps Wave 1 intact and only
+adds manual station metadata to `tools/metar_shadow_fetch.py`, so each station
+can be fetched with the existing `--icao` workflow.
+
+| City | ICAO station(s) | Status | Reason |
+|---|---|---|---|
+| Seoul | RKSI | Wave 2 | Canary WU/ICAO coverage gap |
+| Singapore | WSSS | Wave 2 | Canary WU/ICAO coverage gap |
+| Toronto | CYYZ | Wave 2 | Canary WU/ICAO coverage gap |
+| Wellington | NZWN | Wave 2 | Canary WU/ICAO coverage gap |
+| Madrid | LEMD | Wave 2 | Canary WU/ICAO coverage gap |
+| Milan | LIMC | Wave 2 | Canary WU/ICAO coverage gap |
+| Munich | EDDM | Wave 2 | Canary WU/ICAO coverage gap |
+
+Wave 2 does not authorize trading, promotion, BANKROLL changes, Fase C, Truth
+Pipeline changes, env vars, DB writes, scheduler wiring, Telegram runtime
+wiring, whitelist changes, or city mode changes. Alerts from Wave 2 remain
+manual LOG_ONLY review rows only.
+
+Source-audit queue remains separate and is not Wave 2: Amsterdam, Wuhan, Busan,
+Jakarta, and Kuala Lumpur require source-audit work before direct METAR
+monitoring expansion.
+
 ## What LOG_ONLY Does
 
 - Collects local JSON files under `data/metar_shadow/`.
@@ -68,6 +94,7 @@ METAR Measurement Layer is evidence input only. It does not auto-promote.
 - Beijing remains blocked by Open-Meteo divergence (Lucknow KDAL-style bug pattern) but is a candidate for unblock review via METAR parity once thresholds in [Future Criteria](#future-criteria) are met.
 - Jeddah needs shadow >=10 cycles AND METAR parity evidence before any Opus promotion review can be requested.
 - Wave 1 stations: Beijing, Shanghai, Tokyo, Jeddah, Buenos Aires, Ankara, Chongqing.
+- Wave 2 stations: Seoul, Singapore, Toronto, Wellington, Madrid, Milan, Munich.
 - Lucknow is out of scope until rolling n>=30 comparable-day observations exist.
 - Meeting Future Criteria authorizes human review only, never automatic trading, canary, active, whitelist, or canonical-source change.
 

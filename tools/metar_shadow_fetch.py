@@ -45,6 +45,21 @@ WAVE1_STATIONS: dict[str, dict[str, str]] = {
     "ZUCK": {"city": "Chongqing", "tz": "Asia/Shanghai"},
 }
 
+WAVE2_STATIONS: dict[str, dict[str, str]] = {
+    "RKSI": {"city": "Seoul", "tz": "Asia/Seoul"},
+    "WSSS": {"city": "Singapore", "tz": "Asia/Singapore"},
+    "CYYZ": {"city": "Toronto", "tz": "America/Toronto"},
+    "NZWN": {"city": "Wellington", "tz": "Pacific/Auckland"},
+    "LEMD": {"city": "Madrid", "tz": "Europe/Madrid"},
+    "LIMC": {"city": "Milan", "tz": "Europe/Rome"},
+    "EDDM": {"city": "Munich", "tz": "Europe/Berlin"},
+}
+
+METAR_STATIONS: dict[str, dict[str, str]] = {
+    **WAVE1_STATIONS,
+    **WAVE2_STATIONS,
+}
+
 TZ_FALLBACK_OFFSETS = {
     "UTC": 0,
     "Asia/Shanghai": 8,
@@ -52,6 +67,13 @@ TZ_FALLBACK_OFFSETS = {
     "Asia/Riyadh": 3,
     "America/Argentina/Buenos_Aires": -3,
     "Europe/Istanbul": 3,
+    "Asia/Seoul": 9,
+    "Asia/Singapore": 8,
+    "America/Toronto": -5,
+    "Pacific/Auckland": 12,
+    "Europe/Madrid": 1,
+    "Europe/Rome": 1,
+    "Europe/Berlin": 1,
 }
 
 
@@ -80,11 +102,11 @@ def parse_date(value: str) -> date:
 
 
 def station_timezone(icao: str) -> str:
-    return WAVE1_STATIONS.get(str(icao).upper(), {}).get("tz", "UTC")
+    return METAR_STATIONS.get(str(icao).upper(), {}).get("tz", "UTC")
 
 
 def station_city(icao: str, city: str | None = None) -> str | None:
-    return city or WAVE1_STATIONS.get(str(icao).upper(), {}).get("city")
+    return city or METAR_STATIONS.get(str(icao).upper(), {}).get("city")
 
 
 def parse_metar_temperature(raw_metar: str) -> tuple[float | None, float | None]:
