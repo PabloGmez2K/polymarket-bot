@@ -1,8 +1,8 @@
 # Beijing Open-Meteo vs WU/ZBAA Source Parity Audit
 
-Generated: `2026-05-17T16:47:34+00:00`
+Generated: `2026-05-17T17:15:10+00:00`
 
-**Verdict:** **WU_FETCHER_MISSING**
+**Verdict:** **SETTLEMENT_GAMMA_PARITY_FAIL**
 
 > LOG_ONLY source-parity dossier. This does not authorize BUY/SELL/SKIP, whitelist, canary/active promotion, scheduler changes, env vars, DB writes, BANKROLL changes, Fase C, or Truth Pipeline activation.
 
@@ -16,7 +16,7 @@ Compare Beijing Open-Meteo proxy daily maximum temperature against the Polymarke
 - Open-Meteo archive: `temperature_2m_max`, lat `40.0799`, lon `116.6031`, timezone `Asia/Shanghai`
 - Weather Underground settlement source: `https://www.wunderground.com/history/daily/cn/beijing/ZBAA`
 - WU data status: `missing_fetcher`
-- Blocked signals source: `data\_tmp_blocked_signals_resolutions_railway.jsonl`
+- Blocked signals source: `data\source_audits\_tmp_beijing_parity_blocked.jsonl`
 - Gamma settlement derivation: `SETTLEMENT_GAMMA_PARITY_FAIL`
 
 ## Aggregate Metrics
@@ -27,6 +27,7 @@ Compare Beijing Open-Meteo proxy daily maximum temperature against the Polymarke
 | median delta C | None |
 | median abs delta C | None |
 | p95 abs delta C | None |
+| max abs delta C | None |
 | pct abs delta >= 1C | None |
 | pct abs delta >= 2C | None |
 
@@ -34,13 +35,18 @@ Compare Beijing Open-Meteo proxy daily maximum temperature against the Polymarke
 
 | Criterion | Status |
 |---|---|
-| n >= 30 | NOT_MET |
+| WU n >= 30 | NOT_MET |
 | median abs delta <= 0.5C | NOT_MET |
 | pct abs delta >= 1C <= 10.0% | NOT_MET |
+| max abs delta <= 2.0C | NOT_MET |
 | blocked days >= 10/11 match WU outcome | 0/0 comparable |
 
 Reasons:
-- no reliable WU/ZBAA fetcher exists in repo and no --wu-csv was provided
+- unreliable_derivations=2
+- n_dates_compared=12 < 20
+- median_abs_delta_c=1.05 > 0.5
+- pct_abs_delta_ge_1c=58.3 > 10.0
+- max_abs_delta_c=3.0 > 2.0
 
 ## Day By Day
 
@@ -125,8 +131,10 @@ This section infers settlement temperature from resolved Polymarket/Gamma exact 
 
 Reasons:
 - unreliable_derivations=2
+- n_dates_compared=12 < 20
 - median_abs_delta_c=1.05 > 0.5
 - pct_abs_delta_ge_1c=58.3 > 10.0
+- max_abs_delta_c=3.0 > 2.0
 
 | Date | Open-Meteo max C | Gamma settlement C | Delta C | Status | Evidence |
 |---|---:|---:|---:|---|---|
@@ -201,7 +209,7 @@ Gamma fetch errors:
 
 ## Pass/Fail
 
-`WU_FETCHER_MISSING`. This dossier remains LOG_ONLY and requires Opus review before any operational next step.
+`SETTLEMENT_GAMMA_PARITY_FAIL`. This dossier remains LOG_ONLY and requires Opus review before any operational next step.
 
 ## Next Trigger For Opus
 

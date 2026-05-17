@@ -8,6 +8,13 @@
 (v10.6.28, P5 expansion ~2026-04-21).
 **Verdict:** **NOT_READY_WAIT_SHADOW** — temporal maturation, not structural block.
 
+**Measurement layer gate (2026-05-17 update):** exact-market promotion review
+also requires a source parity dossier before any Opus promotion review. The
+pilot dossier `docs/source_audits/jeddah_open_meteo_vs_wu_parity.md` currently
+closes as `INSUFFICIENT_DATA` for Gamma-derived exact settlement
+(`n_dates_compared=1`) and `WU_FETCHER_MISSING` for direct WU parity. Do not
+promote Jeddah on source text alone.
+
 ---
 
 ## 1. Current State

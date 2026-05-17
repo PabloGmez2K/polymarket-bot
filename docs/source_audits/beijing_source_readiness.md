@@ -4,7 +4,11 @@
 **Mode:** Sonnet read-only / docs-only  
 **Authority:** No operational action. No code patch. No env/whitelist/policy change.  
 **Source data:** Blocked Signals audit 2026-05-17 (Railway live); `data/runtime_import/shadow_city_tracking.json`; `data/runtime_import_derived/blocked_signals_resolutions.jsonl`; `bot.py` RESOLUTION_ICAO + OBSERVED_AUDIT_CITIES (v10.6.40); `tools/forecast_accuracy_audit.py` ICAO_ONLY_PROXY_AUDIT_CITIES.  
-**Verdict:** **READY_FOR_OPUS_SOURCE_REVIEW** — Gamma audit complete (2026-05-17); source confirmed WU/ZBAA; C1–C4 met; Opus review required before any promotion step.
+**Verdict:** **BLOCKED_BY_MEASUREMENT_LAYER** — source text is confirmed WU/ZBAA, but source parity fails. The general parity dossier
+`docs/source_audits/beijing_open_meteo_vs_wu_parity.md` reproduces
+`SETTLEMENT_GAMMA_PARITY_FAIL` with median `|delta|=1.05C`, max `|delta|=3.0C`,
+and `58.3%` of Gamma-derived exact settlement dates at `|delta| >= 1C`.
+Exact-market promotion review is gated until source parity passes.
 
 ---
 
