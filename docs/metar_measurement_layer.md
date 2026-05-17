@@ -58,3 +58,52 @@ Meeting those criteria would still only justify human review. It would not autom
 - `A_METAR_PARITY_DRIFT`
 - `A_METAR_COVERAGE_GAP`
 - `A_METAR_VS_OM_DELTA`
+- Lucknow comparable-days watch (track until rolling n>=30)
+
+## Promotion Impact
+
+METAR Measurement Layer is evidence input only. It does not auto-promote.
+
+- Any WU/ICAO `exact` city requires source parity / METAR evidence accumulated under this layer before canary or active promotion review.
+- Beijing remains blocked by Open-Meteo divergence (Lucknow KDAL-style bug pattern) but is a candidate for unblock review via METAR parity once thresholds in [Future Criteria](#future-criteria) are met.
+- Jeddah needs shadow >=10 cycles AND METAR parity evidence before any Opus promotion review can be requested.
+- Wave 1 stations: Beijing, Shanghai, Tokyo, Jeddah, Buenos Aires, Ankara, Chongqing.
+- Lucknow is out of scope until rolling n>=30 comparable-day observations exist.
+- Meeting Future Criteria authorizes human review only, never automatic trading, canary, active, whitelist, or canonical-source change.
+
+## Manual Weekly Tracking
+
+Operational cadence is a manual weekly run. There is no scheduler hook.
+
+Outputs:
+- `data/metar_shadow/<ICAO>_<YYYY-MM-DD>.json` (LOG_ONLY, gitignored)
+- `data/metar_shadow_report.md` / `data/metar_shadow_report.csv` (LOG_ONLY, gitignored)
+
+What to inspect each run:
+- coverage % per station
+- median and max `|METAR-WU|` delta
+- count of rows with `|delta| >= 1C`
+- METAR vs Open-Meteo informational delta
+- any `insufficient_metar_coverage` rows
+- warnings emitted by `metar_shadow_fetch.py` or `metar_parity_report.py`
+
+If WU CSV is not yet supplied, the report verdict will surface `METAR_PARITY_INSUFFICIENT_DATA`. That is expected, not a failure.
+
+## What Stays Prohibited
+
+This layer never authorizes:
+
+- Substituting Open-Meteo in runtime.
+- Changing city modes, whitelist, or canary/active membership.
+- Automatic promotion of any kind.
+- BUY/SELL/SKIP decisions.
+- BANKROLL changes or Fase C transitions.
+- Truth Pipeline modifications or canonical source swap.
+- Scheduler integration or runtime hook.
+
+## Next Codex Task (future, not active)
+
+Pending Opus decision before activation:
+
+- Integrate the METAR LOG_ONLY parity report block into the existing manual / weekly digest or Telegram summary as informational-only content.
+- No scheduler wiring until Opus reviews enough Wave 1 data and explicitly approves.
