@@ -1,6 +1,6 @@
 # Beijing Open-Meteo vs WU/ZBAA Source Parity Audit
 
-Generated: `2026-05-17T16:29:53+00:00`
+Generated: `2026-05-17T16:47:34+00:00`
 
 **Verdict:** **WU_FETCHER_MISSING**
 
@@ -16,7 +16,8 @@ Compare Beijing Open-Meteo proxy daily maximum temperature against the Polymarke
 - Open-Meteo archive: `temperature_2m_max`, lat `40.0799`, lon `116.6031`, timezone `Asia/Shanghai`
 - Weather Underground settlement source: `https://www.wunderground.com/history/daily/cn/beijing/ZBAA`
 - WU data status: `missing_fetcher`
-- Blocked signals source: `C:\Projects\polymarket-bot\data\runtime_import_derived\blocked_signals_resolutions.jsonl`
+- Blocked signals source: `data\_tmp_blocked_signals_resolutions_railway.jsonl`
+- Gamma settlement derivation: `SETTLEMENT_GAMMA_PARITY_FAIL`
 
 ## Aggregate Metrics
 
@@ -106,12 +107,97 @@ Reasons:
 | 2026-05-15 | 29.0 | None | None | wu_fetcher_missing |
 | 2026-05-16 | 24.4 | None | None | wu_fetcher_missing |
 
+## Gamma-Derived Settlement Triage
+
+**Verdict:** **SETTLEMENT_GAMMA_PARITY_FAIL**
+
+This section infers settlement temperature from resolved Polymarket/Gamma exact markets only. It does not scrape WU and does not replace formal WU parity.
+
+| Metric | Value |
+|---|---:|
+| blocked exact dates | 14 |
+| dates compared | 12 |
+| median delta C | -1.05 |
+| median abs delta C | 1.05 |
+| max abs delta C | 3.0 |
+| pct abs delta >= 1C | 58.3 |
+| pct abs delta >= 2C | 25.0 |
+
+Reasons:
+- unreliable_derivations=2
+- median_abs_delta_c=1.05 > 0.5
+- pct_abs_delta_ge_1c=58.3 > 10.0
+
+| Date | Open-Meteo max C | Gamma settlement C | Delta C | Status | Evidence |
+|---|---:|---:|---:|---|---|
+| 2026-04-13 | 17.8 | 18.0 | -0.2 | compared | single YES exact market |
+| 2026-04-14 | 17.5 | None | None | unreliable_gamma_derivation | expected exactly one YES exact market, got 0 |
+| 2026-04-17 | 21.2 | 22.0 | -0.8 | compared | single YES exact market |
+| 2026-04-18 | 25.0 | 27.0 | -2.0 | compared | single YES exact market |
+| 2026-04-20 | 21.9 | 24.0 | -2.1 | compared | single YES exact market |
+| 2026-04-21 | 25.3 | 27.0 | -1.7 | compared | single YES exact market |
+| 2026-04-22 | 22.4 | 23.0 | -0.6 | compared | single YES exact market |
+| 2026-04-23 | 23.9 | 25.0 | -1.1 | compared | single YES exact market |
+| 2026-04-27 | 22.0 | 25.0 | -3.0 | compared | single YES exact market |
+| 2026-04-28 | 20.0 | 21.0 | -1.0 | compared | single YES exact market |
+| 2026-04-29 | 23.3 | 25.0 | -1.7 | compared | single YES exact market |
+| 2026-05-01 | 26.5 | 26.0 | 0.5 | compared | single YES exact market |
+| 2026-05-02 | 23.9 | 24.0 | -0.1 | compared | single YES exact market |
+| 2026-05-09 | 22.1 | None | None | unreliable_gamma_derivation | expected exactly one YES exact market, got 0 |
+
+Gamma fetch errors:
+- `highest-temperature-in-beijing-on-april-14-2026-17c`: HTTP Error 404: Not Found
+- `highest-temperature-in-beijing-on-april-14-2026-18c`: HTTP Error 404: Not Found
+- `highest-temperature-in-beijing-on-april-17-2026-19c`: HTTP Error 404: Not Found
+- `highest-temperature-in-beijing-on-april-17-2026-20c`: HTTP Error 404: Not Found
+- `highest-temperature-in-beijing-on-april-17-2026-21c`: HTTP Error 404: Not Found
+- `highest-temperature-in-beijing-on-april-18-2026-23c`: HTTP Error 404: Not Found
+- `highest-temperature-in-beijing-on-april-18-2026-24c`: HTTP Error 404: Not Found
+- `highest-temperature-in-beijing-on-april-18-2026-25c`: HTTP Error 404: Not Found
+- `highest-temperature-in-beijing-on-april-20-2026-20c`: HTTP Error 404: Not Found
+- `highest-temperature-in-beijing-on-april-22-2026-19c`: HTTP Error 404: Not Found
+- `highest-temperature-in-beijing-on-april-22-2026-20c`: HTTP Error 404: Not Found
+- `highest-temperature-in-beijing-on-april-23-2026-21c`: HTTP Error 404: Not Found
+- `highest-temperature-in-beijing-on-april-23-2026-22c`: HTTP Error 404: Not Found
+- `highest-temperature-in-beijing-on-april-27-2026-27c`: HTTP Error 404: Not Found
+- `highest-temperature-in-beijing-on-april-29-2026-21c`: HTTP Error 404: Not Found
+- `highest-temperature-in-beijing-on-may-1-2026-23c`: HTTP Error 404: Not Found
+- `highest-temperature-in-beijing-on-may-9-2026-20c`: HTTP Error 404: Not Found
+- `highest-temperature-in-beijing-on-may-9-2026-21c`: HTTP Error 404: Not Found
+- `highest-temperature-in-beijing-on-may-9-2026-22c`: HTTP Error 404: Not Found
+
 ## Blocked Signals Days
 
 | Date | Condition | Strike C | Outcome | WU high C | Expected From WU | Match | Trader | Consensus |
 |---|---|---:|---|---:|---|---|---|---|
+| 2026-04-13 | exact | 18.0 | Yes | None | None | None | Dimpled-Boy | False |
+| 2026-04-14 | exact | 20.0 | No | None | None | None | Dimpled-Boy | False |
+| 2026-04-17 | exact | 22.0 | Yes | None | None | None | Entire-Hood | True |
+| 2026-04-17 | exact | 22.0 | Yes | None | None | None | Jubilant-Spending | True |
 | 2026-04-18 | exact | 26.0 | No | None | None | None | Entire-Hood | False |
-| 2026-04-18 | exact | 27.0 | Yes | None | None | None | Entire-Hood | False |
+| 2026-04-20 | exact | 23.0 | No | None | None | None | Entire-Hood | False |
+| 2026-04-22 | exact | 22.0 | No | None | None | None | Entire-Hood | False |
+| 2026-04-22 | exact | 23.0 | Yes | None | None | None | Entire-Hood | True |
+| 2026-04-22 | exact | 24.0 | No | None | None | None | Entire-Hood | False |
+| 2026-04-22 | exact | 25.0 | No | None | None | None | Entire-Hood | False |
+| 2026-04-21 | exact | 27.0 | Yes | None | None | None | Jubilant-Spending | False |
+| 2026-04-22 | exact | 23.0 | Yes | None | None | None | Jubilant-Spending | True |
+| 2026-04-23 | exact | 25.0 | Yes | None | None | None | Entire-Hood | False |
+| 2026-04-23 | exact | 24.0 | No | None | None | None | Entire-Hood | False |
+| 2026-04-27 | exact | 23.0 | No | None | None | None | Entire-Hood | False |
+| 2026-04-27 | exact | 22.0 | No | None | None | None | Entire-Hood | False |
+| 2026-04-27 | exact | 24.0 | No | None | None | None | Entire-Hood | False |
+| 2026-04-28 | exact | 20.0 | No | None | None | None | Entire-Hood | False |
+| 2026-04-28 | exact | 22.0 | No | None | None | None | Entire-Hood | False |
+| 2026-04-28 | exact | 21.0 | Yes | None | None | None | Entire-Hood | False |
+| 2026-04-29 | exact | 24.0 | No | None | None | None | Entire-Hood | False |
+| 2026-05-01 | exact | 26.0 | Yes | None | None | None | Entire-Hood | True |
+| 2026-05-01 | exact | 28.0 | No | None | None | None | Entire-Hood | True |
+| 2026-05-01 | exact | 28.0 | No | None | None | None | Thrifty-Original | True |
+| 2026-05-01 | exact | 27.0 | No | None | None | None | Thrifty-Original | False |
+| 2026-05-01 | exact | 26.0 | Yes | None | None | None | Dimpled-Boy | True |
+| 2026-05-02 | exact | 25.0 | No | None | None | None | Entire-Hood | False |
+| 2026-05-09 | exact | 23.0 | No | None | None | None | Entire-Hood | False |
 
 ## Pass/Fail
 

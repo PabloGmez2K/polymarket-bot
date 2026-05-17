@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 import statistics
 import sys
 import urllib.parse
@@ -36,6 +37,7 @@ LAT = 40.0799
 LON = 116.6031
 WU_URL = "https://www.wunderground.com/history/daily/cn/beijing/ZBAA"
 OPEN_METEO_ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
+GAMMA_MARKET_BY_SLUG_URL = "https://gamma-api.polymarket.com/markets/slug/{slug}"
 
 OPUS_MIN_N = 30
 OPUS_MAX_MEDIAN_ABS_DELTA_C = 0.5
@@ -57,6 +59,16 @@ class DailyComparison:
     wu_high_c: float | None
     delta_c: float | None
     status: str
+
+
+@dataclass(frozen=True)
+class GammaSettlementComparison:
+    date_local: str
+    open_meteo_max_c: float | None
+    settlement_temp_c: float | None
+    delta_c: float | None
+    status: str
+    evidence: str
 
 
 def _now_iso() -> str:
@@ -130,6 +142,291 @@ def fetch_open_meteo_daily(start: date, end: date, lat: float = LAT, lon: float 
         for day, value in zip(dates, values)
         if value is not None
     }
+
+
+def fetch_gamma_market_by_slug(slug: str, timeout: int = 30) -> dict:
+    encoded = urllib.parse.quote(slug, safe="")
+    req = urllib.request.Request(
+        GAMMA_MARKET_BY_SLUG_URL.format(slug=encoded),
+        headers={"User-Agent": "beijing-source-parity-audit/1.0"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Gamma market payload for {slug} is not an object")
+    return payload
+
+
+def month_name_to_number(month: str) -> int | None:
+    months = {
+        "january": 1,
+        "february": 2,
+        "march": 3,
+        "april": 4,
+        "may": 5,
+        "june": 6,
+        "july": 7,
+        "august": 8,
+        "september": 9,
+        "october": 10,
+        "november": 11,
+        "december": 12,
+    }
+    return months.get(str(month or "").strip().lower())
+
+
+def date_to_slug_parts(date_local: str) -> tuple[str, int, int]:
+    dt = parse_date(date_local)
+    return dt.strftime("%B").lower(), dt.day, dt.year
+
+
+def build_beijing_exact_slug(date_local: str, strike_c: float | int) -> str:
+    month, day, year = date_to_slug_parts(date_local)
+    strike = int(float(strike_c))
+    return f"highest-temperature-in-beijing-on-{month}-{day}-{year}-{strike}c"
+
+
+def parse_beijing_exact_slug(slug: str) -> dict | None:
+    match = re.fullmatch(
+        r"highest-temperature-in-beijing-on-([a-z]+)-(\d{1,2})-(\d{4})-(\d+)c",
+        str(slug or "").strip().lower(),
+    )
+    if not match:
+        return None
+    month = month_name_to_number(match.group(1))
+    if not month:
+        return None
+    day = int(match.group(2))
+    year = int(match.group(3))
+    strike = float(match.group(4))
+    return {"date_local": f"{year:04d}-{month:02d}-{day:02d}", "strike_c": strike}
+
+
+def parse_jsonish_list(value) -> list:
+    if isinstance(value, list):
+        return value
+    if value in (None, ""):
+        return []
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+        return parsed if isinstance(parsed, list) else []
+    return []
+
+
+def yes_no_from_gamma_market(market: dict) -> bool | None:
+    outcomes = parse_jsonish_list(market.get("outcomes"))
+    prices = parse_jsonish_list(market.get("outcomePrices"))
+    if len(outcomes) < 2 or len(prices) < 2:
+        return None
+    outcome_prices = {}
+    for outcome, price in zip(outcomes, prices):
+        try:
+            outcome_prices[str(outcome).strip().lower()] = float(price)
+        except (TypeError, ValueError):
+            continue
+    if outcome_prices.get("yes") == 1.0 and outcome_prices.get("no") == 0.0:
+        return True
+    if outcome_prices.get("yes") == 0.0 and outcome_prices.get("no") == 1.0:
+        return False
+    return None
+
+
+def extract_gamma_exact_result(market: dict, fallback_slug: str | None = None) -> dict:
+    slug = str(market.get("slug") or fallback_slug or "")
+    parsed = parse_beijing_exact_slug(slug)
+    if not parsed:
+        raise ValueError(f"Gamma market slug is not a Beijing exact-temperature slug: {slug}")
+    source = str(market.get("resolutionSource") or "")
+    if "wunderground.com" not in source.lower() or ICAO.lower() not in source.lower():
+        raise ValueError(f"Gamma market source is not WU/{ICAO}: {source}")
+    result_yes = yes_no_from_gamma_market(market)
+    if result_yes is None:
+        raise ValueError(f"Gamma market does not expose terminal YES/NO prices: {slug}")
+    return {
+        "date_local": parsed["date_local"],
+        "strike_c": parsed["strike_c"],
+        "slug": slug,
+        "market_id": market.get("id"),
+        "condition_id": market.get("conditionId") or market.get("condition_id"),
+        "yes": result_yes,
+        "resolution_source": source,
+    }
+
+
+def infer_settlement_from_exact_markets(markets: list[dict]) -> tuple[dict[str, dict], list[str]]:
+    """Infer integer settlement high from resolved exact markets.
+
+    A date is reliable when exactly one exact market resolves YES and all
+    available NO markets for that date are consistent with that YES strike.
+    """
+    by_date: dict[str, list[dict]] = {}
+    warnings = []
+    for market in markets:
+        try:
+            result = extract_gamma_exact_result(market)
+        except ValueError as exc:
+            warnings.append(str(exc))
+            continue
+        by_date.setdefault(result["date_local"], []).append(result)
+
+    inferred: dict[str, dict] = {}
+    for date_local, rows in sorted(by_date.items()):
+        yes_rows = [row for row in rows if row["yes"] is True]
+        no_rows = [row for row in rows if row["yes"] is False]
+        if len(yes_rows) != 1:
+            inferred[date_local] = {
+                "date_local": date_local,
+                "settlement_temp_c": None,
+                "status": "unreliable",
+                "reason": f"expected exactly one YES exact market, got {len(yes_rows)}",
+                "markets": rows,
+            }
+            continue
+        settlement = yes_rows[0]["strike_c"]
+        inconsistent_no = [row for row in no_rows if row["strike_c"] == settlement]
+        status = "inferred" if not inconsistent_no else "unreliable"
+        reason = "single YES exact market" if status == "inferred" else "NO market conflicts with YES strike"
+        inferred[date_local] = {
+            "date_local": date_local,
+            "settlement_temp_c": settlement if status == "inferred" else None,
+            "status": status,
+            "reason": reason,
+            "markets": rows,
+        }
+    return inferred, warnings
+
+
+def collect_gamma_markets_for_blocked_rows(
+    blocked_rows: list[dict],
+    fetcher=fetch_gamma_market_by_slug,
+    neighbor_radius: int = 3,
+) -> tuple[list[dict], list[dict]]:
+    market_keys = set()
+    requests = []
+    by_date: dict[str, list[float]] = {}
+    for row in blocked_rows:
+        if row.get("condition") != "exact" or not row.get("date_local") or row.get("strike_c") is None:
+            continue
+        by_date.setdefault(row["date_local"], []).append(float(row["strike_c"]))
+
+    for date_local, strikes in sorted(by_date.items()):
+        low = int(min(strikes)) - max(0, int(neighbor_radius))
+        high = int(max(strikes)) + max(0, int(neighbor_radius))
+        for strike in range(low, high + 1):
+            slug = build_beijing_exact_slug(date_local, strike)
+            if slug in market_keys:
+                continue
+            market_keys.add(slug)
+            requests.append({"date_local": date_local, "strike_c": float(strike), "slug": slug})
+
+    markets = []
+    errors = []
+    for req in requests:
+        try:
+            market = fetcher(req["slug"])
+            market["_requested_slug"] = req["slug"]
+            markets.append(market)
+        except Exception as exc:  # LOG_ONLY audit: keep collecting evidence.
+            errors.append({**req, "error": str(exc)})
+    return markets, errors
+
+
+def build_gamma_settlement_comparisons(
+    blocked_rows: list[dict],
+    open_meteo: dict[str, float],
+    fetcher=fetch_gamma_market_by_slug,
+    neighbor_radius: int = 3,
+) -> dict:
+    markets, errors = collect_gamma_markets_for_blocked_rows(blocked_rows, fetcher=fetcher, neighbor_radius=neighbor_radius)
+    inferred, warnings = infer_settlement_from_exact_markets(markets)
+
+    target_dates = sorted({row["date_local"] for row in blocked_rows if row.get("date_local")})
+    rows: list[GammaSettlementComparison] = []
+    for day in target_dates:
+        om_value = open_meteo.get(day)
+        settlement = inferred.get(day, {})
+        settlement_temp = settlement.get("settlement_temp_c")
+        if not settlement:
+            status = "missing_gamma_market"
+            delta = None
+            evidence = "no exact Gamma market fetched for date"
+        elif settlement.get("status") != "inferred":
+            status = "unreliable_gamma_derivation"
+            delta = None
+            evidence = settlement.get("reason", "")
+        elif om_value is None:
+            status = "missing_open_meteo"
+            delta = None
+            evidence = settlement.get("reason", "")
+        else:
+            status = "compared"
+            delta = round(float(om_value) - float(settlement_temp), 2)
+            evidence = settlement.get("reason", "")
+        rows.append(GammaSettlementComparison(day, om_value, settlement_temp, delta, status, evidence))
+
+    metrics = compute_gamma_settlement_metrics(rows, blocked_rows)
+    verdict, reasons = decide_gamma_settlement_verdict(metrics, errors, warnings)
+    return {
+        "enabled": True,
+        "neighbor_radius": neighbor_radius,
+        "market_fetch_errors": errors,
+        "warnings": warnings,
+        "inferred_settlements": inferred,
+        "comparisons": [row.__dict__ for row in rows],
+        "metrics": metrics,
+        "verdict": verdict,
+        "verdict_reasons": reasons,
+    }
+
+
+def compute_gamma_settlement_metrics(rows: list[GammaSettlementComparison], blocked_rows: list[dict]) -> dict:
+    compared = [row for row in rows if row.delta_c is not None]
+    deltas = [row.delta_c for row in compared if row.delta_c is not None]
+    abs_deltas = [abs(value) for value in deltas]
+    exact_dates = {row["date_local"] for row in blocked_rows if row.get("condition") == "exact" and row.get("date_local")}
+    return {
+        "blocked_rows": len(blocked_rows),
+        "blocked_exact_dates": len(exact_dates),
+        "n_dates_compared": len(compared),
+        "n_unreliable": sum(1 for row in rows if row.status == "unreliable_gamma_derivation"),
+        "n_missing_gamma_market": sum(1 for row in rows if row.status == "missing_gamma_market"),
+        "delta_median_c": round(statistics.median(deltas), 2) if deltas else None,
+        "median_abs_delta_c": round(statistics.median(abs_deltas), 2) if abs_deltas else None,
+        "max_abs_delta_c": round(max(abs_deltas), 2) if abs_deltas else None,
+        "pct_abs_delta_ge_1c": round(100.0 * sum(1 for value in abs_deltas if value >= 1.0) / len(compared), 1) if compared else None,
+        "pct_abs_delta_ge_2c": round(100.0 * sum(1 for value in abs_deltas if value >= 2.0) / len(compared), 1) if compared else None,
+    }
+
+
+def decide_gamma_settlement_verdict(metrics: dict, errors: list[dict], warnings: list[str]) -> tuple[str, list[str]]:
+    reasons = []
+    if warnings:
+        reasons.append(f"gamma_warnings={len(warnings)}")
+    if (metrics.get("n_unreliable") or 0) > 0:
+        reasons.append(f"unreliable_derivations={metrics.get('n_unreliable')}")
+    if (metrics.get("n_missing_gamma_market") or 0) > 0:
+        reasons.append(f"missing_gamma_markets={metrics.get('n_missing_gamma_market')}")
+    n_compared = metrics.get("n_dates_compared") or 0
+    if n_compared == 0:
+        if errors:
+            reasons.append(f"gamma_fetch_errors={len(errors)}")
+        return "INSUFFICIENT_GAMMA_MARKETS", reasons or ["no comparable Gamma-derived settlement dates"]
+    median_abs = metrics.get("median_abs_delta_c")
+    pct_ge_1 = metrics.get("pct_abs_delta_ge_1c")
+    if median_abs is None or median_abs > OPUS_MAX_MEDIAN_ABS_DELTA_C:
+        reasons.append(f"median_abs_delta_c={median_abs} > {OPUS_MAX_MEDIAN_ABS_DELTA_C}")
+    if pct_ge_1 is None or pct_ge_1 > OPUS_MAX_PCT_ABS_DELTA_GE_1C:
+        reasons.append(f"pct_abs_delta_ge_1c={pct_ge_1} > {OPUS_MAX_PCT_ABS_DELTA_GE_1C}")
+    if any(reason.startswith(("median_abs_delta_c", "pct_abs_delta_ge_1c")) for reason in reasons):
+        return "SETTLEMENT_GAMMA_PARITY_FAIL", reasons
+    if any(reason.startswith(("gamma_warnings", "unreliable_derivations")) for reason in reasons):
+        return "GAMMA_SETTLEMENT_DERIVATION_UNRELIABLE", reasons
+    if reasons:
+        return "SETTLEMENT_GAMMA_PARITY_FAIL", reasons
+    return "SETTLEMENT_GAMMA_PARITY_PASS", ["Gamma-derived settlement triage criteria met"]
 
 
 def build_comparisons(
@@ -305,6 +602,7 @@ def decide_verdict(metrics: dict, wu_status: str, blocked_metrics: dict) -> tupl
 
 def render_markdown(report: dict) -> str:
     metrics = report["metrics"]
+    gamma = report.get("gamma_settlement") or {}
     lines = [
         "# Beijing Open-Meteo vs WU/ZBAA Source Parity Audit",
         "",
@@ -325,6 +623,7 @@ def render_markdown(report: dict) -> str:
         f"- Weather Underground settlement source: `{WU_URL}`",
         f"- WU data status: `{report['wu_status']}`",
         f"- Blocked signals source: `{report.get('blocked_source') or 'not found'}`",
+        f"- Gamma settlement derivation: `{gamma.get('verdict', 'not_run')}`",
         "",
         "## Aggregate Metrics",
         "",
@@ -354,6 +653,54 @@ def render_markdown(report: dict) -> str:
         lines.append(
             f"| {row['date_local']} | {row.get('open_meteo_max_c')} | {row.get('wu_high_c')} | {row.get('delta_c')} | {row.get('status')} |"
         )
+    lines.extend(
+        [
+            "",
+            "## Gamma-Derived Settlement Triage",
+            "",
+        ]
+    )
+    if gamma:
+        gamma_metrics = gamma.get("metrics", {})
+        lines.extend(
+            [
+                f"**Verdict:** **{gamma.get('verdict')}**",
+                "",
+                "This section infers settlement temperature from resolved Polymarket/Gamma exact markets only. It does not scrape WU and does not replace formal WU parity.",
+                "",
+                "| Metric | Value |",
+                "|---|---:|",
+                f"| blocked exact dates | {gamma_metrics.get('blocked_exact_dates')} |",
+                f"| dates compared | {gamma_metrics.get('n_dates_compared')} |",
+                f"| median delta C | {gamma_metrics.get('delta_median_c')} |",
+                f"| median abs delta C | {gamma_metrics.get('median_abs_delta_c')} |",
+                f"| max abs delta C | {gamma_metrics.get('max_abs_delta_c')} |",
+                f"| pct abs delta >= 1C | {gamma_metrics.get('pct_abs_delta_ge_1c')} |",
+                f"| pct abs delta >= 2C | {gamma_metrics.get('pct_abs_delta_ge_2c')} |",
+                "",
+                "Reasons:",
+            ]
+        )
+        lines.extend(f"- {reason}" for reason in gamma.get("verdict_reasons", []))
+        lines.extend(
+            [
+                "",
+                "| Date | Open-Meteo max C | Gamma settlement C | Delta C | Status | Evidence |",
+                "|---|---:|---:|---:|---|---|",
+            ]
+        )
+        for row in gamma.get("comparisons", []):
+            lines.append(
+                f"| {row.get('date_local')} | {row.get('open_meteo_max_c')} | {row.get('settlement_temp_c')} | {row.get('delta_c')} | {row.get('status')} | {row.get('evidence')} |"
+            )
+        if gamma.get("market_fetch_errors"):
+            lines.extend(["", "Gamma fetch errors:"])
+            lines.extend(f"- `{err.get('slug')}`: {err.get('error')}" for err in gamma.get("market_fetch_errors", []))
+        if gamma.get("warnings"):
+            lines.extend(["", "Gamma derivation warnings:"])
+            lines.extend(f"- {warning}" for warning in gamma.get("warnings", []))
+    else:
+        lines.append("Not run. Use `--settlement-from-gamma` for quick triage from resolved exact markets.")
     lines.extend(
         [
             "",
@@ -411,6 +758,13 @@ def build_report(args) -> dict:
     metrics = compute_metrics(comparisons)
     blocked_table, blocked_metrics = build_blocked_table(blocked_rows, wu)
     verdict, reasons = decide_verdict(metrics, wu_status, blocked_metrics)
+    gamma_settlement = None
+    if getattr(args, "settlement_from_gamma", False):
+        gamma_settlement = build_gamma_settlement_comparisons(
+            blocked_rows,
+            open_meteo,
+            neighbor_radius=getattr(args, "gamma_neighbor_radius", 3),
+        )
 
     return {
         "generated_at": _now_iso(),
@@ -427,6 +781,7 @@ def build_report(args) -> dict:
         "blocked_metrics": blocked_metrics,
         "comparisons": [row.__dict__ for row in comparisons],
         "blocked_table": blocked_table,
+        "gamma_settlement": gamma_settlement,
         "verdict": verdict,
         "verdict_reasons": reasons,
         "log_only": True,
@@ -440,6 +795,17 @@ def parse_args(argv: list[str] | None = None):
     parser.add_argument("--days", type=int, default=60, help="Default trailing window length when --start/--end omitted.")
     parser.add_argument("--open-meteo-csv", help="Optional CSV fixture/manual file with date,open_meteo_max_c.")
     parser.add_argument("--wu-csv", help="Optional manual WU/ZBAA CSV with date,wu_high_c. No WU scraping is attempted.")
+    parser.add_argument(
+        "--settlement-from-gamma",
+        action="store_true",
+        help="Derive quick triage settlement temps from resolved Polymarket/Gamma exact markets. No WU scraping.",
+    )
+    parser.add_argument(
+        "--gamma-neighbor-radius",
+        type=int,
+        default=3,
+        help="When deriving settlement from Gamma, probe exact slugs from min(blocked strike)-N to max(blocked strike)+N per date.",
+    )
     parser.add_argument("--blocked-resolutions", help="Path to blocked_signals_resolutions.jsonl.")
     parser.add_argument("--json-out", default=str(DEFAULT_JSON_OUTPUT))
     parser.add_argument("--md-out", default=str(DEFAULT_MD_OUTPUT))
@@ -458,8 +824,25 @@ def main(argv: list[str] | None = None) -> int:
         json_path = Path(args.json_out)
         json_path.parent.mkdir(parents=True, exist_ok=True)
         json_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
-    print(json.dumps({"verdict": report["verdict"], "wu_status": report["wu_status"], "md_out": str(md_path)}, ensure_ascii=False))
-    return 0 if report["verdict"] in {"PARITY_PASS", "WU_FETCHER_MISSING", "INSUFFICIENT_WU_DATA", "NEEDS_MANUAL_WU_CHECK", "PARITY_FAIL"} else 1
+    print_payload = {"verdict": report["verdict"], "wu_status": report["wu_status"], "md_out": str(md_path)}
+    if report.get("gamma_settlement"):
+        print_payload["gamma_verdict"] = report["gamma_settlement"]["verdict"]
+    print(json.dumps(print_payload, ensure_ascii=False))
+    allowed = {
+        "PARITY_PASS",
+        "WU_FETCHER_MISSING",
+        "INSUFFICIENT_WU_DATA",
+        "NEEDS_MANUAL_WU_CHECK",
+        "PARITY_FAIL",
+    }
+    gamma_allowed = {
+        "SETTLEMENT_GAMMA_PARITY_PASS",
+        "SETTLEMENT_GAMMA_PARITY_FAIL",
+        "INSUFFICIENT_GAMMA_MARKETS",
+        "GAMMA_SETTLEMENT_DERIVATION_UNRELIABLE",
+    }
+    gamma_verdict = (report.get("gamma_settlement") or {}).get("verdict")
+    return 0 if report["verdict"] in allowed and (gamma_verdict is None or gamma_verdict in gamma_allowed) else 1
 
 
 if __name__ == "__main__":
