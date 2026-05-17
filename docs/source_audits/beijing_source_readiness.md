@@ -4,7 +4,7 @@
 **Mode:** Sonnet read-only / docs-only  
 **Authority:** No operational action. No code patch. No env/whitelist/policy change.  
 **Source data:** Blocked Signals audit 2026-05-17 (Railway live); `data/runtime_import/shadow_city_tracking.json`; `data/runtime_import_derived/blocked_signals_resolutions.jsonl`; `bot.py` RESOLUTION_ICAO + OBSERVED_AUDIT_CITIES (v10.6.40); `tools/forecast_accuracy_audit.py` ICAO_ONLY_PROXY_AUDIT_CITIES.  
-**Verdict:** **SOURCE_AUDIT_NEEDED** — trader signal strong; source/settlement path unresolved; no promotion step authorized.
+**Verdict:** **READY_FOR_OPUS_SOURCE_REVIEW** — Gamma audit complete (2026-05-17); source confirmed WU/ZBAA; C1–C4 met; Opus review required before any promotion step.
 
 ---
 
@@ -26,8 +26,8 @@
 | condition types | **exact only** |
 | traders dominantes | Entire-Hood, Thrifty-Original, Dimpled-Boy |
 | avg_price_entered (muestra local) | 0.42–0.47 |
-| settlement_source | **unknown** |
-| fidelity | **unverified** |
+| settlement_source | **WU ZBAA** — `https://www.wunderground.com/history/daily/cn/beijing/ZBAA` (Gamma audit 2026-05-17) |
+| fidelity | **SOURCE_TEXT_CONFIRMED_WU_ZBAA** — Gamma description explicit, Celsius entero, mapping match |
 | observed_coverage | icao_only (open-meteo proxy) |
 | whitelist (QUALITY_TRADER_CITIES_WHITELIST) | **Ausente** |
 | active trading | No — cero BUY real |
@@ -52,24 +52,63 @@ Los 2 registros locales en `blocked_signals_resolutions.jsonl` son los únicos s
 | noaa_station_id | **Ausente** | `bot.py:16419` — no tiene `noaa_station_id` ni `noaa_daily_station_id` |
 | noaa ISD | ISD 54511099999 confirmado (GHCND sin TMAX 2025-10→2026-03) | Comentario `bot.py:16461` — mismo patrón que Toronto/HK/Singapore |
 | Open-Meteo proxy | **Activo** — lat 40.0799, lon 116.6031, "Beijing Capital" | `bot.py:16353` coords; `forecast_accuracy_audit.py:32` ICAO_ONLY_PROXY_AUDIT_CITIES |
-| source_texts (mercados) | **unknown** | Campo no confirmado vía Gamma para Beijing — no existe source_text conocido en scanner local |
-| settlement_source | **unknown** | No registrado en blocked_signals schema (campo ausente, no null) |
-| fidelity | **unverified** | Sin audit Gamma/WU comparativo realizado |
-| Riesgo de mismatch | **Alto** | Beijing tiene WU ZBAA definida, pero no se sabe si Polymarket usa WU/ZBAA, otra fuente, o precio interno como settlement reference |
+| source_texts (mercados) | **WU ZBAA confirmado** | Gamma audit 2026-05-17: `resolutionSource=https://www.wunderground.com/history/daily/cn/beijing/ZBAA`; description explícita: "Beijing Capital International Airport Station", Celsius entero; sin "unknown", sin "polymarket_market_price" |
+| settlement_source | **WU ZBAA** | Confirmado vía Gamma — dos mercados auditados (market_id 1996577, 1996578), idéntica fuente |
+| fidelity | **SOURCE_TEXT_CONFIRMED_WU_ZBAA** | Gamma URL == bot.py `_wu_history_url("ZBAA")` — match exacto |
+| Riesgo de mismatch | **Bajo** | Source confirmada y alineada con mapping interno; riesgo estructural resuelto |
 
 **Situación vs Jeddah:**  
-Jeddah tiene `OEJN` en RESOLUTION_STATIONS **con** WU URL definida, y el scanner v0.2 confirmó `source_texts=["polymarket_market_price"]` (solo, sin "unknown"). Beijing tiene `ZBAA` con WU URL también definida — la diferencia es que **no se ha corrido el scanner v0.2 sobre Beijing** (fue excluida como `observed_audit` en el run 2026-05-15 que analizó Jeddah/Chongqing/Amsterdam). El riesgo de mismatch es desconocido hasta que Gamma audit confirme qué usa Polymarket como settlement reference para los mercados de Beijing.
+Jeddah tiene `OEJN` en RESOLUTION_STATIONS con WU URL definida, y el scanner v0.2 confirmó `source_texts=["polymarket_market_price"]`. Beijing tiene `ZBAA` con WU URL también definida — y el **Gamma audit directo 2026-05-17** confirmó `resolutionSource=https://www.wunderground.com/history/daily/cn/beijing/ZBAA` en dos mercados resueltos. A diferencia de Jeddah (que obtuvo source via scanner sobre blocked_signals), Beijing obtuvo su confirmación via Gamma API directa (el scanner la excluía como `observed_audit`). El resultado es equivalente: source WU/ICAO confirmada, sin "unknown". **La brecha con Jeddah ya no es de source — ambas ciudades esperan decisión Opus sobre el path WU/ICAO.**
 
 **¿Por qué no es inmediatamente accionable?**  
 El camino WU-ZBAA existe estructuralmente en `bot.py`, pero `bot.py:5497` exige `interpretable = noaa_configured AND observed >= MIN_SAMPLE`. Sin `noaa_station_id`, `noaa_configured=False`. La única vía habilitada actualmente es ICAO-only via open-meteo proxy — modo de *observación*, no de *trading*.
 
 ---
 
-## 3. Señal Trader
+## 3. Gamma Audit 2026-05-17
+
+**Método:** Gamma API directa — `GET gamma-api.polymarket.com/markets/slug/{slug}`. Read-only. Sin código nuevo. Sin cambios a bot.py, tools, env, ni datos operativos.  
+**Autoridad:** Informativo / docs-only. No autoriza trading, whitelist, city mode change, BANKROLL, ni Fase C.
+
+### Mercados auditados
+
+| Campo | Mercado 1 | Mercado 2 |
+|---|---|---|
+| **Pregunta** | Will the highest temperature in Beijing be 27°C on April 18? | Will the highest temperature in Beijing be 26°C on April 18? |
+| **slug** | `highest-temperature-in-beijing-on-april-18-2026-27c` | `highest-temperature-in-beijing-on-april-18-2026-26c` |
+| **market_id** | 1996578 | 1996577 |
+| **conditionId** | `0xa08019...e452e8eb` | `0x5b656a...6c3d3ed` |
+| **endDate** | 2026-04-18T12:00:00Z | 2026-04-18T12:00:00Z |
+| **condition (blocked)** | exact | exact |
+| **trader (blocked)** | Entire-Hood | Entire-Hood |
+| **outcome** | Yes — win_for_trader=true | No — win_for_trader=true |
+| **resolutionSource** | `https://www.wunderground.com/history/daily/cn/beijing/ZBAA` | `https://www.wunderground.com/history/daily/cn/beijing/ZBAA` |
+
+### Source text (description Gamma — idéntico en ambos mercados)
+
+> "The resolution source for this market will be information from Wunderground, specifically the highest temperature recorded for all times on this day by the **Beijing Capital International Airport Station** once information is finalized, available here: `https://www.wunderground.com/history/daily/cn/beijing/ZBAA`."
+>
+> "The resolution source for this market measures temperatures to **whole degrees Celsius**."
+
+### Comparación con mapping interno
+
+| Dimensión | Gamma (real) | bot.py interno |
+|---|---|---|
+| Fuente | Weather Underground | `_wu_history_url("ZBAA")` |
+| URL | `https://www.wunderground.com/history/daily/cn/beijing/ZBAA` | idéntica |
+| Estación | Beijing Capital International Airport Station | ZBAA |
+| Unidad | Celsius entero | Celsius |
+| "unknown" presente | No | — |
+| "polymarket_market_price" | No | — |
+| **Veredicto** | **SOURCE_TEXT_CONFIRMED_WU_ZBAA** | **MATCH EXACTO** |
+
+---
+
+## 4. Señal Trader
 
 | Dimensión | Valor | Interpretación |
 |---|---|---|
-| blocked_signals WR (Railway) | **100%** n=11 | Muy fuerte — pero source unverified |
+| blocked_signals WR (Railway) | **100%** n=11 | Muy fuerte — source confirmada WU/ZBAA |
 | blocked_signals WR (local n=2) | 100% | Consistent; muestra insuficiente localmente |
 | condition | **exact only** | No hay range ni at_or_below en la muestra de blocked |
 | traders | Entire-Hood (hist_wr=80%), Thrifty-Original (hist_wr=80.5%), Dimpled-Boy (hist_wr=81.0%) | Tres traders de alta WR histórica, todos presentes en otras ciudades activas |
@@ -83,23 +122,23 @@ El camino WU-ZBAA existe estructuralmente en `bot.py`, pero `bot.py:5497` exige 
 **¿Early/edge o late/market-informed?**  
 La muestra local (n=2) muestra avg_price 0.42–0.47 — rango de mercado activo, no de early entry barato. Dado que los mercados de exact temperature en Beijing típicamente tienen 2–3 opciones simultáneas (34°C, 35°C, 36°C), los precios observados en shadow (market_price=56–75%) son coherentes con mercados maduros, no con alpha pre-information. Esto no descarta el alpha del trader, pero sugiere que no es un simple trade de precio obvio.
 
-**¿Basta para justificar source audit?**  
-**Sí.** WR=100% n=11, tres traders de calidad, shadow activo con edge real (best 37.9%) — la señal es suficiente para justificar que alguien resuelva el blocker de source/settlement. No basta para autorizar trading ni whitelist.
+**¿Basta para justificar Opus review?**  
+**Sí.** WR=100% n=11, tres traders de calidad, shadow activo con edge real (best 37.9%), source confirmada WU/ZBAA — la señal es suficiente para solicitar Opus review sobre el path WU/ICAO. No autoriza trading ni whitelist.
 
 ---
 
-## 4. Comparación con Jeddah
+## 5. Comparación con Jeddah
 
 | Dimensión | Jeddah (dossier 2026-05-17) | Beijing (este dossier) |
 |---|---|---|
-| Veredicto | **NOT_READY_WAIT_SHADOW** | **SOURCE_AUDIT_NEEDED** |
-| Blocker primario | shadow_cycles < 10 (ciclos = 6–7) | settlement_source = unknown; source_texts sin confirmar |
-| Blocker secundario | Opus path decision (ICAO-only/WU aceptable?) | noaa_station_id ausente (mismo patrón) |
+| Veredicto | **NOT_READY_WAIT_SHADOW** | **READY_FOR_OPUS_SOURCE_REVIEW** |
+| Blocker primario | shadow_cycles < 10 (ciclos = 6–7) | Opus review C10/C11 pendiente |
+| Blocker secundario | Opus path decision (ICAO-only/WU aceptable?) | noaa_station_id ausente (mismo patrón; no bloquea WU path) |
 | ICAO | OEJN — en RESOLUTION_STATIONS + WU URL | ZBAA — en RESOLUTION_STATIONS + WU URL |
 | WU URL | Definida | Definida |
 | noaa_station_id | Ausente (mismo problema) | Ausente (mismo problema) |
-| Scanner v0.2 corrido | **Sí** — run 2026-05-15 | **No** — excluida como observed_audit |
-| source_texts confirmado | `["polymarket_market_price"]` — single, limpio | **Desconocido** — no auditado vía Gamma |
+| Scanner v0.2 corrido | **Sí** — run 2026-05-15 | **No** — excluida como observed_audit; compensado con Gamma API directo |
+| source_texts confirmado | `["polymarket_market_price"]` — single, limpio | **WU ZBAA** — Gamma audit 2026-05-17 (market_id 1996577, 1996578) |
 | Whitelist | Sí — en QUALITY_TRADER_CITIES_WHITELIST | **No** — ausente |
 | shadow_cycles | 6–7 | **42** — muy maduro |
 | edge_hits | 4–5 | 5 |
@@ -112,68 +151,76 @@ La muestra local (n=2) muestra avg_price 0.42–0.47 — rango de mercado activo
 **Lo que desbloquea a cada una:**
 
 - **Jeddah:** acumular shadow_cycles (necesita ~3–4 más hasta n≥10) + Opus decidir si ICAO-only/WU es path aceptable. Source ya parcialmente conocida.  
-- **Beijing:** resolver `settlement_source` y `source_texts` vía Gamma audit + Opus confirmar si WU ZBAA es el settlement reference real. Shadow está sobrado (42 ciclos), pero la fuente sigue oscura.
+- **Beijing:** Gamma audit completo (2026-05-17). Source confirmada WU ZBAA. Espera **Opus review** sobre path WU/ICAO y decisión de siguiente paso operativo.
 
-Beijing no está esperando maduración de shadow — ya maduró. Está esperando **resolución de fuente**.
+Beijing no está esperando ni shadow ni source audit — ambos están met. Está esperando **decisión Opus**.
 
 ---
 
-## 5. Criterios para SOURCE_AUDIT_READY
+## 6. Criterios para READY_FOR_OPUS_SOURCE_REVIEW
 
-Para pasar de `WATCH_AUDIT / SOURCE_AUDIT_NEEDED` a una revisión Opus accionable:
+Para pasar de `SOURCE_AUDIT_NEEDED` a revisión Opus accionable — estado actualizado post Gamma audit 2026-05-17:
 
-| # | Criterio | Estado actual | Notas |
+| # | Criterio | Estado | Notas |
 |---|---|---|---|
-| C1 | Source text identificada (Gamma audit) | **PENDIENTE** | Correr scanner v0.2 sobre Beijing O audit manual de Gamma para un mercado Beijing reciente |
-| C2 | settlement_source verificable | **PENDIENTE** | Confirmar si Polymarket usa WU ZBAA, otra fuente, o precio interno |
-| C3 | Mapping reproducible (ICAO ZBAA → WU URL → dato verificado) | **PARCIAL** | Estructura bot.py existe (ZBAA + WU URL); falta validación end-to-end contra un dato resuelto real |
-| C4 | source_texts sin "unknown" | **DESCONOCIDO** | Amsterdam tiene "unknown" y es un blocker — Beijing podría tener el mismo problema |
+| C1 | Source text identificada (Gamma audit) | **MET** | Gamma audit 2026-05-17: `resolutionSource=WU ZBAA` en market_id 1996577 y 1996578 |
+| C2 | settlement_source verificable | **MET** | WU ZBAA confirmado — sin ambigüedad, sin "unknown", sin precio interno |
+| C3 | Mapping reproducible (ICAO ZBAA → WU URL → dato resuelto) | **MET** | URL Gamma == `_wu_history_url("ZBAA")` en bot.py — match exacto sobre mercados resueltos reales |
+| C4 | source_texts sin "unknown" | **MET** | No aparece "unknown" ni "polymarket_market_price" en Gamma description |
 | C5 | Shadow/blocked signal suficiente | **MET** | shadow_cycles=42, edge_hits=5, best_edge=37.9%, blocked n=11 WR=100% |
-| C6 | noaa_station_id resuelto (para path NOAA) | **BLOQUEADO** | ISD 54511099999 existe pero GHCND sin TMAX 2025-10→2026-03. Bloquea el path NOAA. No bloquea path WU/ICAO si Opus lo acepta |
+| C6 | noaa_station_id resuelto (para path NOAA) | **BLOQUEADO** | ISD 54511099999 existe pero GHCND sin TMAX 2025-10→2026-03. Bloquea path NOAA. **No bloquea path WU/ICAO** — Opus decide |
 | C7 | Sin drift reciente | **DESCONOCIDO** | No monitoreado activamente; shadow filtra (last_side=FILTERED en ciclos recientes) |
 | C8 | Sin policy conflict | **MET** | No en whitelist, no en canary/active — clean slate |
 | C9 | No risk blocker | **MET** | LOG_ONLY / shadow, sin exposición real |
-| C10 | Opus confirma si WU ZBAA es path aceptable para promotion review | **PENDIENTE** | Mismo decision point que Jeddah C10 |
-| C11 | Opus review antes de cualquier promotion | **PENDIENTE** | Requerida una vez C1–C4 resueltos |
+| C10 | Opus confirma si WU ZBAA es path aceptable para promotion review | **PENDIENTE** | Mismo decision point que Jeddah C10 — base técnica ya disponible |
+| C11 | Opus review antes de cualquier promotion | **PENDIENTE** | **Gate activo** — nada procede sin review Opus explícita |
 
-**Gate de source audit:** C1, C2, C3, C4 son los bloqueadores activos. C5, C8, C9 ya están met. C6 bloquea solo el path NOAA, no el path WU/ICAO. Shadow es suficiente — el trabajo pendiente es enteramente de fuente, no de señal.
+**Gate actual:** C1–C5, C8, C9 met. C6 bloquea solo el path NOAA, no el path WU/ICAO. Los únicos bloqueadores son C10 y C11 — ambos son decisión Opus, no trabajo técnico pendiente.
 
 ---
 
-## 6. Veredicto Actual
+## 7. Veredicto Actual
 
-**SOURCE_AUDIT_NEEDED.**
+**READY_FOR_OPUS_SOURCE_REVIEW.**  
+*(Actualizado 2026-05-17 post Gamma audit — anterior: SOURCE_AUDIT_NEEDED)*
 
 Rationale (en orden de peso):
 
-1. `settlement_source=unknown` — blocker estructural primario. Sin saber qué usa Polymarket para resolver los mercados de Beijing, no se puede validar que el alpha del trader sea explotable con la fuente que tiene el bot.
+1. **Source confirmada WU ZBAA** — Gamma audit sobre 2 mercados resueltos (market_id 1996577, 1996578) confirmó `resolutionSource=https://www.wunderground.com/history/daily/cn/beijing/ZBAA`. Description explícita: "Beijing Capital International Airport Station", Wunderground, Celsius entero. Sin "unknown", sin "polymarket_market_price". Blocker C1/C2/C4 resueltos.
 
-2. `source_texts` sin confirmar — el scanner v0.2 no corrió sobre Beijing (fue excluida como `observed_audit`). No se sabe si hay "unknown" en source_texts (como Amsterdam) o si está limpio (como Jeddah). Esto es un paso previo a cualquier Opus review.
+2. **Mapping interno match exacto** — `_wu_history_url("ZBAA")` en bot.py genera la misma URL que Gamma usa como `resolutionSource`. C3 resuelto.
 
-3. `noaa_station_id` ausente — bloquea el path estándar NOAA/observed-audit. No es un blocker absoluto si Opus acepta el path WU/ZBAA, pero requiere decisión explícita.
+3. **Señal trader madura** — shadow_cycles=42, edge_hits=5, best_edge=37.9%, blocked n=11 WR=100%. C5 met desde antes.
 
-**¿Por qué no WATCH_AUDIT?**  
-Shadow está sobrado: 42 ciclos, 5 edge_hits, best 37.9%. Seguir esperando más shadow no desbloquea nada — el problema es la fuente. El estado correcto es SOURCE_AUDIT_NEEDED, no espera pasiva.
+4. `noaa_station_id` ausente — sigue bloqueando el path NOAA/observed-audit (C6). **No bloquea el path WU/ICAO.** Opus decide si ese path es aceptable para promotion review.
 
-**¿Por qué no READY_FOR_OPUS_SOURCE_REVIEW?**  
-Falta el Gamma audit (C1, C2, C4). Pedir review Opus sin saber si source_texts contiene "unknown" sería prematuro — es el mismo pattern que llevó a Amsterdam a un blocker de resolución tardía.
+**¿Por qué no SOURCE_TEXT_CONFIRMED directamente accionable?**  
+C10 y C11 son gates explícitos. Toda promotion (canary, whitelist, active) requiere Opus review explícita sobre (1) si path WU/ZBAA es aceptable y (2) cuál es el siguiente paso operativo. No hay auto-promoción.
 
 **¿Por qué no SOURCE_BLOCKED?**  
-La estructura técnica existe: ZBAA está mapeado, WU URL definida, open-meteo proxy activo. El blocker no es falta de fuente — es falta de *verificación* de fuente. Es remediable con trabajo humano de bajo costo (Gamma audit de 1-2 mercados).
+La fuente existe, está mapeada y fue confirmada vía Gamma. No hay mismatch ni "unknown". El único trabajo pendiente es decisión Opus.
 
 ---
 
-## 7. Next Trigger
+## 8. Next Trigger
 
-> **Reabrir cuando:** se complete un audit Gamma de al menos 1–2 mercados Beijing resueltos recientes, confirmando (a) qué aparece en `source_texts` para Beijing, y (b) si el settlement reference coincide con WU ZBAA o usa otra fuente.  
-> Una vez C1–C4 resueltos, solicitar Opus review específicamente para: (1) confirmar si el path WU/ZBAA es aceptable para promotion review (análogo a C10 de Jeddah), y (2) decidir próximo paso operativo (scanner v0.2 run, whitelist candidacy, o espera adicional).  
-> **Escalación inmediata si:** `source_texts` confirma "unknown" para Beijing → no proceder sin Opus.  
-> **No reabrir solo por:** más shadow ciclos, más blocked signals, o cambios en otros mercados. La señal ya es suficiente.
+> **Trigger activo:** Solicitar Opus review para C10 y C11 — confirmar si el path WU/ZBAA es aceptable para promotion review (análogo a C10 de Jeddah) y decidir siguiente paso operativo.  
+> La base técnica está completa: source confirmada, mapping match, señal madura. El único trabajo pendiente es decisión Opus.
+>
+> **Opus debe decidir:**  
+> (1) ¿Es WU/ZBAA un path aceptable para promotion review sin `noaa_station_id`? (mismo decision point que Jeddah C10)  
+> (2) ¿Cuál es el siguiente paso operativo? — opciones: whitelist candidacy, canary limitado, scanner v0.2 run (eliminando exclusión observed_audit), o espera adicional.
+>
+> **Guardrails hasta Opus review:**  
+> No BUY/SELL/SKIP. No whitelist. No city mode change. No BANKROLL. No Fase C. No env vars. No promotion de ningún tipo.
+>
+> **No reabrir solo por:** más shadow ciclos, más blocked signals, o cambios en otros mercados. La señal ya es suficiente y la fuente está confirmada.
 
 ---
 
 ## Validaciones
 
-- Dossier read-only. Sin cambios a `bot.py`, `tools/`, tests, env vars, DB, whitelist, policy, scheduler, BANKROLL, Fase C, observed_vs_forecast, Telegram, source mappings, ni city modes.
-- `git diff --check`: verificar a continuación antes de commit.
-- Fuentes: `data/runtime_import/shadow_city_tracking.json` (Beijing snapshot 2026-05-13); `data/runtime_import_derived/blocked_signals_resolutions.jsonl` (local n=2); Blocked Signals audit 2026-05-17 (Railway live n=11); `bot.py` v10.6.40 RESOLUTION_STATIONS/RESOLUTION_ICAO/OBSERVED_AUDIT_CITIES; `tools/forecast_accuracy_audit.py:32` ICAO_ONLY_PROXY_AUDIT_CITIES; `docs/source_audits/jeddah_promotion_readiness.md` (comparación); `docs/source_audits/candidate_source_onboarding_audit.md`.
+- Dossier docs-only. Sin cambios a `bot.py`, `tools/`, tests, env vars, DB, whitelist, policy, scheduler, BANKROLL, Fase C, observed_vs_forecast, Telegram, source mappings, ni city modes.
+- Gamma audit: read-only, queries a `gamma-api.polymarket.com/markets/slug/` (GET, sin autenticación, sin side effects).
+- Fuentes originales: `data/runtime_import/shadow_city_tracking.json` (Beijing snapshot 2026-05-13); `data/runtime_import_derived/blocked_signals_resolutions.jsonl` (local n=2); Blocked Signals audit 2026-05-17 (Railway live n=11); `bot.py` v10.6.40 RESOLUTION_STATIONS/RESOLUTION_ICAO/OBSERVED_AUDIT_CITIES; `tools/forecast_accuracy_audit.py:32` ICAO_ONLY_PROXY_AUDIT_CITIES; `docs/source_audits/jeddah_promotion_readiness.md` (comparación); `docs/source_audits/candidate_source_onboarding_audit.md`.
+- Fuente Gamma audit 2026-05-17: slugs `highest-temperature-in-beijing-on-april-18-2026-27c` (market_id 1996578) y `highest-temperature-in-beijing-on-april-18-2026-26c` (market_id 1996577); campo `resolutionSource` y `description` del payload Gamma.
