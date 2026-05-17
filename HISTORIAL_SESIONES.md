@@ -5584,3 +5584,35 @@ Cerrar el deployment pendiente del ultimo push docs-only y, si Railway estaba `S
 ### Guardrails
 
 No se tocaron `bot.py`, trading core, BUY/SELL/SKIP, BANKROLL, Fase C, Truth Pipeline, env vars, DB, city modes, whitelist, scheduler automatico, Telegram runtime, NOAA runtime ni promotion gates.
+
+---
+
+## Sesión 366 - 18 de mayo de 2026 (Codex)
+
+**Clasificacion:** NORMAL / LOG_ONLY digest-Telegram / METAR Measurement Layer
+**Veredicto:** IMPLEMENTED
+
+### Objetivo
+
+Integrar METAR Wave 1 + Wave 2 en el resumen diario Telegram existente sin crear scheduler nuevo y evitando falsos `A_METAR_COVERAGE_GAP` cuando el dia local de una estacion aun no cerro.
+
+### Cambios
+
+- `bot.py` agrega bloque `METAR LOG_ONLY` al resumen diario Telegram. Lee solo el ultimo `metar_shadow_report.json` existente: `/app/data/metar_shadow_report.json` en Railway via `_data_path`, con fallback local `data/metar_shadow_report.json`.
+- `tools/metar_parity_report.py` emite `wave_summary`, `coverage_status`, `waiting_local_day_close`, horas locales por fila y separa gaps reales de `WAITING_LOCAL_DAY_CLOSE`.
+- `A_METAR_COVERAGE_GAP` ya no se emite si la fecha local de la estacion esta incompleta.
+- `docs/metar_measurement_layer.md` documenta el trigger manual: refrescar estaciones con `tools/metar_shadow_fetch.py` y luego `tools/metar_parity_report.py`; el digest no hace fetch ni report runtime.
+- `docs/source_audits/metar_measurement_layer_report.md` queda regenerado con Wave 1 + Wave 2: 19 rows, coverage 94.7%, Wave 1 healthy, Wave 2 con Toronto/CYYZ waiting local close, 0 gaps reales.
+
+### Validacion
+
+- `python -m py_compile bot.py tools\metar_parity_report.py tools\metar_shadow_fetch.py verify_before_deploy.py`
+- `python -m pytest tests\test_metar_measurement_layer.py tests\test_source_onboarding_runtime.py` -> 29 passed
+- Dry-run del bloque diario: Wave 1 10/10, Wave 2 7/7, coverage 87.5%, Toronto/CYYZ 2026-05-17 `Waiting local day close`
+- `python tools\metar_parity_report.py --no-write-csv --json-out data\metar_shadow_report.json` -> `METAR_PARITY_INSUFFICIENT_DATA`, 1 alerta Lucknow watch
+- `git diff --check` OK
+- `python verify_before_deploy.py` -> 1255/1255
+
+### Guardrails
+
+No se tocaron env vars, DB, BANKROLL, trading core, Fase C, Truth Pipeline, city modes, whitelist, scheduler nuevo, promotion gates, BUY/SELL/SKIP ni canonical source. METAR sigue siendo readout LOG_ONLY.

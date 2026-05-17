@@ -4467,6 +4467,16 @@ def run_tests():
             ]
         },
         "get_next_run_time": lambda: datetime(2026, 4, 5, 16, 0, tzinfo=timezone.utc),
+        "_load_metar_log_only_digest": lambda path=None: {
+            "available": False,
+            "status": "BLOCKED_WAITING_REPORT",
+            "message": "waiting last data/metar_shadow_report.json",
+        },
+        "_format_metar_log_only_daily_lines": lambda metar: [
+            "",
+            "<b>METAR LOG_ONLY</b>",
+            "• Blocked: waiting last data/metar_shadow_report.json",
+        ],
         "send_telegram": lambda text, with_menu=False, custom_keyboard=None: daily_messages.append(text),
     }
     exec(get_function_source(module_ast, code_lines, "_daily_summary_cycles_last_24h"), daily_ns)

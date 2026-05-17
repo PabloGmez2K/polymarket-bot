@@ -120,6 +120,25 @@ What to inspect each run:
 
 If WU CSV is not yet supplied, the report verdict will surface `METAR_PARITY_INSUFFICIENT_DATA`. That is expected, not a failure.
 
+## Daily Digest Readout
+
+The existing daily Telegram summary reads the latest
+`data/metar_shadow_report.json` only. It does not fetch METAR, does not run
+`tools/metar_parity_report.py`, and does not add a scheduler. Refresh remains a
+manual trigger:
+
+1. Run `tools/metar_shadow_fetch.py` for the selected station/date set.
+2. Run `tools/metar_parity_report.py` to refresh
+   `data/metar_shadow_report.json`.
+3. Let the next existing daily summary display the compact METAR LOG_ONLY block.
+
+The digest distinguishes a real `A_METAR_COVERAGE_GAP` from an incomplete
+station-local day. If a station date has insufficient METAR rows but the local
+day has not closed yet, the report marks `WAITING_LOCAL_DAY_CLOSE` and does not
+emit `A_METAR_COVERAGE_GAP`. The Toronto/CYYZ 2026-05-17 case is the reference:
+hours 0..16 while Toronto local day was still open is waiting, not a coverage
+gap; CYYZ 2026-05-16 with hours 0..23 is coverage OK.
+
 ## What Stays Prohibited
 
 This layer never authorizes:

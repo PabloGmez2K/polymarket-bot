@@ -181,3 +181,89 @@ def test_operational_readout_surfaces_coverage_drift_om_and_lucknow_watch(tmp_pa
     assert "A_METAR_VS_OM_DELTA" in codes
     assert "LUCKNOW_COMPARABLE_DAYS_WATCH" in codes
     assert payload["station_summary"][0]["parity_status"] in {"DRIFT", "COVERAGE_GAP"}
+
+
+def test_cyyz_incomplete_current_local_day_is_waiting_not_coverage_gap(tmp_path):
+    metar_dir = tmp_path / "metar"
+    metar_dir.mkdir()
+    (metar_dir / "CYYZ_2026-05-17.json").write_text(
+        json.dumps(
+            {
+                "city": "Toronto",
+                "icao": "CYYZ",
+                "date_local": "2026-05-17",
+                "timezone": "America/Toronto",
+                "status": "insufficient_metar_coverage",
+                "tmax_c": None,
+                "coverage": {
+                    "coverage_ok": False,
+                    "obs_count": 21,
+                    "first_local_hour": 0,
+                    "last_local_hour": 16,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    args = SimpleNamespace(
+        metar_dir=str(metar_dir),
+        icao=None,
+        wu_csv=None,
+        gamma_csv=None,
+        open_meteo_csv=None,
+        generated_at="2026-05-17T22:02:47+00:00",
+    )
+
+    payload = report.build_report(args)
+    cyyz = next(station for station in payload["station_summary"] if station["icao"] == "CYYZ")
+    wave2 = next(wave for wave in payload["wave_summary"] if wave["wave"] == "Wave 2")
+    codes = {alert["code"] for alert in payload["alerts"] if alert.get("icao") == "CYYZ"}
+
+    assert cyyz["parity_status"] == "WAITING_LOCAL_DAY_CLOSE"
+    assert cyyz["insufficient_coverage_rows"] == 0
+    assert cyyz["waiting_local_day_close_rows"] == 1
+    assert wave2["coverage_status"] == "WAITING_LOCAL_DAY_CLOSE"
+    assert "A_METAR_COVERAGE_GAP" not in codes
+
+
+def test_cyyz_closed_prior_local_day_coverage_ok(tmp_path):
+    metar_dir = tmp_path / "metar"
+    metar_dir.mkdir()
+    (metar_dir / "CYYZ_2026-05-16.json").write_text(
+        json.dumps(
+            {
+                "city": "Toronto",
+                "icao": "CYYZ",
+                "date_local": "2026-05-16",
+                "timezone": "America/Toronto",
+                "status": "ok",
+                "tmax_c": 21.0,
+                "tmin_c": 9.0,
+                "coverage": {
+                    "coverage_ok": True,
+                    "obs_count": 30,
+                    "first_local_hour": 0,
+                    "last_local_hour": 23,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    args = SimpleNamespace(
+        metar_dir=str(metar_dir),
+        icao=None,
+        wu_csv=None,
+        gamma_csv=None,
+        open_meteo_csv=None,
+        generated_at="2026-05-17T22:02:47+00:00",
+    )
+
+    payload = report.build_report(args)
+    cyyz = next(station for station in payload["station_summary"] if station["icao"] == "CYYZ")
+    row = payload["rows"][0]
+
+    assert row["coverage_status"] == "coverage_ok"
+    assert cyyz["coverage_pct"] == 100.0
+    assert cyyz["insufficient_coverage_rows"] == 0
+    assert cyyz["waiting_local_day_close_rows"] == 0
+    assert cyyz["parity_status"] == "WAITING_WU_OR_GAMMA"

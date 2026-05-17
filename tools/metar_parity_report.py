@@ -8,9 +8,12 @@ import csv
 import json
 import statistics
 import sys
-from datetime import datetime, timezone
+from collections import Counter
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+from metar_shadow_fetch import WAVE1_STATIONS, WAVE2_STATIONS, get_timezone
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +27,10 @@ FUTURE_MAX_MEDIAN_ABS_DELTA_C = 0.3
 FUTURE_MAX_ABS_DELTA_C = 1.0
 FUTURE_MIN_COVERAGE_PCT = 80.0
 METAR_OPEN_METEO_DELTA_ALERT_C = 1.0
+WAVES = {
+    "Wave 1": set(WAVE1_STATIONS),
+    "Wave 2": set(WAVE2_STATIONS),
+}
 
 LOG_ONLY_DISCLAIMER = (
     "LOG_ONLY METAR/AviationWeather measurement-layer report. This does not "
@@ -77,16 +84,42 @@ def load_metar_payloads(metar_dir: Path, icao_filter: set[str] | None = None) ->
     return rows
 
 
+def _parse_generated_at(value: str | None) -> datetime:
+    raw = str(value or "").strip()
+    if not raw:
+        return datetime.now(timezone.utc).replace(microsecond=0)
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.now(timezone.utc).replace(microsecond=0)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def is_local_day_closed(date_local: str, tz_name: str, generated_at: str | None = None) -> bool:
+    """Return True only after the requested station-local day has fully ended."""
+    try:
+        day = datetime.strptime(str(date_local), "%Y-%m-%d").date()
+    except ValueError:
+        return True
+    tz = get_timezone(tz_name)
+    end_local = datetime.combine(day + timedelta(days=1), time.min, tzinfo=tz)
+    return _parse_generated_at(generated_at) >= end_local.astimezone(timezone.utc)
+
+
 def build_rows(
     metar_payloads: list[dict[str, Any]],
     wu_values: dict[tuple[str, str], float],
     open_meteo_values: dict[tuple[str, str], float],
     gamma_values: dict[tuple[str, str], float],
+    generated_at: str | None = None,
 ) -> list[dict[str, Any]]:
     rows = []
     for payload in metar_payloads:
         icao = str(payload.get("icao") or "").upper()
         date_local = str(payload.get("date_local") or payload.get("date") or "")
+        timezone_name = str(payload.get("timezone") or "UTC")
         key = (icao, date_local)
         metar_tmax = _to_float(payload.get("tmax_c"))
         wu_high = wu_values.get(key) or gamma_values.get(key)
@@ -94,11 +127,25 @@ def build_rows(
         metar_wu_delta = round(metar_tmax - wu_high, 2) if metar_tmax is not None and wu_high is not None else None
         metar_om_delta = round(metar_tmax - open_meteo, 2) if metar_tmax is not None and open_meteo is not None else None
         coverage = payload.get("coverage") if isinstance(payload.get("coverage"), dict) else {}
+        coverage_ok = bool(coverage.get("coverage_ok"))
+        waiting_local_day_close = (
+            not coverage_ok
+            and str(payload.get("status")) == "insufficient_metar_coverage"
+            and not is_local_day_closed(date_local, timezone_name, generated_at)
+        )
+        coverage_status = (
+            "waiting_local_day_close"
+            if waiting_local_day_close
+            else "coverage_ok"
+            if coverage_ok
+            else "coverage_gap"
+        )
         rows.append(
             {
                 "city": payload.get("city"),
                 "icao": icao,
                 "date_local": date_local,
+                "timezone": timezone_name,
                 "metar_status": payload.get("status"),
                 "metar_tmax_c": metar_tmax,
                 "wu_high_c": wu_high,
@@ -106,8 +153,12 @@ def build_rows(
                 "open_meteo_max_c": open_meteo,
                 "metar_wu_delta_c": metar_wu_delta,
                 "metar_open_meteo_delta_c": metar_om_delta,
-                "coverage_ok": bool(coverage.get("coverage_ok")),
+                "coverage_ok": coverage_ok,
+                "coverage_status": coverage_status,
+                "waiting_local_day_close": waiting_local_day_close,
                 "obs_count": coverage.get("obs_count"),
+                "first_local_hour": coverage.get("first_local_hour"),
+                "last_local_hour": coverage.get("last_local_hour"),
                 "status": "compared" if metar_wu_delta is not None else "missing_wu_or_metar",
             }
         )
@@ -158,7 +209,15 @@ def build_station_summary(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ]
         insufficient = [
             row for row in station_rows
-            if row.get("metar_status") == "insufficient_metar_coverage" or not row.get("coverage_ok")
+            if (
+                row.get("metar_status") == "insufficient_metar_coverage"
+                or not row.get("coverage_ok")
+            )
+            and not row.get("waiting_local_day_close")
+        ]
+        waiting_local_day_close = [
+            row for row in station_rows
+            if row.get("waiting_local_day_close")
         ]
         summary.append(
             {
@@ -172,7 +231,8 @@ def build_station_summary(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "max_abs_metar_wu_delta_c": round(max(abs_deltas), 2) if abs_deltas else None,
                 "max_abs_metar_open_meteo_delta_c": round(max(om_abs_deltas), 2) if om_abs_deltas else None,
                 "insufficient_coverage_rows": len(insufficient),
-                "parity_status": _station_parity_status(len(comparable), abs_deltas, len(insufficient)),
+                "waiting_local_day_close_rows": len(waiting_local_day_close),
+                "parity_status": _station_parity_status(len(comparable), abs_deltas, len(insufficient), len(waiting_local_day_close)),
             }
         )
     return summary
@@ -199,6 +259,7 @@ def build_city_summary(station_summary: list[dict[str, Any]]) -> list[dict[str, 
             if station.get("max_abs_metar_open_meteo_delta_c") is not None
         ]
         insufficient = sum(int(station.get("insufficient_coverage_rows") or 0) for station in stations)
+        waiting = sum(int(station.get("waiting_local_day_close_rows") or 0) for station in stations)
         cities.append(
             {
                 "city": city,
@@ -209,15 +270,57 @@ def build_city_summary(station_summary: list[dict[str, Any]]) -> list[dict[str, 
                 "max_abs_metar_wu_delta_c": round(max(max_abs), 2) if max_abs else None,
                 "max_abs_metar_open_meteo_delta_c": round(max(max_om_abs), 2) if max_om_abs else None,
                 "insufficient_coverage_rows": insufficient,
+                "waiting_local_day_close_rows": waiting,
                 "parity_status": _city_parity_status(stations),
             }
         )
     return cities
 
 
-def _station_parity_status(n_compared: int, abs_deltas: list[float], insufficient_coverage_rows: int) -> str:
+def build_wave_summary(station_summary: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_icao = {str(station.get("icao") or "").upper(): station for station in station_summary}
+    waves = []
+    for wave_name, station_codes in WAVES.items():
+        stations = [by_icao[icao] for icao in sorted(station_codes) if icao in by_icao]
+        rows = sum(int(station.get("n_rows") or 0) for station in stations)
+        coverage_ok = sum(int(station.get("coverage_ok_rows") or 0) for station in stations)
+        insufficient = sum(int(station.get("insufficient_coverage_rows") or 0) for station in stations)
+        waiting = sum(int(station.get("waiting_local_day_close_rows") or 0) for station in stations)
+        statuses = Counter(str(station.get("parity_status") or "UNKNOWN") for station in stations)
+        if insufficient:
+            coverage_status = "COVERAGE_GAP"
+        elif waiting:
+            coverage_status = "WAITING_LOCAL_DAY_CLOSE"
+        elif rows:
+            coverage_status = "COVERAGE_HEALTHY"
+        else:
+            coverage_status = "NO_METAR_ROWS"
+        waves.append(
+            {
+                "wave": wave_name,
+                "stations_configured": len(station_codes),
+                "stations_seen": len(stations),
+                "n_rows": rows,
+                "coverage_pct": _pct(coverage_ok, rows),
+                "insufficient_coverage_rows": insufficient,
+                "waiting_local_day_close_rows": waiting,
+                "coverage_status": coverage_status,
+                "parity_status_counts": dict(sorted(statuses.items())),
+            }
+        )
+    return waves
+
+
+def _station_parity_status(
+    n_compared: int,
+    abs_deltas: list[float],
+    insufficient_coverage_rows: int,
+    waiting_local_day_close_rows: int = 0,
+) -> str:
     if insufficient_coverage_rows:
         return "COVERAGE_GAP"
+    if waiting_local_day_close_rows:
+        return "WAITING_LOCAL_DAY_CLOSE"
     if not n_compared:
         return "WAITING_WU_OR_GAMMA"
     if max(abs_deltas) > FUTURE_MAX_ABS_DELTA_C:
@@ -234,6 +337,8 @@ def _city_parity_status(stations: list[dict[str, Any]]) -> str:
     statuses = {str(station.get("parity_status") or "") for station in stations}
     if "COVERAGE_GAP" in statuses:
         return "COVERAGE_GAP"
+    if "WAITING_LOCAL_DAY_CLOSE" in statuses:
+        return "WAITING_LOCAL_DAY_CLOSE"
     if "DRIFT" in statuses:
         return "DRIFT"
     if statuses == {"PROMISING_LOG_ONLY"}:
@@ -280,7 +385,12 @@ def build_alerts(report: dict[str, Any]) -> list[dict[str, Any]]:
         city = station.get("city")
         icao = station.get("icao")
         coverage_pct = station.get("coverage_pct")
-        if station.get("insufficient_coverage_rows") or (coverage_pct is not None and coverage_pct < FUTURE_MIN_COVERAGE_PCT):
+        waiting_local_day_close_rows = int(station.get("waiting_local_day_close_rows") or 0)
+        if station.get("insufficient_coverage_rows") or (
+            coverage_pct is not None
+            and coverage_pct < FUTURE_MIN_COVERAGE_PCT
+            and not waiting_local_day_close_rows
+        ):
             alerts.append(
                 {
                     "code": "A_METAR_COVERAGE_GAP",
@@ -365,16 +475,33 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
         "## Operational Readout",
         "",
+        "### By Wave",
+        "",
+        "| Wave | Stations | Rows | Coverage | Real gaps | Waiting local close | Coverage status | Parity status counts |",
+        "|---|---:|---:|---:|---:|---:|---|---|",
+    ]
+    for wave in report.get("wave_summary", []):
+        lines.append(
+            f"| {wave.get('wave')} | {wave.get('stations_seen')}/{wave.get('stations_configured')} | "
+            f"{wave.get('n_rows')} | {wave.get('coverage_pct')} | {wave.get('insufficient_coverage_rows')} | "
+            f"{wave.get('waiting_local_day_close_rows')} | {wave.get('coverage_status')} | "
+            f"{wave.get('parity_status_counts')} |"
+        )
+    lines.extend(
+        [
+            "",
         "### By City",
         "",
-        "| City | Stations | Coverage | Compared | Max METAR-WU | Max METAR-OM | Insufficient | Status |",
-        "|---|---|---:|---:|---:|---:|---:|---|",
-    ]
+            "| City | Stations | Coverage | Compared | Max METAR-WU | Max METAR-OM | Real gaps | Waiting local close | Status |",
+            "|---|---|---:|---:|---:|---:|---:|---:|---|",
+        ]
+    )
     for city in report.get("city_summary", []):
         lines.append(
             f"| {city.get('city')} | {', '.join(city.get('stations') or [])} | {city.get('coverage_pct')} | "
             f"{city.get('n_compared_metar_wu')} | {city.get('max_abs_metar_wu_delta_c')} | "
             f"{city.get('max_abs_metar_open_meteo_delta_c')} | {city.get('insufficient_coverage_rows')} | "
+            f"{city.get('waiting_local_day_close_rows')} | "
             f"{city.get('parity_status')} |"
         )
     lines.extend(
@@ -382,8 +509,8 @@ def render_markdown(report: dict[str, Any]) -> str:
             "",
             "### By Station",
             "",
-            "| City | ICAO | Coverage | Compared | Median METAR-WU | Max METAR-WU | Max METAR-OM | Insufficient | Status |",
-            "|---|---|---:|---:|---:|---:|---:|---:|---|",
+            "| City | ICAO | Coverage | Compared | Median METAR-WU | Max METAR-WU | Max METAR-OM | Real gaps | Waiting local close | Status |",
+            "|---|---|---:|---:|---:|---:|---:|---:|---:|---|",
         ]
     )
     for station in report.get("station_summary", []):
@@ -391,7 +518,8 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"| {station.get('city') or ''} | {station.get('icao')} | {station.get('coverage_pct')} | "
             f"{station.get('n_compared_metar_wu')} | {station.get('median_abs_metar_wu_delta_c')} | "
             f"{station.get('max_abs_metar_wu_delta_c')} | {station.get('max_abs_metar_open_meteo_delta_c')} | "
-            f"{station.get('insufficient_coverage_rows')} | {station.get('parity_status')} |"
+            f"{station.get('insufficient_coverage_rows')} | "
+            f"{station.get('waiting_local_day_close_rows')} | {station.get('parity_status')} |"
         )
     lines.extend(
         [
@@ -420,11 +548,12 @@ def render_markdown(report: dict[str, Any]) -> str:
         ]
     )
     lines.extend(f"- {reason}" for reason in report["verdict_reasons"])
-    lines.extend(["", "## Rows", "", "| City | ICAO | Date | METAR | WU/Gamma | Delta | Coverage | Open-Meteo | METAR-OM | Status |", "|---|---|---|---:|---:|---:|---|---:|---:|---|"])
+    lines.extend(["", "## Rows", "", "| City | ICAO | Date | METAR | WU/Gamma | Delta | Coverage | Coverage status | Open-Meteo | METAR-OM | Status |", "|---|---|---|---:|---:|---:|---|---|---:|---:|---|"])
     for row in report["rows"]:
         lines.append(
             f"| {row.get('city') or ''} | {row.get('icao')} | {row.get('date_local')} | {row.get('metar_tmax_c')} | "
             f"{row.get('wu_high_c')} | {row.get('metar_wu_delta_c')} | {row.get('coverage_ok')} | "
+            f"{row.get('coverage_status')} | "
             f"{row.get('open_meteo_max_c')} | {row.get('metar_open_meteo_delta_c')} | {row.get('status')} |"
         )
     lines.extend(
@@ -452,7 +581,11 @@ def write_csv(rows: list[dict[str, Any]], path: Path) -> None:
         "metar_wu_delta_c",
         "metar_open_meteo_delta_c",
         "coverage_ok",
+        "coverage_status",
+        "waiting_local_day_close",
         "obs_count",
+        "first_local_hour",
+        "last_local_hour",
         "status",
     ]
     with path.open("w", encoding="utf-8", newline="") as fh:
@@ -463,17 +596,19 @@ def write_csv(rows: list[dict[str, Any]], path: Path) -> None:
 
 def build_report(args: argparse.Namespace) -> dict[str, Any]:
     icao_filter = {item.upper() for item in args.icao} if args.icao else None
+    generated_at = getattr(args, "generated_at", None) or _now_iso()
     metar = load_metar_payloads(Path(args.metar_dir), icao_filter=icao_filter)
     wu = load_csv_values(Path(args.wu_csv), ("wu_high_c", "high_c", "tmax_c", "max_c")) if args.wu_csv else {}
     gamma = load_csv_values(Path(args.gamma_csv), ("gamma_settlement_c", "settlement_temp_c", "wu_high_c", "tmax_c")) if args.gamma_csv else {}
     open_meteo = load_csv_values(Path(args.open_meteo_csv), ("open_meteo_max_c", "temperature_2m_max", "max_c")) if args.open_meteo_csv else {}
-    rows = build_rows(metar, wu, open_meteo, gamma)
+    rows = build_rows(metar, wu, open_meteo, gamma, generated_at=generated_at)
     metrics = compute_metrics(rows)
     verdict, reasons = classify_parity_drift(metrics)
     station_summary = build_station_summary(rows)
     city_summary = build_city_summary(station_summary)
+    wave_summary = build_wave_summary(station_summary)
     report = {
-        "generated_at": _now_iso(),
+        "generated_at": generated_at,
         "log_only": True,
         "disclaimer": LOG_ONLY_DISCLAIMER,
         "inputs": {
@@ -487,6 +622,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         "verdict_reasons": reasons,
         "city_summary": city_summary,
         "station_summary": station_summary,
+        "wave_summary": wave_summary,
         "rows": rows,
     }
     report["alerts"] = build_alerts(report)

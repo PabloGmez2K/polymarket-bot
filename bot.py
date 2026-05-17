@@ -5355,6 +5355,7 @@ _DIGEST_SCRIPT = os.path.join(
     "city_intelligence_digest.py",
 )
 _DIGEST_JSON_FILE = _data_path("city_intelligence_digest.json")
+_METAR_SHADOW_REPORT_FILE = _data_path("metar_shadow_report.json")
 _DIGEST_COOLDOWN_HOURS = 24
 
 # Onboarding states that surface in digest Telegram
@@ -8952,6 +8953,125 @@ def _daily_summary_has_cycle_today(now):
     return bool(latest_ts and latest_ts.date() == now.date())
 
 
+def _safe_float_text(value, suffix=""):
+    if value is None:
+        return "n/d"
+    try:
+        return f"{float(value):.1f}{suffix}"
+    except Exception:
+        return "n/d"
+
+
+def _load_metar_log_only_digest(path=None):
+    """Read the last manual METAR parity report. No network and no runtime writes."""
+    report_path = path or _METAR_SHADOW_REPORT_FILE
+    if not path and not os.path.exists(report_path):
+        local_report_path = os.path.join("data", "metar_shadow_report.json")
+        if os.path.exists(local_report_path):
+            report_path = local_report_path
+    try:
+        if not os.path.exists(report_path):
+            return {
+                "available": False,
+                "status": "BLOCKED_WAITING_REPORT",
+                "message": "waiting last data/metar_shadow_report.json",
+                "path": str(report_path),
+            }
+        with open(report_path, "r", encoding="utf-8") as fh:
+            report = json.load(fh)
+    except Exception as exc:
+        return {
+            "available": False,
+            "status": "BLOCKED_REPORT_PARSE_ERROR",
+            "message": f"METAR report parse error: {exc}",
+            "path": str(report_path),
+        }
+
+    waves = report.get("wave_summary") or []
+    alerts = report.get("alerts") or []
+    waiting_rows = [
+        row
+        for row in report.get("rows", [])
+        if row.get("waiting_local_day_close")
+        or row.get("coverage_status") == "waiting_local_day_close"
+    ]
+    real_gap_alerts = [
+        alert
+        for alert in alerts
+        if alert.get("code") == "A_METAR_COVERAGE_GAP"
+    ]
+    parity_status = str(report.get("verdict") or "UNKNOWN")
+    if real_gap_alerts:
+        status = "WARNING_COVERAGE_GAP_REAL"
+    elif waiting_rows:
+        status = "WAITING_LOCAL_DAY_CLOSE"
+    elif parity_status == "METAR_PARITY_INSUFFICIENT_DATA":
+        status = "BLOCKED_WAITING_EXTERNAL_PARITY_INPUTS"
+    else:
+        status = "OK_COVERAGE_HEALTHY"
+
+    return {
+        "available": True,
+        "status": status,
+        "generated_at": report.get("generated_at"),
+        "verdict": parity_status,
+        "metrics": report.get("metrics") or {},
+        "wave_summary": waves,
+        "alerts": alerts,
+        "waiting_rows": waiting_rows,
+        "real_gap_alerts": real_gap_alerts,
+        "path": str(report_path),
+    }
+
+
+def _format_metar_log_only_daily_lines(metar):
+    lines = ["", "<b>METAR LOG_ONLY</b>"]
+    if not metar or not metar.get("available"):
+        lines.append(f"• Blocked: {metar.get('message', 'waiting METAR report') if metar else 'waiting METAR report'}")
+        lines.append("• Trigger: run tools/metar_shadow_fetch.py manually, then tools/metar_parity_report.py.")
+        return lines
+
+    for wave in metar.get("wave_summary", []):
+        lines.append(
+            f"• {wave.get('wave')}: {wave.get('stations_seen')}/{wave.get('stations_configured')} stations, "
+            f"coverage {_safe_float_text(wave.get('coverage_pct'), '%')}, "
+            f"real gaps {int(wave.get('insufficient_coverage_rows') or 0)}, "
+            f"waiting {int(wave.get('waiting_local_day_close_rows') or 0)}"
+        )
+
+    metrics = metar.get("metrics") or {}
+    lines.append(
+        f"• Parity: <code>{metar.get('verdict')}</code>; "
+        f"coverage {_safe_float_text(metrics.get('coverage_pct'), '%')}; "
+        f"METAR-WU n={metrics.get('n_compared_metar_wu', 0)}"
+    )
+
+    real_gap_alerts = metar.get("real_gap_alerts") or []
+    waiting_rows = metar.get("waiting_rows") or []
+    if real_gap_alerts:
+        examples = ", ".join(
+            f"{alert.get('city')}/{alert.get('icao')}" for alert in real_gap_alerts[:3]
+        )
+        lines.append(f"• Warning: coverage gap real ({examples})")
+    elif waiting_rows:
+        examples = ", ".join(
+            f"{row.get('city')}/{row.get('icao')} {row.get('date_local')}" for row in waiting_rows[:3]
+        )
+        lines.append(f"• Waiting local day close: {examples}")
+    elif metar.get("status") == "BLOCKED_WAITING_EXTERNAL_PARITY_INPUTS":
+        lines.append("• Blocked: waiting external parity inputs (WU/Gamma/Open-Meteo CSV).")
+    else:
+        lines.append("• OK: METAR Wave 1+2 coverage healthy.")
+
+    alert_codes = [str(alert.get("code")) for alert in metar.get("alerts", []) if alert.get("code")]
+    if alert_codes:
+        lines.append(f"• Alerts LOG_ONLY: {', '.join(alert_codes[:5])}")
+    else:
+        lines.append("• Alerts LOG_ONLY: none.")
+    lines.append("• Runtime: reads latest JSON only; no fetch, no scheduler.")
+    return lines
+
+
 def build_daily_summary_payload(now=None):
     """Construye payload del resumen diario (datos crudos sin formateo)."""
     if now is None:
@@ -8984,6 +9104,7 @@ def build_daily_summary_payload(now=None):
         "shadow_only": shadow_only,
         "operable_active_count": operable_counts["active"],
         "operable_canary_count": operable_counts["canary"],
+        "metar_log_only": _load_metar_log_only_digest(),
     }
 
 
@@ -9062,6 +9183,7 @@ def format_daily_summary_text(payload):
     lines.append(f"• Acumulado histórico: {n.get('cumulative', 0)}")
     lines.append("")
     lines.append("<i>Caso NOAA = 1 fila city+date en observed_vs_forecast (forecast vs observado NOAA).</i>")
+    lines.extend(_format_metar_log_only_daily_lines(payload.get("metar_log_only")))
 
     next_run_raw = str(payload.get("next_run_at", "") or "").strip()
     if next_run_raw:
