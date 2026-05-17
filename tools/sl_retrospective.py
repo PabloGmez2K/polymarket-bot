@@ -31,6 +31,16 @@ SL_REASONS = {"stop_loss", "stop_loss_intra"}
 PHASE_F1_CUTOFF = "2026-04-24T21:22:53+00:00"
 PHASE_F2_CUTOFF = "2026-04-27T08:00:41+00:00"
 MIN_CURRENT_CONFIG_SAMPLE = 5
+POST_GUARD_WATCH_FALSE_EXITS_MIN = 4
+POST_GUARD_WATCH_NET_THRESHOLD = -5.0
+POST_GUARD_WATCH_MAIN_FALSE_RATE = 60.0
+POST_GUARD_WATCH_MAIN_RESOLVED_MIN = 2
+POST_GUARD_ESCALATE_RESOLVED_MIN = 10
+POST_GUARD_ESCALATE_FALSE_RATE = 50.0
+POST_GUARD_ESCALATE_MAIN_RESOLVED_MIN = 5
+POST_GUARD_ESCALATE_MAIN_FALSE_RATE = 60.0
+POST_GUARD_ESCALATE_NET_THRESHOLD = -10.0
+POST_GUARD_ESCALATE_NET_RESOLVED_MIN = 8
 DEFAULT_GUARD_FILE = REPO_ROOT / "data" / "sl_intra_guard_audit.json"
 DEFAULT_GUARD_FALLBACK = REPO_ROOT / "data" / "runtime_import" / "sl_intra_guard_audit.json"
 
@@ -775,6 +785,161 @@ def _current_config_verdict_lines(phase_summaries: dict | None) -> list[str]:
     if f3_acc is not None and f3_acc >= 60:
         return ["⚠️ Config actual: tasa de falsas alta — revisar"]
     return ["📊 Config actual: zona gris — seguir monitorizando"]
+
+
+def _fmt_money(value: float | int | None) -> str:
+    if value is None:
+        return "n/d"
+    return f"{float(value):+.2f}$"
+
+
+def _false_rate(summary: dict) -> float | None:
+    resolved = summary.get("n_resolved", 0) or 0
+    if resolved <= 0:
+        return None
+    return (summary.get("n_right", 0) or 0) / resolved * 100.0
+
+
+def _post_guard_status(phase_summaries: dict | None) -> dict:
+    f3 = (phase_summaries or {}).get("F3") or {}
+    by_type = f3.get("by_type") or {}
+    main = by_type.get("stop_loss") or {}
+    intra = by_type.get("stop_loss_intra") or {}
+    n_resolved = f3.get("n_resolved", 0) or 0
+    false_exits = f3.get("n_right", 0) or 0
+    false_rate = _false_rate(f3)
+    main_resolved = main.get("n_resolved", 0) or 0
+    main_false_rate = _false_rate(main)
+    intra_resolved = intra.get("n_resolved", 0) or 0
+    intra_false_rate = _false_rate(intra)
+    false_exit_cost = round(
+        (f3.get("false_exit_without_sl_best_total", 0.0) or 0.0)
+        - (f3.get("false_exit_with_sl_total", 0.0) or 0.0),
+        2,
+    )
+    protected_saved = round(
+        (f3.get("protected_with_sl_total", 0.0) or 0.0)
+        - (f3.get("protected_without_sl_best_total", 0.0) or 0.0),
+        2,
+    )
+    net_vs_best_seen = round(protected_saved - false_exit_cost, 2)
+
+    escalation_reasons = []
+    if n_resolved >= POST_GUARD_ESCALATE_RESOLVED_MIN and false_rate is not None and false_rate >= POST_GUARD_ESCALATE_FALSE_RATE:
+        escalation_reasons.append(
+            f"post_guard resueltos={n_resolved} y falsas={false_rate:.0f}% >= {POST_GUARD_ESCALATE_FALSE_RATE:.0f}%"
+        )
+    if (
+        main_resolved >= POST_GUARD_ESCALATE_MAIN_RESOLVED_MIN
+        and main_false_rate is not None
+        and main_false_rate >= POST_GUARD_ESCALATE_MAIN_FALSE_RATE
+    ):
+        escalation_reasons.append(
+            f"main stop_loss resueltos={main_resolved} y falsas={main_false_rate:.0f}% >= {POST_GUARD_ESCALATE_MAIN_FALSE_RATE:.0f}%"
+        )
+    if n_resolved >= POST_GUARD_ESCALATE_NET_RESOLVED_MIN and net_vs_best_seen <= POST_GUARD_ESCALATE_NET_THRESHOLD:
+        escalation_reasons.append(
+            f"net_vs_best_seen={_fmt_money(net_vs_best_seen)} <= {_fmt_money(POST_GUARD_ESCALATE_NET_THRESHOLD)} con {n_resolved} resueltos"
+        )
+
+    watch_reasons = []
+    if false_exits >= POST_GUARD_WATCH_FALSE_EXITS_MIN and net_vs_best_seen <= POST_GUARD_WATCH_NET_THRESHOLD:
+        watch_reasons.append(
+            f"{false_exits} falsas post-guard y net_vs_best_seen={_fmt_money(net_vs_best_seen)}"
+        )
+    if (
+        main_resolved >= POST_GUARD_WATCH_MAIN_RESOLVED_MIN
+        and main_false_rate is not None
+        and main_false_rate >= POST_GUARD_WATCH_MAIN_FALSE_RATE
+    ):
+        watch_reasons.append(
+            f"main stop_loss falsas={main_false_rate:.0f}% con {main_resolved} resueltos"
+        )
+
+    status = "NORMAL_GRAY"
+    reasons = []
+    if escalation_reasons:
+        status = "ESCALATE_OPUS_READY"
+        reasons = escalation_reasons
+    elif watch_reasons:
+        status = "WATCH_RISK_INCREASING"
+        reasons = watch_reasons
+
+    return {
+        "status": status,
+        "reasons": reasons,
+        "n_resolved": n_resolved,
+        "false_exits": false_exits,
+        "false_rate": false_rate,
+        "main_resolved": main_resolved,
+        "main_false_rate": main_false_rate,
+        "intra_resolved": intra_resolved,
+        "intra_false_rate": intra_false_rate,
+        "false_exit_cost": false_exit_cost,
+        "protected_saved": protected_saved,
+        "net_vs_best_seen": net_vs_best_seen,
+        "next_triggers": [
+            (
+                f"Opus si post_guard llega a {POST_GUARD_ESCALATE_RESOLVED_MIN} resueltos "
+                f"({max(0, POST_GUARD_ESCALATE_RESOLVED_MIN - n_resolved)} faltan) "
+                f"y falsas >= {POST_GUARD_ESCALATE_FALSE_RATE:.0f}%"
+            ),
+            (
+                f"Opus si main stop_loss llega a {POST_GUARD_ESCALATE_MAIN_RESOLVED_MIN} resueltos "
+                f"({max(0, POST_GUARD_ESCALATE_MAIN_RESOLVED_MIN - main_resolved)} faltan) "
+                f"y falsas >= {POST_GUARD_ESCALATE_MAIN_FALSE_RATE:.0f}%"
+            ),
+            (
+                f"Opus si net_vs_best_seen <= {_fmt_money(POST_GUARD_ESCALATE_NET_THRESHOLD)} "
+                f"con {POST_GUARD_ESCALATE_NET_RESOLVED_MIN} resueltos "
+                f"({max(0, POST_GUARD_ESCALATE_NET_RESOLVED_MIN - n_resolved)} faltan)"
+            ),
+        ],
+    }
+
+
+def _post_guard_status_lines(status: dict) -> list[str]:
+    false_rate = status.get("false_rate")
+    main_false_rate = status.get("main_false_rate")
+    intra_false_rate = status.get("intra_false_rate")
+    false_rate_text = f"{false_rate:.0f}%" if false_rate is not None else "n/d"
+    main_rate_text = f"{main_false_rate:.0f}%" if main_false_rate is not None else "n/d"
+    intra_rate_text = f"{intra_false_rate:.0f}%" if intra_false_rate is not None else "n/d"
+    lines = [
+        f"ðŸ§­ Subestado post-guard: {status['status']}",
+        (
+            f"   false_exits={status['false_exits']} | false_rate={false_rate_text} | "
+            f"main_stop_loss={main_rate_text} ({status['main_resolved']} resueltos) | "
+            f"stop_loss_intra={intra_rate_text} ({status['intra_resolved']} resueltos)"
+        ),
+        (
+            f"   net_vs_best_seen={_fmt_money(status['net_vs_best_seen'])} "
+            f"(coste falsas {_fmt_money(-status['false_exit_cost'])}; "
+            f"proteccion neta {_fmt_money(status['protected_saved'])})"
+        ),
+    ]
+    if status.get("reasons"):
+        lines.append("   trigger_actual: " + "; ".join(status["reasons"]))
+    for trigger in status.get("next_triggers") or []:
+        lines.append("   next_trigger: " + trigger)
+    lines.append("   LOG_ONLY: no autoriza cambio de SL, trading action, BUY/SELL/SKIP, BANKROLL ni Fase C.")
+    lines.append("   Escalado a revision manual/Opus solo si se cumple trigger explicito.")
+    return lines
+
+
+def _current_config_verdict_lines(phase_summaries: dict | None) -> list[str]:
+    status = _post_guard_status(phase_summaries)
+    f3_resolved = status["n_resolved"]
+    f3_acc = status["false_rate"]
+    min_sample = globals().get("MIN_CURRENT_CONFIG_SAMPLE", 5)
+    lines = _post_guard_status_lines(status)
+    if f3_resolved < min_sample:
+        return ["âš ï¸ Config actual post-guard: muestra insuficiente â€” seguir monitorizando"] + lines
+    if f3_acc is not None and f3_acc < 30:
+        return ["âœ… Config actual post-guard: funcionando correctamente"] + lines
+    if f3_acc is not None and f3_acc >= 60:
+        return ["âš ï¸ Config actual: tasa de falsas alta â€” revisar"] + lines
+    return ["ðŸ“Š Config actual: zona gris â€” seguir monitorizando"] + lines
 
 
 def build_message(
