@@ -424,3 +424,93 @@ Si no se cumplen → `DEFER_STOP`.
 
 - **rtk** `KEEP_WITH_RULES`: usar para git/grep/log dentro de sesiones. Si falla con PowerShell, usar comando directo sin debuggear rtk.
 - **engram** `USE_AFTER_REPO`: orden obligatorio: `git status` → `ORCHESTRATOR.md` → `CONTEXTO.md` → engram solo si quedan gaps. No antes que el repo.
+
+---
+
+## 13. Operating Model: empresa / ROI / tokens-as-payroll
+
+El sistema es una empresa pequeña orientada a monetización. El bankroll es capital operativo; los tokens son nómina; el P&L semanal es la cuenta de resultados; los experimentos LOG_ONLY son I+D controlado; subir BANKROLL $25→$35→$50→$100 es la expansión de la empresa.
+
+Los agentes/LLMs son trabajadores. Si no producen, la empresa no es sostenible. No se necesita rendimiento perfecto desde el principio; se necesita rendimiento suficiente para justificar la nómina y reinvertir.
+
+### A. Regla de inversión de tokens
+
+No abrir Sonnet/Codex/Opus si la tarea no puede mejorar al menos una de estas cinco métricas:
+
+1. P&L
+2. throughput de operaciones buenas
+3. control de riesgo / pérdidas evitables
+4. BANKROLL readiness
+5. calidad de decisión para una acción futura
+
+### B. Salidas permitidas de una sesión
+
+Cada sesión debe cerrar en una de estas:
+
+| Salida | Significado |
+|---|---|
+| `IMPLEMENTED` | Código/config desplegado y validado |
+| `EXPERIMENT_PREPARED` | LOG_ONLY listo, trigger, ventana y criterio definidos |
+| `OPUS_DECISION_TAKEN` | Veredicto binario emitido, siguiente paso asignado |
+| `TRIGGER_DEFINED` | Sin acción aún, pero condición explícita y fecha de reapertura |
+| `ARCHIVED / DEFER_STOP` | ROI insuficiente: cerrado con condición de reapertura o descarte |
+| `ACTION_NOW` | Ejecución inmediata autorizada |
+
+Evitar "seguimos monitorizando" si no hay trigger, fecha, métrica o tarea siguiente.
+
+### C. Manejo de "datos insuficientes"
+
+Si faltan datos, responder exactamente:
+
+1. Qué dato falta.
+2. Si se puede obtener con herramienta existente (SSH, script, digest).
+3. Si hace falta mejorar la herramienta (coste, scope, agente).
+4. Qué trigger reabre (n, WR, fecha, evidencia concreta).
+5. Cuándo archivar si no aparece evidencia.
+
+No usar "esperar más" como escapatoria por defecto.
+
+### D. Relación con BANKROLL
+
+Todo workstream debe conectarse, directa o indirectamente, con el camino $35/$50/$100:
+
+- más operaciones buenas (throughput);
+- menos operaciones malas (guards, SL);
+- P&L más canónico (measurement layer);
+- más ciudades seguras (parity, promotion);
+- mejor control de riesgo.
+
+### E. Patrón: auditoría que se convierte en capacidad
+
+Ejemplo de uso correcto de tokens — Measurement Layer / METAR (sesión 2026-05-17):
+
+- detectó un blocker estructural (source parity);
+- generalizó la solución a todas las ciudades;
+- creó tooling LOG_ONLY con kill switch;
+- definió Wave 1 con criterio de parada;
+- conectó promoción de ciudades con parity;
+- puede desbloquear throughput futuro.
+
+Cualquier auditoría debe poder seguir este patrón: **blocker → solución → herramienta → experimento → trigger → capacidad**.
+
+### F. Anti-patrones
+
+- Auditorías globales sin decisión ni salida accionable.
+- Revalidar Phase 1/SQLite/gaps si ya están OK y no cambian ninguna decisión.
+- Documentación por documentación.
+- Usar Opus para confirmar WATCH sin trigger.
+- Crear herramientas que no entran en digest, decisión, experimento o workflow en ≤30 días.
+- Permitir que una alarma WATCH consuma tokens si no puede cambiar ninguna acción.
+
+### G. Regla Opus
+
+Usar Opus cuando haya decisión estratégica/semántica:
+BANKROLL · SL/riesgo · city promotion · measurement layer · policy gates · estrategia/throughput.
+
+Pedir veredictos únicos y tareas concretas, no ensayos abiertos. Si Opus ya decidió → no reanalizar: ejecutar, validar, cerrar.
+
+### H. Regla Codex / Sonnet
+
+- **Codex**: implementación, tooling, tests, runtime/read-only técnico.
+- **Sonnet**: docs, dossiers, cierres, síntesis, task cards, auditorías read-only no delicadas.
+- Si ya hay decisión Opus, no reanalizar: ejecutar directamente, validar y cerrar.

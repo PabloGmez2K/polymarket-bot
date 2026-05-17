@@ -5519,3 +5519,37 @@ Precheck read-only confirmó que el cleanup Railway ya estaba ejecutado antes de
 ### NO se toco
 
 No se tocaron codigo, Railway, env vars, DB, BANKROLL, Fase C, city modes, scheduler, whitelist, promotion gates, trading core ni CONTEXTO.md (sin estado vivo durable que cambiar).
+
+---
+
+## Sesión 363 - 17 de mayo de 2026 (Sonnet 4.6)
+
+**Clasificacion:** LITE / docs-only / dirección estratégica
+**Bloque:** Operating Model empresa/ROI/tokens-as-payroll
+**Veredicto:** DOCTRINE_UPDATED
+
+### Decisión
+
+Se incorporó el principio rector de la sesión 2026-05-17 en `ORCHESTRATOR.md §13`: el sistema opera como empresa orientada a monetización, no como máquina de auditorías. Bankroll = capital operativo; tokens = nómina; P&L semanal = cuenta de resultados.
+
+### Reglas incorporadas
+
+- **Inversión de tokens**: no abrir agente si la tarea no puede mover P&L, throughput, riesgo, BANKROLL readiness o calidad de decisión.
+- **Salidas de sesión**: `IMPLEMENTED / EXPERIMENT_PREPARED / OPUS_DECISION_TAKEN / TRIGGER_DEFINED / ARCHIVED / ACTION_NOW`. Prohibido "seguimos monitorizando" sin trigger explícito.
+- **Datos insuficientes**: responder qué falta, si hay herramienta, qué trigger reabre, cuándo archivar.
+- **Patrón capacidad**: toda auditoría debe seguir blocker→solución→herramienta→experimento→trigger→capacidad.
+- **Anti-patrones listados**: auditorías sin decisión, Opus para WATCH sin trigger, herramientas sin workflow.
+- **Reglas de agente**: Opus=semántica, Codex=implementación, Sonnet=docs/síntesis; si Opus ya decidió, ejecutar sin reanalizar.
+
+### Ejemplo canónico
+
+Measurement Layer / METAR (sesión 2026-05-17): detectó blocker, generalizó solución, creó tooling LOG_ONLY, definió Wave 1, conectó con promoción de ciudades. Patrón de auditoría que se convierte en capacidad productiva.
+
+### Cambios
+
+- `ORCHESTRATOR.md`: nueva sección §13 Operating Model con subreglas A–H.
+- `HISTORIAL_SESIONES.md`: esta entrada.
+
+### NO se toco
+
+No se tocaron codigo, runtime, Railway, env vars, DB, BANKROLL, Fase C, city modes, scheduler, whitelist, promotion gates, trading core, AGENTS.md ni CONTEXTO.md.
