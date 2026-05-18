@@ -797,6 +797,7 @@ TRADERS_INTELLIGENCE_COLLECTOR_ENABLED = os.getenv("TRADERS_INTELLIGENCE_COLLECT
 CITY_INTELLIGENCE_RUNTIME_BRIDGE_ENABLED = os.getenv("CITY_INTELLIGENCE_RUNTIME_BRIDGE_ENABLED", "true").lower() in ("1", "true", "yes", "on")
 CITY_INTELLIGENCE_RUNTIME_BRIDGE_HOUR_UTC = int(os.getenv("CITY_INTELLIGENCE_RUNTIME_BRIDGE_HOUR_UTC", "7"))
 BLOCKED_SIGNALS_FILE = _data_path("blocked_signals_resolutions.jsonl")
+BOT_SIGNAL_EVALUATIONS_FILE = _data_path("bot_signal_evaluations.jsonl")
 TRADERS_DB_FILE = _seed_data_file("traders_db.json")
 LIFECYCLE_REVIEW_JSON_FILE = _data_path("city_lifecycle_review.json")
 LIFECYCLE_REVIEW_COOLDOWN_HOURS = 24
@@ -965,6 +966,161 @@ def _make_skip_entry(
         "question": question,
         "extras": extras if extras is not None else {},
     }
+
+
+def _bot_eval_capture_disabled():
+    return os.getenv("DISABLE_BOT_EVAL_CAPTURE", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _bot_eval_read_enabled():
+    return os.getenv("READ_BOT_EVAL_CAPTURE", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _build_bot_eval_key(city, date_iso, condition, threshold, threshold_high=None, unit=None):
+    if not city or not date_iso or not condition or threshold is None or not unit:
+        return None
+    temp_part = f"{threshold}-{threshold_high}" if threshold_high is not None else str(threshold)
+    return f"{city}|{date_iso}|{condition}|{temp_part}|{unit}"
+
+
+def record_bot_evaluation(cycle_id, eval_key, would_buy: bool, **fields):
+    """
+    LOG_ONLY append-only capture of the bot's live evaluation outcome.
+    Best-effort by design: failures never affect trading or cycle control flow.
+    """
+    if _bot_eval_capture_disabled() or not eval_key:
+        return False
+    try:
+        record = {
+            "schema_version": 1,
+            "ts_utc": datetime.now(timezone.utc).isoformat(),
+            "cycle_id": cycle_id,
+            "eval_key": eval_key,
+            "city": fields.get("city"),
+            "date_iso": fields.get("date_iso"),
+            "condition": fields.get("condition"),
+            "threshold": fields.get("threshold"),
+            "threshold_high": fields.get("threshold_high"),
+            "unit": fields.get("unit"),
+            "would_buy": bool(would_buy),
+            "bot_edge_pct_at_signal": fields.get("bot_edge_pct_at_signal", fields.get("edge_pct")),
+            "evaluation_source": "live_eval",
+            "skip_or_block_reason": fields.get("skip_or_block_reason"),
+            "decision_gate": fields.get("decision_gate"),
+            "decision_confidence": fields.get("decision_confidence"),
+            "our_prob": fields.get("our_prob"),
+            "mkt_prob": fields.get("mkt_prob"),
+            "forecast_max": fields.get("forecast_max"),
+            "sigma_used": fields.get("sigma_used"),
+            "days_ahead": fields.get("days_ahead"),
+        }
+        target_dir = os.path.dirname(BOT_SIGNAL_EVALUATIONS_FILE)
+        if target_dir:
+            os.makedirs(target_dir, exist_ok=True)
+        with open(BOT_SIGNAL_EVALUATIONS_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+        return True
+    except Exception:
+        return False
+
+
+def _load_bot_evaluation_index():
+    index = {}
+    if not _bot_eval_read_enabled():
+        return index
+    try:
+        if not os.path.exists(BOT_SIGNAL_EVALUATIONS_FILE):
+            return index
+        with open(BOT_SIGNAL_EVALUATIONS_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                eval_key = rec.get("eval_key")
+                if eval_key:
+                    index[eval_key] = rec
+    except Exception:
+        return {}
+    return index
+
+
+def _bot_eval_join_fields(signal: dict) -> dict:
+    try:
+        eval_key = (
+            signal.get("eval_key")
+            or signal.get("match_key")
+            or _build_bot_eval_key(
+                signal.get("city"),
+                signal.get("date") or signal.get("date_iso"),
+                signal.get("condition"),
+                signal.get("temp") if signal.get("temp") is not None else signal.get("threshold"),
+                signal.get("temp_high") if signal.get("temp_high") is not None else signal.get("threshold_high"),
+                signal.get("unit"),
+            )
+        )
+        rec = _load_bot_evaluation_index().get(eval_key)
+        if not rec:
+            return {
+                "bot_would_have_bought": False,
+                "bot_evaluation_source": "unknown",
+                "bot_evaluation_join_status": "missing",
+            }
+        return {
+            "bot_would_have_bought": bool(rec.get("would_buy")),
+            "bot_evaluation_source": "live_eval",
+            "bot_edge_pct_at_signal": rec.get("bot_edge_pct_at_signal"),
+            "bot_skip_or_block_reason": rec.get("skip_or_block_reason"),
+            "bot_decision_gate": rec.get("decision_gate"),
+            "bot_decision_confidence": rec.get("decision_confidence"),
+            "bot_evaluation_join_status": "captured",
+        }
+    except Exception:
+        return {
+            "bot_would_have_bought": False,
+            "bot_evaluation_source": "unknown",
+            "bot_evaluation_join_status": "missing",
+        }
+
+
+def _record_bot_evaluation_from_skip_entry(entry):
+    try:
+        extras = entry.get("extras") if isinstance(entry.get("extras"), dict) else {}
+        skip_reason = entry.get("skip_reason")
+        decision_gate = "shadow_only" if skip_reason == "shadow_only_override" else skip_reason
+        eval_key = extras.get("qt_match_key") or _build_bot_eval_key(
+            entry.get("city"),
+            entry.get("date_iso"),
+            entry.get("condition"),
+            entry.get("threshold"),
+            entry.get("threshold_high"),
+            entry.get("unit"),
+        )
+        return record_bot_evaluation(
+            entry.get("cycle_id"),
+            eval_key,
+            False,
+            city=entry.get("city"),
+            date_iso=entry.get("date_iso"),
+            condition=entry.get("condition"),
+            threshold=entry.get("threshold"),
+            threshold_high=entry.get("threshold_high"),
+            unit=entry.get("unit"),
+            edge_pct=entry.get("edge_pct"),
+            skip_or_block_reason=skip_reason,
+            decision_gate=decision_gate,
+            decision_confidence=entry.get("our_prob"),
+            our_prob=entry.get("our_prob"),
+            mkt_prob=entry.get("mkt_prob"),
+            forecast_max=entry.get("forecast_max"),
+            sigma_used=entry.get("sigma_used"),
+            days_ahead=entry.get("days_ahead"),
+        )
+    except Exception:
+        return False
 
 
 def _sl_cooldown_register(city: str, hours: int = None) -> None:
@@ -10389,16 +10545,21 @@ def _blocked_signal_bot_eval_fields(signal: dict) -> dict:
     v3 schema adapter for blocked_signals records.
     Only trusts explicit bot eval metadata already captured upstream.
     """
+    if _bot_eval_read_enabled():
+        return _bot_eval_join_fields(signal)
     try:
         source = str(signal.get("bot_evaluation_source", "") or "").strip()
         if source not in {"live_eval", "replay", "unknown"}:
             source = "unknown"
         would_have_bought = signal.get("bot_would_have_bought")
         if isinstance(would_have_bought, bool):
-            return {
+            fields = {
                 "bot_would_have_bought": would_have_bought,
                 "bot_evaluation_source": source,
             }
+            if signal.get("bot_evaluation_join_status") in {"captured", "missing"}:
+                fields["bot_evaluation_join_status"] = signal.get("bot_evaluation_join_status")
+            return fields
     except Exception:
         pass
     return {
@@ -10453,9 +10614,13 @@ def _build_blocked_signal_resolution_record(signal: dict, market: dict, prices, 
         "observed_coverage_status": _resolve_observed_coverage_status(city),
         "settlement_source": "unknown",
         "settlement_fidelity_status": "unverified",
-        "bot_edge_pct_at_signal": None,
+        "bot_edge_pct_at_signal": bot_eval_fields.get("bot_edge_pct_at_signal"),
         "bot_would_have_bought": bot_eval_fields["bot_would_have_bought"],
         "bot_evaluation_source": bot_eval_fields["bot_evaluation_source"],
+        **({"bot_skip_or_block_reason": bot_eval_fields.get("bot_skip_or_block_reason")} if "bot_skip_or_block_reason" in bot_eval_fields else {}),
+        **({"bot_decision_gate": bot_eval_fields.get("bot_decision_gate")} if "bot_decision_gate" in bot_eval_fields else {}),
+        **({"bot_decision_confidence": bot_eval_fields.get("bot_decision_confidence")} if "bot_decision_confidence" in bot_eval_fields else {}),
+        **({"bot_evaluation_join_status": bot_eval_fields.get("bot_evaluation_join_status")} if "bot_evaluation_join_status" in bot_eval_fields else {}),
         "price_bucket": _price_bucket(signal.get("avg_price", 0)),
     }
 
@@ -21181,6 +21346,14 @@ def main(client):
         threshold_high_c = None
         if threshold_high is not None:
             threshold_high_c = (threshold_high - 32) * 5 / 9 if c["unit"] == "F" else float(threshold_high)
+        c["eval_key"] = _build_bot_eval_key(
+            city,
+            c["date_iso"],
+            c["condition"],
+            threshold,
+            threshold_high,
+            c["unit"],
+        )
 
         # Label para logs (muestra rango si aplica)
         temp_label = f"{threshold}-{threshold_high}°{c['unit']}" if threshold_high else f"{threshold}°{c['unit']}"
@@ -21197,15 +21370,11 @@ def main(client):
             # Si la condición está en QUALITY_TRADER_CONDITIONS, ciudad en whitelist,
             # y hay al menos un quality trader con señal → pasa al pipeline con flag canary.
             _qt_canary = False
-            _early_key = None
+            _early_key = c.get("eval_key")
             _qt_gate_reason = "condition_not_in_quality_trader_gate"
             if condition_name in QUALITY_TRADER_CONDITIONS:
                 _qt_gate_reason = "city_not_in_quality_trader_whitelist"
                 if city in QUALITY_TRADER_CITIES_WHITELIST:
-                    if threshold_high is not None:
-                        _early_key = f"{city}|{c['date_iso']}|{c['condition']}|{threshold}-{threshold_high}|{c['unit']}"
-                    else:
-                        _early_key = f"{city}|{c['date_iso']}|{c['condition']}|{threshold}|{c['unit']}"
                     if trader_signals.get(_early_key):
                         _qt_canary = True
                         _qt_gate_reason = "quality_trader_signal_match"
@@ -21516,6 +21685,7 @@ def main(client):
             "resolution_icao": resolution_meta.get("icao", "?"),
             "resolution_wu_url": resolution_meta.get("wu_url", ""),
             "token_id": token_id,
+            "eval_key": c.get("eval_key"),
             "trader_confirmed": [s["trader"] for s in matching_traders],  # v9
         })
 
@@ -21539,6 +21709,9 @@ def main(client):
             f"CONDICION FILTRADA: {condition_filtered_skip} mercados fuera de ALLOWED_CONDITIONS "
             f"({allowed_display}) enviados a shadow tracking"
         )
+
+    for _skip_entry in list(skip_log_entries):
+        _record_bot_evaluation_from_skip_entry(_skip_entry)
 
     # ---- PASO 5: Presupuesto (v10: acumulativo) ----
     # Consultar cuánto hay REALMENTE invertido en posiciones
@@ -21653,6 +21826,25 @@ def main(client):
                 )
                 # DORMANT until LOG_ONLY="0" — promotion requires Opus signoff
                 if UNSELLABLE_GUARD_ENABLED and not UNSELLABLE_GUARD_LOG_ONLY:
+                    record_bot_evaluation(
+                        cycle_id,
+                        trade.get("eval_key"),
+                        False,
+                        city=trade.get("city"),
+                        date_iso=trade.get("date"),
+                        condition=trade.get("condition"),
+                        threshold=trade.get("threshold"),
+                        threshold_high=trade.get("threshold_high"),
+                        unit=trade.get("unit"),
+                        edge_pct=trade.get("edge_pct"),
+                        skip_or_block_reason=guard_skip_reason,
+                        decision_gate=guard_skip_reason,
+                        decision_confidence=trade.get("our_prob"),
+                        our_prob=trade.get("our_prob"),
+                        mkt_prob=trade.get("mkt_price"),
+                        forecast_max=trade.get("forecast_max"),
+                        days_ahead=trade.get("days_ahead"),
+                    )
                     results.append({"ok": False, "msg": "unsellable_liquidity_guard"})
                     execution_failures.append({
                         "reason": guard_skip_reason,
@@ -21667,6 +21859,25 @@ def main(client):
                 "side": trade["side"],
             }
 
+            record_bot_evaluation(
+                cycle_id,
+                trade.get("eval_key"),
+                True,
+                city=trade.get("city"),
+                date_iso=trade.get("date"),
+                condition=trade.get("condition"),
+                threshold=trade.get("threshold"),
+                threshold_high=trade.get("threshold_high"),
+                unit=trade.get("unit"),
+                edge_pct=trade.get("edge_pct"),
+                skip_or_block_reason=None,
+                decision_gate=None,
+                decision_confidence=trade.get("our_prob"),
+                our_prob=trade.get("our_prob"),
+                mkt_prob=trade.get("mkt_price"),
+                forecast_max=trade.get("forecast_max"),
+                days_ahead=trade.get("days_ahead"),
+            )
             result = execute_trade(client, trade, dry_run=DRY_RUN)
 
             # v10.6.23: retry once when Polymarket rejects due to share-count minimum.

@@ -7545,7 +7545,7 @@ def run_tests():
         "blocked_signals schema v3: settlement/edge v2 preservados y bot eval v3 persistido",
         '"settlement_source": "unknown"' in code
         and '"settlement_fidelity_status": "unverified"' in code
-        and '"bot_edge_pct_at_signal": None' in code
+        and '"bot_edge_pct_at_signal": bot_eval_fields.get("bot_edge_pct_at_signal")' in code
         and '"bot_would_have_bought": bot_eval_fields["bot_would_have_bought"]' in code
         and '"bot_evaluation_source": bot_eval_fields["bot_evaluation_source"]' in code,
     )
