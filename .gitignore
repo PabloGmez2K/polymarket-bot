@@ -68,6 +68,7 @@ data/source_onboarding/
 data/source_audits/
 data/metar_shadow/
 data/metar_shadow_report.*
+data/metar_resolution_verify_report.json
 data/city_intelligence_digest.json
 data/city_promotion_gate.json
 data/city_validation_ledger.json

@@ -8,6 +8,13 @@ METAR/AviationWeather is approved only as a LOG_ONLY experimental measurement la
 
 `tools/metar_parity_report.py` reads those local LOG_ONLY files plus optional WU, Gamma-derived settlement, and Open-Meteo CSV inputs. It reports rolling METAR-vs-WU deltas, coverage, informational METAR-vs-Open-Meteo deltas, per-city/per-station operational readout, and JSON alert rows that can be reviewed manually or consumed by a future digest. It does not connect to runtime, Telegram, schedulers, or promotion gates.
 
+The separate Resolution Verification Layer is `tools/metar_resolution_verify.py`.
+It asks a narrower question: whether official Polymarket/Gamma outcomes would
+have matched hypothetical METAR/AviationWeather outcomes for already-resolved
+markets. It consumes `blocked_signals_resolutions.jsonl` plus local METAR
+snapshots and remains LOG_ONLY; it is not part of measurement coverage, parity,
+runtime trading, source policy, or promotion gates.
+
 ## Wave 1 Mapping
 
 | City | ICAO station(s) | Status |
