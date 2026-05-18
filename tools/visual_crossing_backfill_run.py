@@ -26,6 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DAILY_BUDGET = 100
 DEFAULT_MAX_CALLS_PER_RUN = 20
 STATE_FILE_NAME = "visual_crossing_backfill_state.json"
+RESOLUTIONS_FILE_NAME = "blocked_signals_resolutions.jsonl"
 LOG_ONLY_DISCLAIMER = (
     "LOG_ONLY manual Visual Crossing backfill for METAR Resolution Verification. "
     "Manual execution only; no scheduler, digest hook, Telegram runtime alert, "
@@ -56,6 +57,26 @@ def resolve_data_dir(value: str | None = None) -> Path:
     if app_data.exists():
         return app_data
     return REPO_ROOT / "data"
+
+
+def resolve_resolutions_path(data_dir: Path, value: str | None = None) -> Path:
+    if value:
+        path = Path(value)
+        if path.exists():
+            return path
+        raise SystemExit(f"ERROR: resolutions file not found: {path}")
+
+    candidates = [
+        data_dir / "runtime_import_derived" / RESOLUTIONS_FILE_NAME,
+        data_dir / RESOLUTIONS_FILE_NAME,
+        REPO_ROOT / "data" / "runtime_import_derived" / RESOLUTIONS_FILE_NAME,
+    ]
+    for path in candidates:
+        if path.exists():
+            return path
+
+    checked = ", ".join(str(path) for path in candidates)
+    raise SystemExit(f"ERROR: resolutions file not found. Checked: {checked}")
 
 
 def _env_int(name: str, default: int) -> int:
@@ -96,9 +117,9 @@ def save_state(path: Path, state: dict[str, Any]) -> None:
     path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def build_verify_args(data_dir: Path, metar_dir: Path) -> SimpleNamespace:
+def build_verify_args(data_dir: Path, metar_dir: Path, resolutions_path: Path) -> SimpleNamespace:
     return SimpleNamespace(
-        resolutions=str(verifier.DEFAULT_RESOLUTIONS),
+        resolutions=str(resolutions_path),
         metar_dir=str(metar_dir),
         json_out=str(data_dir / "metar_resolution_verify_report.json"),
         md_out=str(verifier.DEFAULT_MD_OUT),
@@ -161,8 +182,8 @@ def write_snapshot(out_dir: Path, payload: dict[str, Any]) -> Path:
     return out_path
 
 
-def run_verifier(data_dir: Path, metar_dir: Path, write: bool) -> dict[str, Any]:
-    verify_args = build_verify_args(data_dir, metar_dir)
+def run_verifier(data_dir: Path, metar_dir: Path, resolutions_path: Path, write: bool) -> dict[str, Any]:
+    verify_args = build_verify_args(data_dir, metar_dir, resolutions_path)
     report = verifier.build_report(verify_args)
     if write:
         verifier.write_outputs(report, Path(verify_args.json_out), Path(verify_args.md_out))
@@ -205,6 +226,11 @@ def build_summary(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", default=None, help="Data dir. Default: DATA_DIR, /app/data, then data/.")
+    parser.add_argument(
+        "--resolutions",
+        default=None,
+        help="Path to blocked_signals_resolutions.jsonl. Default: DATA_DIR/runtime_import_derived, DATA_DIR, then local data/runtime_import_derived.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Plan only; no API calls, state writes, or report writes.")
     return parser.parse_args(argv)
 
@@ -214,10 +240,11 @@ def main(argv: list[str] | None = None) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     metar_dir = data_dir / "metar_shadow"
     state_path = data_dir / STATE_FILE_NAME
+    resolutions_path = resolve_resolutions_path(data_dir, args.resolutions)
     daily_budget = _env_int("VISUAL_CROSSING_DAILY_BUDGET", DEFAULT_DAILY_BUDGET)
     max_calls_per_run = _env_int("VISUAL_CROSSING_MAX_CALLS_PER_RUN", DEFAULT_MAX_CALLS_PER_RUN)
 
-    before_report = run_verifier(data_dir, metar_dir, write=False)
+    before_report = run_verifier(data_dir, metar_dir, resolutions_path, write=False)
     before_counts = status_counts(before_report)
     skipped_existing = len(collect_existing_wave_snapshots(before_report, metar_dir))
     missing = collect_missing_snapshots(before_report, metar_dir)
@@ -226,7 +253,7 @@ def main(argv: list[str] | None = None) -> int:
     used_today = int(state.get("calls_used") or 0)
     daily_remaining = max(0, daily_budget - used_today)
     calls_allowed = min(max_calls_per_run, daily_remaining, len(missing))
-    report_path = Path(build_verify_args(data_dir, metar_dir).md_out)
+    report_path = Path(build_verify_args(data_dir, metar_dir, resolutions_path).md_out)
 
     if args.dry_run:
         after_counts = before_counts
@@ -268,7 +295,7 @@ def main(argv: list[str] | None = None) -> int:
         if out_path.exists():
             new_snapshots += 1
 
-    after_report = run_verifier(data_dir, metar_dir, write=True)
+    after_report = run_verifier(data_dir, metar_dir, resolutions_path, write=True)
     after_counts = status_counts(after_report)
     state["runs"] = (state.get("runs") or [])[-19:] + [
         {

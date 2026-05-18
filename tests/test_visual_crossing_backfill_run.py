@@ -61,23 +61,60 @@ def test_load_state_resets_on_new_utc_day(tmp_path):
     assert state == {"date_utc": "2026-05-18", "calls_used": 0, "runs": []}
 
 
+def test_resolve_resolutions_path_prefers_data_dir_runtime_import_derived(tmp_path):
+    data_dir = tmp_path / "data"
+    expected = data_dir / "runtime_import_derived" / "blocked_signals_resolutions.jsonl"
+    expected.parent.mkdir(parents=True)
+    expected.write_text("", encoding="utf-8")
+
+    assert backfill.resolve_resolutions_path(data_dir) == expected
+
+
+def test_resolve_resolutions_path_uses_railway_flat_data_dir_fallback(tmp_path):
+    data_dir = tmp_path / "data"
+    expected = data_dir / "blocked_signals_resolutions.jsonl"
+    data_dir.mkdir()
+    expected.write_text("", encoding="utf-8")
+
+    assert backfill.resolve_resolutions_path(data_dir) == expected
+
+
+def test_resolve_resolutions_path_errors_clearly_when_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(backfill, "REPO_ROOT", tmp_path / "repo")
+
+    try:
+        backfill.resolve_resolutions_path(tmp_path / "data")
+    except SystemExit as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("missing resolutions path should abort")
+
+    assert "ERROR: resolutions file not found. Checked:" in message
+    assert "runtime_import_derived" in message
+    assert "blocked_signals_resolutions.jsonl" in message
+
+
 def test_dry_run_does_not_require_api_key_or_write_state(tmp_path, monkeypatch, capsys):
     data_dir = tmp_path / "data"
     metar_dir = data_dir / "metar_shadow"
     metar_dir.mkdir(parents=True)
+    resolutions = data_dir / "runtime_import_derived" / "blocked_signals_resolutions.jsonl"
+    resolutions.parent.mkdir()
+    resolutions.write_text("", encoding="utf-8")
     monkeypatch.delenv("VISUAL_CROSSING_API_KEY", raising=False)
     monkeypatch.setenv("VISUAL_CROSSING_DAILY_BUDGET", "1")
     monkeypatch.setenv("VISUAL_CROSSING_MAX_CALLS_PER_RUN", "20")
 
-    def fake_run_verifier(_data_dir, _metar_dir, write):
+    def fake_run_verifier(_data_dir, _metar_dir, _resolutions_path, write):
         assert write is False
+        assert _resolutions_path == resolutions
         return _report()
 
     monkeypatch.setattr(backfill, "run_verifier", fake_run_verifier)
     monkeypatch.setattr(
         backfill,
         "build_verify_args",
-        lambda _data_dir, _metar_dir: SimpleNamespace(md_out=str(tmp_path / "report.md")),
+        lambda _data_dir, _metar_dir, _resolutions_path: SimpleNamespace(md_out=str(tmp_path / "report.md")),
     )
 
     exit_code = backfill.main(["--data-dir", str(data_dir), "--dry-run"])
