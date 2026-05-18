@@ -304,6 +304,54 @@ Si Railway vuelve a responder `invalid_grant`:
 
 ---
 
+## Resolution Verification — Manual Railway Run
+
+Finalidad: ejecutar manualmente un backfill limitado e idempotente de Visual
+Crossing para `METAR Resolution Source Verification`, solo como evidencia
+LOG_ONLY. El runner rellena snapshots faltantes en `metar_shadow/` con el
+formato real consumido por `tools/metar_resolution_verify.py`
+(`<ICAO>_<YYYY-MM-DD>.json`), respeta presupuesto diario, vuelve a generar el
+reporte de verification y emite un resumen JSON por stdout.
+
+Dry-run recomendado antes de cualquier gasto:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 run python tools/visual_crossing_backfill_run.py --dry-run
+```
+
+Comando real, solo tras autorizacion literal de Pablo:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\railway_safe.ps1 run python tools/visual_crossing_backfill_run.py
+```
+
+Env vars esperadas en Railway:
+
+- `VISUAL_CROSSING_API_KEY`: requerida solo para el comando real cuando hay
+  llamadas pendientes.
+- `VISUAL_CROSSING_DAILY_BUDGET`: default `100`.
+- `VISUAL_CROSSING_MAX_CALLS_PER_RUN`: default `20`.
+
+Guardrails:
+
+- No configurar ni cambiar env vars desde Codex para este flujo.
+- No exceder `VISUAL_CROSSING_MAX_CALLS_PER_RUN` ni
+  `VISUAL_CROSSING_DAILY_BUDGET`, aunque queden filas pendientes.
+- El presupuesto se guarda en
+  `/app/data/visual_crossing_backfill_state.json` en Railway, o
+  `data/visual_crossing_backfill_state.json` en local.
+- El runner no imprime ni guarda `VISUAL_CROSSING_API_KEY`.
+- `--dry-run` no hace llamadas, no escribe state y no reescribe reportes.
+- Revisar stdout: `calls_used`, `budget_remaining`, `new_snapshots`,
+  `skipped_existing`, `new_match`, `new_mismatch`, `new_no_snapshot`,
+  `new_no_data`, `planned_calls`, `final_status_counts` y `report_path`.
+
+Esto no es scheduler, no es digest hook, no crea alertas runtime y no autoriza
+trading, source switch, source policy, city modes, whitelist, promotion gates,
+BUY/SELL/SKIP, BANKROLL, Fase C, Truth Pipeline, Telegram runtime ni DB writes.
+
+---
+
 ## Scoreboard
 
 ### Como se actualiza

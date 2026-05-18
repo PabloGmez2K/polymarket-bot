@@ -112,7 +112,7 @@ def test_fahrenheit_threshold_from_match_key(tmp_path):
     assert result["status"] == "MATCH"
 
 
-def test_real_local_data_currently_has_no_comparable_snapshots():
+def test_real_local_data_has_visual_crossing_backfill_pilot_snapshots():
     args = SimpleNamespace(
         resolutions=str(REPO_ROOT / "data" / "runtime_import_derived" / "blocked_signals_resolutions.jsonl"),
         metar_dir=str(REPO_ROOT / "data" / "metar_shadow"),
@@ -124,9 +124,9 @@ def test_real_local_data_currently_has_no_comparable_snapshots():
 
     payload = verify.build_report(args)
 
-    assert payload["summary"]["status_counts"].get("MATCH", 0) == 0
-    assert payload["summary"]["status_counts"].get("MISMATCH", 0) == 0
-    assert payload["summary"]["status_counts"].get("NO_SNAPSHOT", 0) > 0
+    assert payload["summary"]["status_counts"].get("MATCH", 0) == 34
+    assert payload["summary"]["status_counts"].get("MISMATCH", 0) == 6
+    assert payload["summary"]["status_counts"].get("NO_SNAPSHOT", 0) == 0
 
 
 def test_apply_patch_review_requires_verified_candidate():
