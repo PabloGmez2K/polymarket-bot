@@ -5665,3 +5665,43 @@ Expected total payout = **$6.81**. UI Deposit observado = **$6.18**. Diff = **-$
 ### Guardrails
 
 No se tocaron `bot.py`, BANKROLL, Fase C, sizing, whitelist, source_policy, scheduler, NOAA, DB ni SL/L2/INTRA ejecutable. No se cambio SHADOW_ONLY_MODE (sigue `false`). No se ejecuto BUY/SELL/SKIP manual.
+
+---
+
+## Sesión 371 - 20 de mayo de 2026 (Claude Code)
+
+**Clasificacion:** FULL acotado / env var solo / no codigo
+**Bloque:** Enable READ_BOT_EVAL_CAPTURE — Phase 0 rollout step 3
+**Veredicto:** ENABLED_NOT_OBSERVED_YET
+
+### Objetivo
+
+Activar `READ_BOT_EVAL_CAPTURE=1` en Railway para que el resolver de `blocked_signals_resolutions.jsonl` empiece a unir evaluaciones de `bot_signal_evaluations.jsonl` (180 líneas acumuladas, gate n≥20 superado).
+
+### Contexto previo
+
+- Commit `3d8108f` (S369) deployó writer de `bot_signal_evaluations.jsonl` con `READ_BOT_EVAL_CAPTURE=0` (default).
+- Check read-only de esta sesión confirmó 180 líneas válidas en `/app/data/bot_signal_evaluations.jsonl` (schema_version=1, evaluation_source=live_eval, would_buy, condition_filtered entries, campos completos).
+- Rollout doc `docs/instrumentation/bot_evaluation_capture.md` indica paso 3: "Flip READ_BOT_EVAL_CAPTURE=1 only after review." Review realizado.
+
+### Cambios
+
+- Railway env var: `READ_BOT_EVAL_CAPTURE` seteado a `1` via `tools/railway_safe.ps1 variables -s polymarket-bot --set`.
+- Confirmado en `railway variables`: `READ_BOT_EVAL_CAPTURE = 1` efectivo.
+- Sin cambios en `ACTIVE_TRADING_CITIES` (sigue `Shanghai,Tokyo,Buenos Aires,Ankara`), `SHADOW_ONLY_MODE` (sigue `false`), `BANKROLL` (sigue `25.00`), `QUALITY_TRADER_CONDITIONS` ni ninguna otra env var.
+
+### Validacion post-set
+
+- Variables confirmadas: `READ_BOT_EVAL_CAPTURE=1`, `ACTIVE_TRADING_CITIES=Shanghai,Tokyo,Buenos Aires,Ankara`, `BANKROLL=25.00`, `SHADOW_ONLY_MODE=false`.
+- Logs Railway al momento del cambio: bot corriendo `v10.6.50 MODO REAL`, ciclo 12:00 UTC completado OK (`Próximo: 16:00 UTC`), INTRA-SL activo, sin crash.
+- Deployment post-env-var: no observado startup banner en ventana de observación (bot entre ciclos); próximo ciclo 16:00 UTC observará el join activo.
+
+### Estado ENABLED_NOT_OBSERVED_YET
+
+- `READ_BOT_EVAL_CAPTURE=1` está en Railway.
+- El resolver leerá `bot_signal_evaluations.jsonl` y unirá por `eval_key` en los próximos registros de `blocked_signals_resolutions.jsonl`.
+- **Trigger exacto para validar**: revisar `/app/data/blocked_signals_resolutions.jsonl` en Railway (tail) tras el ciclo 16:00 UTC de hoy; confirmar que aparecen `bot_evaluation_join_status="captured"` en registros nuevos (o `"missing"` para señales sin match en bot_evaluations).
+
+### Guardrails
+
+No se tocaron `bot.py`, codigo, BANKROLL, Fase C, city modes, whitelist, sizing, scheduler, trading core, ACTIVE_TRADING_CITIES, BLOCKED_CITIES, SHADOW_ONLY_MODE, QUALITY_TRADER_CONDITIONS, DB ni SL/L2/INTRA ejecutable. No se ejecuto BUY/SELL/SKIP manual. No se ejecuto Visual Crossing backfill. BANKROLL sigue $25. Este cambio habilita evidencia para Gap Report; NO autoriza subida de BANKROLL.
