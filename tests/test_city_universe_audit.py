@@ -77,6 +77,22 @@ def _base_fixture(tmp_path: Path, monkeypatch) -> Path:
     return data_dir
 
 
+def _write_policy_env(data_dir: Path, active: str = "ActiveDead", read_capture: str = "1") -> None:
+    (data_dir / "policy_env_snapshot.json").write_text(
+        json.dumps(
+            {
+                "variables": {
+                    "ACTIVE_TRADING_CITIES": active,
+                    "CANARY_TRADING_CITIES": "",
+                    "BLOCKED_CITIES": "",
+                    "READ_BOT_EVAL_CAPTURE": read_capture,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_shadow_would_buy_candidate_promotes(tmp_path, monkeypatch):
     data_dir = _base_fixture(tmp_path, monkeypatch)
     evals = [
@@ -99,7 +115,7 @@ def test_shadow_would_buy_candidate_promotes(tmp_path, monkeypatch):
     assert row["recommended_action"] == "promote_to_canary_candidate"
 
 
-def test_active_with_zero_evals_demotes(tmp_path, monkeypatch):
+def test_active_with_zero_evals_low_confidence_is_watch_not_demote(tmp_path, monkeypatch):
     data_dir = _base_fixture(tmp_path, monkeypatch)
     _write_jsonl(data_dir / "bot_signal_evaluations.jsonl", [])
 
@@ -108,7 +124,35 @@ def test_active_with_zero_evals_demotes(tmp_path, monkeypatch):
 
     assert row["current_mode"] == "active"
     assert row["total_evals_14d"] == 0
-    assert row["recommended_action"] == "demote_to_watch_candidate"
+    assert report["report_context"]["confidence_banner"] == "LOW_CONFIDENCE_WINDOW"
+    assert row["recommended_action"] == "active_throughput_watch"
+
+
+def test_active_with_valid_window_and_regression_gets_demotion_review(tmp_path, monkeypatch):
+    data_dir = _base_fixture(tmp_path, monkeypatch)
+    _write_policy_env(data_dir, active="ActiveDead", read_capture="1")
+    _write_jsonl(data_dir / "bot_signal_evaluations.jsonl", [])
+    (tmp_path / "data" / "city_promotion_gate.json").write_text(
+        json.dumps(
+            {
+                "review_queue": [
+                    {
+                        "city": "ActiveDead",
+                        "gate_status": "review_active_regression",
+                        "recommendation": "demotion_review",
+                        "drift_flags": [],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = build_report(data_dir, 21, "low", NOW)
+    row = next(r for r in report["ranked_cities"] if r["city"] == "ActiveDead")
+
+    assert report["report_context"]["confidence_banner"] == "OK"
+    assert row["recommended_action"] == "demotion_review_candidate"
 
 
 def test_source_mismatch_blocks_promotion_despite_high_score(tmp_path, monkeypatch):
@@ -143,7 +187,72 @@ def test_city_without_data_has_none_confidence(tmp_path, monkeypatch):
     top = [r["city"] for r in report["ranked_cities"] if r["recommended_action"] == "promote_to_canary_candidate"]
 
     assert row["data_confidence"] == "none"
+    assert row["scores"]["condition_compat"] == 0
+    assert "NO_DATA_FOR_CONDITION_COMPAT" in row["reason_codes"]
     assert "NoDataCity" not in top
+
+
+def test_markdown_drift_word_without_drift_column_flag_does_not_warn(tmp_path, monkeypatch):
+    data_dir = _base_fixture(tmp_path, monkeypatch)
+    (tmp_path / "data" / "city_promotion_gate.json").unlink()
+    (tmp_path / "docs" / "city_promotion_gate_latest.md").write_text(
+        "\n".join(
+            [
+                "| City | Gate | Priority | Runtime policy | Cross policy | Drift | Recommendation | Bottleneck |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- |",
+                "| ActiveDead | observe_runtime_canary | watch | active | active | - | observe_runtime_canary | drift mentioned in text |",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    _write_jsonl(data_dir / "bot_signal_evaluations.jsonl", [])
+
+    report = build_report(data_dir, 14, "low", NOW)
+    row = next(r for r in report["ranked_cities"] if r["city"] == "ActiveDead")
+
+    assert "drift_warning" not in row["risk_flags"]
+
+
+def test_markdown_explicit_drift_column_sets_warning(tmp_path, monkeypatch):
+    data_dir = _base_fixture(tmp_path, monkeypatch)
+    (tmp_path / "data" / "city_promotion_gate.json").unlink()
+    (tmp_path / "docs" / "city_promotion_gate_latest.md").write_text(
+        "\n".join(
+            [
+                "| City | Gate | Priority | Runtime policy | Cross policy | Drift | Recommendation | Bottleneck |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- |",
+                "| ActiveDead | observe_runtime_canary | watch | active | shadow | policy_divergence | audit_runtime_drift | canary_measurement |",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    _write_jsonl(data_dir / "bot_signal_evaluations.jsonl", [])
+
+    report = build_report(data_dir, 14, "low", NOW)
+    row = next(r for r in report["ranked_cities"] if r["city"] == "ActiveDead")
+
+    assert "drift_warning" in row["risk_flags"]
+
+
+def test_jsonl_utf8_bom_first_line_is_parsed(tmp_path, monkeypatch):
+    data_dir = _base_fixture(tmp_path, monkeypatch)
+    row = {
+        "city": "ShadowGood",
+        "timestamp": "2026-05-19T00:00:00+00:00",
+        "would_buy": True,
+        "evaluation_source": "shadow",
+        "edge": 0.12,
+        "condition": "exact",
+    }
+    (data_dir / "bot_signal_evaluations.jsonl").write_bytes(
+        b"\xef\xbb\xbf" + (json.dumps(row) + "\n").encode("utf-8")
+    )
+
+    report = build_report(data_dir, 14, "low", NOW)
+    city = next(r for r in report["ranked_cities"] if r["city"] == "ShadowGood")
+
+    assert city["total_evals_14d"] == 1
+    assert not any("bot_signal_evaluations invalid JSON" in warning for warning in report["warnings"])
 
 
 def test_markdown_contains_required_sections(tmp_path, monkeypatch):

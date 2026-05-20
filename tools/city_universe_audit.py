@@ -39,6 +39,8 @@ CONFIDENCE_ORDER = {"none": 0, "low": 1, "medium": 2, "high": 3}
 PROMOTION_ACTIONS = {
     "keep_active",
     "demote_to_watch_candidate",
+    "demotion_review_candidate",
+    "active_throughput_watch",
     "promote_to_canary_candidate",
     "observe_more",
     "source_blocked",
@@ -81,6 +83,7 @@ class CityStats:
     reason_codes: list[str] = field(default_factory=list)
     recommended_action: str = "observe_more"
     main_blockers: list[str] = field(default_factory=list)
+    drift_status: str = "drift_unknown"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -130,20 +133,26 @@ def _read_jsonl(path: Path, warnings: list[str], label: str) -> list[dict[str, A
         warnings.append(f"{label} missing: {path}")
         return []
     rows: list[dict[str, Any]] = []
+    invalid_count = 0
     try:
-        for idx, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        raw = path.read_bytes()
+        if raw.startswith(b"\xef\xbb\xbf"):
+            raw = raw[3:]
+        for idx, line in enumerate(raw.decode("utf-8-sig", errors="replace").splitlines(), 1):
             line = line.strip()
             if not line:
                 continue
             try:
                 row = json.loads(line)
             except json.JSONDecodeError:
-                warnings.append(f"{label} line {idx} invalid JSON, skipped")
+                invalid_count += 1
                 continue
             if isinstance(row, dict):
                 rows.append(row)
     except Exception as exc:
         warnings.append(f"{label} read error: {exc}")
+    if invalid_count:
+        warnings.append(f"{label} invalid JSON lines skipped: {invalid_count}")
     return rows
 
 
@@ -222,13 +231,17 @@ def _policy_paths(data_dir: Path) -> list[Path]:
     ]
 
 
-def _load_policy(data_dir: Path, warnings: list[str]) -> dict[str, set[str]]:
-    policy_state = _read_json(data_dir / "city_policy_state.json", warnings, "city_policy_state", {})
-    policy_env: dict[str, Any] = {}
+def _load_policy_env_snapshot(data_dir: Path, warnings: list[str]) -> dict[str, Any]:
     for path in _policy_paths(data_dir):
         if path.exists():
-            policy_env = _read_json(path, warnings, "policy_env_snapshot", {})
-            break
+            data = _read_json(path, warnings, "policy_env_snapshot", {})
+            return data if isinstance(data, dict) else {}
+    return {}
+
+
+def _load_policy(data_dir: Path, warnings: list[str], policy_env: dict[str, Any] | None = None) -> dict[str, set[str]]:
+    policy_state = _read_json(data_dir / "city_policy_state.json", warnings, "city_policy_state", {})
+    policy_env = policy_env or _load_policy_env_snapshot(data_dir, warnings)
 
     variables = policy_env.get("variables", {}) if isinstance(policy_env, dict) else {}
     active = set(_as_list(variables.get("ACTIVE_TRADING_CITIES")))
@@ -322,23 +335,36 @@ def _load_json_or_md_index(base_name: str, warnings: list[str]) -> tuple[dict[st
 
     index: dict[str, dict[str, str]] = {}
     try:
+        header: list[str] = []
         for line in md_path.read_text(encoding="utf-8").splitlines():
-            if not line.startswith("|") or line.startswith("| ---") or " City " in line:
+            if not line.startswith("|"):
                 continue
             cells = [cell.strip(" `") for cell in line.strip().strip("|").split("|")]
+            if "City" in cells:
+                header = cells
+                continue
+            if line.startswith("| ---"):
+                continue
             if len(cells) >= 3 and cells[0]:
+                row = {header[idx]: cells[idx] for idx in range(min(len(header), len(cells)))} if header else {}
                 if base_name == "city_lifecycle_review":
                     index[_city_key(cells[0])] = {
                         "city": cells[0],
                         "stage": cells[1],
                         "transition": cells[2],
                         "notes": cells[4] if len(cells) > 4 else "",
+                        "drift": row.get("Drift", "drift_unknown"),
                     }
                 else:
                     index[_city_key(cells[0])] = {
                         "city": cells[0],
                         "gate_status": cells[1] if len(cells) > 1 else "unknown",
                         "review_priority": cells[2] if len(cells) > 2 else "unknown",
+                        "runtime_policy": row.get("Runtime policy", "unknown"),
+                        "cross_policy": row.get("Cross policy", "unknown"),
+                        "drift": row.get("Drift", "drift_unknown"),
+                        "recommendation": row.get("Recommendation", "unknown"),
+                        "bottleneck": row.get("Bottleneck", "unknown"),
                     }
     except Exception as exc:
         warnings.append(f"{base_name} markdown parse error: {exc}")
@@ -375,10 +401,81 @@ def _trader_signal_score(stats: CityStats) -> int:
     return 0
 
 
+def _norm_status(value: Any) -> str:
+    text = str(value or "").strip()
+    return text if text and text != "-" else ""
+
+
+def _extract_drift_status(row: dict[str, Any]) -> str:
+    if not isinstance(row, dict) or not row:
+        return "drift_unknown"
+    raw = row.get("drift")
+    if raw is None:
+        flags = row.get("drift_flags")
+        if isinstance(flags, list):
+            raw = ",".join(str(flag) for flag in flags if str(flag).strip())
+        elif flags:
+            raw = str(flags)
+    text = _norm_status(raw)
+    return text if text else "none"
+
+
+def _has_drift_warning(row: dict[str, Any]) -> bool:
+    status = _extract_drift_status(row)
+    return status not in {"none", "drift_unknown"}
+
+
+def _has_active_regression(lifecycle_row: dict[str, Any], gate_row: dict[str, Any]) -> bool:
+    fields = [
+        lifecycle_row.get("transition"),
+        lifecycle_row.get("lifecycle_transition"),
+        lifecycle_row.get("recommendation"),
+        gate_row.get("recommendation"),
+        gate_row.get("gate_status"),
+    ]
+    regression_tokens = {"active_regression", "demote", "demotion", "audit_runtime_drift", "review_active_regression"}
+    return any(any(token in str(field or "").lower() for token in regression_tokens) for field in fields)
+
+
+def _read_bot_eval_capture_status(policy_env: dict[str, Any]) -> str:
+    variables = policy_env.get("variables", {}) if isinstance(policy_env, dict) else {}
+    raw = variables.get("READ_BOT_EVAL_CAPTURE")
+    if raw is None:
+        return "unknown"
+    if str(raw).strip().lower() in {"1", "true", "yes", "on"}:
+        return "enabled"
+    if str(raw).strip().lower() in {"0", "false", "no", "off"}:
+        return "disabled"
+    return "unknown"
+
+
+def _build_report_context(days: int, policy: dict[str, set[str]], policy_env: dict[str, Any]) -> dict[str, Any]:
+    active_cities = {city for city in policy.get("active", set()) if str(city).strip().upper() not in {"", "NONE"}}
+    shadow_only_mode = len(active_cities) == 0
+    read_status = _read_bot_eval_capture_status(policy_env)
+    low_reasons = []
+    if days < 21:
+        low_reasons.append("effective_window_days_lt_21")
+    if read_status != "enabled":
+        low_reasons.append(f"read_bot_eval_capture_{read_status}")
+    if shadow_only_mode:
+        low_reasons.append("shadow_only_mode")
+    return {
+        "shadow_only_mode": shadow_only_mode,
+        "read_bot_eval_capture_status": read_status,
+        "effective_window_days": days,
+        "low_confidence_window": bool(low_reasons),
+        "confidence_banner": "LOW_CONFIDENCE_WINDOW" if low_reasons else "OK",
+        "confidence_reasons": low_reasons,
+        "action_semantics": "review_candidates_only_not_operational_decisions",
+    }
+
+
 def _reason_codes(stats: CityStats) -> list[str]:
     codes: list[str] = []
     if stats.total_evals_14d == 0:
         codes.append("NO_EVALS_IN_WINDOW")
+        codes.append("NO_DATA_FOR_CONDITION_COMPAT")
     if stats.condition_filtered_pct > 80:
         codes.append("CONDITION_FILTER_DOMINANT")
     elif stats.condition_filtered_count:
@@ -396,21 +493,27 @@ def _reason_codes(stats: CityStats) -> list[str]:
             codes.append("SOURCE_AMBIGUOUS")
     if "drift_warning" in stats.risk_flags:
         codes.append("DRIFT_WARNING")
+    elif "drift_unknown" in stats.risk_flags:
+        codes.append("DRIFT_UNKNOWN")
     if "settlement_warning" in stats.risk_flags:
         codes.append("SETTLEMENT_WARNING")
     return codes
 
 
-def _score_and_action(stats: CityStats, source_score: int) -> None:
-    positive_edges = [stats.avg_edge, stats.max_edge]
+def _score_and_action(
+    stats: CityStats,
+    source_score: int,
+    report_context: dict[str, Any],
+    active_regression: bool,
+) -> None:
     avg_edge = stats.avg_edge
     stats.scores = {
         "throughput_score": 0 if stats.total_evals_14d == 0 else (2 if stats.evals_per_day >= 5 else 1),
         "edge_score": 0 if avg_edge <= 0 else (2 if avg_edge >= 10 else 1),
         "would_buy_shadow": 0 if stats.would_buy_shadow_count == 0 else (2 if stats.would_buy_shadow_count >= 5 else 1),
         "condition_compat": 0
-        if stats.total_evals_14d and stats.condition_filtered_pct > 80
-        else (1 if stats.total_evals_14d and stats.condition_filtered_pct >= 40 else 2),
+        if stats.total_evals_14d == 0 or stats.condition_filtered_pct > 80
+        else (1 if stats.condition_filtered_pct >= 40 else 2),
         "source_fidelity": source_score,
         "trader_signal": _trader_signal_score(stats),
         "recency": 0,
@@ -440,8 +543,19 @@ def _score_and_action(stats: CityStats, source_score: int) -> None:
     elif stats.total_evals_14d > 0 and stats.condition_filtered_pct >= 80:
         stats.recommended_action = "condition_policy_blocked"
     elif stats.current_mode == "active":
-        if stats.total_evals_14d == 0 or stats.would_buy_true_count == 0:
-            stats.recommended_action = "demote_to_watch_candidate"
+        active_dead = stats.total_evals_14d == 0 or stats.would_buy_true_count == 0
+        demotion_ready = (
+            active_dead
+            and report_context["effective_window_days"] >= 21
+            and not report_context["low_confidence_window"]
+            and report_context["read_bot_eval_capture_status"] in {"enabled", "partially_enabled"}
+            and not report_context["shadow_only_mode"]
+            and active_regression
+        )
+        if demotion_ready:
+            stats.recommended_action = "demotion_review_candidate"
+        elif active_dead:
+            stats.recommended_action = "active_throughput_watch"
         else:
             stats.recommended_action = "keep_active"
     elif candidate_signal and not critical and source_ok and condition_ok and confident:
@@ -477,7 +591,9 @@ def build_report(data_dir: Path, days: int, min_confidence: str, now: datetime |
     blocked_rows = _filter_window(_read_jsonl(data_dir / "blocked_signals_resolutions.jsonl", warnings, "blocked_signals_resolutions"), days, now)
     trade_data = _read_json(data_dir / "trade_lifecycle.json", warnings, "trade_lifecycle", [])
     skip_rows = _filter_window(_read_jsonl(data_dir / "skip_log.jsonl", warnings, "skip_log"), days, now)
-    policy = _load_policy(data_dir, warnings)
+    policy_env = _load_policy_env_snapshot(data_dir, warnings)
+    policy = _load_policy(data_dir, warnings, policy_env)
+    report_context = _build_report_context(days, policy, policy_env)
     source_index, source_inputs = _index_source_onboarding(warnings)
     lifecycle_index, lifecycle_inputs = _load_json_or_md_index("city_lifecycle_review", warnings)
     gate_index, gate_inputs = _load_json_or_md_index("city_promotion_gate", warnings)
@@ -592,22 +708,25 @@ def build_report(data_dir: Path, days: int, min_confidence: str, now: datetime |
         stats.lifecycle_stage = str(lifecycle_row.get("stage") or lifecycle_row.get("lifecycle_stage") or "unknown")
         stats.lifecycle_transition = str(lifecycle_row.get("transition") or "unknown")
         stats.promotion_gate = str(gate_row.get("gate_status") or gate_row.get("promotion_gate") or "unknown")
+        stats.drift_status = _extract_drift_status(gate_row if gate_row else lifecycle_row)
 
         joined_source = f"{stats.source_fidelity_status} {stats.mapping_status}".upper()
         if any(flag in joined_source for flag in CRITICAL_SOURCE_STATUSES):
             stats.risk_flags.append("source_critical")
         if stats.current_mode == "blocked":
             stats.risk_flags.append("structural_block")
+        if _has_drift_warning(gate_row) or (not gate_row and _has_drift_warning(lifecycle_row)):
+            stats.risk_flags.append("drift_warning")
+        elif stats.drift_status == "drift_unknown":
+            stats.risk_flags.append("drift_unknown")
         gate_text = " ".join(str(v) for v in gate_row.values()).lower() if isinstance(gate_row, dict) else ""
         life_text = " ".join(str(v) for v in lifecycle_row.values()).lower() if isinstance(lifecycle_row, dict) else ""
-        if "drift" in gate_text or "drift" in life_text:
-            stats.risk_flags.append("drift_warning")
         if "settlement" in gate_text or "settlement" in life_text or "mismatch" in gate_text:
             stats.risk_flags.append("settlement_warning")
         if stats.data_confidence == "none":
             stats.risk_flags.append("insufficient_data")
 
-        _score_and_action(stats, source_score)
+        _score_and_action(stats, source_score, report_context, _has_active_regression(lifecycle_row, gate_row))
         ranked.append(stats)
 
     ranked.sort(key=lambda s: (-s.score, -s.would_buy_shadow_count, -s.edge_positive_count, s.city.lower()))
@@ -621,6 +740,7 @@ def build_report(data_dir: Path, days: int, min_confidence: str, now: datetime |
         "log_only": True,
         "disclaimer": LOG_ONLY_DISCLAIMER,
         "window_days": days,
+        "report_context": report_context,
         "min_confidence": min_confidence,
         "inputs": sorted(set(inputs_used)),
         "warnings": warnings,
@@ -628,7 +748,7 @@ def build_report(data_dir: Path, days: int, min_confidence: str, now: datetime |
             "cities_ranked": len(ranked),
             "markdown_ranked": len(markdown_rows),
             "top_candidate_count": sum(1 for s in ranked if s.recommended_action == "promote_to_canary_candidate"),
-            "bottom_active_count": sum(1 for s in ranked if s.current_mode == "active" and s.recommended_action == "demote_to_watch_candidate"),
+            "bottom_active_count": sum(1 for s in ranked if s.current_mode == "active" and s.recommended_action in {"demote_to_watch_candidate", "demotion_review_candidate", "active_throughput_watch"}),
             "mode_counts": dict(Counter(s.current_mode for s in ranked)),
             "action_counts": dict(Counter(s.recommended_action for s in ranked)),
         },
@@ -664,6 +784,7 @@ def _city_to_dict(stats: CityStats, rank: int) -> dict[str, Any]:
         "promotion_gate": stats.promotion_gate,
         "lifecycle_stage": stats.lifecycle_stage,
         "lifecycle_transition": stats.lifecycle_transition,
+        "drift_status": stats.drift_status,
         "latest_seen_at": stats.latest_seen_at,
         "data_confidence": stats.data_confidence,
         "scores": stats.scores,
@@ -683,11 +804,13 @@ def _fmt_pct(value: float | None) -> str:
 def render_markdown(report: dict[str, Any]) -> str:
     rows = report["markdown_ranked_cities"]
     all_rows = report["ranked_cities"]
+    context = report.get("report_context", {})
     top = [r for r in all_rows if r["recommended_action"] == "promote_to_canary_candidate"][:5]
     bottom = [
         r
         for r in all_rows
-        if r["current_mode"] == "active" and r["recommended_action"] == "demote_to_watch_candidate"
+        if r["current_mode"] == "active"
+        and r["recommended_action"] in {"demote_to_watch_candidate", "demotion_review_candidate", "active_throughput_watch"}
     ]
 
     lines = [
@@ -697,15 +820,32 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
         f"- Generated: `{report['generated_at']}`",
         f"- Window: `{report['window_days']}` days",
+        f"- Confidence banner: `{context.get('confidence_banner', 'unknown')}`",
+        f"- Effective window days: `{context.get('effective_window_days', report['window_days'])}`",
+        f"- READ_BOT_EVAL_CAPTURE: `{context.get('read_bot_eval_capture_status', 'unknown')}`",
+        f"- Shadow-only mode: `{context.get('shadow_only_mode', 'unknown')}`",
+        f"- Action semantics: `{context.get('action_semantics', 'review_candidates_only_not_operational_decisions')}`",
         f"- Cities ranked: `{report['summary']['cities_ranked']}`",
         f"- Top canary candidates: `{len(top)}`",
-        f"- Bottom active cities: `{len(bottom)}`",
+        f"- Bottom active review rows: `{len(bottom)}`",
         "",
-        "## Ranking",
-        "",
-        "| Rank | City | Mode | Evals/day | WouldBuy Shadow | Edge+ | Score | Data | Risk Flags | Action |",
-        "| --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- | --- |",
     ]
+    if context.get("low_confidence_window"):
+        lines.extend(
+            [
+                "> LOW_CONFIDENCE_WINDOW - active-city actions are throughput watches/review candidates, not demotions.",
+                f"> Reasons: {', '.join(context.get('confidence_reasons') or [])}",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "## Ranking",
+            "",
+            "| Rank | City | Mode | Evals/day | WouldBuy Shadow | Edge+ | Score | Data | Risk Flags | Action |",
+            "| --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- | --- |",
+        ]
+    )
     for row in rows:
         flags = ", ".join(row["risk_flags"]) if row["risk_flags"] else "-"
         lines.append(
@@ -739,7 +879,7 @@ def render_markdown(report: dict[str, Any]) -> str:
 
     lines.extend(["", "## Bottom Active Cities", ""])
     if not bottom:
-        lines.append("No active city met the dead-throughput demotion heuristic.")
+        lines.append("No active city met the active-throughput watch heuristic.")
     for row in bottom:
         dead = "DEAD" if row["evals_per_day"] < 1 or row["would_buy_true_count"] == 0 else "WATCH"
         lines.extend(
