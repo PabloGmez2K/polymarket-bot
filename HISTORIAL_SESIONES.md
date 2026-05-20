@@ -5619,3 +5619,49 @@ Integrar METAR Wave 1 + Wave 2 en el resumen diario Telegram existente sin crear
 ### Guardrails
 
 No se tocaron env vars, DB, BANKROLL, trading core, Fase C, Truth Pipeline, city modes, whitelist, scheduler nuevo, promotion gates, BUY/SELL/SKIP ni canonical source. METAR sigue siendo readout LOG_ONLY.
+
+## Sesión 370 - 20 de mayo de 2026 (Claude Code)
+
+**Clasificacion:** FULL acotado / runtime env var restore / no codigo
+**Veredicto:** OPERATIONAL_RESTORE_DONE / FINANCIAL_RECONCILIATION_OPEN
+
+### Objetivo
+
+Restaurar operativa normal tras la pausa de la sesion previa (POSITION_VISIBILITY_BUG May18), dejando la conciliacion del +$6.18 como incidencia financiera manual abierta. El riesgo de exposicion viva de los 4 May18 ya no aplica porque los markets estan `closed=true, umaResolutionStatus=resolved`.
+
+### Evidencia de cierre runtime de los 4 May18
+
+Via `gamma-api.polymarket.com/events`:
+
+- Seoul 25°C+ May18 `0x05aecedb…`: **YES wins** -> bot bought YES 1.48 shares -> esperado +$1.48
+- Tokyo 28°C+ May18 `0xdad151f6…`: YES wins -> bot bought NO -> $0 (LOSS confirmado)
+- Wellington 14°C May18 `0x68f47de0…`: **NO wins** -> bot bought NO 5.33 shares -> esperado +$5.33
+- Shanghai 27°C May18 `0x935f3ff3…`: YES wins -> bot bought NO -> $0 (LOSS confirmado)
+
+Expected total payout = **$6.81**. UI Deposit observado = **$6.18**. Diff = **-$0.63** (~9% short). No hay REDEEM events en `/activity` para esos 4 conditionIds; auto-redeem del negRiskAdapter no disparo. Ninguno aparece en `/positions` ni `/closed-positions`.
+
+### Cambios
+
+- Railway env var: `ACTIVE_TRADING_CITIES` cambiado de `NONE` a `Shanghai,Tokyo,Buenos Aires,Ankara` via `tools/railway_safe.ps1 variables -s polymarket-bot --set`.
+- Deployment `db966b45-95c6-4905-9717-47447f49087d` disparado por env var change y observado: BUILDING -> DEPLOYING -> **SUCCESS**.
+- Sin cambios en SHADOW_ONLY_MODE (sigue `false`), BLOCKED_CITIES (`London,Paris,Atlanta,Chicago`), QUALITY_TRADER_CONDITIONS (`exact`), BANKROLL, Fase C, codigo, DB ni scheduler.
+
+### Validacion runtime post-deploy
+
+- `railway variables` confirma `ACTIVE_TRADING_CITIES=Shanghai,Tokyo,Buenos Aires,Ankara` efectivo.
+- Logs: `POLYMARKET BOT v10.6.50 | Schedule: [0,4,8,12,16,20] UTC | Modo: REAL | Ciclos: 356 | trade_lifecycle: 137 registros`.
+- Arranque sin crash. `Autenticacion OK`. Telegram polling OK. INTRA-SL monitor OK. (Hay log `ERROR [py_clob_client_v2] Could not create api key` informativo del recovery del cliente CLOB, no bloqueante; el bot autentica correctamente acto seguido.)
+- Bot decide `Ultimo ciclo hace 2.6h (< 3.0h) -> saltando ciclo inicial`. Proximo ciclo: 08:00 UTC.
+- `/positions` data-api: CANARY #356 viva (Seoul May21 22°C+ NO, 1.9 shares, cashPnl +$0.11, currentValue $1.08). No hay otras posiciones non-redeemable.
+
+### Incidencia financiera abierta
+
+- **EXPECTED**: $6.81 (Seoul YES $1.48 + Wellington NO $5.33).
+- **OBSERVED** (UI Polymarket): Deposit +$6.18.
+- **DIFF**: -$0.63.
+- **Status**: REDEEM events ausentes en activity API para los 4 conditionIds; tipo `DEPOSIT` no existe en activity. La discrepancia no se explica con el feed publico.
+- **Proxima accion manual**: o (a) ticket a Polymarket support con los 4 conditionIds preguntando estado de auto-redeem negRiskAdapter, o (b) consultar Etherscan V2 (`api.etherscan.io/v2/api?chainid=137`) con API key para `tokentx` USDC.e (`0x2791Bca1…`) hacia `0x5218BB52D11bA6C167E3E31FdC944EB0E977399A` en ventana 48h.
+
+### Guardrails
+
+No se tocaron `bot.py`, BANKROLL, Fase C, sizing, whitelist, source_policy, scheduler, NOAA, DB ni SL/L2/INTRA ejecutable. No se cambio SHADOW_ONLY_MODE (sigue `false`). No se ejecuto BUY/SELL/SKIP manual.
