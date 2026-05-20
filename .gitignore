@@ -71,6 +71,7 @@ data/metar_shadow_report.*
 data/metar_resolution_verify_report.json
 data/city_intelligence_digest.json
 data/city_promotion_gate.json
+data/city_universe_audit_report.json
 data/city_validation_ledger.json
 data/city_watch_reinforced.json
 data/city_watchlist_phase4.json
@@ -86,6 +87,7 @@ data/chicago_active_benchmark.json
 
 # ─── Docs: regenerable readouts (scripts write these automatically) ───────────
 docs/*_latest.md
+!docs/city_universe_audit_latest.md
 docs/*-latest.md
 docs/*_runtime_import.md
 
