@@ -5705,3 +5705,32 @@ Activar `READ_BOT_EVAL_CAPTURE=1` en Railway para que el resolver de `blocked_si
 ### Guardrails
 
 No se tocaron `bot.py`, codigo, BANKROLL, Fase C, city modes, whitelist, sizing, scheduler, trading core, ACTIVE_TRADING_CITIES, BLOCKED_CITIES, SHADOW_ONLY_MODE, QUALITY_TRADER_CONDITIONS, DB ni SL/L2/INTRA ejecutable. No se ejecuto BUY/SELL/SKIP manual. No se ejecuto Visual Crossing backfill. BANKROLL sigue $25. Este cambio habilita evidencia para Gap Report; NO autoriza subida de BANKROLL.
+
+---
+
+## Sesion 372 - 21 de mayo de 2026 (Codex)
+
+**Clasificacion:** LITE / docs-only / alert severity contract
+**Bloque:** Trader-vs-bot gap daily alert severity
+**Veredicto:** SPLIT_ACTION_LEVELS_DOCUMENTED
+
+### Objetivo
+
+Registrar el contrato Opus `SPLIT_ACTION_LEVELS` para que la alarma diaria
+trader-vs-bot gap no eleve a `ACTION` ciudades con gap real pero source
+readiness incompleta, a raiz del caso San Francisco.
+
+### Cambios
+
+- Creado `docs/alerts/trader_vs_bot_gap_severity.md`.
+- Documentados cuatro niveles: `INFO`, `WATCH_SOURCE`, `WATCH`, `ACTION`.
+- Documentados gates de magnitud y regla dura: `MAPPING_MISSING` o `no_icao`
+  nunca puede emitir `ACTION`.
+- Caso San Francisco clasificado como `WATCH_SOURCE`.
+
+### Guardrails
+
+No se tocaron codigo, `bot.py`, env vars, DB, BANKROLL, Fase C, whitelist,
+canary, city modes, `RESOLUTION_ICAO`, `RESOLUTION_STATIONS`,
+`OBSERVED_AUDIT_CITIES`, Railway runtime ni trading. No se ejecuto
+`verify_before_deploy.py`.
