@@ -5765,3 +5765,38 @@ no emitan `ACTION`.
 No se tocaron BANKROLL, Fase C, whitelist, canary, city modes,
 `RESOLUTION_ICAO`, `RESOLUTION_STATIONS`, `OBSERVED_AUDIT_CITIES`, DB, env
 vars, runtime execution, BUY/SELL/SKIP ni source unlock de San Francisco.
+
+---
+
+## Sesión 374 - 21 de mayo de 2026 (Codex)
+
+**Clasificacion:** DOCS_ONLY / precheck read-only / ALREADY_DELETED / LEGACY_CLEANUP_CLOSED
+**Bloque:** Checkpoint legacy Railway services/volumes
+**Veredicto:** LEGACY_CLEANUP_CLOSED
+
+### Objetivo
+
+Confirmar y cerrar el checkpoint pendiente de borrado de servicios y volúmenes
+Railway legacy (`city-intelligence`, `phase5-visibility`).
+
+### Hallazgos (precheck Codex read-only)
+
+- Railway lista únicamente el servicio `polymarket-bot`. `city-intelligence` y
+  `phase5-visibility` devuelven `Service not found` — ya no existen.
+- `volume list` solo muestra `polymarket-bot-volume`. Los volúmenes
+  `city-intelligence-volume` y `phase5-visibility-volume` tampoco existen.
+- Bridge vivo funcional: `runtime_import_manifest` fresco;
+  `city_validation_ledger`, `city_promotion_gate` y `city_intelligence_pipeline`
+  con `runtime_inputs_status=available`; daily summary state actualizado.
+- Repo conserva `tools/city_intelligence_*.py`, `tools/*phase5*.py`, docs y
+  `seed_data/phase5` como referencia histórica (sin tocar).
+
+### Acciones
+
+Ninguna. Los recursos ya habían sido eliminados en sesiones anteriores.
+Esta entrada solo cierra el checkpoint para que no vuelva a aparecer como pendiente.
+
+### Guardrails
+
+No se tocaron código, `bot.py`, env vars, DB, BANKROLL, city modes, Fase C,
+trading core, Railway runtime, BUY/SELL/SKIP ni `verify_before_deploy.py`.
