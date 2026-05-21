@@ -357,6 +357,7 @@ def test_reporting_drift_blocked_effective_appears_in_drift_no_action():
     ]
     inputs = _make_inputs(lifecycle_cities=lifecycle_cities)
     digest = build_digest(inputs)
+    assert digest["review_queue"] == []
     assert digest["drift"][0]["city"] == "Paris"
     assert digest["drift"][0]["transition_proposed"] == "reporting_drift_blocked_effective"
 
@@ -365,8 +366,10 @@ def test_reporting_drift_blocked_effective_appears_in_drift_no_action():
         digest,
         [],
     )
-    assert "REPORTING_DRIFT_BLOCKED_EFFECTIVE" in md
+    assert "reporting_drift_blocked_effective" in md
     assert "NO_ACTION / LOG_ONLY" in md
+    assert "Known blocked-effective reporting drift; no action unless count/cities change." in md
+    assert "ACTION REQUIRED" not in md
 
 
 # ---------------------------------------------------------------------------

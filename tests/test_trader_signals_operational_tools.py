@@ -387,7 +387,7 @@ def test_monitor_telegram_payload_labels_low_bot_n_as_review():
 
         assert result["should_notify"] is True
         assert "<b>Gaps trader vs bot</b>" in result["telegram_message"]
-        assert "muestra bot baja" in result["telegram_message"]
+        assert "digest-only: insufficient bot sample" in result["telegram_message"]
         assert "blocked_signal_wr" in result["telegram_message"]
         assert "No BUY/SELL/SKIP" in result["telegram_message"]
 
@@ -410,7 +410,7 @@ def test_monitor_telegram_renders_initial_activity_with_two_snapshots():
                 {"trader": "Thrifty-Original", "current_signals": 31, "blocked_wr_pct": 95.4, "blocked_n": 109}
             ],
             "trader_winning_not_observed": [
-                {"city": "Istanbul", "trader_wr_pct": 100.0, "trader_n": 22}
+                {"city": "Istanbul", "trader_wr_pct": 100.0, "trader_n": 22, "trader_wins": 22}
             ],
             "trader_winning_bot_gap": [
                 {
@@ -436,7 +436,31 @@ def test_monitor_telegram_renders_initial_activity_with_two_snapshots():
     assert "<b>Motivo del aviso</b>" in message
     assert "<b>Estado de evidencia</b>" in message
     assert "<b>No autorizado</b>" in message
-    assert "posible gap a revisar; muestra bot baja" in message
+    assert "digest-only: insufficient bot sample" in message
+
+
+def test_monitor_suppresses_low_n_trader_only_reasons():
+    module = load_module(MONITOR_PATH, "traders_operational_intelligence_monitor")
+    with local_tmp_dir() as tmp_dir:
+        args = monitor_args(module, tmp_dir, now="2026-05-14T09:00:00+00:00")
+        write_json(
+            Path(args.state),
+            {
+                "schema_version": module.SCHEMA_VERSION,
+                "last_success_at": "2026-05-14T08:00:00+00:00",
+                "last_activity_answerability": "NO",
+                "last_digest_date": "2026-05-14",
+                "known_not_observed_keys": [],
+                "known_gap_sufficient_keys": [],
+                "last_stale": False,
+            },
+        )
+
+        result = module.build_run(args, env={"TRADERS_OPERATIONAL_INTELLIGENCE_ENABLED": "true"})
+
+        assert result["should_notify"] is False
+        assert "new_trader_winning_not_observed" not in result["notification_reasons"]
+        assert "new_trader_gap_bot_n_sufficient" not in result["notification_reasons"]
 
 
 def test_monitor_kill_switch_disables_without_error():

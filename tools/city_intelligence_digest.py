@@ -47,7 +47,6 @@ LOG_ONLY_DISCLAIMER = (
 
 # Lifecycle transitions that go into the Review Queue (strongest first)
 _REVIEW_QUEUE_PRIORITY = [
-    "reporting_drift_blocked_effective",
     "silent_promotion_detected",
     "manual_review_pending",
     "active_review",
@@ -221,12 +220,22 @@ def build_source_audit_section(source_audits):
     return {"actionable": actionable, "quiet": quiet}
 
 
-def build_drift_section(review_queue):
+def build_drift_section(lifecycle_data, review_queue):
     """Extract policy conflict / silent promotion items from review queue."""
+    rows = list(review_queue)
+    if lifecycle_data:
+        rows.extend(
+            c for c in lifecycle_data.get("cities", [])
+            if c.get("transition_proposed") == "reporting_drift_blocked_effective"
+        )
     return [
         r for r in review_queue
         if r.get("transition_proposed") in {
             "silent_promotion_detected",
+        }
+    ] + [
+        r for r in rows
+        if r.get("transition_proposed") in {
             "reporting_drift_blocked_effective",
         }
     ]
@@ -237,7 +246,7 @@ def build_digest(inputs):
     review_queue = build_review_queue(inputs["lifecycle"])
     onboarding = build_onboarding_section(inputs["onboarding"])
     source_audits = build_source_audit_section(inputs["source_audits"])
-    drift = build_drift_section(review_queue)
+    drift = build_drift_section(inputs["lifecycle"], review_queue)
 
     lifecycle_meta = {}
     if inputs["lifecycle"]:
@@ -417,7 +426,7 @@ def render_markdown(payload, digest, warnings):
     ]
     if drift:
         lines.append("**NO_ACTION / LOG_ONLY - blocked effective reporting drift does not authorize promotion.**")
-        lines.append("**ACTION REQUIRED — Policy inconsistency detected:**")
+        lines.append("**Known blocked-effective reporting drift; no action unless count/cities change.**")
         lines.append("")
         for r in drift:
             notes_str = "; ".join(r.get("notes", [])) or "-"

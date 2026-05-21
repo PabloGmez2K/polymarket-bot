@@ -81,12 +81,13 @@ def test_no_alert_when_no_changes(tmp_path):
     first = module.build_run(args, env={"SOURCE_ONBOARDING_ANDON_ENABLED": "true"})
     second = module.build_run(args, env={"SOURCE_ONBOARDING_ANDON_ENABLED": "true"})
 
-    assert first["should_notify"] is True
+    assert first["should_notify"] is False
     assert second["should_notify"] is False
+    assert first["telegram_message"] is None
     assert second["telegram_message"] is None
 
 
-def test_alert_new_human_source_audit_ready(tmp_path):
+def test_suppresses_human_source_audit_ready_when_core_evidence_missing(tmp_path):
     module = load_module()
     write_json(
         tmp_path / "source_onboarding" / "andon_state.json",
@@ -106,13 +107,42 @@ def test_alert_new_human_source_audit_ready(tmp_path):
 
     result = module.build_run(args_for(module, tmp_path), env={"SOURCE_ONBOARDING_ANDON_ENABLED": "true"})
 
+    assert result["should_notify"] is False
+    assert "NEW_HUMAN_SOURCE_AUDIT_READY" not in result["notification_reasons"]
+    assert result["telegram_message"] is None
+
+
+def test_alert_new_human_source_audit_ready_when_evidence_complete(tmp_path):
+    module = load_module()
+    write_json(
+        tmp_path / "source_onboarding" / "andon_state.json",
+        {
+            "schema_version": module.SCHEMA_VERSION,
+            "cities": {
+                "Chongqing": {
+                    "primary_status": "WAITING_EVIDENCE",
+                    "source_audit_status": "SOURCE_TEXT_MISSING",
+                    "priority_tier": "LOW",
+                    "shadow_evidence_status": "SHADOW_EVIDENCE_PARTIAL",
+                }
+            },
+        },
+    )
+    record = city_record(
+        primary_status="READY_FOR_SOURCE_AUDIT",
+        missing_inputs=[],
+    )
+    write_json(tmp_path / "source_onboarding.json", source_payload(record))
+
+    result = module.build_run(args_for(module, tmp_path), env={"SOURCE_ONBOARDING_ANDON_ENABLED": "true"})
+
     assert result["should_notify"] is True
     assert "NEW_HUMAN_SOURCE_AUDIT_READY" in result["notification_reasons"]
     assert "NO_ACTION / LOG_ONLY" in result["telegram_message"]
     assert "Do not add to active/canary" in result["telegram_message"]
 
 
-def test_alert_source_confirmed_waiting_shadow(tmp_path):
+def test_suppresses_source_confirmed_waiting_shadow_when_core_evidence_missing(tmp_path):
     module = load_module()
     write_json(
         tmp_path / "source_onboarding" / "andon_state.json",
@@ -137,9 +167,9 @@ def test_alert_source_confirmed_waiting_shadow(tmp_path):
 
     result = module.build_run(args_for(module, tmp_path), env={"SOURCE_ONBOARDING_ANDON_ENABLED": "true"})
 
-    assert result["should_notify"] is True
-    assert "SOURCE_CONFIRMED_WAITING_SHADOW" in result["notification_reasons"]
-    assert "wait for stronger shadow" in result["telegram_message"]
+    assert result["should_notify"] is False
+    assert "SOURCE_CONFIRMED_WAITING_SHADOW" not in result["notification_reasons"]
+    assert result["telegram_message"] is None
 
 
 def test_source_ambiguous_and_mismatch_escalate_opus(tmp_path):

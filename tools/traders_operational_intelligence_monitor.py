@@ -39,6 +39,13 @@ DEFAULT_STALE_HOURS = 26.0
 DEFAULT_ERROR_COOLDOWN_MINUTES = 360
 DEFAULT_INITIAL_ACTIVITY_SNAPSHOTS = 5
 DEFAULT_LOW_BOT_N_REVIEW = 10
+TRADER_NOT_OBSERVED_ALERT_MIN_N = 10
+TRADER_NOT_OBSERVED_ALERT_MIN_WR = 70.0
+TRADER_NOT_OBSERVED_ALERT_MIN_WINS = 8
+TRADER_GAP_ALERT_MIN_TRADER_N = 15
+TRADER_GAP_ALERT_MIN_BOT_N = 10
+TRADER_GAP_ALERT_MIN_WR = 70.0
+TRADER_GAP_ALERT_MIN_GAP_PP = 30.0
 LOG_ONLY_DISCLAIMER = (
     "LOG_ONLY. No BUY/SELL/SKIP. No city mode changes. Human review required."
 )
@@ -174,6 +181,30 @@ def row_key(row: dict[str, Any], *fields: str) -> str:
     return "|".join(str(row.get(field, "")) for field in fields)
 
 
+def qualifies_not_observed_alert(row: dict[str, Any]) -> bool:
+    return (
+        int(row.get("trader_n") or 0) >= TRADER_NOT_OBSERVED_ALERT_MIN_N
+        and int(row.get("trader_wins") or 0) >= TRADER_NOT_OBSERVED_ALERT_MIN_WINS
+        and float(row.get("trader_wr_pct") or 0.0) >= TRADER_NOT_OBSERVED_ALERT_MIN_WR
+    )
+
+
+def qualifies_gap_alert(row: dict[str, Any]) -> bool:
+    if row.get("classification") != "TRADER_WINNING_BOT_NOT_WINNING":
+        return False
+    bot_wr_raw = row.get("bot_wr_pct")
+    if bot_wr_raw is None:
+        return False
+    trader_wr = float(row.get("trader_wr_pct") or 0.0)
+    bot_wr = float(bot_wr_raw)
+    return (
+        int(row.get("trader_n") or 0) >= TRADER_GAP_ALERT_MIN_TRADER_N
+        and int(row.get("bot_n") or 0) >= TRADER_GAP_ALERT_MIN_BOT_N
+        and trader_wr >= TRADER_GAP_ALERT_MIN_WR
+        and (trader_wr - bot_wr) >= TRADER_GAP_ALERT_MIN_GAP_PP
+    )
+
+
 def classify_signals_staleness(signals_payload: dict[str, Any], now: datetime, stale_hours: float) -> dict[str, Any]:
     generated = signals_payload.get("generated")
     generated_dt = parse_time(generated)
@@ -303,9 +334,13 @@ def build_telegram_message(report: dict[str, Any], reasons: list[str], staleness
     not_observed = tables.get("trader_winning_not_observed") or []
     if not_observed:
         row = not_observed[0]
+        sample_note = ""
+        if not qualifies_not_observed_alert(row):
+            sample_note = "; digest-only due to low sample"
         lines.append(
             "- "
             f"{row.get('city')} WR={row.get('trader_wr_pct')}% n={row.get('trader_n')}"
+            f"{sample_note}"
         )
         lines.append("- Fuente: blocked resolved por ciudad; no implica cambio de modo.")
     else:
@@ -318,7 +353,7 @@ def build_telegram_message(report: dict[str, Any], reasons: list[str], staleness
             label = row.get("classification")
             bot_n = int(row.get("bot_n") or 0)
             if bot_n < DEFAULT_LOW_BOT_N_REVIEW:
-                label_text = "posible gap a revisar; muestra bot baja"
+                label_text = "digest-only: insufficient bot sample"
             elif label == "TRADER_WINNING_BOT_NOT_WINNING":
                 label_text = "posible gap a revisar"
             elif label == "TRADER_WINNING_BOT_INSUFFICIENT_N":
@@ -362,7 +397,7 @@ def detect_reasons(
     known_not_observed = set(state.get("known_not_observed_keys") or [])
     current_not_observed = {
         row_key(row, "city") for row in tables.get("trader_winning_not_observed", [])
-        if int(row.get("trader_n") or 0) >= 3
+        if qualifies_not_observed_alert(row)
     }
     new_not_observed = sorted(current_not_observed - known_not_observed)
     if new_not_observed:
@@ -371,8 +406,7 @@ def detect_reasons(
     known_gaps = set(state.get("known_gap_sufficient_keys") or [])
     current_gaps = {
         row_key(row, "city", "classification") for row in tables.get("trader_winning_bot_gap", [])
-        if int(row.get("bot_n") or 0) >= 3
-        and row.get("classification") == "TRADER_WINNING_BOT_NOT_WINNING"
+        if qualifies_gap_alert(row)
     }
     new_gaps = sorted(current_gaps - known_gaps)
     if new_gaps:

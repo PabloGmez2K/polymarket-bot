@@ -44,6 +44,8 @@ ACTIONABLE_STATUSES = {
     SOURCE_AMBIGUOUS,
     SOURCE_MISMATCH,
 }
+STATE_WAITING = "WAITING_EVIDENCE"
+CORE_EVIDENCE_BLOCKERS = {"trader_evidence", "noaa_station_id", "shadow_cycles_or_edges"}
 
 LOG_ONLY_DISCLAIMER = (
     "NO_ACTION / LOG_ONLY. Do not add to active/canary. "
@@ -218,6 +220,11 @@ def city_fingerprint(city: dict[str, Any]) -> str:
     )
 
 
+def has_core_evidence_blockers(city: dict[str, Any]) -> bool:
+    missing = set(city.get("missing_inputs") or [])
+    return city.get("primary_status") == STATE_WAITING or bool(missing & CORE_EVIDENCE_BLOCKERS)
+
+
 def detect_city_events(city: dict[str, Any], previous: dict[str, Any] | None) -> list[str]:
     previous = previous or {}
     events: list[str] = []
@@ -225,11 +232,20 @@ def detect_city_events(city: dict[str, Any], previous: dict[str, Any] | None) ->
     current_audit = city.get("source_audit_status")
     previous_primary = previous.get("primary_status")
     previous_audit = previous.get("source_audit_status")
+    digest_only_missing_evidence = has_core_evidence_blockers(city)
 
-    if current_audit in {READY_AUDIT, READY_AUDIT_LEGACY} and previous_audit not in {READY_AUDIT, READY_AUDIT_LEGACY}:
+    if (
+        not digest_only_missing_evidence
+        and current_audit in {READY_AUDIT, READY_AUDIT_LEGACY}
+        and previous_audit not in {READY_AUDIT, READY_AUDIT_LEGACY}
+    ):
         events.append("NEW_HUMAN_SOURCE_AUDIT_READY")
 
-    if current_primary == SOURCE_CONFIRMED_WAITING_SHADOW and previous_primary != SOURCE_CONFIRMED_WAITING_SHADOW:
+    if (
+        not digest_only_missing_evidence
+        and current_primary == SOURCE_CONFIRMED_WAITING_SHADOW
+        and previous_primary != SOURCE_CONFIRMED_WAITING_SHADOW
+    ):
         events.append("SOURCE_CONFIRMED_WAITING_SHADOW")
 
     if (
@@ -254,7 +270,11 @@ def detect_city_events(city: dict[str, Any], previous: dict[str, Any] | None) ->
 
     previous_tier = previous.get("priority_tier")
     current_tier = city.get("priority_tier")
-    if previous and tier_rank(current_tier) > tier_rank(previous_tier):
+    if (
+        not digest_only_missing_evidence
+        and previous
+        and tier_rank(current_tier) > tier_rank(previous_tier)
+    ):
         events.append("PRIORITY_UPGRADED")
 
     return events
@@ -267,6 +287,8 @@ def select_action_for_pablo(event_names: list[str], city: dict[str, Any]) -> str
         return "ESCALATE_OPUS before any mapping or city-mode change."
     if "OBSERVATION_REVIEW_READY" in event_names:
         return "Observation review ready. Human/Opus review required before any promotion discussion."
+    if has_core_evidence_blockers(city):
+        return "Digest only; evidence missing before human audit."
     if "SOURCE_CONFIRMED_WAITING_SHADOW" in event_names:
         return "Human source audit ready, but wait for stronger shadow before promotion review."
     if "NEW_HUMAN_SOURCE_AUDIT_READY" in event_names:
