@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import sys
+import urllib.error
 import urllib.request
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
@@ -450,14 +451,23 @@ def send_telegram(message: str):
     chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
     if not token or not chat_id:
         return {"sent": False, "reason": "missing_telegram_env"}
-    payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
+    payload = {"chat_id": chat_id, "text": message}
     req = urllib.request.Request(
         f"https://api.telegram.org/bot{token}/sendMessage",
         data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
     )
-    urllib.request.urlopen(req, timeout=10)
-    return {"sent": True, "reason": "sent"}
+    try:
+        urllib.request.urlopen(req, timeout=10)
+        return {"sent": True, "reason": "sent"}
+    except urllib.error.HTTPError as exc:
+        return {"sent": False, "reason": "telegram_http_error", "error_type": f"HTTPError:{exc.code}"}
+    except urllib.error.URLError as exc:
+        return {"sent": False, "reason": "telegram_url_error", "error_type": f"URLError:{exc.reason}"}
+    except TimeoutError as exc:
+        return {"sent": False, "reason": "telegram_timeout", "error_type": str(exc)}
+    except Exception as exc:
+        return {"sent": False, "reason": "telegram_exception", "error_type": f"{type(exc).__name__}:{exc}"}
 
 
 def should_send(state: dict, summary: dict, now: datetime, force: bool):
@@ -503,6 +513,11 @@ def main():
             "last_status": summary["status"],
             "last_lifecycle_7d_pnl": summary["windows"]["7d"]["pnl"],
         })
+        if send_now:
+            state["last_attempt_date"] = now.date().isoformat()
+            state["last_telegram_result"] = telegram_result.get("reason")
+            if telegram_result.get("error_type"):
+                state["last_telegram_error"] = telegram_result["error_type"]
         if send_now and telegram_result.get("reason") in {"sent", "missing_telegram_env"}:
             state["last_sent_date"] = now.date().isoformat()
             state["last_sent_at"] = now.replace(microsecond=0).isoformat()
