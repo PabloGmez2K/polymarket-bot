@@ -5800,3 +5800,91 @@ Esta entrada solo cierra el checkpoint para que no vuelva a aparecer como pendie
 
 No se tocaron código, `bot.py`, env vars, DB, BANKROLL, city modes, Fase C,
 trading core, Railway runtime, BUY/SELL/SKIP ni `verify_before_deploy.py`.
+
+## Sesión 375 - 21 de mayo de 2026 (Opus / Claude Code)
+
+**Clasificacion:** LITE / read-only / strategic decision / no codigo / no runtime
+**Bloque:** Throughput & Universe Strategy Review
+**Veredicto:** CODE_LOG_ONLY_METRICS_FIRST + SOURCE_ONBOARDING_FIRST
+
+### Objetivo
+
+Decidir cómo aumentar throughput y universo del bot con menor riesgo, usando
+evidencia live ya recogida por Codex (ciclo real 366, 2026-05-21T11:38:47Z),
+sin tocar implementación ni runtime.
+
+### Evidence pack live (ciclo 366)
+
+- Funnel: 22 evaluados → 2 BUY real canary, 4 shadow/non-buy edge, 11
+  condition_filtered, 154 city window skipped, 121 price OOR, 33 date OOR
+  past, 4 below min edge, 4 fuera allowlist/policy-city mode.
+- BUY canary: Milan 2026-05-21 exact 28C NO edge 34.6; Seoul 2026-05-22
+  at_or_above 27C YES edge 33.9.
+- Edges no-buy relevantes: Hong Kong at_or_above 31C NO edge 54.45
+  (shadow); Paris exact 24C NO edge 41.98 (blocked); London exact 24C NO
+  edge 25.91 (blocked); Chicago at_or_below 59F NO edge 21.82 (blocked);
+  Madrid exact 32C edge 43.62 descartado por `sold_this_cycle`.
+- Traders: Thrifty-Original (40 señales, blocked WR 96.6% n=147),
+  Entire-Hood (22 señales, blocked WR 99.2% n=248), Dimpled-Boy (blocked
+  WR 96.6% n=119). Trader-only persistente: SF 6/7, Miami 5/7, Cape Town
+  4/7. Último signals_crosscheck: 24 matches / 15 bot-only / 4 trader-only
+  / 1 operational trader-only.
+- Oportunidades detectadas por Codex: Hong Kong shadow fuerte (42 edge
+  hits, best 67.0, 176+ ciclos, source risk medium); Chongqing y Jeddah
+  `SOURCE_CONFIRMED_WAITING_SHADOW` con audit listo; Singapore canary
+  muestra positiva pero pequeña.
+
+### Veredicto y ranking ROI/riesgo
+
+Tier 1 (hacer ahora, bajo riesgo, alto leverage):
+
+1. **CODE_LOG_ONLY_METRICS_FIRST** — Codex read-only/LOG_ONLY: contadores
+   por etapa del funnel (`discovered_markets_unique`, discovered →
+   filtered → policy/source → edge → selected → BUY) y mejor join
+   `bot_signal_evaluations` ↔ `blocked_signals_resolutions`. Sin esto, los
+   "22 evaluados" son opacos vs 154 city-window-skipped + 121
+   price-OOR.
+2. **SOURCE_ONBOARDING_FIRST** — Chongqing y Jeddah, manteniéndolas en
+   SHADOW (no canary, no active). Completa pipeline ya iniciado, no es
+   expansión arriesgada.
+
+Tier 2 (diseñar ahora, ejecutar después, gateado por Tier 1):
+
+3. Trader-vs-bot gap report (depende de `bot_evaluation` capture).
+4. Condition filter experiment design (exact/range). No abrir segundo
+   experimento mientras el canary exact NO LOG_ONLY acumula muestra.
+
+Tier 3 (NO MOVER esta sesión):
+
+5. Hong Kong canary: mantener SHADOW; source risk medium + Phase 2 abierta
+   + BANKROLL HOLD no autorizan canary nuevo.
+6. San Francisco: regla `sf_source_unlock_waiting_evidence` NO cumplida.
+7. Edges en blocked (London/Paris/Chicago/Atlanta): loguear como input
+   futuro de source-fix review, NO desbloquear.
+8. Singapore canary: muestra insuficiente.
+
+### Siguiente paso Codex NORMAL (próxima sesión)
+
+1. `docs/funnel_observability_log_only.md` con esquema de contadores +
+   queries de join (APPLY_PATCH local, sin push).
+2. Baseline read-only SSH de 7 días previos si es posible.
+3. Plan de onboarding shadow para Chongqing/Jeddah SIN ejecutar cambios
+   de city mode.
+
+### Criterio de parada
+
+Si 7 días post-instrumentación el funnel no revela cuello nuevo y los 22
+evaluados/ciclo siguen siendo el techo real, reabrir Tier 2 (gap report)
+con datos limpios. Si alarmas A2/A7/A8 del monitor v10.6.50 disparan
+antes, atender alarma y pausar Tier 2.
+
+### Guardrails
+
+No se tocaron código, `bot.py`, runtime, Railway env vars, DB, BANKROLL
+($25 HOLD), Fase C, Phase 2 Recalibration, city modes, whitelist,
+canary/active/blocked status, ACTIVE_TRADING_CITIES, QUALITY_TRADER_CONDITIONS,
+ALLOWED_CONDITIONS, scheduler, sizing, guards, SHADOW_ONLY_MODE,
+trading core ni BUY/SELL/SKIP. Cualquier paso operativo posterior
+requiere confirmación humana explícita. No se guardó esta decisión en
+engram ni memory externa por pedido explícito; verdad durable vive en
+`CONTEXTO.md`, `HISTORIAL_SESIONES.md` y `agent_events.jsonl`.
