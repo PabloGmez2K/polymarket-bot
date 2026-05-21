@@ -57,6 +57,8 @@ data/traders_intelligence/
 data/intelligence/
 data/*.lock
 data/wallet_cash_flows.jsonl
+data/wallet_cash_flow_pending_attestation.json
+data/wallet_cash_flow_pending_attestation.jsonl
 data/observability/
 data/signals_crosscheck.jsonl
 data/signals_crosscheck_daily_summary_state.json

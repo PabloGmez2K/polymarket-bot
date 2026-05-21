@@ -8,6 +8,7 @@ It stays isolated from the runtime bot module, Telegram, and state writes.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import sqlite3
 import sys
@@ -46,6 +47,7 @@ P_L_CONTAMINATION_WARNING = (
     "P/L incluye registros reconstruidos/no audit-ready; no usar para BANKROLL ni decisiones operativas."
 )
 REQUIRED_WALLET_HISTORY_HOURS = 168
+PENDING_ATTESTATION_TOOL = REPO_ROOT / "tools" / "wallet_cash_flow_pending_attestation.py"
 
 
 def configure_stdout() -> None:
@@ -580,7 +582,38 @@ def summarize_pnl_sources(data_dir: Path, profitability: dict[str, Any]) -> dict
         },
         "canonical_source": "none",
         "bankroll_readiness": "blocked",
+        "pending_cash_flow_attestation": summarize_pending_cash_flow_attestation(data_dir),
     }
+
+
+def summarize_pending_cash_flow_attestation(data_dir: Path) -> dict[str, Any]:
+    if not PENDING_ATTESTATION_TOOL.exists():
+        return {
+            "status": "tool_missing",
+            "manual_confirmation_required": False,
+            "canonical_eligible": False,
+            "writes_wallet_cash_flows": False,
+        }
+    try:
+        spec = importlib.util.spec_from_file_location("wallet_cash_flow_pending_attestation", PENDING_ATTESTATION_TOOL)
+        if spec is None or spec.loader is None:
+            raise RuntimeError("import_spec_missing")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.compute_pending_attestation(
+            data_dir,
+            data_dir / "wallet_portfolio_snapshots.jsonl",
+            data_dir / "wallet_cash_flows.jsonl",
+            generated_at=now_utc(),
+        )
+    except Exception as exc:
+        return {
+            "status": "tool_error",
+            "detail": str(exc)[:200],
+            "manual_confirmation_required": True,
+            "canonical_eligible": False,
+            "writes_wallet_cash_flows": False,
+        }
 
 
 def summarize_operational(data_dir: Path, generated_at: datetime) -> dict[str, Any]:
@@ -913,6 +946,7 @@ def format_human(digest: dict[str, Any]) -> str:
     lifecycle_source = pnl_sources.get("lifecycle") or {}
     wallet_source = pnl_sources.get("wallet_pnl") or {}
     cash_flow_source = pnl_sources.get("cash_flows") or {}
+    pending_attestation = pnl_sources.get("pending_cash_flow_attestation") or {}
     dashboard_source = pnl_sources.get("dashboard") or {}
     quality_rate = source_quality.get("contamination_rate")
     quality_rate_text = "unknown" if quality_rate is None else f"{quality_rate * 100.0:.1f}%"
@@ -968,6 +1002,7 @@ def format_human(digest: dict[str, Any]) -> str:
             f"  - Cash flows: {cash_flow_source.get('status', 'unknown')} | "
             f"records={cash_flow_source.get('n_records', 0)}"
         ),
+        format_pending_attestation_line(pending_attestation),
         (
             f"  - Dashboard: {dashboard_source.get('status', 'unknown')} | "
             f"auto_extractor_authorized="
@@ -1013,6 +1048,22 @@ def format_human(digest: dict[str, Any]) -> str:
         digest["next_step"],
     ])
     return "\n".join(lines)
+
+
+def format_pending_attestation_line(pending: dict[str, Any]) -> str:
+    status = pending.get("status", "unknown")
+    if status == "pending_no_cash_flow_attestation":
+        gap = pending.get("gap") if isinstance(pending.get("gap"), dict) else {}
+        return (
+            "  - Cash-flow coverage gap: "
+            f"{gap.get('period_start', 'unknown')} -> {gap.get('period_end', 'unknown')}. "
+            "Pablo confirmation needed."
+        )
+    if status == "manual_review_required":
+        flags = pending.get("anomaly_flags") if isinstance(pending.get("anomaly_flags"), list) else []
+        flag_text = ",".join(str(flag) for flag in flags) if flags else "unknown"
+        return f"  - Cash-flow coverage gap: manual review required ({flag_text})."
+    return f"  - Cash-flow pending attestation: {status}"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

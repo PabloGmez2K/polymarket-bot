@@ -679,6 +679,28 @@ def test_digest_would_send_stays_false_for_cash_flow_gate_states(tmp_path):
         assert digest["pnl_sources"]["cash_flows"]["status"] == name
 
 
+def test_daily_digest_surfaces_pending_cash_flow_attestation_gap(tmp_path):
+    module = load_tool_module()
+    start = datetime(2026, 5, 1, 8, 0, tzinfo=timezone.utc)
+    attested_end = start + timedelta(days=2)
+    write_jsonl(
+        tmp_path / "wallet_portfolio_snapshots.jsonl",
+        wallet_snapshots(start=start, count=5, step_hours=24),
+    )
+    write_jsonl(tmp_path / "wallet_cash_flows.jsonl", [cash_flow_row(start, attested_end)])
+
+    digest = module.build_digest(tmp_path)
+    pending = digest["pnl_sources"]["pending_cash_flow_attestation"]
+    human = module.format_human(digest)
+
+    assert pending["status"] == "pending_no_cash_flow_attestation"
+    assert pending["manual_confirmation_required"] is True
+    assert pending["writes_wallet_cash_flows"] is False
+    assert pending["canonical_eligible"] is False
+    assert "Cash-flow coverage gap:" in human
+    assert "Pablo confirmation needed." in human
+
+
 def test_daily_digest_does_not_execute_wallet_snapshot_tool():
     source = TOOL_PATH.read_text(encoding="utf-8")
 
