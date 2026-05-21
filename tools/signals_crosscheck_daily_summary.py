@@ -21,6 +21,7 @@ DEFAULT_CROSSCHECK_FALLBACK = REPO_ROOT / "data" / "runtime_import_derived" / "s
 DEFAULT_SIGNALS_PATH = REPO_ROOT / "data" / "runtime_import" / "signals.json"
 DEFAULT_SHADOW_PATH = REPO_ROOT / "data" / "runtime_import" / "shadow_city_tracking.json"
 DEFAULT_POLICY_PATH = REPO_ROOT / "data" / "runtime_import" / "city_policy_state.json"
+DEFAULT_SOURCE_ONBOARDING_PATH = REPO_ROOT / "data" / "source_onboarding.json"
 DEFAULT_STATE_PATH = REPO_ROOT / "data" / "signals_crosscheck_daily_summary_state.json"
 DEFAULT_MD_OUTPUT = REPO_ROOT / "docs" / "signals_crosscheck_daily_summary_latest.md"
 
@@ -39,6 +40,7 @@ def parse_args():
     parser.add_argument("--signals", default=str(DEFAULT_SIGNALS_PATH))
     parser.add_argument("--shadow", default=str(DEFAULT_SHADOW_PATH))
     parser.add_argument("--policy", default=str(DEFAULT_POLICY_PATH))
+    parser.add_argument("--source-onboarding", default=str(DEFAULT_SOURCE_ONBOARDING_PATH))
     parser.add_argument("--state-output", default=str(DEFAULT_STATE_PATH))
     parser.add_argument("--md-output", default=str(DEFAULT_MD_OUTPUT))
     parser.add_argument(
@@ -174,13 +176,62 @@ def get_blocked_cities(policy_data: dict):
     return blocked
 
 
-def build_today_operational_sample(signals_path: str, shadow_path: str, policy_path: str):
+def index_source_onboarding(payload):
+    if not isinstance(payload, dict):
+        return {}
+    rows = payload.get("candidates") or payload.get("records") or payload.get("cities") or []
+    if isinstance(rows, dict):
+        rows = rows.values()
+    indexed = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        city = str(row.get("city") or "").strip()
+        if city:
+            indexed[city] = row
+    return indexed
+
+
+def source_status_for_city(row):
+    row = row if isinstance(row, dict) else {}
+    values = [
+        row.get("primary_status"),
+        row.get("state"),
+        row.get("mapping_status"),
+        row.get("internal_mapping_status"),
+        row.get("source_audit_status"),
+        row.get("source_feasibility"),
+    ]
+    blocking = row.get("blocking_reasons")
+    if isinstance(blocking, list):
+        values.extend(blocking)
+    joined = " ".join(str(value or "").upper() for value in values)
+    if "MAPPING_MISSING" in joined or "NO_ICAO" in joined:
+        if "MAPPING_MISSING" in joined and "NO_ICAO" in joined:
+            return "MAPPING_MISSING/no_icao", True
+        if "MAPPING_MISSING" in joined:
+            return "MAPPING_MISSING", True
+        return "no_icao", True
+    if "SOURCE_BLOCKED" in joined or "SOURCE_MISMATCH" in joined:
+        return "SOURCE_BLOCKED", True
+    return str(row.get("mapping_status") or row.get("primary_status") or "unknown"), False
+
+
+def build_today_operational_sample(
+    signals_path: str,
+    shadow_path: str,
+    policy_path: str,
+    source_onboarding_path: str | None = None,
+):
     try:
         sig_data = load_json(signals_path, required=True)
         shadow_data = load_json(shadow_path, required=True)
         policy_data = load_json(policy_path, required=False) or {}
     except FileNotFoundError:
         return []
+    source_onboarding = {}
+    if source_onboarding_path:
+        source_onboarding = index_source_onboarding(load_json(source_onboarding_path, required=False) or {})
 
     signals = sig_data.get("signals", []) if isinstance(sig_data, dict) else []
     shadow_cities = shadow_data.get("cities", {}) if isinstance(shadow_data, dict) else {}
@@ -194,9 +245,15 @@ def build_today_operational_sample(signals_path: str, shadow_path: str, policy_p
         city = signal.get("city")
         if not city:
             continue
-        city_stat = stats.setdefault(city, {"allowed": 0, "consensus": 0, "max_wr": 0.0})
+        city_stat = stats.setdefault(
+            city,
+            {"allowed": 0, "consensus": 0, "max_wr": 0.0, "consensus_traders": set()},
+        )
         if signal.get("condition") in allowed_conditions:
             city_stat["allowed"] += 1
+            trader = str(signal.get("trader") or "").strip()
+            if trader and signal.get("has_consensus"):
+                city_stat["consensus_traders"].add(trader)
         if signal.get("has_consensus"):
             city_stat["consensus"] += 1
         wr = float(signal.get("trader_win_rate") or 0.0)
@@ -212,12 +269,31 @@ def build_today_operational_sample(signals_path: str, shadow_path: str, policy_p
         shadow = shadow_cities.get(city, {}) if isinstance(shadow_cities, dict) else {}
         if int(shadow.get("edge_hits", 0) or 0) > 0:
             continue
+        source_status, source_blocked = source_status_for_city(source_onboarding.get(city, {}))
+        markets_seen = int(shadow.get("markets_seen", 0) or 0)
+        edge_hits = int(shadow.get("edge_hits", 0) or 0)
+        gate_passed = (
+            city_stat["allowed"] >= 5 and len(city_stat["consensus_traders"]) >= 2
+        ) or (markets_seen >= 15 and edge_hits >= 1)
+        if source_blocked:
+            severity = "WATCH_SOURCE"
+        elif gate_passed:
+            severity = "ACTION"
+        else:
+            severity = "WATCH_SOURCE"
         sample.append(
             {
                 "city": city,
                 "allowed": city_stat["allowed"],
                 "consensus": city_stat["consensus"],
+                "consensus_trader_count": len(city_stat["consensus_traders"]),
                 "max_wr": city_stat["max_wr"],
+                "source_status": source_status,
+                "source_blocked": source_blocked,
+                "markets_seen": markets_seen,
+                "edge_hits": edge_hits,
+                "gate_passed": gate_passed,
+                "severity": severity,
             }
         )
     sample.sort(key=lambda row: (-row["consensus"], -row["allowed"], -row["max_wr"], row["city"]))
@@ -344,6 +420,7 @@ def build_message(summary: dict, today_operational_sample: list[dict]):
 
     next_step_header = {
         "ACTION": "Tarea para Codex",
+        "WATCH_SOURCE": "Proximo paso (WATCH_SOURCE)",
         "WATCH": "Próximo paso (WATCH)",
         "INFO": "Próximo paso",
     }.get(action["label"], "Próximo paso")
@@ -375,7 +452,18 @@ def classify_action_level(summary: dict, today_operational_sample: list[dict]) -
         }
 
     if today_operational_sample:
-        top_city = today_operational_sample[0]["city"]
+        action_rows = [row for row in today_operational_sample if row.get("severity") == "ACTION"]
+        if not action_rows:
+            top_city = today_operational_sample[0]["city"]
+            return {
+                "label": "WATCH_SOURCE",
+                "reason": "hay gap operable real, pero fuente/gates no permiten ACTION.",
+                "task": (
+                    f"Mantener <code>{top_city}</code> en WATCH_SOURCE: revisar source_onboarding/mapping "
+                    "solo como tarea separada. No abrir whitelist/canary ni tocar trading core."
+                ),
+            }
+        top_city = action_rows[0]["city"]
         return {
             "label": "ACTION",
             "reason": "hay gap operativo real fuera de blocked con consenso y condicion operable.",
@@ -390,8 +478,8 @@ def classify_action_level(summary: dict, today_operational_sample: list[dict]) -
 
     if latest_operational_count(summary) > 0:
         return {
-            "label": "ACTION",
-            "reason": "el cross-check live detecto gap operativo real, aunque el detalle no se pudo reconstruir.",
+            "label": "WATCH_SOURCE",
+            "reason": "el cross-check live detecto gap operativo, pero faltan detalles de fuente/gates para ACTION.",
             "task": (
                 "Auditar fuente/cobertura con los archivos live del bot antes de cualquier decision. "
                 "No abrir whitelist/canary automaticamente ni tocar reglas de entrada o trading core."
@@ -451,7 +539,12 @@ def main():
 
     recent_records = records[-max(1, args.window_runs) :]
     summary = summarize_runs(recent_records, min_runs=args.min_runs)
-    today_operational_sample = build_today_operational_sample(args.signals, args.shadow, args.policy)
+    today_operational_sample = build_today_operational_sample(
+        args.signals,
+        args.shadow,
+        args.policy,
+        args.source_onboarding,
+    )
 
     state = load_json(args.state_output, required=False) or {}
     today_utc = datetime.now(timezone.utc).date().isoformat()

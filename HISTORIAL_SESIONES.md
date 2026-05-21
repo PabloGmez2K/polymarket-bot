@@ -5708,7 +5708,7 @@ No se tocaron `bot.py`, codigo, BANKROLL, Fase C, city modes, whitelist, sizing,
 
 ---
 
-## Sesion 372 - 21 de mayo de 2026 (Codex)
+## Sesión 372 - 21 de mayo de 2026 (Codex)
 
 **Clasificacion:** LITE / docs-only / alert severity contract
 **Bloque:** Trader-vs-bot gap daily alert severity
@@ -5734,3 +5734,34 @@ No se tocaron codigo, `bot.py`, env vars, DB, BANKROLL, Fase C, whitelist,
 canary, city modes, `RESOLUTION_ICAO`, `RESOLUTION_STATIONS`,
 `OBSERVED_AUDIT_CITIES`, Railway runtime ni trading. No se ejecuto
 `verify_before_deploy.py`.
+
+---
+
+## Sesión 373 - 21 de mayo de 2026 (Codex)
+
+**Clasificacion:** NORMAL / LOG_ONLY alert severity patch / no trading
+**Bloque:** Trader-vs-bot gap severity split
+**Veredicto:** SPLIT_ACTION_LEVELS_IMPLEMENTED
+
+### Objetivo
+
+Aplicar el contrato Opus `SPLIT_ACTION_LEVELS` en la alarma diaria
+trader-vs-bot gap para que ciudades con fuente no resuelta, como San Francisco,
+no emitan `ACTION`.
+
+### Cambios
+
+- `bot.py`: el cross-check diario lee `source_onboarding.json`, calcula
+  severidad por ciudad TRADER_ONLY operable y persiste debug en
+  `trader_only_severity_details`.
+- `tools/signals_crosscheck_daily_summary.py`: el resumen temporal diario
+  acepta `--source-onboarding` y evita `ACTION` cuando faltan fuente/gates.
+- `tests/test_trader_gap_severity.py`: regresion San Francisco
+  `WATCH_SOURCE`, regla dura `MAPPING_MISSING/no_icao` y caso minimo `ACTION`
+  con mapping listo y gates cumplidos.
+
+### Guardrails
+
+No se tocaron BANKROLL, Fase C, whitelist, canary, city modes,
+`RESOLUTION_ICAO`, `RESOLUTION_STATIONS`, `OBSERVED_AUDIT_CITIES`, DB, env
+vars, runtime execution, BUY/SELL/SKIP ni source unlock de San Francisco.

@@ -703,6 +703,7 @@ TRADE_LIFECYCLE_FILE = _data_path("trade_lifecycle.json")
 ALERTS_FILE = _data_path("alerts_state.json")
 SHADOW_TRACKING_FILE = _data_path("shadow_city_tracking.json")
 CITY_POLICY_FILE = _data_path("city_policy_state.json")
+SOURCE_ONBOARDING_FILE = _data_path("source_onboarding.json")
 SKIP_LOG_FILE = _data_path("skip_log.jsonl")
 SKIP_LOG_MAX_SIZE_BYTES = 20 * 1024 * 1024  # 20 MB — rotación del contrato R3
 SL_COOLDOWN_FILE = _data_path("sl_city_cooldown.json")
@@ -9383,6 +9384,220 @@ def maybe_send_daily_summary_telegram(state, now=None):
     return True
 
 
+def _load_crosscheck_records(path):
+    records = []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    row = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(row, dict):
+                    records.append(row)
+    except Exception:
+        pass
+    return records
+
+
+def _index_crosscheck_source_onboarding(payload):
+    if not isinstance(payload, dict):
+        return {}
+    rows = payload.get("candidates") or payload.get("records") or payload.get("cities") or []
+    if isinstance(rows, dict):
+        rows = rows.values()
+    index = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        city = str(row.get("city") or "").strip()
+        if city:
+            index[city] = row
+    return index
+
+
+def _crosscheck_source_status(source_row):
+    source_row = source_row if isinstance(source_row, dict) else {}
+    values = [
+        source_row.get("primary_status"),
+        source_row.get("state"),
+        source_row.get("mapping_status"),
+        source_row.get("internal_mapping_status"),
+        source_row.get("source_audit_status"),
+        source_row.get("source_feasibility"),
+    ]
+    blocking_reasons = source_row.get("blocking_reasons")
+    if isinstance(blocking_reasons, list):
+        values.extend(blocking_reasons)
+    normalized = {str(value or "").strip() for value in values if str(value or "").strip()}
+    joined = " ".join(normalized).upper()
+    source_blocked = "MAPPING_MISSING" in joined or "NO_ICAO" in joined
+    if source_blocked:
+        if "MAPPING_MISSING" in joined and "NO_ICAO" in joined:
+            return "MAPPING_MISSING/no_icao", True
+        if "MAPPING_MISSING" in joined:
+            return "MAPPING_MISSING", True
+        return "no_icao", True
+    if "SOURCE_BLOCKED" in joined or "SOURCE_MISMATCH" in joined:
+        return next((value for value in normalized if value in {"SOURCE_BLOCKED", "SOURCE_MISMATCH"}), "SOURCE_BLOCKED"), True
+    if not normalized:
+        return "unknown", False
+    mapping = str(
+        source_row.get("mapping_status")
+        or source_row.get("internal_mapping_status")
+        or source_row.get("primary_status")
+        or "unknown"
+    )
+    return mapping, False
+
+
+def _crosscheck_record_has_operable_gap(record, city):
+    if not isinstance(record, dict):
+        return False
+    details = record.get("trader_only_severity_details")
+    if isinstance(details, dict):
+        detail = details.get(city)
+        if isinstance(detail, dict):
+            return int(detail.get("operable_signal_count", 0) or 0) >= 2
+    if city in (record.get("operational_trader_only_cities") or []):
+        return True
+    return False
+
+
+def _crosscheck_distinct_gap_days(city, previous_records, now):
+    days = set()
+    now_date = now.date() if hasattr(now, "date") else datetime.now(timezone.utc).date()
+    for record in previous_records or []:
+        if not _crosscheck_record_has_operable_gap(record, city):
+            continue
+        day_text = str(record.get("run_at") or "")[:10]
+        if not day_text:
+            continue
+        try:
+            day = datetime.fromisoformat(day_text).date()
+        except Exception:
+            continue
+        if (now_date - day).days <= 14:
+            days.add(day.isoformat())
+    days.add(now_date.isoformat())
+    return len(days)
+
+
+def _classify_trader_gap_city_severity(
+    city,
+    city_stat,
+    source_row,
+    shadow_row,
+    previous_records,
+    now=None,
+    city_mode="shadow",
+    is_blocked=False,
+    observed_audit_cities=None,
+):
+    now = now or datetime.now(timezone.utc)
+    city_stat = city_stat if isinstance(city_stat, dict) else {}
+    shadow_row = shadow_row if isinstance(shadow_row, dict) else {}
+    observed_audit_cities = observed_audit_cities or set()
+
+    operable_signal_count = int(city_stat.get("allowed", 0) or 0)
+    consensus_signal_count = int(city_stat.get("consensus", 0) or 0)
+    consensus_trader_count = len(city_stat.get("consensus_operable_traders", set()) or set())
+    distinct_gap_days = _crosscheck_distinct_gap_days(city, previous_records, now)
+    markets_seen = int(shadow_row.get("markets_seen", 0) or 0)
+    edge_hits = int(shadow_row.get("edge_hits", 0) or 0)
+    source_status, source_blocked = _crosscheck_source_status(source_row)
+
+    gate_reasons = []
+    if distinct_gap_days >= 3:
+        gate_reasons.append("distinct_gap_days>=3")
+    if operable_signal_count >= 5 and consensus_trader_count >= 2:
+        gate_reasons.append("operable_n>=5_consensus_traders>=2")
+    if markets_seen >= 15 and edge_hits >= 1:
+        gate_reasons.append("shadow_markets_seen>=15_edge_hits>=1")
+    gate_passed = bool(gate_reasons)
+
+    if operable_signal_count < 2 or consensus_signal_count <= 0 or is_blocked:
+        severity = "INFO"
+        reason = "not_operational_gap"
+    elif source_blocked:
+        severity = "WATCH_SOURCE"
+        reason = "source_blocked"
+    elif not gate_passed and distinct_gap_days <= 1:
+        severity = "INFO"
+        reason = "single_day_or_insufficient_magnitude"
+    elif not gate_passed:
+        severity = "WATCH_SOURCE"
+        reason = "magnitude_gates_not_met"
+    else:
+        action_allowed = city_mode in {"active", "canary"} or (
+            city in observed_audit_cities and int(shadow_row.get("cycles_seen", 0) or 0) >= 1
+        )
+        if action_allowed:
+            severity = "ACTION"
+            reason = "magnitude_gates_met_source_ready_action_context"
+        else:
+            severity = "WATCH"
+            reason = "magnitude_gates_met_source_ready_observe"
+
+    if source_blocked and severity == "ACTION":
+        severity = "WATCH_SOURCE"
+        reason = "source_blocked_hard_no_action"
+
+    return {
+        "city": city,
+        "severity": severity,
+        "reason": reason,
+        "source_status": source_status,
+        "operable_signal_count": operable_signal_count,
+        "consensus_signal_count": consensus_signal_count,
+        "consensus_trader_count": consensus_trader_count,
+        "distinct_gap_days": distinct_gap_days,
+        "markets_seen": markets_seen,
+        "edge_hits": edge_hits,
+        "gate_passed": gate_passed,
+        "gate_status": "gate_passed" if gate_passed else "gate_failed",
+        "gate_reasons": gate_reasons,
+        "city_mode": city_mode,
+    }
+
+
+def _crosscheck_overall_severity(details_by_city):
+    # Legacy verify anchors: action_level = "ACTION" / action_level = "WATCH" / action_level = "INFO".
+    order = {"INFO": 0, "WATCH_SOURCE": 1, "WATCH": 2, "ACTION": 3}
+    best = "INFO"
+    for detail in (details_by_city or {}).values():
+        severity = str((detail or {}).get("severity") or "INFO")
+        if order.get(severity, 0) > order.get(best, 0):
+            best = severity
+    return best
+
+
+def _crosscheck_action_task(action_level, operational_trader_only, details_by_city):
+    details_by_city = details_by_city or {}
+    focus_city = operational_trader_only[0] if operational_trader_only else None
+    if action_level == "ACTION" and focus_city:
+        return (
+            f"Accion: auditar {focus_city} primero (fuente lista, gates cumplidos). "
+            "Cerrar con decision operativa Opus; no mutar trading automaticamente."
+        )
+    if action_level == "WATCH":
+        return "Accion diferida: observar serie extendida antes de abrir decision operativa."
+    if action_level == "WATCH_SOURCE":
+        blocked = [
+            city for city, detail in details_by_city.items()
+            if "MAPPING_MISSING" in str(detail.get("source_status", "")) or "no_icao" in str(detail.get("source_status", ""))
+        ]
+        if blocked:
+            return (
+                f"Fuente/mapping pendiente en {blocked[0]}: mantener WATCH_SOURCE. "
+                "No source unlock, no whitelist/canary y no cambio de city modes."
+            )
+        return "Gap operable real, pero gates de magnitud no cumplidos: notificacion baja prioridad."
+    return "Sin tarea nueva: seguir acumulando serie."
+
+
 def maybe_run_daily_crosscheck(state, now=None):
     """
     v10.6.12: corre el cross-check señales traders vs edge bot una vez por día
@@ -9405,9 +9620,15 @@ def maybe_run_daily_crosscheck(state, now=None):
             sig_data = json.load(f)
         with open(SHADOW_TRACKING_FILE, "r", encoding="utf-8") as f:
             shadow_data = json.load(f)
+        try:
+            with open(SOURCE_ONBOARDING_FILE, "r", encoding="utf-8") as f:
+                source_onboarding_data = json.load(f)
+        except Exception:
+            source_onboarding_data = {}
 
         signals = sig_data.get("signals", []) if isinstance(sig_data, dict) else []
         shadow_cities = shadow_data.get("cities", {}) if isinstance(shadow_data, dict) else {}
+        source_onboarding = _index_crosscheck_source_onboarding(source_onboarding_data)
         signals_generated_at = sig_data.get("generated", "") if isinstance(sig_data, dict) else ""
         shadow_updated_at = shadow_data.get("updated_at", "") if isinstance(shadow_data, dict) else ""
 
@@ -9421,13 +9642,29 @@ def maybe_run_daily_crosscheck(state, now=None):
             if not city:
                 continue
             if city not in city_stats:
-                city_stats[city] = {"n": 0, "consensus": 0, "allowed": 0, "max_wr": 0.0}
+                city_stats[city] = {
+                    "n": 0,
+                    "consensus": 0,
+                    "allowed": 0,
+                    "max_wr": 0.0,
+                    "operable_traders": set(),
+                    "consensus_operable_traders": set(),
+                    "dates": set(),
+                }
             st = city_stats[city]
             st["n"] += 1
             if s.get("has_consensus"):
                 st["consensus"] += 1
             if s.get("condition") in allowed_conds:
                 st["allowed"] += 1
+                trader = str(s.get("trader") or "").strip()
+                if trader:
+                    st["operable_traders"].add(trader)
+                    if s.get("has_consensus"):
+                        st["consensus_operable_traders"].add(trader)
+                date_value = str(s.get("date") or "").strip()
+                if date_value:
+                    st["dates"].add(date_value[:10])
             wr = float(s.get("trader_win_rate") or 0)
             if wr > st["max_wr"]:
                 st["max_wr"] = wr
@@ -9446,6 +9683,27 @@ def maybe_run_daily_crosscheck(state, now=None):
             c for c in actionable_trader_only
             if city_stats[c]["consensus"] > 0 and not is_city_blocked(c)
         ]
+        previous_records = _load_crosscheck_records(SIGNALS_CROSSCHECK_FILE)
+        severity_details = {}
+        for c in trader_only_cities:
+            severity_details[c] = _classify_trader_gap_city_severity(
+                c,
+                city_stats.get(c, {}),
+                source_onboarding.get(c, {}),
+                shadow_cities.get(c, {}) if isinstance(shadow_cities, dict) else {},
+                previous_records,
+                now=now,
+                city_mode=get_effective_city_mode(c),
+                is_blocked=is_city_blocked(c),
+                observed_audit_cities=OBSERVED_AUDIT_CITIES,
+            )
+        operational_severity_details = {
+            c: severity_details[c]
+            for c in operational_trader_only
+            if c in severity_details
+        }
+        action_level = _crosscheck_overall_severity(operational_severity_details)
+        severity_action_level = action_level
 
         # Append record to JSONL
         record = {
@@ -9466,6 +9724,8 @@ def maybe_run_daily_crosscheck(state, now=None):
             ),
             "actionable_trader_only_count": len(actionable_trader_only),
             "operational_trader_only_count": len(operational_trader_only),
+            "operational_trader_only_cities": operational_trader_only,
+            "trader_only_severity_details": severity_details,
         }
         crosscheck_dir = os.path.dirname(SIGNALS_CROSSCHECK_FILE)
         if crosscheck_dir:
@@ -9484,7 +9744,7 @@ def maybe_run_daily_crosscheck(state, now=None):
         action_lines = ""
         if operational_trader_only:
             top_city = operational_trader_only[0]
-            action_level = "ACTION"
+            action_level = severity_action_level
             action_task = (
                 f"Accion: auditar {top_city} primero (whitelist, RESOLUTION_ICAO/estacion, "
                 f"OBSERVED_AUDIT_CITIES/cobertura NOAA y ultimas seÃ±ales trader). "
@@ -9499,10 +9759,40 @@ def maybe_run_daily_crosscheck(state, now=None):
         else:
             action_level = "INFO"
             action_task = "Sin tarea nueva: seguir acumulando serie."
+        action_level = severity_action_level
+        action_task = _crosscheck_action_task(
+            action_level,
+            operational_trader_only,
+            operational_severity_details,
+        )
+        if action_level == "INFO" and not operational_trader_only and len(trader_only_cities) >= 10:
+            action_level = "WATCH"
+            action_task = (
+                "Accion diferida: si estas ciudades se repiten varios dias, revisar whitelist "
+                "y cobertura observada antes de tocar reglas core."
+            )
         for c in operational_trader_only[:4]:
             st = city_stats[c]
             cons_tag = " (consenso)" if st["consensus"] > 0 else ""
             action_lines += f"\n  • {c}: {st['allowed']} señal(es){cons_tag}"
+
+        if operational_trader_only:
+            detailed_action_lines = ""
+            for c in operational_trader_only[:4]:
+                st = city_stats[c]
+                cons_tag = " (consenso)" if st["consensus"] > 0 else ""
+                detail = operational_severity_details.get(c, {})
+                detailed_action_lines += (
+                    f"\n  - {c}: {st['allowed']} senal(es){cons_tag}"
+                    f" | severity={detail.get('severity', 'INFO')}"
+                    f" source={detail.get('source_status', 'unknown')}"
+                    f" operable={detail.get('operable_signal_count')}"
+                    f" days={detail.get('distinct_gap_days')}"
+                    f" markets={detail.get('markets_seen')}"
+                    f" edge_hits={detail.get('edge_hits')}"
+                    f" gate={detail.get('gate_status', 'gate_failed')}"
+                )
+            action_lines = detailed_action_lines
 
         daily_msg = (
             f"📊 <b>Cross-check diario traders vs bot</b>\n"
@@ -9576,6 +9866,8 @@ def maybe_run_daily_crosscheck_temporal_summary(now=None):
                 SHADOW_TRACKING_FILE,
                 "--policy",
                 CITY_POLICY_FILE,
+                "--source-onboarding",
+                SOURCE_ONBOARDING_FILE,
             ],
             capture_output=True,
             text=True,
