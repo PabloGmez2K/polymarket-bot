@@ -259,6 +259,30 @@ Si el usuario pega outputs de agentes, analizarlos también desde token economic
 
 ---
 
+## 7.1 Codex Operating Pattern
+
+Para cambios importantes, empezar en modo `ASK` / read-only: mapa del código,
+plan, riesgos, archivos candidatos, validación esperada y criterio de parada.
+Pasar a `CODE` solo si el scope queda claro y supera el Token Economics Gate.
+
+Los prompts para Codex deben parecerse a una issue/PR: objetivo, contexto
+mínimo, rutas o archivos relevantes, patrón existente a imitar, guardrails,
+validación y formato de entrega.
+
+`Best-of-N` solo se usa para comparar planes, prompts o alternativas de diseño
+cuando el coste está justificado. No usarlo para multiplicar implementaciones,
+Railway checks ni análisis `WATCH_ONLY`.
+
+La cola/backlog de Codex queda subordinada a trigger, ROI esperado y criterio
+de cierre. Evitar cementerios `WATCH`: si no mueve P&L, throughput, riesgo,
+BANKROLL readiness o calidad de decisión en <=30d, cerrar como `DEFER_STOP`.
+
+Codex implementa, testea y valida, pero no decide semántica de trading/riesgo:
+BANKROLL, sizing, whitelist, city modes, scheduler, BUY/SELL/SKIP, guards/SL,
+source promotion y Fase C requieren Opus o confirmación humana según modo.
+
+---
+
 ## 8. Guardrails críticos
 
 - No tocar trading core salvo petición explícita.

@@ -16,6 +16,14 @@ No cargar `CONTEXTO.md` completo ni sesiones antiguas sin necesidad.
 - subir profundidad solo con perfiles `low`, `deep` o `max`
 - preferir trabajo por fases y subproblemas acotados
 
+## Codex Operating Pattern
+
+- Para cambios importantes: primero `ASK` / read-only con mapa, plan, riesgos, archivos candidatos, validación y criterio de parada; luego `CODE` solo si el scope queda claro.
+- Tratar prompts como issues/PRs: objetivo, contexto mínimo, rutas, patrón existente, guardrails, validación y entrega.
+- `Best-of-N` solo para comparar planes, prompts o alternativas de diseño con coste justificado; no para multiplicar implementaciones, Railway checks ni análisis `WATCH_ONLY`.
+- La cola/backlog de Codex requiere trigger, ROI esperado y criterio de cierre; evitar cementerios `WATCH`.
+- Codex implementa, testea y valida; no decide semántica de trading/riesgo: BANKROLL, sizing, whitelist, city modes, scheduler, BUY/SELL/SKIP, guards/SL, source promotion y Fase C requieren Opus o confirmación humana según modo.
+
 ## Modos de ciudad — regla canónica
 
 Cuatro modos exclusivos y ordenados por prioridad (el primero que aplica gana):
