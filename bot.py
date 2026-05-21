@@ -698,6 +698,8 @@ UNSELLABLE_GUARD_MONITOR_SCRIPT = os.path.join(
     "unsellable_guard_monitor.py",
 )
 CYCLES_HISTORY_FILE = _data_path("cycles_history.jsonl")
+FUNNEL_OBSERVABILITY_LOG_ONLY_FILE = _data_path("funnel_observability_log_only.jsonl")
+FUNNEL_OBSERVABILITY_LATEST_FILE = _data_path("funnel_observability_latest.json")
 POSTMORTEM_FILE = _data_path("postmortem.json")
 TRADE_LIFECYCLE_FILE = _data_path("trade_lifecycle.json")
 ALERTS_FILE = _data_path("alerts_state.json")
@@ -982,6 +984,151 @@ def _build_bot_eval_key(city, date_iso, condition, threshold, threshold_high=Non
         return None
     temp_part = f"{threshold}-{threshold_high}" if threshold_high is not None else str(threshold)
     return f"{city}|{date_iso}|{condition}|{temp_part}|{unit}"
+
+
+def _funnel_market_identifier(market):
+    """Stable LOG_ONLY market id; never used for trading authorization."""
+    if not isinstance(market, dict):
+        return None
+    for key in ("condition_id", "conditionId", "market_id", "id", "marketId", "market_slug", "slug"):
+        value = market.get(key)
+        if value is not None and str(value).strip():
+            if key in {"condition_id", "conditionId"}:
+                return f"condition_id:{str(value).strip()}"
+            if key in {"market_slug", "slug"}:
+                return f"market_slug:{str(value).strip()}"
+            return f"market_id:{str(value).strip()}"
+
+    question = str(market.get("question") or "").strip()
+    parsed = parse_temperature_question(question) if question else None
+    if not parsed:
+        return f"fallback:|||||||{question}" if question else None
+    date_iso = date_text_to_iso(parsed.get("date_str", "")) or parsed.get("date_str", "")
+    parts = [
+        parsed.get("city", ""),
+        date_iso,
+        parsed.get("condition", ""),
+        parsed.get("temp_threshold", ""),
+        parsed.get("temp_threshold_high", ""),
+        parsed.get("unit", ""),
+        question,
+    ]
+    return "fallback:" + "|".join(str(part) for part in parts)
+
+
+def count_discovered_markets_unique(markets):
+    """
+    Count unique discovered markets before filters.
+    LOG_ONLY metrics only: this does not authorize trading and is not read by
+    BUY/SELL/SKIP decisions.
+    """
+    if markets is None:
+        return None
+    seen = set()
+    for market in markets:
+        identifier = _funnel_market_identifier(market)
+        if identifier:
+            seen.add(identifier)
+    return len(seen)
+
+
+def _safe_int(value, default=0):
+    try:
+        return int(value or 0)
+    except Exception:
+        return default
+
+
+def _funnel_reason_count(reason_counts, *names):
+    if not isinstance(reason_counts, dict):
+        return 0
+    return sum(_safe_int(reason_counts.get(name)) for name in names)
+
+
+def build_funnel_observability_record(cycle_data, discovered_markets_unique=None):
+    """
+    Build the per-cycle funnel artifact.
+    LOG_ONLY / NO_ACTION: metrics only, no trading authorization, and no impact
+    on BUY/SELL/SKIP, sizing, city modes, scheduler, filters, or guards.
+    """
+    cycle_data = cycle_data if isinstance(cycle_data, dict) else {}
+    scan = cycle_data.get("scan", {}) if isinstance(cycle_data.get("scan"), dict) else {}
+    slot_metrics = scan.get("slot_metrics", {}) if isinstance(scan.get("slot_metrics"), dict) else {}
+    reject_reasons = slot_metrics.get("reject_reasons", {})
+    execution_rejects = slot_metrics.get("execution_reject_reasons", {})
+    if not isinstance(reject_reasons, dict):
+        reject_reasons = {}
+    if not isinstance(execution_rejects, dict):
+        execution_rejects = {}
+
+    policy_source_blocked = {
+        "fuera_allowlist": _funnel_reason_count(reject_reasons, "fuera_allowlist"),
+        "blocked_city": _funnel_reason_count(reject_reasons, "blocked_city"),
+        "settlement_risk": _funnel_reason_count(reject_reasons, "settlement_risk"),
+        "shadow_only_mode": _funnel_reason_count(reject_reasons, "shadow_only_override", "shadow_only_mode"),
+    }
+    policy_source_blocked["total"] = sum(policy_source_blocked.values())
+
+    date_past = _funnel_reason_count(reject_reasons, "date_out_of_range_past")
+    date_future = _funnel_reason_count(reject_reasons, "date_out_of_range_future")
+    discovered_is_known = discovered_markets_unique is not None
+
+    return {
+        "schema_version": 1,
+        "ts_utc": cycle_data.get("timestamp_utc") or datetime.now(timezone.utc).isoformat(),
+        "cycle_number": cycle_data.get("cycle_number"),
+        "logic_cycle_number": cycle_data.get("logic_cycle_number"),
+        "logic_series": cycle_data.get("logic_series"),
+        "version": cycle_data.get("version"),
+        "mode": cycle_data.get("mode"),
+        "log_only": True,
+        "trading_authorization": "NO_ACTION",
+        "discovered_markets_unique": _safe_int(discovered_markets_unique) if discovered_is_known else None,
+        "prefiltered": _safe_int(scan.get("markets_evaluated")),
+        "markets_evaluated": _safe_int(scan.get("markets_evaluated")),
+        "city_window_skipped": _safe_int(scan.get("city_window_skipped")),
+        "price_out_of_range": _funnel_reason_count(reject_reasons, "price_out_of_range"),
+        "date_out_of_range_past": date_past,
+        "date_out_of_range_future": date_future,
+        "date_out_of_range": {"past": date_past, "future": date_future},
+        "condition_filtered": _safe_int(scan.get("condition_filtered")) or _funnel_reason_count(reject_reasons, "condition_filtered"),
+        "policy_source_blocked": policy_source_blocked,
+        "edge": _safe_int(scan.get("with_edge")),
+        "with_edge": _safe_int(scan.get("with_edge")),
+        "shadow_edge": _safe_int(scan.get("shadow")),
+        "shadow": _safe_int(scan.get("shadow")),
+        "selected": _safe_int(scan.get("selected")),
+        "real_buy": len(cycle_data.get("buys", []) if isinstance(cycle_data.get("buys"), list) else []),
+        "execution_rejects": dict(execution_rejects),
+        "baseline_partial": not discovered_is_known,
+        "reject_reasons": dict(reject_reasons),
+    }
+
+
+def write_funnel_observability_log_only(record, jsonl_path=None, latest_path=None):
+    """
+    Best-effort writer for funnel observability.
+    NO_ACTION metrics only: write failures are warnings and never affect trading.
+    """
+    if not isinstance(record, dict):
+        return False
+    jsonl_path = jsonl_path or FUNNEL_OBSERVABILITY_LOG_ONLY_FILE
+    latest_path = latest_path or FUNNEL_OBSERVABILITY_LATEST_FILE
+    try:
+        target_dir = os.path.dirname(jsonl_path)
+        if target_dir:
+            os.makedirs(target_dir, exist_ok=True)
+        with open(jsonl_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+        latest_dir = os.path.dirname(latest_path)
+        if latest_dir:
+            os.makedirs(latest_dir, exist_ok=True)
+        with open(latest_path, "w", encoding="utf-8") as f:
+            json.dump(record, f, indent=2, ensure_ascii=False, default=str)
+        return True
+    except Exception as e:
+        log.warning(f"funnel observability LOG_ONLY write failed (NO_ACTION metrics only): {e}")
+        return False
 
 
 def record_bot_evaluation(cycle_id, eval_key, would_buy: bool, **fields):
@@ -21374,6 +21521,7 @@ def main(client):
             for idx, tid in enumerate(clob_ids):
                 known_tokens[tid] = {"question": q, "side": "YES" if idx == 0 else "NO"}
 
+    discovered_markets_unique = count_discovered_markets_unique(all_markets)
     dl.append(f"\nMERCADOS: {len(all_markets)} encontrados")
     record_trade_lifecycle_market_observations(all_markets, source="cycle_market_scan")
 
@@ -22366,6 +22514,7 @@ def main(client):
                 "n_loss_total": mgmt.get("n_loss_total", 0),
             },
             "scan": {
+                "discovered_markets_unique": discovered_markets_unique if 'discovered_markets_unique' in locals() else None,
                 "markets_evaluated": len(candidates) if 'candidates' in locals() else 0,
                 "with_edge": len(trades) if 'trades' in locals() else 0,
                 "selected": len(selected) if 'selected' in locals() else 0,
@@ -22397,6 +22546,11 @@ def main(client):
         # Historial acumulativo (append-only, una línea JSON por ciclo)
         with open(CYCLES_HISTORY_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(cycle_data, ensure_ascii=False) + "\n")
+        funnel_record = build_funnel_observability_record(
+            cycle_data,
+            discovered_markets_unique=discovered_markets_unique if 'discovered_markets_unique' in locals() else None,
+        )
+        write_funnel_observability_log_only(funnel_record)
         log.info("cycle_summary guardado OK")
     except Exception as e:
         log.warning(f"Error guardando cycle_summary: {e}")
