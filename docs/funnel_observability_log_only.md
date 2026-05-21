@@ -1,9 +1,25 @@
 # Funnel Observability LOG_ONLY
 
-**Status:** design-only / LOG_ONLY.  
+**Status:** IMPLEMENTED / LOG_ONLY.
 **Decision source:** Opus strategic decision after live throughput evidence pack, cycle 366 (`2026-05-21T11:38:47Z`): `CODE_LOG_ONLY_METRICS_FIRST + SOURCE_ONBOARDING_FIRST`.
 
-This document defines a narrow observability patch for the weather-market funnel. It must not authorize trading, change policy, or change any filter.
+This document records the implemented narrow observability patch for the weather-market funnel. It does not authorize trading, change policy, or change any filter.
+
+## Implementation Status
+
+The LOG_ONLY funnel observability patch is already committed in `bot.py`.
+
+Implemented pieces:
+
+- Output paths: `FUNNEL_OBSERVABILITY_LOG_ONLY_FILE` and `FUNNEL_OBSERVABILITY_LATEST_FILE`.
+- `count_discovered_markets_unique(...)` for top-of-funnel market dedupe.
+- `build_funnel_observability_record(...)` for per-cycle counter normalization.
+- `write_funnel_observability_log_only(...)` as a best-effort/no-throw writer.
+- Discovery hook after `all_markets` is collected.
+- Cycle hook beside `cycle_summary.json` and `cycles_history.jsonl`.
+- Focused tests in `tests/test_funnel_observability.py`.
+
+This status update is documentation-only. It does not reopen the semantic design.
 
 ## Objective
 
@@ -99,17 +115,17 @@ Optional but useful fields:
 - `top_price_out_of_range_by_city`
 - `source_risk_by_city`
 
-## Recommended Artifact Format
+## Artifact Format
 
-Write append-only JSONL:
+The implementation writes append-only JSONL:
 
 `data/funnel_observability_log_only.jsonl`
 
-Each line is one cycle. A compact latest snapshot may also be written:
+Each line is one cycle. It also writes a compact latest snapshot:
 
 `data/funnel_observability_latest.json`
 
-The JSONL should be best-effort and no-throw. I/O errors must not stop a cycle. The writer must not be read by trading decision code.
+The JSONL writer is best-effort and no-throw. I/O errors must not stop a cycle. The writer must not be read by trading decision code.
 
 ## Joining Evaluation And Resolution Artifacts
 
@@ -157,11 +173,11 @@ Interpretation guardrail:
 
 ## Trading Authorization Guardrails
 
-The future patch must include explicit fail-closed wording in code comments, docs, and digest copy:
+The implemented patch remains fail-closed:
 
 - `log_only=true`
 - `trading_authorization="NO_ACTION"`
-- no changes to `ACTIVE_TRADING_CITIES`, `CANARY_TRADING_CITIES`, `BLOCKED_CITIES`, `auto_*_cities`, whitelist, BANKROLL, sizing, scheduler, source policy, exact/range filters, guards, Fase C, or BUY/SELL/SKIP
+- no changes to `ACTIVE_TRADING_CITIES`, `CANARY_TRADING_CITIES`, `BLOCKED_CITIES`, `auto_*_cities`, whitelist, BANKROLL, sizing, scheduler, source policy, exact/range filters, guards, DB, env vars, Railway runtime, Fase C, or BUY/SELL/SKIP
 - no automatic promotion from `shadow_edge`, `edge`, or any joined settlement outcome
 - any city mode change requires later human confirmation
 
@@ -230,22 +246,31 @@ Additional artifact availability:
 - `blocked_signals_resolutions.jsonl`: 660 rows.
 - Latest logs available through Railway were recent deployment logs only; they confirmed cycle 366 and 367 activity but did not expose historical funnel counters directly.
 
-What is missing for a full baseline:
+What was missing for the historical 7-day baseline:
 
-- `discovered_markets_unique` is not present in `cycles_history.jsonl`.
+- `discovered_markets_unique` was not present in historical `cycles_history.jsonl` rows from before the implementation.
 - The existing `scanned_markets` list is a small sampled list, not raw discovery.
 - `bot_signal_evaluations.jsonl` does not cover the full 7-day window; it starts on `2026-05-19T20:00:55Z`.
 - Per-city/per-market breakdowns for `price_out_of_range`, `date_out_of_range`, and `policy/source blocked` are incomplete unless reconstructed from skip logs or future structured metrics.
 
-## Future Code Patch Candidates
+## Implemented Hook Locations
 
-Do not patch in this design session. Candidate locations for a later Codex CODE task:
+Current implementation locations:
 
-- `bot.py` near market discovery / scan loop: count `discovered_markets_unique`.
-- `bot.py` near `build_cycle_slot_metrics(...)`: normalize reject stage counters.
-- `bot.py` near `cycle_summary` write: append `funnel_observability_log_only.jsonl`.
-- `bot.py` near `record_bot_evaluation(...)`: reuse `eval_key` but keep this artifact separate.
-- Tests: focused unit tests around counter construction and no-throw JSONL append.
+- `bot.py` constants near the runtime artifact paths.
+- `bot.py` market discovery / scan loop: counts `discovered_markets_unique`.
+- `bot.py` `build_funnel_observability_record(...)`: normalizes stage counters.
+- `bot.py` `write_funnel_observability_log_only(...)`: appends JSONL and writes latest snapshot.
+- `bot.py` near `cycle_summary` / `cycles_history`: emits one funnel record per cycle.
+- `tests/test_funnel_observability.py`: covers market dedupe, counter mapping, partial baseline, JSONL/latest writes, and no-throw I/O failure.
+
+## Future Non-Semantic Extensions
+
+Any future extension must remain LOG_ONLY and require a separate prompt. Candidate non-semantic improvements:
+
+- Optional compact digest copy if explicitly approved.
+- Additional per-city/per-reason breakdowns derived only from already collected counters.
+- A separate Cycle Index pointer layer, only after its mini-spec is approved for CODE.
 
 Validation for future patch:
 
@@ -253,4 +278,3 @@ Validation for future patch:
 - focused tests for funnel counter builder and writer
 - `git diff --check`
 - `python verify_before_deploy.py` because that future patch would touch code
-
