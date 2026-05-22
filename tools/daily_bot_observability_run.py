@@ -18,9 +18,21 @@ import daily_bot_digest
 import db_throughput_report
 import leaderboard_pnl_snapshot
 
+try:
+    import traders_activity_profile as _tap
+    _TAP_AVAILABLE = True
+except Exception:
+    _tap = None  # type: ignore[assignment]
+    _TAP_AVAILABLE = False
+
 
 DEFAULT_SNAPSHOT_PATH = leaderboard_pnl_snapshot.DEFAULT_SNAPSHOT_PATH
 DEFAULT_DB_PATH = Path("data") / "polymarket.db"
+TRADERS_ACTIVITY_SNAPSHOT_DIR = Path("data") / "traders_intelligence" / "activity_snapshots"
+# Cover the full operational cohort (traders_db.json + traders_intelligence.json).
+# At 44 wallets × 2 sides × ~850ms/call = ~75s, safely within the 120s bot.py timeout.
+TRADERS_ACTIVITY_MAX_WALLETS = 50
+TRADERS_ACTIVITY_MAX_FILLS_PER_WALLET = 100
 
 
 class RunnerError(Exception):
@@ -110,6 +122,82 @@ def build_db_throughput_summary(args: argparse.Namespace) -> dict[str, Any] | No
     return summarize_db_throughput(report)
 
 
+def build_traders_activity_summary(args: argparse.Namespace) -> dict[str, Any]:
+    """Run traders activity profile for local-registry cohort. Always fail-open."""
+    if not getattr(args, "traders_activity_profile", False):
+        return {"ok": False, "error": "disabled"}
+    if not _TAP_AVAILABLE or _tap is None:
+        return {"ok": False, "error": "module_not_available"}
+    snapshot_dir = str(TRADERS_ACTIVITY_SNAPSHOT_DIR)
+    try:
+        profile_args = _tap.parse_args([
+            "--cohort", "local-registry",
+            "--max-wallets", str(TRADERS_ACTIVITY_MAX_WALLETS),
+            "--max-fills-per-wallet", str(TRADERS_ACTIVITY_MAX_FILLS_PER_WALLET),
+            "--snapshot-dir", snapshot_dir,
+        ])
+        payload = _tap.build_payload(profile_args)
+        if getattr(args, "write_snapshot", False):
+            _tap.write_snapshot(payload, snapshot_dir)
+        summary = payload.get("summary", {})
+        traders = payload.get("traders", [])
+        cohort_meta = payload.get("cohort", {})
+        failures = [t for t in traders if t.get("query_status") == "failed"]
+        comparable = [
+            t.get("alias") or t["wallet"][:10]
+            for t in traders
+            if t.get("lane_suggestion") == "COMPARABLE_CANDIDATE"
+        ]
+        return {
+            "ok": True,
+            "generated_at": payload.get("generated_at"),
+            "cohort_mode": cohort_meta.get("cohort_mode"),
+            "cohort_warning": cohort_meta.get("cohort_warning"),
+            "n_wallets": summary.get("n_wallets", 0),
+            "lane_counts": summary.get("lane_counts", {}),
+            "query_status_counts": summary.get("query_status_counts", {}),
+            "capped_wallets": summary.get("capped_wallets", 0),
+            "n_failures": len(failures),
+            "comparable_candidates": comparable,
+        }
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:300]}
+
+
+def render_traders_activity_telegram(summary: dict[str, Any]) -> str:
+    """Render compact traders activity section for Telegram. Returns empty string if disabled."""
+    error = summary.get("error", "")
+    if not summary.get("ok"):
+        if error == "disabled":
+            return ""
+        return (
+            "\n\n🔬 <b>Traders Activity (LOG_ONLY)</b>"
+            f"\n⚠️ Error: <code>{error[:120]}</code>"
+        )
+    lanes = summary.get("lane_counts", {})
+    comparable = summary.get("comparable_candidates", [])
+    n_wallets = summary.get("n_wallets", 0)
+    n_failures = summary.get("n_failures", 0)
+    q_counts = summary.get("query_status_counts", {})
+    ok_count = sum(v for k, v in q_counts.items() if k.startswith("ok_"))
+    lines = [
+        "",
+        "🔬 <b>Traders Activity (LOG_ONLY)</b>",
+        f"• Wallets: {n_wallets} | OK: {ok_count} | Fallos: {n_failures}",
+    ]
+    if lanes:
+        lane_summary = ", ".join(f"{k}={v}" for k, v in sorted(lanes.items()))
+        lines.append(f"• Lanes: {lane_summary}")
+    if comparable:
+        lines.append(f"• Comparable: {', '.join(comparable[:3])}")
+    else:
+        lines.append("• Comparable: ninguno provisional")
+    if summary.get("cohort_warning"):
+        lines.append("• ⚠️ local-registry: puede incluir wallets históricas, no solo activas.")
+    lines.append("• LOG_ONLY. No BUY/SELL/SKIP. Revisar antes de usar.")
+    return "\n".join(lines)
+
+
 def build_run(args: argparse.Namespace) -> dict[str, Any]:
     path = Path(args.snapshot_file)
     payload = leaderboard_pnl_snapshot.build_snapshot(snapshot_args(args))
@@ -132,9 +220,13 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
         temp_payload["temporary_snapshot"] = True
         digest = daily_bot_digest.build_digest_from_rows(rows + [temp_payload], path, db_throughput=db_summary)
 
+    traders_activity = build_traders_activity_summary(args)
+    traders_section = render_traders_activity_telegram(traders_activity)
+    extended_preview = digest["telegram_preview"] + (traders_section if traders_section else "")
+
     telegram_send_result = {"sent": False, "reason": "not_attempted"}
     if args.send_telegram_manual:
-        telegram_send_result = daily_bot_digest.send_telegram_manual(digest["telegram_preview"])
+        telegram_send_result = daily_bot_digest.send_telegram_manual(extended_preview)
 
     return {
         "mode": "write_snapshot" if args.write_snapshot else "dry_run",
@@ -149,6 +241,7 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
         "usable_for_trend": True,
         "usable_for_bankroll": False,
         "db_throughput": db_summary,
+        "traders_activity": traders_activity,
         "decision": {
             "bankroll": "No BANKROLL increase.",
             "operational_use": "Observability only.",
@@ -162,8 +255,9 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
             written,
             args.telegram_preview or args.send_telegram_manual,
             telegram_send_result if args.send_telegram_manual else None,
+            telegram_preview=extended_preview,
         ),
-        "telegram_preview": digest["telegram_preview"],
+        "telegram_preview": extended_preview,
         "telegram_manual_send": telegram_send_result,
     }
 
@@ -174,7 +268,9 @@ def render_run_message(
     written: bool,
     include_telegram_preview: bool,
     telegram_send_result: dict[str, Any] | None = None,
+    telegram_preview: str | None = None,
 ) -> str:
+    preview = telegram_preview if telegram_preview is not None else digest["telegram_preview"]
     lines = [
         "DAILY BOT OBSERVABILITY RUN",
         f"snapshot_written={str(written).lower()}",
@@ -190,7 +286,7 @@ def render_run_message(
     ]
     if include_telegram_preview:
         heading = "TELEGRAM MANUAL SEND PREVIEW" if telegram_send_result is not None else "TELEGRAM PREVIEW ONLY"
-        lines.extend(["", heading, digest["telegram_preview"]])
+        lines.extend(["", heading, preview])
     if telegram_send_result is not None:
         lines.extend(["", f"telegram_manual_send={telegram_send_result.get('reason')}"])
         if telegram_send_result.get("missing_env"):
@@ -222,6 +318,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--wallet", help="Manual wallet/proxy wallet override. Output only shows masked wallet.")
     parser.add_argument("--env-file", default=".env", help=argparse.SUPPRESS)
     parser.add_argument("--user", help="Optional manual user label override.")
+    parser.add_argument(
+        "--traders-activity-profile",
+        action="store_true",
+        help=(
+            "Include a compact traders activity section (local-registry cohort, max "
+            f"{TRADERS_ACTIVITY_MAX_WALLETS} wallets). LOG_ONLY. Fail-open."
+        ),
+    )
     args = parser.parse_args(argv)
     if not args.write_snapshot:
         args.dry_run = True

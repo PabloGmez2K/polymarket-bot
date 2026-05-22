@@ -321,3 +321,190 @@ def test_runner_json_cli_with_fixture_path():
     assert payload["snapshot_written"] is False
     assert payload["usable_for_bankroll"] is False
     assert payload["digest"]["latest"]["query_status"] == "NEEDS_MANUAL_WALLET_INPUT"
+
+
+# --- Traders activity profile integration tests ---
+
+def _fake_traders_activity_summary_ok() -> dict:
+    return {
+        "ok": True,
+        "generated_at": "2026-05-22T08:00:00Z",
+        "cohort_mode": "local-registry",
+        "cohort_warning": "local-registry/union may include discovered or historical registry wallets.",
+        "n_wallets": 5,
+        "lane_counts": {"REVIEW_REQUIRED": 3, "COMPARABLE_CANDIDATE": 2},
+        "query_status_counts": {"ok_complete": 4, "ok_capped": 1},
+        "capped_wallets": 1,
+        "n_failures": 0,
+        "comparable_candidates": ["ColdMath", "Entire-Hood"],
+    }
+
+
+def test_traders_activity_summary_disabled_by_default(monkeypatch):
+    module = load_tool()
+    monkeypatch.setattr(module.leaderboard_pnl_snapshot, "build_snapshot", lambda args: snapshot())
+    with local_tmp_dir() as tmp_dir:
+        path = tmp_dir / "leaderboard_pnl_snapshots.jsonl"
+        args = module.parse_args(["--dry-run", "--snapshot-file", str(path)])
+        result = module.build_run(args)
+
+    assert result["traders_activity"]["ok"] is False
+    assert result["traders_activity"]["error"] == "disabled"
+
+
+def test_traders_activity_summary_fail_open_on_exception(monkeypatch):
+    module = load_tool()
+    monkeypatch.setattr(module.leaderboard_pnl_snapshot, "build_snapshot", lambda args: snapshot())
+    monkeypatch.setattr(module, "_TAP_AVAILABLE", True)
+    monkeypatch.setattr(module, "_tap", None)  # force module_not_available path
+
+    with local_tmp_dir() as tmp_dir:
+        path = tmp_dir / "leaderboard_pnl_snapshots.jsonl"
+        args = module.parse_args(["--dry-run", "--traders-activity-profile", "--snapshot-file", str(path)])
+        result = module.build_run(args)
+
+    # digest should still succeed
+    assert result["usable_for_bankroll"] is False
+    ta = result["traders_activity"]
+    assert ta["ok"] is False
+    assert "error" in ta
+
+
+def test_traders_activity_summary_returns_ok_with_mock(monkeypatch):
+    module = load_tool()
+    monkeypatch.setattr(module.leaderboard_pnl_snapshot, "build_snapshot", lambda args: snapshot())
+    expected = _fake_traders_activity_summary_ok()
+    monkeypatch.setattr(module, "build_traders_activity_summary", lambda args: expected)
+
+    with local_tmp_dir() as tmp_dir:
+        path = tmp_dir / "leaderboard_pnl_snapshots.jsonl"
+        args = module.parse_args(["--dry-run", "--traders-activity-profile", "--snapshot-file", str(path)])
+        result = module.build_run(args)
+
+    ta = result["traders_activity"]
+    assert ta["ok"] is True
+    assert ta["n_wallets"] == 5
+    assert ta["comparable_candidates"] == ["ColdMath", "Entire-Hood"]
+
+
+def test_render_traders_activity_telegram_disabled():
+    module = load_tool()
+    section = module.render_traders_activity_telegram({"ok": False, "error": "disabled"})
+    assert section == ""
+
+
+def test_render_traders_activity_telegram_error():
+    module = load_tool()
+    section = module.render_traders_activity_telegram({"ok": False, "error": "connection timeout"})
+    assert "🔬" in section
+    assert "Error" in section
+    assert "connection timeout" in section
+
+
+def test_render_traders_activity_telegram_ok():
+    module = load_tool()
+    section = module.render_traders_activity_telegram(_fake_traders_activity_summary_ok())
+    assert "🔬" in section
+    assert "Wallets: 5" in section
+    assert "COMPARABLE_CANDIDATE=2" in section
+    assert "ColdMath" in section
+    assert "LOG_ONLY" in section
+    assert "local-registry" in section
+
+
+def test_build_run_with_traders_activity_extends_preview(monkeypatch):
+    module = load_tool()
+    monkeypatch.setattr(module.leaderboard_pnl_snapshot, "build_snapshot", lambda args: snapshot())
+    monkeypatch.setattr(module, "build_traders_activity_summary", lambda args: _fake_traders_activity_summary_ok())
+
+    with local_tmp_dir() as tmp_dir:
+        path = tmp_dir / "leaderboard_pnl_snapshots.jsonl"
+        args = module.parse_args(["--dry-run", "--traders-activity-profile", "--snapshot-file", str(path)])
+        result = module.build_run(args)
+
+    assert "🔬" in result["telegram_preview"]
+    assert "Wallets: 5" in result["telegram_preview"]
+    assert "📊" in result["telegram_preview"]  # original digest header still present
+
+
+def test_build_run_without_traders_activity_flag_no_section(monkeypatch):
+    module = load_tool()
+    monkeypatch.setattr(module.leaderboard_pnl_snapshot, "build_snapshot", lambda args: snapshot())
+
+    with local_tmp_dir() as tmp_dir:
+        path = tmp_dir / "leaderboard_pnl_snapshots.jsonl"
+        args = module.parse_args(["--dry-run", "--snapshot-file", str(path)])
+        result = module.build_run(args)
+
+    assert "🔬" not in result["telegram_preview"]
+    assert "Traders Activity" not in result["telegram_preview"]
+
+
+def test_traders_activity_telegram_send_uses_extended_preview(monkeypatch):
+    module = load_tool()
+    calls = []
+    monkeypatch.setattr(module.leaderboard_pnl_snapshot, "build_snapshot", lambda args: snapshot())
+    monkeypatch.setattr(module, "build_traders_activity_summary", lambda args: _fake_traders_activity_summary_ok())
+    monkeypatch.setattr(
+        module.daily_bot_digest,
+        "send_telegram_manual",
+        lambda message: calls.append(message) or {"sent": True, "reason": "sent"},
+    )
+
+    with local_tmp_dir() as tmp_dir:
+        path = tmp_dir / "leaderboard_pnl_snapshots.jsonl"
+        args = module.parse_args([
+            "--dry-run", "--send-telegram-manual", "--traders-activity-profile",
+            "--snapshot-file", str(path),
+        ])
+        result = module.build_run(args)
+
+    assert len(calls) == 1
+    assert calls[0] == result["telegram_preview"]
+    assert "🔬" in calls[0]
+
+
+def test_bot_py_daily_digest_command_includes_traders_activity_flag():
+    """Verify bot.py's maybe_send_daily_bot_digest command activates --traders-activity-profile."""
+    bot_src = (REPO_ROOT / "bot.py").read_text(encoding="utf-8")
+    func_start = bot_src.find("def maybe_send_daily_bot_digest(")
+    assert func_start != -1, "maybe_send_daily_bot_digest not found in bot.py"
+    func_end = bot_src.find("\ndef ", func_start + 1)
+    func_body = bot_src[func_start:func_end] if func_end != -1 else bot_src[func_start:]
+    assert "--traders-activity-profile" in func_body, (
+        "maybe_send_daily_bot_digest must pass --traders-activity-profile to the daily digest script"
+    )
+
+
+def test_traders_activity_constants_cover_full_cohort():
+    """Max wallets must be enough to cover all traders in local-registry cohort (~44)."""
+    module = load_tool()
+    assert module.TRADERS_ACTIVITY_MAX_WALLETS >= 44
+
+
+def test_traders_activity_snapshot_not_written_in_dry_run(monkeypatch, tmp_path):
+    module = load_tool()
+    snapshot_calls = []
+    monkeypatch.setattr(module.leaderboard_pnl_snapshot, "build_snapshot", lambda args: snapshot())
+
+    def fake_build_payload(args):
+        return {
+            "generated_at": "2026-05-22T08:00:00Z",
+            "summary": {"n_wallets": 3, "lane_counts": {}, "query_status_counts": {}, "capped_wallets": 0},
+            "traders": [],
+            "cohort": {"cohort_mode": "local-registry", "cohort_warning": None},
+        }
+
+    def fake_write_snapshot(payload, snapshot_dir):
+        snapshot_calls.append(snapshot_dir)
+        return tmp_path / "snap.json"
+
+    if module._TAP_AVAILABLE and module._tap is not None:
+        monkeypatch.setattr(module._tap, "build_payload", fake_build_payload)
+        monkeypatch.setattr(module._tap, "write_snapshot", fake_write_snapshot)
+
+    path = tmp_path / "leaderboard_pnl_snapshots.jsonl"
+    args = module.parse_args(["--dry-run", "--traders-activity-profile", "--snapshot-file", str(path)])
+    module.build_run(args)
+
+    assert snapshot_calls == [], "write_snapshot must NOT be called in dry-run mode"

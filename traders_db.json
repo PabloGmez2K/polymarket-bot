@@ -850,6 +850,17 @@
       "last_n_positions": 50,
       "last_n_signals": 46,
       "last_pnl_closed": 56.14
+    },
+    "Bogus-Curry": {
+      "address": "0xb06a0eae498750ed0acac7e1f759f741c56e52f5",
+      "source": "manual",
+      "added": "2026-05-22T00:00:00+00:00",
+      "tags": [
+        "directional",
+        "reference"
+      ],
+      "notes": "Validado como Ooookey. Especialista at_or_above Taipei/Shenzhen. Estilo mixto pendiente de review.",
+      "strategy": "reference"
     }
   },
   "meta": {

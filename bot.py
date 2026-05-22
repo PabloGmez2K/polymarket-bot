@@ -10819,7 +10819,8 @@ def maybe_send_daily_bot_digest(now=None):
             logger.warning(f"daily digest: skip (missing script: {DAILY_DIGEST_SCRIPT})")
         return False
 
-    command = [sys.executable, DAILY_DIGEST_SCRIPT, "--write-snapshot", "--send-telegram-manual"]
+    command = [sys.executable, DAILY_DIGEST_SCRIPT, "--write-snapshot", "--send-telegram-manual",
+               "--traders-activity-profile"]
     if DB_THROUGHPUT_DIGEST_ENABLED:
         command.extend(["--db-throughput-report", "--db", SQLITE_DB_PATH])
 
