@@ -232,6 +232,7 @@ Qué agrega:
     "census": "data/directional_trader_census.json",
     "enrichment": "data/directional_trader_enrichment.json",
     "city_cross": "data/reference_trader_city_market_cross.json",
+    "traders_db": "traders_db.json",
     "crosscheck_series": "data/signals_crosscheck.jsonl",
     "blocked_resolutions": "data/blocked_signals_resolutions.jsonl"
   },
@@ -242,12 +243,14 @@ Qué agrega:
     "enrichment_generated_at": "...",
     "n_traders_profiled": 10,
     "n_traders_dropped_insufficient_data": 2,
-    "likely_input_degraded": false
+    "likely_input_degraded": false,
+    "external_observability_enabled": false
   },
   "traders": [
     {
       "pseudonym": "Entire-Hood",
       "address": "0xb40e...",
+      "proxy_wallet": "0xb40e...",
       "reference_quality": "high_priority_reference",
       "activity": {
         "n_active_signals_now": 8,
@@ -320,7 +323,22 @@ Qué agrega:
         "no_bias",
         "high_blocked_wr",
         "multi_strike_issuer"
-      ]
+      ],
+      "external_observability": {
+        "classification": "external_observability",
+        "source_quality": "external_opaque",
+        "operational_use": "LOG_ONLY_NOT_TRADING_SIGNAL",
+        "enabled": false,
+        "identity_status": "resolved",
+        "identity_source": "traders_db",
+        "proxy_wallet": "0xb40e...",
+        "leaderboard_overall_all": {"query_status": "disabled"},
+        "leaderboard_weather_all": {"query_status": "disabled"},
+        "public_profile": {
+          "query_status": "disabled",
+          "profile_url": "https://polymarket.com/profile/0xb40e..."
+        }
+      }
     }
   ],
   "city_rollup": [
@@ -358,6 +376,15 @@ Estructura fija y corta:
 - **Sección "no responde honestamente hoy"**: lista literal de preguntas con
   `insufficient_data`.
 - **Anexo**: top mismatches bot vs trader en últimos ciclos del crosscheck.
+
+External observability is manual/opt-in only via
+`--external-observability`. Default runtime/report execution must not make
+network calls. When enabled, each trader may include `leaderboard_overall_all`
+and `leaderboard_weather_all` for `timePeriod=ALL`, plus `public_profile`.
+Allowed statuses are `ok`, `empty`, `failed`, `missing_identity` and
+`disabled`. These fields are external opaque LOG_ONLY evidence and never
+authorize BUY/SELL/SKIP, BANKROLL, sizing, whitelist, city modes, guards,
+Fase C or any trading decision.
 - Máximo ~2 pantallas de texto.
 
 ### 7.3 Scores y tags

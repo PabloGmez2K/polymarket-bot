@@ -4,7 +4,11 @@
 import argparse
 import json
 import math
+import os
+import urllib.parse
+import urllib.request
 from collections import Counter, defaultdict
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -22,8 +26,14 @@ DEFAULT_BLOCKED_LIVE_PATH = REPO_ROOT / "data" / "blocked_signals_resolutions.js
 DEFAULT_BLOCKED_LEGACY_PATH = REPO_ROOT / "data" / "runtime_import_derived" / "blocked_signals_resolutions.jsonl"
 DEFAULT_BLOCKED_PATH = DEFAULT_BLOCKED_LIVE_PATH
 DEFAULT_LIFECYCLE_PATH = REPO_ROOT / "data" / "runtime_import" / "trade_lifecycle.json"
+DEFAULT_TRADERS_DB_PATH = REPO_ROOT / "traders_db.json"
 DEFAULT_JSON_OUTPUT = REPO_ROOT / "data" / "traders_intelligence.json"
 DEFAULT_MD_OUTPUT = REPO_ROOT / "docs" / "traders_intelligence_latest.md"
+DATA_API_URL = os.getenv("DATA_API_URL", "https://data-api.polymarket.com").rstrip("/")
+GAMMA_API_URL = os.getenv("GAMMA_API_URL", "https://gamma-api.polymarket.com").rstrip("/")
+LEADERBOARD_CATEGORIES = ("OVERALL", "WEATHER")
+EXTERNAL_SOURCE_QUALITY = "external_opaque"
+EXTERNAL_OPERATIONAL_USE = "LOG_ONLY_NOT_TRADING_SIGNAL"
 
 
 UNANSWERABLE_REASON = (
@@ -37,7 +47,7 @@ SCALING_REASON = (
 )
 
 
-def parse_args():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Construye la capa read-only traders_intelligence v0 sobre artefactos existentes."
     )
@@ -48,10 +58,16 @@ def parse_args():
     parser.add_argument("--crosscheck-series", default=str(DEFAULT_CROSSCHECK_PATH), help="Ruta a signals_crosscheck.jsonl.")
     parser.add_argument("--blocked-resolutions", default=str(DEFAULT_BLOCKED_PATH), help="Ruta a blocked_signals_resolutions.jsonl.")
     parser.add_argument("--trade-lifecycle", default=str(DEFAULT_LIFECYCLE_PATH), help="Ruta a trade_lifecycle.json.")
+    parser.add_argument("--traders-db", default=str(DEFAULT_TRADERS_DB_PATH), help="Ruta a traders_db.json para resolver wallets faltantes.")
     parser.add_argument("--json-output", default=str(DEFAULT_JSON_OUTPUT), help="Ruta del JSON de salida.")
     parser.add_argument("--md-output", default=str(DEFAULT_MD_OUTPUT), help="Ruta del markdown de salida.")
     parser.add_argument("--min-evidence", type=int, default=5, help="Minimo de evidencia para emitir tags discretos.")
-    return parser.parse_args()
+    parser.add_argument(
+        "--external-observability",
+        action="store_true",
+        help="Opt-in manual: consulta leaderboard/profile externos LOG_ONLY. Default no hace red.",
+    )
+    return parser.parse_args(argv)
 
 
 def ensure_parent(path_str):
@@ -124,6 +140,37 @@ def iso_now():
 
 def normalize_name(value):
     return str(value or "").strip().lower()
+
+
+def normalize_wallet(value):
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.lower().startswith("0x") and len(text) == 42:
+        return text.lower()
+    return None
+
+
+def money(value):
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
+def extract_metric(row, names):
+    if not row:
+        return None
+    for name in names:
+        if name in row:
+            return money(row.get(name))
+    return None
+
+
+def compact_error(message):
+    return " ".join(str(message).split())[:300]
 
 
 def percentile(values, pct):
@@ -260,6 +307,273 @@ def build_census_lookup(census_payload):
         elif address:
             census_map[normalize_name(address)] = row
     return census_map, summary
+
+
+def build_traders_db_lookup(traders_db_payload):
+    lookup = {}
+    if not traders_db_payload:
+        return lookup
+    traders = traders_db_payload.get("traders", {})
+    if not isinstance(traders, dict):
+        return lookup
+    for name, row in traders.items():
+        if not isinstance(row, dict):
+            continue
+        address = normalize_wallet(row.get("address"))
+        if not address:
+            continue
+        payload = {
+            "address": address,
+            "name": str(name or "").strip(),
+            "pseudonym": str(row.get("pseudonym") or name or "").strip(),
+            "source": row.get("source"),
+        }
+        for key in (name, row.get("pseudonym"), address):
+            norm = normalize_name(key)
+            if norm and norm not in lookup:
+                lookup[norm] = payload
+    return lookup
+
+
+def resolve_identity(trader_name, address, enrichment_row, census_row, traders_db_lookup):
+    profile_address = normalize_wallet(address)
+    trader_key = normalize_name(trader_name)
+    db_row = traders_db_lookup.get(trader_key) if trader_key else None
+    if not db_row and profile_address:
+        db_row = traders_db_lookup.get(normalize_name(profile_address))
+    if profile_address:
+        return {
+            "identity_status": "resolved",
+            "proxy_wallet": profile_address,
+            "identity_source": "profile_current",
+            "identity_sources_checked": ["profile_current", "traders_db", "enrichment", "census"],
+        }
+    if db_row and db_row.get("address"):
+        return {
+            "identity_status": "resolved",
+            "proxy_wallet": db_row["address"],
+            "identity_source": "traders_db",
+            "identity_sources_checked": ["profile_current", "traders_db", "enrichment", "census"],
+        }
+    for source, row in (("enrichment", enrichment_row), ("census", census_row)):
+        wallet = normalize_wallet((row or {}).get("address"))
+        if wallet:
+            return {
+                "identity_status": "resolved",
+                "proxy_wallet": wallet,
+                "identity_source": source,
+                "identity_sources_checked": ["profile_current", "traders_db", "enrichment", "census"],
+            }
+    return {
+        "identity_status": "missing_identity",
+        "proxy_wallet": None,
+        "identity_source": None,
+        "identity_sources_checked": ["profile_current", "traders_db", "enrichment", "census"],
+    }
+
+
+def rows_from_response(payload):
+    if isinstance(payload, list):
+        return [row for row in payload if isinstance(row, dict)]
+    if isinstance(payload, dict):
+        for key in ("leaderboard", "data", "results", "items"):
+            rows = payload.get(key)
+            if isinstance(rows, list):
+                return [row for row in rows if isinstance(row, dict)]
+        if any(key in payload for key in ("pnl", "proxyWallet", "userName", "rank", "vol")):
+            return [payload]
+    return []
+
+
+def should_bypass_proxy_env():
+    proxy_vars = (
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    )
+    poisoned_markers = ("127.0.0.1:9", "localhost:9")
+    for name in proxy_vars:
+        value = os.getenv(name, "")
+        if any(marker in value for marker in poisoned_markers):
+            return True
+    return False
+
+
+def request_json(url):
+    req = urllib.request.Request(url)
+    req.add_header("User-Agent", "polymarket-traders-intelligence/1.0")
+    if should_bypass_proxy_env():
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        response = opener.open(req, timeout=20)
+    else:
+        response = urllib.request.urlopen(req, timeout=20)
+    with response as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def leaderboard_url(wallet, category):
+    params = urllib.parse.urlencode(
+        {
+            "user": wallet,
+            "category": category,
+            "timePeriod": "ALL",
+            "orderBy": "PNL",
+            "limit": "1",
+        }
+    )
+    return f"{DATA_API_URL}/v1/leaderboard?{params}"
+
+
+def profile_api_url(wallet):
+    return f"{GAMMA_API_URL}/public-profile?{urllib.parse.urlencode({'address': wallet})}"
+
+
+def public_profile_url(wallet):
+    return f"https://polymarket.com/profile/{wallet}"
+
+
+def pick_wallet_row(payload, wallet):
+    rows = rows_from_response(payload)
+    wallet_l = wallet.lower()
+    for row in rows:
+        candidate = str(
+            row.get("proxyWallet")
+            or row.get("proxy_wallet")
+            or row.get("wallet")
+            or row.get("address")
+            or row.get("user")
+            or ""
+        ).lower()
+        if candidate == wallet_l:
+            return row
+    return rows[0] if len(rows) == 1 else None
+
+
+def query_leaderboard_all(wallet, category):
+    url = leaderboard_url(wallet, category)
+    try:
+        payload = request_json(url)
+        row = pick_wallet_row(payload, wallet)
+    except Exception as exc:
+        return {
+            "category": category,
+            "time_period": "ALL",
+            "query_status": "failed",
+            "api_error": compact_error(str(exc)),
+            "pnl": None,
+            "vol": None,
+            "rank": None,
+            "userName": None,
+            "proxyWallet": wallet,
+        }
+    if row is None:
+        return {
+            "category": category,
+            "time_period": "ALL",
+            "query_status": "empty",
+            "api_error": None,
+            "pnl": None,
+            "vol": None,
+            "rank": None,
+            "userName": None,
+            "proxyWallet": wallet,
+        }
+    return {
+        "category": category,
+        "time_period": "ALL",
+        "query_status": "ok",
+        "api_error": None,
+        "pnl": extract_metric(row, ("pnl", "profit", "realizedPnl", "realized_pnl")),
+        "vol": extract_metric(row, ("vol", "volume", "totalVolume", "total_volume")),
+        "rank": row.get("rank"),
+        "userName": row.get("userName") or row.get("username") or row.get("name"),
+        "proxyWallet": normalize_wallet(row.get("proxyWallet") or row.get("proxy_wallet")) or wallet,
+    }
+
+
+def query_public_profile(wallet):
+    url = profile_api_url(wallet)
+    base = {
+        "query_status": "unknown",
+        "api_error": None,
+        "profile_url": public_profile_url(wallet),
+        "profile_api_url": url,
+        "proxyWallet": wallet,
+        "pseudonym": None,
+        "name": None,
+        "userName": None,
+        "xUsername": None,
+        "verifiedBadge": None,
+        "profileImage": None,
+    }
+    try:
+        payload = request_json(url)
+    except Exception as exc:
+        base["query_status"] = "failed"
+        base["api_error"] = compact_error(str(exc))
+        return base
+    if not isinstance(payload, dict):
+        base["query_status"] = "empty"
+        return base
+    source = payload.get("profile") if isinstance(payload.get("profile"), dict) else payload
+    base.update(
+        {
+            "query_status": "ok",
+            "proxyWallet": normalize_wallet(source.get("proxyWallet") or source.get("address")) or wallet,
+            "pseudonym": source.get("pseudonym"),
+            "name": source.get("name"),
+            "userName": source.get("userName") or source.get("username"),
+            "xUsername": source.get("xUsername") or source.get("twitterUsername"),
+            "verifiedBadge": source.get("verifiedBadge"),
+            "profileImage": source.get("profileImage"),
+        }
+    )
+    return base
+
+
+def disabled_external_observability(identity):
+    return {
+        "classification": "external_observability",
+        "source_quality": EXTERNAL_SOURCE_QUALITY,
+        "operational_use": EXTERNAL_OPERATIONAL_USE,
+        "enabled": False,
+        **identity,
+        "leaderboard_overall_all": {"query_status": "disabled"},
+        "leaderboard_weather_all": {"query_status": "disabled"},
+        "public_profile": {
+            "query_status": "disabled",
+            "profile_url": public_profile_url(identity["proxy_wallet"]) if identity.get("proxy_wallet") else None,
+        },
+    }
+
+
+def build_external_observability(identity, enabled):
+    if not enabled:
+        return disabled_external_observability(identity)
+    wallet = identity.get("proxy_wallet")
+    base = {
+        "classification": "external_observability",
+        "source_quality": EXTERNAL_SOURCE_QUALITY,
+        "operational_use": EXTERNAL_OPERATIONAL_USE,
+        "enabled": True,
+        **identity,
+    }
+    if not wallet:
+        base.update(
+            {
+                "leaderboard_overall_all": {"query_status": "missing_identity"},
+                "leaderboard_weather_all": {"query_status": "missing_identity"},
+                "public_profile": {"query_status": "missing_identity", "profile_url": None},
+            }
+        )
+        return base
+    base["leaderboard_overall_all"] = query_leaderboard_all(wallet, "OVERALL")
+    base["leaderboard_weather_all"] = query_leaderboard_all(wallet, "WEATHER")
+    base["public_profile"] = query_public_profile(wallet)
+    return base
 
 
 def latest_crosscheck_record(rows):
@@ -440,6 +754,8 @@ def build_trader_block(
     latest_crosscheck,
     consensus_mentions,
     min_evidence,
+    traders_db_lookup,
+    external_observability_enabled,
 ):
     census_snapshot = {}
     if enrichment_row:
@@ -599,10 +915,18 @@ def build_trader_block(
         multi_strike_rows,
         min_evidence,
     )
+    identity = resolve_identity(
+        trader_name=trader_name,
+        address=address,
+        enrichment_row=enrichment_row,
+        census_row=census_row,
+        traders_db_lookup=traders_db_lookup,
+    )
 
     return {
         "pseudonym": trader_name,
         "address": address,
+        "proxy_wallet": identity.get("proxy_wallet"),
         "reference_quality": reference_quality,
         "activity": activity_block,
         "style": style_block,
@@ -627,6 +951,10 @@ def build_trader_block(
         },
         "candidate_profiles": candidate_profiles,
         "profile_tags": profile_tags,
+        "external_observability": build_external_observability(
+            identity,
+            enabled=external_observability_enabled,
+        ),
     }
 
 
@@ -734,6 +1062,30 @@ def render_markdown(payload):
             f"{trader.get('activity', {}).get('n_active_signals_now', 0)} | {tags} |"
         )
 
+    if payload.get("integrity", {}).get("external_observability_enabled"):
+        lines.extend([
+            "",
+            "## External Observability LOG_ONLY",
+            "",
+            "| Trader | Proxy wallet | OVERALL ALL PnL | WEATHER ALL PnL/status | OVERALL vol | OVERALL rank | Profile URL |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+        ])
+        for trader in payload.get("traders", []):
+            external = trader.get("external_observability", {})
+            overall = external.get("leaderboard_overall_all", {})
+            weather = external.get("leaderboard_weather_all", {})
+            profile = external.get("public_profile", {})
+            wallet = external.get("proxy_wallet") or "-"
+            weather_value = weather.get("pnl") if weather.get("query_status") == "ok" else weather.get("query_status", "-")
+            lines.append(
+                f"| {trader.get('pseudonym')} | {wallet} | "
+                f"{overall.get('pnl') if overall.get('pnl') is not None else overall.get('query_status', '-')} | "
+                f"{weather_value if weather_value is not None else '-'} | "
+                f"{overall.get('vol') if overall.get('vol') is not None else '-'} | "
+                f"{overall.get('rank') if overall.get('rank') is not None else '-'} | "
+                f"{profile.get('profile_url') or '-'} |"
+            )
+
     lines.extend([
         "",
         "## No responde honestamente hoy",
@@ -771,8 +1123,8 @@ def render_markdown(payload):
     return "\n".join(lines) + "\n"
 
 
-def main():
-    args = parse_args()
+def main(argv=None):
+    args = parse_args(argv)
     warnings = []
 
     crosscheck_path, crosscheck_paths_checked = resolve_existing_path(
@@ -788,6 +1140,7 @@ def main():
     census_payload = load_json_file(args.census, "census", warnings)
     enrichment_payload = load_json_file(args.enrichment, "enrichment", warnings)
     city_cross_payload = load_json_file(args.city_cross, "city_cross", warnings)
+    traders_db_payload = load_json_file(args.traders_db, "traders_db", warnings)
     crosscheck_rows = load_jsonl_file(
         crosscheck_path,
         "crosscheck_series",
@@ -806,6 +1159,7 @@ def main():
     blocked_by_trader = build_blocked_lookup(blocked_rows)
     enrichment_map, enrichment_summary = build_enrichment_lookup(enrichment_payload)
     census_map, census_summary = build_census_lookup(census_payload)
+    traders_db_lookup = build_traders_db_lookup(traders_db_payload)
     city_cross_lookup = build_city_cross_lookup(city_cross_payload)
     latest_crosscheck = latest_crosscheck_record(crosscheck_rows)
     recent_crosschecks = recent_crosscheck_rows(crosscheck_rows, limit=7)
@@ -844,6 +1198,8 @@ def main():
             latest_crosscheck=latest_crosscheck,
             consensus_mentions=consensus_mentions,
             min_evidence=args.min_evidence,
+            traders_db_lookup=traders_db_lookup,
+            external_observability_enabled=args.external_observability,
         )
         if not enrichment_row or not census_row:
             incomplete_profiles.append(trader_name)
@@ -869,6 +1225,7 @@ def main():
         ("census", census_payload),
         ("enrichment", enrichment_payload),
         ("city_cross", city_cross_payload),
+        ("traders_db", traders_db_payload),
         ("crosscheck_series", crosscheck_rows),
         ("blocked_resolutions", blocked_rows),
         ("trade_lifecycle", lifecycle_payload),
@@ -929,6 +1286,7 @@ def main():
             "census": str(Path(args.census)),
             "enrichment": str(Path(args.enrichment)),
             "city_cross": str(Path(args.city_cross)),
+            "traders_db": str(Path(args.traders_db)),
             "crosscheck_series": str(crosscheck_path),
             "blocked_resolutions": str(blocked_path),
             "trade_lifecycle": str(Path(args.trade_lifecycle)),
@@ -942,6 +1300,7 @@ def main():
             "n_traders_dropped_insufficient_data": dropped,
             "likely_input_degraded": likely_input_degraded,
             "missing_inputs": missing_labels,
+            "external_observability_enabled": bool(args.external_observability),
         },
         "bot_context": bot_context,
         "traders": traders,
