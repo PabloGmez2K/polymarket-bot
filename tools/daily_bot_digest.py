@@ -135,7 +135,26 @@ def telegram_delta(value: Any) -> str:
     return f"{parsed.quantize(MONEY_QUANT, rounding=ROUND_HALF_UP):+,.2f}$"
 
 
-def telegram_trend_sentence(trend_label: str) -> str:
+def has_mixed_delta_signs(deltas: dict[str, Any]) -> bool:
+    values = [as_decimal(value) for value in deltas.values() if value is not None]
+    known = [value for value in values if value is not None]
+    return any(value > Decimal("0.01") for value in known) and any(
+        value < Decimal("-0.01") for value in known
+    )
+
+
+def day_delta_is_negative(deltas: dict[str, Any]) -> bool:
+    day = as_decimal(deltas.get("day_delta"))
+    return bool(day is not None and day < Decimal("-0.01"))
+
+
+def telegram_trend_sentence(trend_label: str, deltas: dict[str, Any] | None = None) -> str:
+    deltas = deltas or {}
+    if has_mixed_delta_signs(deltas):
+        sentence = "Balance mixto frente al ultimo registro valido."
+        if day_delta_is_negative(deltas):
+            sentence += " Dia empeora; no interpretarlo como mejora diaria."
+        return sentence
     if trend_label == "improving":
         return "Mejora frente al último registro válido."
     if trend_label == "worsening":
@@ -600,7 +619,7 @@ def render_telegram_digest(digest: dict[str, Any]) -> str:
         trend_lines = ["Aun no hay comparacion disponible en este intento."]
     elif previous:
         trend_lines = [
-            telegram_trend_sentence(str(digest.get("trend_label", "unknown"))),
+            telegram_trend_sentence(str(digest.get("trend_label", "unknown")), deltas),
             f"• Día: {telegram_delta(deltas.get('day_delta'))}",
             f"• Semana: {telegram_delta(deltas.get('week_delta'))}",
             f"• Mes: {telegram_delta(deltas.get('month_delta'))}",
@@ -645,6 +664,10 @@ def render_telegram_digest(digest: dict[str, Any]) -> str:
         f"ℹ️ {bold('Nota')}",
         "Mensaje informativo. No cambia bankroll, no compra, no vende y no activa Fase C.",
     ]
+    if previous and has_mixed_delta_signs(deltas):
+        lines[lines.index(reading)] = telegram_trend_sentence(
+            str(digest.get("trend_label", "unknown")), deltas
+        )
     lines.extend(render_db_throughput_telegram_lines(digest.get("db_throughput")))
     return "\n".join(lines)
 

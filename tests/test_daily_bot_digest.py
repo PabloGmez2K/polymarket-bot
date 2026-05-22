@@ -138,6 +138,69 @@ def test_two_snapshots_calculates_deltas_correctly():
     assert digest["trend_label"] == "improving"
 
 
+def test_telegram_preview_mixed_day_worse_avoids_global_improves_copy():
+    module = load_tool()
+    with local_tmp_dir() as tmp_dir:
+        path = tmp_dir / "leaderboard_pnl_snapshots.jsonl"
+        write_jsonl(
+            path,
+            [
+                snapshot(
+                    captured_at_utc="2026-05-22T18:00:00Z",
+                    pnl_day=0.0,
+                    pnl_week=1.0,
+                    pnl_month=2.0,
+                    pnl_all=-30.0,
+                ),
+                snapshot(
+                    captured_at_utc="2026-05-22T20:00:00Z",
+                    pnl_day=-1.43,
+                    pnl_week=2.0,
+                    pnl_month=3.0,
+                    pnl_all=-29.0,
+                ),
+            ],
+        )
+        digest = module.build_digest(path)
+
+    preview = digest["telegram_preview"]
+    assert digest["trend_label"] == "improving"
+    assert digest["deltas"]["day_delta"] == -1.43
+    assert digest["deltas"]["week_delta"] == 1.0
+    assert "Balance mixto frente al ultimo registro valido." in preview
+    assert "Dia empeora; no interpretarlo como mejora diaria." in preview
+    assert "El bot mejora" not in preview
+
+
+def test_telegram_preview_clear_positive_and_negative_keep_direct_copy():
+    module = load_tool()
+    with local_tmp_dir() as tmp_dir:
+        positive = tmp_dir / "positive.jsonl"
+        write_jsonl(
+            positive,
+            [
+                snapshot(captured_at_utc="2026-05-22T18:00:00Z", pnl_day=0.0, pnl_week=1.0, pnl_month=2.0, pnl_all=3.0),
+                snapshot(captured_at_utc="2026-05-22T20:00:00Z", pnl_day=1.0, pnl_week=2.0, pnl_month=3.0, pnl_all=4.0),
+            ],
+        )
+        positive_digest = module.build_digest(positive)
+
+        negative = tmp_dir / "negative.jsonl"
+        write_jsonl(
+            negative,
+            [
+                snapshot(captured_at_utc="2026-05-22T18:00:00Z", pnl_day=1.0, pnl_week=2.0, pnl_month=3.0, pnl_all=4.0),
+                snapshot(captured_at_utc="2026-05-22T20:00:00Z", pnl_day=0.0, pnl_week=1.0, pnl_month=2.0, pnl_all=3.0),
+            ],
+        )
+        negative_digest = module.build_digest(negative)
+
+    assert "Mejora frente" in positive_digest["telegram_preview"]
+    assert "Balance mixto" not in positive_digest["telegram_preview"]
+    assert "Empeora frente" in negative_digest["telegram_preview"]
+    assert "Balance mixto" not in negative_digest["telegram_preview"]
+
+
 def test_digest_skips_failed_snapshot_between_valid_snapshots():
     module = load_tool()
     with local_tmp_dir() as tmp_dir:
