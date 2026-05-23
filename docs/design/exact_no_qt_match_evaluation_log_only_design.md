@@ -1,8 +1,8 @@
 # Design: Exact / No QT Match — LOG_ONLY Edge Evaluation Experiment
 
-**Status:** `DESIGN_CORRECTED — READY_FOR_OPUS_APPROVAL`
+**Status:** `DESIGN_FINAL — READY_FOR_OPUS_APPROVAL`
 **Date:** 2026-05-23
-**Session:** 379 (Sonnet, docs-only + Railway read-only) — corrección S379b
+**Session:** 379 (Sonnet, docs-only + Railway read-only) — corrección S379c
 **Predecessor verdict:** `DESIGN_PRE_EDGE_LOG_ONLY_LEARNING_EXPERIMENT` (Opus)
 
 ---
@@ -265,8 +265,10 @@ Schema aplicable a **Opción B** (artefacto separado). Si Opus elige Opción A, 
   // Provenance para joins
   "skip_log_eval_key": "Shanghai|2026-05-24|exact|25|C",
   "capture_meta": {
-    "sampled": false,       // true si se aplicó sampling por cap
-    "cap_active": false     // true si el ciclo alcanzó el cap antes de esta fila
+    "sampled": false,              // true si se aplicó SHA-256 sampling (cap activo)
+    "cap_active": false,           // true si el ciclo alcanzó el cap
+    "sampling_method": "none",     // "sha256_rank" cuando sampled=true, "none" si no
+    "stable_rank": null            // hexdigest SHA-256 de cycle_id|eval_key; null si no aplica
   }
 }
 ```
@@ -355,20 +357,58 @@ aparición y registrar `deduplicated_count` en métricas del ciclo.
 EXACT_NO_QT_MATCH_CAP_PER_CYCLE=20  # control de seguridad; cubre máximo observado (12)
 ```
 
-Si el ciclo supera el cap, aplicar **sampling por hash determinista**: usar
-`hash(eval_key + cycle_id) % cap_per_cycle` para seleccionar qué filas incluir, preservando
-representación proporcional de ciudades. No usar orden lexicográfico por `eval_key` porque puede
-sesgar la muestra hacia ciudades cuyo nombre comienza con letras más tempranas en el alfabeto.
+Cuando `eligible_before_cap > cap_per_cycle`, aplicar **selección por SHA-256 estable**:
+
+1. Deduplicar primero por `cycle_id + eval_key` (produce el conjunto `eligible`).
+2. Si `len(eligible) <= cap_per_cycle`, capturar todas las filas (no se aplica sampling).
+3. Si `len(eligible) > cap_per_cycle`:
+   - Calcular para cada candidata:
+     `stable_rank = sha256(f"{cycle_id}|{eval_key}".encode("utf-8")).hexdigest()`
+   - Ordenar ascendentemente por `stable_rank`.
+   - Seleccionar exactamente las primeras `cap_per_cycle` filas.
+4. Registrar en las métricas del ciclo (ver contadores abajo).
+
+**Por qué SHA-256 y no `hash()` de Python:** `hash()` no es reproducible entre procesos ni
+versiones de Python (semilla aleatoria por proceso). SHA-256 produce el mismo resultado para
+la misma entrada independientemente del proceso, hora de ejecución u orden de llegada, lo que
+permite auditar retroactivamente qué filas fueron seleccionadas y por qué.
+
+**Sesgo lexicográfico eliminado:** el ranking SHA-256 de `cycle_id|eval_key` no correlaciona
+con el nombre de ciudad, a diferencia de un orden lexicográfico sobre `eval_key` que favorecería
+ciudades cuyos nombres empiezan con letras tempranas del alfabeto.
 
 Si el volumen sube de forma sostenida por encima del cap, considerar **estratificación por
-ciudad/city_mode** antes de aumentar el cap.
+ciudad/city_mode** antes de aumentar el cap, para garantizar representación de todas las ciudades
+activas en el ciclo.
+
+### Condición de activación — identidad primaria obligatoria
+
+Antes de activar la env var `LOG_ONLY_EXACT_NO_QT_MATCH_EVAL_ENABLED=1`, el patch debe
+confirmar mediante inspección del código de inserción que al menos uno de `condition_id` o
+`market_id` está accesible en el contexto de ciclo en el punto `bot.py:~21864`.
+
+Si ninguno de los dos está disponible en ese punto:
+- **No activar** la env var.
+- Volver a Opus con evidencia del gap de identidad.
+- El experimento no debe acumular una cohorte sin resolución general por identidad (Vía 2 §8).
+
+Esta condición es independiente de los tests de §11 y debe verificarse antes del smoke ciclo.
 
 ### Contadores de ciclo
 
 El writer emite en el log del ciclo (no en Telegram):
 ```
-[exact_no_qt_eval] captured=N deduplicated=M capped=K failed=J overhead_ms=T
+[exact_no_qt_eval] eligible_before_cap=E selected_after_cap=S capped_count=C
+                   deduplicated=M failed=J overhead_ms=T
+                   sampling_method=sha256_rank cap_per_cycle=20
 ```
+
+Donde:
+- `eligible_before_cap`: filas únicas por `cycle_id+eval_key` antes de aplicar cap
+- `selected_after_cap`: filas efectivamente escritas en el artefacto
+- `capped_count`: filas omitidas por cap (`eligible_before_cap - selected_after_cap`)
+- `deduplicated`: filas omitidas por dedup intra-ciclo antes del cap
+- `sampling_method`: siempre `sha256_rank` cuando se activa el cap; `none` cuando no
 
 ### Monitor de coste/latencia
 
@@ -530,10 +570,25 @@ def test_writer_error_is_fail_open(monkeypatch): ...
 def test_dedup_by_eval_key_same_cycle():
     # misma eval_key dos veces en el ciclo → solo un registro escrito
 
-# T9: cap + hash sampling
-def test_cap_per_cycle_hash_sampling():
-    # 25 rows con cap=20 → 20 escritas con distribución no-lexicográfica,
-    # sampled=true, cap_active=true en capture_meta; 5 omitidas
+# T9a: cap + SHA-256 sampling — selección exacta de N registros
+def test_cap_per_cycle_sha256_exact_n():
+    # 25 rows con cap=20 → exactamente 20 escritas; capped_count=5
+
+# T9b: reproducibilidad entre ejecuciones
+def test_sha256_sampling_is_reproducible():
+    # misma lista de eval_keys + cycle_id en dos ejecuciones distintas
+    # → mismo conjunto de filas seleccionadas, mismo orden
+
+# T9c: independencia del orden de entrada
+def test_sha256_sampling_order_independent():
+    # misma lista de eval_keys en orden aleatorio distinto
+    # → mismo conjunto seleccionado independientemente del orden de llegada
+
+# T9d: ausencia de sesgo lexicográfico por ciudad
+def test_sha256_sampling_no_lexicographic_bias():
+    # ciudades que empiezan con A no deben ser seleccionadas más que ciudades con S/T/Z
+    # en una muestra suficientemente grande con cap activo; verificar distribución uniforme
+    # por ciudad inicial usando chi-squared o comparando con selección lexicográfica
 
 # T10: schema completo con campos YES/NO
 def test_schema_required_fields():
@@ -587,11 +642,11 @@ sigue siendo `POLICY_BLOCKED_BEFORE_EDGE_EVALUATION`.
 
 | Veredicto | Condición |
 |---|---|
-| `PRE_EDGE_LOG_ONLY_DESIGN_CORRECTED_READY_FOR_OPUS_APPROVAL` | Diseño corregido con baseline real, schema YES/NO, decisión arquitectónica pendiente, checkpoints alineados con Phase 2 ✓ |
+| `PRE_EDGE_LOG_ONLY_DESIGN_FINAL_READY_FOR_OPUS_APPROVAL` | Diseño final con baseline real, schema YES/NO, SHA-256 sampling, identidad obligatoria pre-activación, checkpoints alineados con Phase 2 ✓ |
 | `PRE_EDGE_LOG_ONLY_DESIGN_BLOCKED_BY_VOLUME_OR_COST` | Si validación de overhead revela coste inaceptable |
 | `PRE_EDGE_LOG_ONLY_DESIGN_BLOCKED_BY_DATA_GAP` | Si confirmación de implementación revela que `condition_id`/`market_id` no están disponibles en el punto de inserción |
 
-**Estado actual:** `PRE_EDGE_LOG_ONLY_DESIGN_CORRECTED_READY_FOR_OPUS_APPROVAL`
+**Estado actual:** `PRE_EDGE_LOG_ONLY_DESIGN_FINAL_READY_FOR_OPUS_APPROVAL`
 
 Pendiente de resolución por Opus antes de implementar:
 1. Decisión arquitectónica §4: Opción A (extender `bot_signal_evaluations`) o Opción B (artefacto separado).
@@ -600,6 +655,6 @@ Pendiente de resolución por Opus antes de implementar:
 
 ---
 
-*Corrección aplicada en sesión 379b (Sonnet, docs-only). No se modificó `bot.py`, no se activó env var,
+*Corrección final aplicada en sesión 379c (Sonnet, docs-only). No se modificó `bot.py`, no se activó env var,
 no se ejecutó trading, no se tocaron BANKROLL, Fase C, city modes, whitelists, thresholds, scheduler,
 guards, SL ni ningún path de BUY/SELL/SKIP.*
