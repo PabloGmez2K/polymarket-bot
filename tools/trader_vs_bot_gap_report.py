@@ -13,6 +13,23 @@ Data sources (all read-only, from --data-dir):
 
 Join: BSE.eval_key <-> BSR.match_key  (see docs/instrumentation/bot_evaluation_capture.md)
 
+NOTE on join semantics:
+  - join_confidence (HIGH/MEDIUM/LOW/NONE) describes market identity per §3.2 of the
+    ledger contract, NOT whether a BSE evaluation was matched.
+  - bot_eval_joined (bool) is the separate flag for actual BSE eval_key <-> match_key join.
+  - identity_available_rows: BSR rows with condition_id or market_id (Polymarket primary).
+  - bot_evaluation_joined_rows: BSR rows with a real BSE eval_key match.
+  - bot_evaluation_missing_rows: v2+ BSR rows with match_key but no BSE match.
+  - legacy_unjoinable_rows: v1 BSR rows missing key fields (city_mode, reason_blocked).
+
+NOTE on temporal alignment:
+  BSE rows are selected by EARLIEST ts_utc per eval_key (first bot evaluation of that
+  market). temporal_alignment_status = VERIFIED when BSE ts_utc is before the market
+  date_iso (bot evaluated before market resolution day). UNVERIFIED when same-day or
+  after. NOT_AVAILABLE when no BSE match.
+  Any row with temporal_alignment_status != VERIFIED must carry the flag
+  'temporal_alignment_unverified' and fails the gate 'temporal_alignment_verified'.
+
 Classification dimensions (§9.3, docs/market_evidence_ledger_contract.md):
   1. Trader outcome  (win_for_trader)
   2. Bot evaluation  (would_buy from BSE join, UNKNOWN if not joined)
@@ -27,28 +44,25 @@ import sys
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
-SCHEMA_VERSION_OUTPUT = 1
+SCHEMA_VERSION_OUTPUT = 2  # bumped: honest join semantics + temporal alignment
 
 # ---------------------------------------------------------------------------
 # Field derivation helpers
 # ---------------------------------------------------------------------------
 
-# Maps (city_mode, reason_blocked) → actual_execution_status
-# Primary key is city_mode; reason_blocked is secondary context.
 def _derive_execution_status(bsr: dict) -> str:
     mode = bsr.get("city_mode_at_record_time")
     reason = bsr.get("reason_blocked", "")
-    detail = bsr.get("block_reason_detail", "")
 
     if mode == "blocked":
         return "BLOCKED_POLICY"
     if mode == "shadow":
         return "SHADOW_ONLY"
-    if mode == "canary" or mode == "active":
+    if mode in ("canary", "active"):
         if reason and "source" in str(reason).lower():
             return "SOURCE_BLOCKED"
         return "BLOCKED_POLICY"
-    # No city_mode available (v1 rows)
+    # No city_mode available (v1 rows or missing field)
     return "UNKNOWN"
 
 
@@ -80,28 +94,24 @@ def _derive_blocking_gate(bsr: dict) -> str | None:
     return "none"
 
 
-def _derive_execution_status_from_bse(bse: dict) -> str:
-    """Derive execution status from BSE row (when no BSR match)."""
-    gate = bse.get("decision_gate") or bse.get("skip_or_block_reason", "")
-    if gate == "condition_filtered":
-        return "BLOCKED_POLICY"
-    would_buy = bse.get("would_buy")
-    if would_buy is False:
-        return "FILTERED_NO_EDGE"
-    return "UNKNOWN"
-
-
-def _bse_to_blocking_gate(bse: dict) -> str | None:
-    gate = bse.get("decision_gate") or bse.get("skip_or_block_reason", "")
-    if gate == "condition_filtered":
-        return "condition_policy"
-    if gate in ("fuera_allowlist",):
-        return "condition_policy"
-    if gate and "source" in gate.lower():
-        return "source_fidelity"
-    if bse.get("would_buy") is False and not gate:
-        return "edge_threshold"
-    return None
+def _temporal_alignment_status(bse: dict | None, market_date: str | None) -> str:
+    """
+    VERIFIED: BSE ts_utc date is strictly before the market date_iso.
+    UNVERIFIED: BSE ts_utc is on or after market date, or timestamps are missing.
+    NOT_AVAILABLE: no BSE match.
+    """
+    if bse is None:
+        return "NOT_AVAILABLE"
+    ts = bse.get("ts_utc", "")
+    if not ts or not market_date:
+        return "UNVERIFIED"
+    try:
+        eval_date = ts[:10]  # "YYYY-MM-DD"
+        if eval_date < market_date:
+            return "VERIFIED"
+        return "UNVERIFIED"
+    except (TypeError, IndexError):
+        return "UNVERIFIED"
 
 
 # ---------------------------------------------------------------------------
@@ -138,18 +148,18 @@ def _classify_row(
 
 
 def _gates_status(row: dict, bsr: dict | None, bse: dict | None) -> tuple[list, list]:
-    """Return (gates_passed, gates_missing) per §5.2."""
+    """Return (gates_passed, gates_missing) per §5.2 of ledger contract."""
     passed = []
     missing = []
 
-    # Gate 1: identity joinable ≥ MEDIUM
+    # Gate 1: market identity joinable with confidence >= MEDIUM
     jc = row.get("join_confidence", "NONE")
     if jc in ("HIGH", "MEDIUM"):
         passed.append("identity_joinable")
     else:
         missing.append("identity_joinable")
 
-    # Gate 2: price comparable — price_bucket available as proxy
+    # Gate 2: price comparable — price_bucket known as proxy
     if bsr and bsr.get("price_bucket"):
         passed.append("price_bucket_known")
     else:
@@ -163,23 +173,32 @@ def _gates_status(row: dict, bsr: dict | None, bse: dict | None) -> tuple[list, 
     else:
         missing.append("outcome_resolved")
 
-    # Gate 4: executability — actual_execution_status derivable
+    # Gate 4: actual_execution_status derivable
     if row.get("actual_execution_status") not in ("UNKNOWN", None):
         passed.append("execution_status_known")
     else:
         missing.append("execution_status_known")
 
     # Gate 5: counterfactual (would_buy from BSE join)
-    if bse and bse.get("would_buy") is not None:
+    if row.get("bot_eval_joined") and bse and bse.get("would_buy") is not None:
         passed.append("counterfactual_estimable")
     else:
         missing.append("counterfactual_estimable")
 
+    # Gate 5b: temporal alignment verified (required for CONFIRMED status)
+    tal = row.get("temporal_alignment_status", "NOT_AVAILABLE")
+    if tal == "VERIFIED":
+        passed.append("temporal_alignment_verified")
+    else:
+        missing.append("temporal_alignment_verified")
+
     # Gate 6: no blocking data quality issues
     dq = row.get("data_quality_flags", [])
     blocking_dq = [f for f in dq if f in (
-        "bot_evaluation_null", "settlement_fidelity_unknown",
+        "bot_evaluation_null",
+        "settlement_fidelity_unknown",
         "v1_schema_missing_fields",
+        "temporal_alignment_unverified",
     )]
     if not blocking_dq:
         passed.append("no_blocking_data_quality")
@@ -238,23 +257,24 @@ def build_report(data_dir: str, days: int | None = None) -> dict:
     scx_all = _load_jsonl(scx_path)
 
     cutoff = _cutoff_from_days(days)
-
-    # Filter BSR by date if requested
     if cutoff:
-        bsr_all = [r for r in bsr_all if (_bsr_date(r) or datetime.min.replace(tzinfo=timezone.utc)) >= cutoff]
+        bsr_all = [
+            r for r in bsr_all
+            if (_bsr_date(r) or datetime.min.replace(tzinfo=timezone.utc)) >= cutoff
+        ]
 
-    # Index BSE by eval_key (keep latest per key)
+    # Index BSE by eval_key — keep EARLIEST evaluation per key.
+    # Rationale: first bot assessment is closest to when the trader may have signaled;
+    # later evaluations may reflect changed market conditions (price drift, new forecasts).
     bse_index: dict[str, dict] = {}
     for row in bse_all:
         k = row.get("eval_key")
         if k:
             existing = bse_index.get(k)
-            if existing is None or row.get("ts_utc", "") > existing.get("ts_utc", ""):
+            if existing is None or row.get("ts_utc", "") < existing.get("ts_utc", ""):
                 bse_index[k] = row
 
-    # Index SCX by run_at (just for metadata)
-    scx_latest = scx_all[-1] if scx_all else {}
-
+    scx_all_count = len(scx_all)
     generated_at = datetime.now(tz=timezone.utc).isoformat()
     rows_out = []
 
@@ -262,26 +282,45 @@ def build_report(data_dir: str, days: int | None = None) -> dict:
         mk = bsr.get("match_key")
         sv = bsr.get("schema_version")  # None = v1 (no schema_version field)
 
-        # BSE join
+        # ---- Bot evaluation join (Dimension 2) ----
+        # bot_eval_joined = True ONLY when BSE row with matching eval_key exists.
+        # This is the actual BSE <-> BSR join. It is SEPARATE from market identity.
         bse = bse_index.get(mk) if mk else None
-        join_confidence = "NONE"
-        if bse:
-            join_confidence = "MEDIUM"  # eval_key <-> match_key join
-        elif bsr.get("condition_id") or bsr.get("market_id"):
-            join_confidence = "HIGH"  # has Polymarket primary identity
+        bot_eval_joined = bse is not None
 
-        # Data quality flags
+        # ---- Market identity confidence per §3.2 ----
+        # HIGH  = Polymarket primary identity (condition_id or market_id)
+        # MEDIUM = eval_key <-> match_key join (bot eval joined)
+        # LOW   = match_key present but no BSE match (market semantically identified)
+        # NONE  = v1 row without match_key or primary identity
+        has_polymarket_identity = bool(bsr.get("condition_id") or bsr.get("market_id"))
+        if has_polymarket_identity:
+            join_confidence = "HIGH"
+        elif bot_eval_joined:
+            join_confidence = "MEDIUM"
+        elif mk:
+            join_confidence = "LOW"
+        else:
+            join_confidence = "NONE"
+
+        # ---- Temporal alignment ----
+        market_date = bsr.get("date")  # "YYYY-MM-DD"
+        tal_status = _temporal_alignment_status(bse, market_date)
+
+        # ---- Data quality flags ----
         dq_flags: list[str] = []
         if sv is None:
             dq_flags.append("v1_schema_missing_fields")
         if bsr.get("settlement_fidelity_status") in ("unverified", "unknown", None):
             dq_flags.append("settlement_fidelity_unknown")
-        if bsr.get("bot_evaluation_join_status") == "missing" and bse is None:
+        if bsr.get("bot_evaluation_join_status") == "missing" and not bot_eval_joined:
             dq_flags.append("bot_evaluation_join_missing")
-        if bse is None and sv is not None:
+        if not bot_eval_joined and sv is not None:
             dq_flags.append("bot_would_buy_unknown")
+        if tal_status == "UNVERIFIED":
+            dq_flags.append("temporal_alignment_unverified")
 
-        # Derive execution status and gate
+        # ---- Execution status and blocking gate (Dimension 3) ----
         if sv is None:
             exec_status = "UNKNOWN"
             blocking_gate = None
@@ -289,21 +328,23 @@ def build_report(data_dir: str, days: int | None = None) -> dict:
             exec_status = _derive_execution_status(bsr)
             blocking_gate = _derive_blocking_gate(bsr)
 
-        # Core dimensions
+        # ---- Core dimensions ----
         win_for_trader: bool | None = bsr.get("win_for_trader")
         would_buy: bool | None = bse.get("would_buy") if bse else None
 
-        # Classification
+        # ---- Classification ----
         classification = _classify_row(win_for_trader, would_buy, exec_status)
 
-        # Build output row
         out_row: dict[str, Any] = {
             "match_key": mk,
             "city": bsr.get("city"),
-            "date": bsr.get("date"),
+            "date": market_date,
             "condition": bsr.get("condition"),
             "trader": bsr.get("trader"),
+            # Identity and join status
             "join_confidence": join_confidence,
+            "has_polymarket_identity": has_polymarket_identity,
+            "bot_eval_joined": bot_eval_joined,
             "bsr_schema_version": sv if sv is not None else "v1_legacy",
             # Dimension 1: trader outcome
             "win_for_trader": win_for_trader,
@@ -316,7 +357,13 @@ def build_report(data_dir: str, days: int | None = None) -> dict:
             "bot_edge_pct": bse.get("bot_edge_pct_at_signal") if bse else None,
             "bot_decision_gate": bse.get("decision_gate") if bse else None,
             "bot_skip_reason": bse.get("skip_or_block_reason") if bse else None,
-            "bot_evaluation_source": bsr.get("bot_evaluation_source", "FIELD_MISSING" if sv is None else "unknown"),
+            "bot_eval_ts_utc": bse.get("ts_utc") if bse else None,
+            "bot_evaluation_source": bsr.get(
+                "bot_evaluation_source",
+                "FIELD_MISSING" if sv is None else "unknown",
+            ),
+            # Temporal alignment
+            "temporal_alignment_status": tal_status,
             # Dimension 3: execution/block
             "actual_execution_status": exec_status,
             "blocking_gate": blocking_gate,
@@ -336,38 +383,49 @@ def build_report(data_dir: str, days: int | None = None) -> dict:
             "learning_classification": classification,
         }
 
-        # Gates
         gates_passed, gates_missing = _gates_status(out_row, bsr, bse)
         out_row["gates_passed"] = gates_passed
         out_row["gates_missing"] = gates_missing
 
         rows_out.append(out_row)
 
-    # Summary counts
+    # ---- Summary counts ----
     cls_counts: dict[str, int] = {}
     exec_counts: dict[str, int] = {}
-    join_counts = {"MEDIUM": 0, "HIGH": 0, "NONE": 0}
     confirmed_missed = 0
+    identity_available = 0
+    bot_eval_joined_count = 0
+    bot_eval_missing = 0
+    legacy_unjoinable = 0
+    tal_distribution: dict[str, int] = {}
+
     for r in rows_out:
         c = r["learning_classification"]
         cls_counts[c] = cls_counts.get(c, 0) + 1
         e = r["actual_execution_status"]
         exec_counts[e] = exec_counts.get(e, 0) + 1
-        jc = r["join_confidence"]
-        join_counts[jc] = join_counts.get(jc, 0) + 1
         if c == "CANDIDATE_MISSED_OPPORTUNITY" and not r["gates_missing"]:
             confirmed_missed += 1
+        if r.get("has_polymarket_identity"):
+            identity_available += 1
+        if r.get("bot_eval_joined"):
+            bot_eval_joined_count += 1
+        elif r.get("bsr_schema_version") != "v1_legacy":
+            bot_eval_missing += 1
+        else:
+            legacy_unjoinable += 1
+        tal = r.get("temporal_alignment_status", "NOT_AVAILABLE")
+        tal_distribution[tal] = tal_distribution.get(tal, 0) + 1
 
-    # Blocking fields summary
     blocking_fields: dict[str, int] = {}
     for r in rows_out:
         for f in r.get("data_quality_flags", []):
             blocking_fields[f] = blocking_fields.get(f, 0) + 1
 
-    # Opus sample: rows with full join and trader win, sorted by classification
+    # Sample for Opus: rows with actual BSE join and trader win
     sample_for_opus = [
         r for r in rows_out
-        if r["join_confidence"] == "MEDIUM" and r["win_for_trader"] is True
+        if r.get("bot_eval_joined") and r["win_for_trader"] is True
     ][:20]
 
     report = {
@@ -379,20 +437,27 @@ def build_report(data_dir: str, days: int | None = None) -> dict:
         "data_dir": data_dir,
         "days_filter": days,
         "artifact_sources": {
-            "bot_signal_evaluations": {"path": bse_path, "rows_loaded": len(bse_all)},
+            "bot_signal_evaluations": {
+                "path": bse_path,
+                "rows_loaded": len(bse_all),
+                "unique_eval_keys": len(bse_index),
+                "note": "indexed by EARLIEST ts_utc per eval_key",
+            },
             "blocked_signals_resolutions": {"path": bsr_path, "rows_loaded": len(bsr_all)},
             "signals_crosscheck": {
                 "path": scx_path,
-                "rows_loaded": len(scx_all),
-                "note": "cycle-level aggregate only, not joined per-market",
+                "rows_loaded": scx_all_count,
+                "note": "cycle-level aggregate only — not joined per-market",
             },
         },
         "summary": {
-            "total_bsr_rows": len(bsr_all),
-            "total_bsr_after_date_filter": len(rows_out),
-            "bse_eval_keys_indexed": len(bse_index),
-            "joined_rows": join_counts.get("MEDIUM", 0) + join_counts.get("HIGH", 0),
-            "join_confidence_distribution": join_counts,
+            "total_bsr_rows": len(rows_out),
+            # Honest join breakdown — do NOT confuse identity with BSE eval join
+            "identity_available_rows": identity_available,
+            "bot_evaluation_joined_rows": bot_eval_joined_count,
+            "bot_evaluation_missing_rows": bot_eval_missing,
+            "legacy_unjoinable_rows": legacy_unjoinable,
+            "temporal_alignment_distribution": tal_distribution,
             "classification_distribution": cls_counts,
             "execution_status_distribution": exec_counts,
             "confirmed_missed_opportunities": confirmed_missed,
@@ -403,30 +468,39 @@ def build_report(data_dir: str, days: int | None = None) -> dict:
                 "artifact": "blocked_signals_resolutions.jsonl (v1 rows)",
                 "gap_type": "v1_schema_missing_fields",
                 "rows_affected": blocking_fields.get("v1_schema_missing_fields", 0),
-                "impact": "No city_mode_at_record_time, reason_blocked, or bot_evaluation_join_status. "
-                          "Classified as NO_ACTION_INSUFFICIENT_EVIDENCE.",
+                "impact": "No city_mode_at_record_time, reason_blocked, or "
+                          "bot_evaluation_join_status. Classified as "
+                          "NO_ACTION_INSUFFICIENT_EVIDENCE.",
             },
             {
                 "artifact": "bot_signal_evaluations.jsonl",
                 "gap_type": "bot_would_buy_unknown",
                 "rows_affected": blocking_fields.get("bot_would_buy_unknown", 0),
                 "impact": "BSR v2+ rows without matching BSE eval_key. "
-                          "would_buy cannot be determined; classification requires bot evaluation dimension.",
+                          "would_buy cannot be determined; bot evaluation dimension missing.",
             },
             {
                 "artifact": "blocked_signals_resolutions.jsonl (settlement)",
                 "gap_type": "settlement_fidelity_unknown",
                 "rows_affected": blocking_fields.get("settlement_fidelity_unknown", 0),
                 "impact": "All settlement_fidelity_status are 'unverified'. "
-                          "CONFIRMED_MISSED_OPPORTUNITY gate 6 fails for all rows.",
+                          "Gate 'no_blocking_data_quality' fails for all rows.",
+            },
+            {
+                "artifact": "bot_signal_evaluations.jsonl (temporal)",
+                "gap_type": "temporal_alignment_unverified",
+                "rows_affected": blocking_fields.get("temporal_alignment_unverified", 0),
+                "impact": "BSE ts_utc is not strictly before the market date. "
+                          "Cannot confirm bot evaluated before market resolution. "
+                          "Gate 'temporal_alignment_verified' fails.",
             },
             {
                 "artifact": "signals_crosscheck.jsonl",
                 "gap_type": "crosscheck_is_aggregate_only",
-                "rows_affected": len(scx_all),
-                "impact": "signals_crosscheck is a cycle-level city aggregate; it has no per-market "
-                          "eval_key or bot_evaluation field. Cannot be joined as individual market rows. "
-                          "Used as context only.",
+                "rows_affected": scx_all_count,
+                "impact": "signals_crosscheck is a cycle-level city aggregate; "
+                          "no per-market eval_key or bot_evaluation. "
+                          "Cannot be joined as individual market rows. Context only.",
             },
         ],
         "rows": rows_out,
@@ -458,14 +532,27 @@ def format_markdown(report: dict) -> str:
         f"**Ledger contract:** `{report['ledger_contract_ref']}`  ",
         f"**Days filter:** {report['days_filter'] or 'all'}",
         "",
-        "## Summary",
+        "## Summary — Join Breakdown",
         "",
-        f"- BSR rows (after date filter): **{s['total_bsr_rows']}**",
-        f"- BSE eval_keys indexed: **{s['bse_eval_keys_indexed']}**",
-        f"- Joined rows (BSR <-> BSE, MEDIUM/HIGH confidence): **{s['joined_rows']}**",
+        f"- BSR rows total: **{s['total_bsr_rows']}**",
+        f"- Identity available (condition_id or market_id): **{s['identity_available_rows']}**",
+        f"- Bot evaluation joined (BSR.match_key = BSE.eval_key): **{s['bot_evaluation_joined_rows']}**",
+        f"- Bot evaluation missing (v2+ BSR, no BSE match): **{s['bot_evaluation_missing_rows']}**",
+        f"- Legacy unjoinable (v1 BSR, key fields absent): **{s['legacy_unjoinable_rows']}**",
         f"- Confirmed missed opportunities (all gates passed): **{s['confirmed_missed_opportunities']}**",
         "",
+        "> NOTE: 'Identity available' and 'Bot evaluation joined' are independent dimensions.",
+        "> A row can have Polymarket identity (condition_id) but no BSE join, and vice versa.",
+        "",
+        "## Temporal Alignment Distribution",
+        "",
+    ]
+    tal_rows = sorted(s["temporal_alignment_distribution"].items(), key=lambda x: -x[1])
+    lines.append(_md_table(["Status", "Count"], [[k, str(v)] for k, v in tal_rows]))
+    lines += [
+        "",
         "## Classification Distribution",
+        "> Only rows with bot_eval_joined=True have all 3 dimensions classified.",
         "",
     ]
     cls_rows = sorted(s["classification_distribution"].items(), key=lambda x: -x[1])
@@ -496,19 +583,25 @@ def format_markdown(report: dict) -> str:
     ]
     bq = s["blocking_data_quality_fields"]
     if bq:
-        lines.append(_md_table(["Field", "Rows"], [[k, str(v)] for k, v in sorted(bq.items(), key=lambda x: -x[1])]))
+        lines.append(_md_table(
+            ["Field", "Rows"],
+            [[k, str(v)] for k, v in sorted(bq.items(), key=lambda x: -x[1])],
+        ))
     else:
         lines.append("_None_")
     lines += [
         "",
         "## Sample for Opus Review",
-        f"_(joined rows with trader win, up to 20)_",
+        "_(rows with bot_eval_joined=True and trader win, up to 20)_",
         "",
     ]
     sample = report.get("sample_for_opus_review", [])
     if sample:
-        sample_headers = ["match_key", "win_for_trader", "bot_would_buy", "actual_execution_status",
-                          "blocking_gate", "classification", "gates_missing"]
+        hdrs = [
+            "match_key", "win_for_trader", "bot_would_buy",
+            "actual_exec_status", "blocking_gate", "temporal_align",
+            "classification", "gates_missing",
+        ]
         sample_rows = []
         for r in sample:
             sample_rows.append([
@@ -517,12 +610,13 @@ def format_markdown(report: dict) -> str:
                 str(r.get("bot_would_buy", "")),
                 r.get("actual_execution_status", ""),
                 str(r.get("blocking_gate", "")),
+                r.get("temporal_alignment_status", ""),
                 r.get("learning_classification", ""),
                 ", ".join(r.get("gates_missing", [])) or "-",
             ])
-        lines.append(_md_table(sample_headers, sample_rows))
+        lines.append(_md_table(hdrs, sample_rows))
     else:
-        lines.append("_No joined rows with trader win found._")
+        lines.append("_No rows with bot_eval_joined=True and trader win found._")
     lines += [
         "",
         "---",
@@ -557,7 +651,7 @@ def main() -> None:
     parser.add_argument(
         "--out",
         default=None,
-        help="If set, write JSON report to data/intelligence/<filename>. "
+        help="Write JSON report to data/intelligence/<filename>. "
              "Must be explicitly requested (not automatic).",
     )
     parser.add_argument(
@@ -574,7 +668,6 @@ def main() -> None:
     args = parser.parse_args()
 
     if not args.json_output and not args.markdown and not args.out:
-        # Default: print markdown summary
         args.markdown = True
 
     report = build_report(data_dir=args.data_dir, days=args.days)
