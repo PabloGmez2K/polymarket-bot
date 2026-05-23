@@ -21,6 +21,7 @@ import tempfile
 import pytest
 
 from tools.trader_vs_bot_gap_report import (
+    _build_skip_qt_index,
     _classify_row,
     _derive_blocking_gate,
     _derive_evaluation_stage,
@@ -34,6 +35,55 @@ from tools.trader_vs_bot_gap_report import (
 # ---------------------------------------------------------------------------
 # _derive_execution_status
 # ---------------------------------------------------------------------------
+
+class TestBuildSkipQtIndex:
+    def _write_skip(self, tmp: str, rows: list[dict]) -> str:
+        path = os.path.join(tmp, "skip_log.jsonl")
+        with open(path, "w", encoding="utf-8") as fh:
+            for r in rows:
+                fh.write(json.dumps(r) + "\n")
+        return path
+
+    def test_returns_empty_dict_when_file_missing(self, tmp_path):
+        result = _build_skip_qt_index(str(tmp_path / "nonexistent.jsonl"))
+        assert result == {}
+
+    def test_indexes_qt_match_key_to_sub_reason(self, tmp_path):
+        path = self._write_skip(str(tmp_path), [{
+            "extras": {
+                "qt_match_key": "Madrid|2026-05-21|exact|32|C",
+                "exact_range_gate_reason": "no_quality_trader_signal_match",
+            }
+        }])
+        idx = _build_skip_qt_index(path)
+        assert idx["Madrid|2026-05-21|exact|32|C"] == "no_quality_trader_signal_match"
+
+    def test_multiple_cycles_same_key_same_reason(self, tmp_path):
+        """Multiple entries with same key and same sub-reason -> unambiguous."""
+        path = self._write_skip(str(tmp_path), [
+            {"extras": {"qt_match_key": "A|2026-05-21|exact|20|C", "exact_range_gate_reason": "no_quality_trader_signal_match"}},
+            {"extras": {"qt_match_key": "A|2026-05-21|exact|20|C", "exact_range_gate_reason": "no_quality_trader_signal_match"}},
+        ])
+        idx = _build_skip_qt_index(path)
+        assert idx["A|2026-05-21|exact|20|C"] == "no_quality_trader_signal_match"
+
+    def test_conflicting_sub_reasons_returns_none(self, tmp_path):
+        """Multiple entries with same key but different sub-reasons -> None (ambiguous)."""
+        path = self._write_skip(str(tmp_path), [
+            {"extras": {"qt_match_key": "A|2026-05-21|exact|20|C", "exact_range_gate_reason": "no_quality_trader_signal_match"}},
+            {"extras": {"qt_match_key": "A|2026-05-21|exact|20|C", "exact_range_gate_reason": "city_not_in_quality_trader_whitelist"}},
+        ])
+        idx = _build_skip_qt_index(path)
+        assert idx["A|2026-05-21|exact|20|C"] is None
+
+    def test_rows_without_extras_ignored(self, tmp_path):
+        path = self._write_skip(str(tmp_path), [
+            {"city": "London", "date_iso": "2026-05-21"},  # no extras
+            {"extras": {}},  # no qt_match_key
+        ])
+        idx = _build_skip_qt_index(path)
+        assert idx == {}
+
 
 class TestDeriveExecutionStatus:
     def test_blocked_city(self):
@@ -616,6 +666,145 @@ class TestBuildReport:
         _write_jsonl(scx_p, [])
         report = build_report(self.tmp)
         assert "evaluation_stage_distribution" in report["summary"]
+
+    def _skip_log_path(self):
+        return os.path.join(self.tmp, "skip_log.jsonl")
+
+    def test_qt_gate_sub_reason_matched(self):
+        """BSR condition_filtered row with matching skip_log entry -> MATCHED sub-reason."""
+        bse_p, bsr_p, scx_p = self._paths()
+        skip_p = self._skip_log_path()
+        _write_jsonl(bse_p, [BSE_ROW_CONDITION_FILTERED])
+        _write_jsonl(bsr_p, [BSR_V3_SHADOW])
+        _write_jsonl(scx_p, [])
+        _write_jsonl(skip_p, [{
+            "ts_utc": "2026-05-20T10:00:00+00:00",
+            "cycle_id": "2026-05-20T10:00",
+            "city": "Istanbul",
+            "date_iso": "2026-05-22",
+            "condition": "exact",
+            "skip_reason": "condition_filtered",
+            "extras": {
+                "qt_match_key": "Istanbul|2026-05-22|exact|18|C",
+                "exact_range_gate_reason": "no_quality_trader_signal_match",
+            },
+        }])
+        report = build_report(self.tmp)
+        row = report["rows"][0]
+        assert row["qt_gate_sub_reason"] == "no_quality_trader_signal_match"
+        assert row["qt_gate_sub_reason_join_status"] == "MATCHED"
+
+    def test_qt_gate_sub_reason_not_found(self):
+        """condition_filtered row but no matching skip_log entry -> NOT_FOUND."""
+        bse_p, bsr_p, scx_p = self._paths()
+        skip_p = self._skip_log_path()
+        _write_jsonl(bse_p, [BSE_ROW_CONDITION_FILTERED])
+        _write_jsonl(bsr_p, [BSR_V3_SHADOW])
+        _write_jsonl(scx_p, [])
+        _write_jsonl(skip_p, [])  # empty skip_log — key not present
+        report = build_report(self.tmp)
+        row = report["rows"][0]
+        assert row["qt_gate_sub_reason"] is None
+        assert row["qt_gate_sub_reason_join_status"] == "NOT_FOUND"
+
+    def test_qt_gate_sub_reason_skip_log_missing(self):
+        """skip_log.jsonl absent -> join_status = SKIP_LOG_MISSING (not NOT_FOUND)."""
+        bse_p, bsr_p, scx_p = self._paths()
+        # Do NOT write skip_log — file does not exist
+        _write_jsonl(bse_p, [BSE_ROW_CONDITION_FILTERED])
+        _write_jsonl(bsr_p, [BSR_V3_SHADOW])
+        _write_jsonl(scx_p, [])
+        report = build_report(self.tmp)
+        row = report["rows"][0]
+        assert row["qt_gate_sub_reason"] is None
+        assert row["qt_gate_sub_reason_join_status"] == "SKIP_LOG_MISSING"
+
+    def test_qt_gate_sub_reason_not_applicable_for_non_condition_filtered(self):
+        """Row with reason_blocked != condition_filtered -> NOT_APPLICABLE."""
+        bse_p, bsr_p, scx_p = self._paths()
+        skip_p = self._skip_log_path()
+        bsr_row = dict(BSR_V3_SHADOW)
+        bsr_row["reason_blocked"] = "city_mode"  # not condition_filtered
+        _write_jsonl(bse_p, [])
+        _write_jsonl(bsr_p, [bsr_row])
+        _write_jsonl(scx_p, [])
+        _write_jsonl(skip_p, [])
+        report = build_report(self.tmp)
+        row = report["rows"][0]
+        assert row["qt_gate_sub_reason"] is None
+        assert row["qt_gate_sub_reason_join_status"] == "NOT_APPLICABLE"
+
+    def test_qt_gate_sub_reason_ambiguous(self):
+        """Same qt_match_key with conflicting sub-reasons -> AMBIGUOUS, data_quality_flag set."""
+        bse_p, bsr_p, scx_p = self._paths()
+        skip_p = self._skip_log_path()
+        _write_jsonl(bse_p, [BSE_ROW_CONDITION_FILTERED])
+        _write_jsonl(bsr_p, [BSR_V3_SHADOW])
+        _write_jsonl(scx_p, [])
+        _write_jsonl(skip_p, [
+            {
+                "ts_utc": "2026-05-20T10:00:00+00:00",
+                "cycle_id": "2026-05-20T10:00",
+                "extras": {
+                    "qt_match_key": "Istanbul|2026-05-22|exact|18|C",
+                    "exact_range_gate_reason": "no_quality_trader_signal_match",
+                },
+            },
+            {
+                "ts_utc": "2026-05-20T14:00:00+00:00",
+                "cycle_id": "2026-05-20T14:00",
+                "extras": {
+                    "qt_match_key": "Istanbul|2026-05-22|exact|18|C",
+                    "exact_range_gate_reason": "city_not_in_quality_trader_whitelist",
+                },
+            },
+        ])
+        report = build_report(self.tmp)
+        row = report["rows"][0]
+        assert row["qt_gate_sub_reason"] is None
+        assert row["qt_gate_sub_reason_join_status"] == "AMBIGUOUS"
+        assert "qt_sub_reason_ambiguous" in row["data_quality_flags"]
+
+    def test_qt_gate_summary_distributions_present(self):
+        """Summary must include qt_gate_sub_reason_distribution and join_status_distribution."""
+        bse_p, bsr_p, scx_p = self._paths()
+        skip_p = self._skip_log_path()
+        _write_jsonl(bse_p, [BSE_ROW_CONDITION_FILTERED])
+        _write_jsonl(bsr_p, [BSR_V3_SHADOW])
+        _write_jsonl(scx_p, [])
+        _write_jsonl(skip_p, [{
+            "ts_utc": "2026-05-20T10:00:00+00:00",
+            "cycle_id": "2026-05-20T10:00",
+            "extras": {
+                "qt_match_key": "Istanbul|2026-05-22|exact|18|C",
+                "exact_range_gate_reason": "no_quality_trader_signal_match",
+            },
+        }])
+        report = build_report(self.tmp)
+        s = report["summary"]
+        assert "qt_gate_sub_reason_distribution" in s
+        assert "qt_gate_sub_reason_join_status_distribution" in s
+        assert s["qt_gate_sub_reason_distribution"].get("no_quality_trader_signal_match", 0) == 1
+        assert s["qt_gate_sub_reason_join_status_distribution"].get("MATCHED", 0) == 1
+
+    def test_qt_gate_data_gap_documented(self):
+        """data_gaps must include qt_sub_reason_partial_coverage entry."""
+        bse_p, bsr_p, scx_p = self._paths()
+        _write_jsonl(bse_p, [])
+        _write_jsonl(bsr_p, [BSR_V3_SHADOW])
+        _write_jsonl(scx_p, [])
+        report = build_report(self.tmp)
+        gap_types = [g["gap_type"] for g in report["data_gaps"]]
+        assert "qt_sub_reason_partial_coverage" in gap_types
+
+    def test_skip_log_artifact_source_documented(self):
+        """artifact_sources must document skip_log."""
+        bse_p, bsr_p, scx_p = self._paths()
+        _write_jsonl(bse_p, [])
+        _write_jsonl(bsr_p, [])
+        _write_jsonl(scx_p, [])
+        report = build_report(self.tmp)
+        assert "skip_log" in report["artifact_sources"]
 
     def test_no_bot_py_import(self):
         """Confirm the module does not import bot.py."""

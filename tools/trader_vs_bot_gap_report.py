@@ -60,7 +60,7 @@ import sys
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
-SCHEMA_VERSION_OUTPUT = 3  # bumped: evaluation_stage_status added
+SCHEMA_VERSION_OUTPUT = 4  # bumped: qt_gate_sub_reason join from skip_log added
 
 # ---------------------------------------------------------------------------
 # Field derivation helpers
@@ -315,14 +315,45 @@ def _bsr_date(bsr: dict) -> datetime | None:
 # Core report builder
 # ---------------------------------------------------------------------------
 
+def _build_skip_qt_index(skip_log_path: str) -> dict[str, str | None]:
+    """
+    Build index: qt_match_key -> exact_range_gate_reason.
+
+    Key format: city|date_iso|condition|threshold|unit (same as eval_key/match_key).
+    Source: skip_log.jsonl extras.qt_match_key + extras.exact_range_gate_reason.
+
+    Per-key strategy: collect all distinct sub-reasons across cycles. If all agree,
+    return the single sub-reason. If they conflict (AMBIGUOUS), return None so the
+    caller can flag AMBIGUOUS. Conflicts observed on Railway: 0.
+    """
+    if not os.path.exists(skip_log_path):
+        return {}
+
+    per_key: dict[str, set[str]] = {}
+    for row in _load_jsonl(skip_log_path):
+        extras = row.get("extras") or {}
+        k = extras.get("qt_match_key")
+        sub = extras.get("exact_range_gate_reason")
+        if k and sub:
+            per_key.setdefault(k, set()).add(sub)
+
+    result: dict[str, str | None] = {}
+    for k, subs in per_key.items():
+        result[k] = next(iter(subs)) if len(subs) == 1 else None  # None = ambiguous
+    return result
+
+
 def build_report(data_dir: str, days: int | None = None) -> dict:
     bse_path = os.path.join(data_dir, "bot_signal_evaluations.jsonl")
     bsr_path = os.path.join(data_dir, "blocked_signals_resolutions.jsonl")
     scx_path = os.path.join(data_dir, "signals_crosscheck.jsonl")
+    skip_log_path = os.path.join(data_dir, "skip_log.jsonl")
 
     bsr_all = _load_jsonl(bsr_path)
     bse_all = _load_jsonl(bse_path)
     scx_all = _load_jsonl(scx_path)
+    skip_qt_index = _build_skip_qt_index(skip_log_path)
+    skip_log_loaded = os.path.exists(skip_log_path)
 
     cutoff = _cutoff_from_days(days)
     if cutoff:
@@ -403,6 +434,28 @@ def build_report(data_dir: str, days: int | None = None) -> dict:
         win_for_trader: bool | None = bsr.get("win_for_trader")
         would_buy: bool | None = bse.get("would_buy") if bse else None
 
+        # ---- Quality-trader gate sub-reason (from skip_log join) ----
+        # Applies only when reason_blocked="condition_filtered" (QT gate path).
+        # Join key: BSR.match_key <-> skip_log.extras.qt_match_key (same format as eval_key).
+        # NOT_FOUND means skip_log had no entry for this key (pre-feature or rotated data).
+        # AMBIGUOUS means multiple distinct sub-reasons existed for the same key (extremely rare).
+        qt_sub_reason: str | None = None
+        if bsr.get("reason_blocked") == "condition_filtered" and mk:
+            if mk in skip_qt_index:
+                raw_sub = skip_qt_index[mk]
+                if raw_sub is None:
+                    qt_join_status = "AMBIGUOUS"
+                    dq_flags.append("qt_sub_reason_ambiguous")
+                else:
+                    qt_sub_reason = raw_sub
+                    qt_join_status = "MATCHED"
+            elif skip_log_loaded:
+                qt_join_status = "NOT_FOUND"
+            else:
+                qt_join_status = "SKIP_LOG_MISSING"
+        else:
+            qt_join_status = "NOT_APPLICABLE"
+
         # ---- Classification ----
         classification = _classify_row(win_for_trader, would_buy, exec_status)
 
@@ -454,6 +507,9 @@ def build_report(data_dir: str, days: int | None = None) -> dict:
             "data_quality_flags": dq_flags,
             # Classification
             "learning_classification": classification,
+            # Quality-trader gate sub-reason (skip_log join)
+            "qt_gate_sub_reason": qt_sub_reason,
+            "qt_gate_sub_reason_join_status": qt_join_status,
         }
 
         gates_passed, gates_missing = _gates_status(out_row, bsr, bse)
@@ -472,6 +528,8 @@ def build_report(data_dir: str, days: int | None = None) -> dict:
     legacy_unjoinable = 0
     tal_distribution: dict[str, int] = {}
     eval_stage_distribution: dict[str, int] = {}
+    qt_sub_reason_distribution: dict[str, int] = {}
+    qt_join_status_distribution: dict[str, int] = {}
 
     for r in rows_out:
         c = r["learning_classification"]
@@ -492,6 +550,11 @@ def build_report(data_dir: str, days: int | None = None) -> dict:
         tal_distribution[tal] = tal_distribution.get(tal, 0) + 1
         es = r.get("evaluation_stage_status", "NOT_AVAILABLE")
         eval_stage_distribution[es] = eval_stage_distribution.get(es, 0) + 1
+        qsr = r.get("qt_gate_sub_reason") or "UNKNOWN"
+        qjs = r.get("qt_gate_sub_reason_join_status", "NOT_APPLICABLE")
+        if qjs != "NOT_APPLICABLE":
+            qt_sub_reason_distribution[qsr] = qt_sub_reason_distribution.get(qsr, 0) + 1
+        qt_join_status_distribution[qjs] = qt_join_status_distribution.get(qjs, 0) + 1
 
     blocking_fields: dict[str, int] = {}
     for r in rows_out:
@@ -525,6 +588,16 @@ def build_report(data_dir: str, days: int | None = None) -> dict:
                 "rows_loaded": scx_all_count,
                 "note": "cycle-level aggregate only — not joined per-market",
             },
+            "skip_log": {
+                "path": skip_log_path,
+                "loaded": skip_log_loaded,
+                "unique_qt_match_keys": len(skip_qt_index),
+                "note": (
+                    "indexed by extras.qt_match_key for quality-trader gate sub-reason join. "
+                    "Coverage starts from when exact_range_gate_reason was added to skip_log. "
+                    "Rows before that date and rotated entries appear as NOT_FOUND."
+                ),
+            },
         },
         "summary": {
             "total_bsr_rows": len(rows_out),
@@ -535,6 +608,8 @@ def build_report(data_dir: str, days: int | None = None) -> dict:
             "legacy_unjoinable_rows": legacy_unjoinable,
             "temporal_alignment_distribution": tal_distribution,
             "evaluation_stage_distribution": eval_stage_distribution,
+            "qt_gate_sub_reason_distribution": qt_sub_reason_distribution,
+            "qt_gate_sub_reason_join_status_distribution": qt_join_status_distribution,
             "classification_distribution": cls_counts,
             "execution_status_distribution": exec_counts,
             "confirmed_missed_opportunities": confirmed_missed,
@@ -570,6 +645,17 @@ def build_report(data_dir: str, days: int | None = None) -> dict:
                 "impact": "BSE ts_utc is not strictly before the market date. "
                           "Cannot confirm bot evaluated before market resolution. "
                           "Gate 'temporal_alignment_verified' fails.",
+            },
+            {
+                "artifact": "skip_log.jsonl",
+                "gap_type": "qt_sub_reason_partial_coverage",
+                "rows_affected": qt_join_status_distribution.get("NOT_FOUND", 0),
+                "impact": (
+                    "condition_filtered rows before exact_range_gate_reason was instrumented "
+                    "in skip_log, or with rotated skip_log entries, cannot have qt_gate_sub_reason "
+                    "resolved. These appear as qt_gate_sub_reason_join_status=NOT_FOUND. "
+                    "No sub-reason is inferred; learning_classification is unchanged."
+                ),
             },
             {
                 "artifact": "signals_crosscheck.jsonl",
@@ -637,6 +723,25 @@ def format_markdown(report: dict) -> str:
     ]
     es_rows = sorted(s["evaluation_stage_distribution"].items(), key=lambda x: -x[1])
     lines.append(_md_table(["Evaluation Stage", "Count"], [[k, str(v)] for k, v in es_rows]))
+    lines += [
+        "",
+        "## Quality-Trader Gate Sub-Reason (skip_log join)",
+        "> Applies to condition_filtered rows only. Join key: BSR.match_key = skip_log.extras.qt_match_key.",
+        "> NOT_FOUND = skip_log had no entry (pre-feature or rotated). NOT_APPLICABLE = not a condition_filtered row.",
+        "",
+    ]
+    qt_join_rows = sorted(
+        s["qt_gate_sub_reason_join_status_distribution"].items(), key=lambda x: -x[1]
+    )
+    lines.append(_md_table(["Join Status", "Count"], [[k, str(v)] for k, v in qt_join_rows]))
+    lines += [""]
+    qt_sub_rows = sorted(s["qt_gate_sub_reason_distribution"].items(), key=lambda x: -x[1])
+    if qt_sub_rows:
+        lines += [
+            "### Sub-reason breakdown (MATCHED rows only)",
+            "",
+        ]
+        lines.append(_md_table(["Sub-Reason", "Count"], [[k, str(v)] for k, v in qt_sub_rows]))
     lines += [
         "",
         "## Classification Distribution",
