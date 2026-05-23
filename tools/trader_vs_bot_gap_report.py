@@ -60,7 +60,7 @@ import sys
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
-SCHEMA_VERSION_OUTPUT = 4  # bumped: qt_gate_sub_reason join from skip_log added
+SCHEMA_VERSION_OUTPUT = 5  # bumped: exact_no_qt_match_eval_log_only artefact reader added
 
 # ---------------------------------------------------------------------------
 # Field derivation helpers
@@ -343,17 +343,67 @@ def _build_skip_qt_index(skip_log_path: str) -> dict[str, str | None]:
     return result
 
 
+def _summarize_exact_no_qt_match_log_only(path: str) -> dict:
+    """
+    Read exact_no_qt_match_evaluations_log_only.jsonl and return a summary dict.
+    Returns NOT_ENABLED_NO_DATA status when file is absent or empty.
+    Never raises; LOG_ONLY read tool, no trading authorization.
+    """
+    if not os.path.exists(path):
+        return {"status": "NOT_ENABLED_NO_DATA", "artifact_path": path, "rows": 0}
+    rows = _load_jsonl(path)
+    if not rows:
+        return {"status": "NOT_ENABLED_NO_DATA", "artifact_path": path, "rows": 0}
+
+    unique_eval_keys: set = set()
+    identity_resolvable_count = 0
+    best_side_dist: dict = {}
+    edge_passes_count = 0
+    city_breakdown: dict = {}
+    city_mode_breakdown: dict = {}
+
+    for r in rows:
+        ek = r.get("eval_key")
+        if ek:
+            unique_eval_keys.add(ek)
+        if r.get("identity_resolvable"):
+            identity_resolvable_count += 1
+        bs = r.get("best_side_log_only") or "null"
+        best_side_dist[bs] = best_side_dist.get(bs, 0) + 1
+        if r.get("edge_passes_reference_threshold_log_only"):
+            edge_passes_count += 1
+        city = r.get("city") or "unknown"
+        city_breakdown[city] = city_breakdown.get(city, 0) + 1
+        cm = r.get("city_mode") or "unknown"
+        city_mode_breakdown[cm] = city_mode_breakdown.get(cm, 0) + 1
+
+    n = len(rows)
+    return {
+        "status": "DATA_AVAILABLE",
+        "artifact_path": path,
+        "rows": n,
+        "unique_eval_keys": len(unique_eval_keys),
+        "identity_resolvable_rate": round(identity_resolvable_count / n, 4) if n else 0.0,
+        "best_side_log_only_distribution": best_side_dist,
+        "n_edge_passes_reference_threshold": edge_passes_count,
+        "city_breakdown": city_breakdown,
+        "city_mode_breakdown": city_mode_breakdown,
+    }
+
+
 def build_report(data_dir: str, days: int | None = None) -> dict:
     bse_path = os.path.join(data_dir, "bot_signal_evaluations.jsonl")
     bsr_path = os.path.join(data_dir, "blocked_signals_resolutions.jsonl")
     scx_path = os.path.join(data_dir, "signals_crosscheck.jsonl")
     skip_log_path = os.path.join(data_dir, "skip_log.jsonl")
+    exact_no_qt_path = os.path.join(data_dir, "exact_no_qt_match_evaluations_log_only.jsonl")
 
     bsr_all = _load_jsonl(bsr_path)
     bse_all = _load_jsonl(bse_path)
     scx_all = _load_jsonl(scx_path)
     skip_qt_index = _build_skip_qt_index(skip_log_path)
     skip_log_loaded = os.path.exists(skip_log_path)
+    exact_no_qt_summary = _summarize_exact_no_qt_match_log_only(exact_no_qt_path)
 
     cutoff = _cutoff_from_days(days)
     if cutoff:
@@ -598,6 +648,16 @@ def build_report(data_dir: str, days: int | None = None) -> dict:
                     "Rows before that date and rotated entries appear as NOT_FOUND."
                 ),
             },
+            "exact_no_qt_match_evaluations_log_only": {
+                "path": exact_no_qt_path,
+                "status": exact_no_qt_summary["status"],
+                "rows": exact_no_qt_summary.get("rows", 0),
+                "note": (
+                    "LOG_ONLY artefact: exact/no-QT-match evaluations. "
+                    "Populated only when LOG_ONLY_EXACT_NO_QT_MATCH_EVAL_ENABLED=1 "
+                    "(env var OFF by default). execution_authorized=false on all rows."
+                ),
+            },
         },
         "summary": {
             "total_bsr_rows": len(rows_out),
@@ -614,6 +674,7 @@ def build_report(data_dir: str, days: int | None = None) -> dict:
             "execution_status_distribution": exec_counts,
             "confirmed_missed_opportunities": confirmed_missed,
             "blocking_data_quality_fields": blocking_fields,
+            "exact_no_qt_match_eval_log_only": exact_no_qt_summary,
         },
         "data_gaps": [
             {

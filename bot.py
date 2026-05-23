@@ -12,6 +12,8 @@ import logging
 import threading
 import subprocess
 import shutil
+import hashlib
+import uuid
 from datetime import date, datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
@@ -25,6 +27,7 @@ from waitress import serve
 load_dotenv()
 
 # =============================================================
+# bot.py v10.6.43 — Exact/no-QT-match LOG_ONLY evaluation capture, env var OFF (sesion 2026-05-23)
 # bot.py v10.6.42 — SQLite Recorder Fase 0: persistencia pasiva fail-safe (sesion 257, 2026-04-27)
 # bot.py v10.6.41 — Fill-real reconciliation para SELL por order_id + anti-flapping guard legacy (sesion 255, 2026-04-27)
 # bot.py v10.6.40 — Guard SL_intra para condition=exact + days<=1 (Opus, sesion 246, 2026-04-26)
@@ -801,6 +804,7 @@ CITY_INTELLIGENCE_RUNTIME_BRIDGE_ENABLED = os.getenv("CITY_INTELLIGENCE_RUNTIME_
 CITY_INTELLIGENCE_RUNTIME_BRIDGE_HOUR_UTC = int(os.getenv("CITY_INTELLIGENCE_RUNTIME_BRIDGE_HOUR_UTC", "7"))
 BLOCKED_SIGNALS_FILE = _data_path("blocked_signals_resolutions.jsonl")
 BOT_SIGNAL_EVALUATIONS_FILE = _data_path("bot_signal_evaluations.jsonl")
+EXACT_NO_QT_MATCH_EVAL_FILE = _data_path("exact_no_qt_match_evaluations_log_only.jsonl")
 TRADERS_DB_FILE = _seed_data_file("traders_db.json")
 LIFECYCLE_REVIEW_JSON_FILE = _data_path("city_lifecycle_review.json")
 LIFECYCLE_REVIEW_COOLDOWN_HOURS = 24
@@ -1103,6 +1107,67 @@ def build_funnel_observability_record(cycle_data, discovered_markets_unique=None
         "baseline_partial": not discovered_is_known,
         "reject_reasons": dict(reject_reasons),
     }
+
+
+def write_exact_no_qt_match_evals(batch, jsonl_path=None, cap_per_cycle=20):
+    """
+    Best-effort writer for exact/no-QT-match LOG_ONLY evaluations.
+    Deduplicates by eval_key, applies SHA-256 stable cap if needed. Fail-open.
+    """
+    if not batch:
+        return
+    jsonl_path = jsonl_path or EXACT_NO_QT_MATCH_EVAL_FILE
+    # Dedup by eval_key within the cycle (keep first occurrence)
+    seen: set = set()
+    deduped = []
+    for r in batch:
+        k = r.get("eval_key")
+        if k not in seen:
+            seen.add(k)
+            deduped.append(r)
+    eligible_before_cap = len(deduped)
+    if eligible_before_cap <= cap_per_cycle:
+        selected = list(deduped)
+        cap_active = False
+        sampling_method = "none"
+        capped_count = 0
+    else:
+        def _sha_rank(r):
+            return hashlib.sha256(
+                f"{r.get('cycle_id', '')}|{r.get('eval_key', '')}".encode("utf-8")
+            ).hexdigest()
+        selected = sorted(deduped, key=_sha_rank)[:cap_per_cycle]
+        cap_active = True
+        sampling_method = "sha256_rank"
+        capped_count = eligible_before_cap - cap_per_cycle
+    selected_after_cap = len(selected)
+    for r in selected:
+        r["capture_meta"] = {
+            "sampled": cap_active,
+            "cap_active": cap_active,
+            "sampling_method": sampling_method,
+            "stable_rank": hashlib.sha256(
+                f"{r.get('cycle_id', '')}|{r.get('eval_key', '')}".encode("utf-8")
+            ).hexdigest() if cap_active else None,
+            "cap_per_cycle": cap_per_cycle,
+            "eligible_before_cap": eligible_before_cap,
+            "selected_after_cap": selected_after_cap,
+            "capped_count": capped_count,
+        }
+    try:
+        target_dir = os.path.dirname(jsonl_path)
+        if target_dir:
+            os.makedirs(target_dir, exist_ok=True)
+        with open(jsonl_path, "a", encoding="utf-8") as fh:
+            for r in selected:
+                fh.write(json.dumps(r, ensure_ascii=False, default=str) + "\n")
+        log.info(
+            f"[exact_no_qt_eval] eligible_before_cap={eligible_before_cap} "
+            f"selected_after_cap={selected_after_cap} capped_count={capped_count} "
+            f"sampling_method={sampling_method} cap_per_cycle={cap_per_cycle}"
+        )
+    except Exception as _e:
+        log.warning(f"exact_no_qt_match_eval write failed (LOG_ONLY, no trading impact): {_e}")
 
 
 def write_funnel_observability_log_only(record, jsonl_path=None, latest_path=None):
@@ -21712,6 +21777,8 @@ def main(client):
             "mkt_prob_yes": mkt_prob_yes, "mkt_prob_no": 1.0 - mkt_prob_yes,
             "volume_24h": float(market.get("volume24hr", 0)), "liquidity": liquidity,
             "token_id_yes": clob_ids[0], "token_id_no": clob_ids[1],
+            "market_id": market.get("id") or None,
+            "condition_id": market.get("conditionId") or None,
             "allowlisted": allowlisted,
             "city_mode": city_mode,
             "shadow_override_flag": shadow_override,  # R3: distingue fuera_allowlist vs shadow_only_override en Loop B
@@ -21752,6 +21819,7 @@ def main(client):
     observed_cycle_market_keys = set()
     skipped_dup = 0
     edge_analysis = []  # Para el log detallado
+    exact_no_qt_eval_batch = []  # LOG_ONLY batch for exact/no-QT-match evals (v10.6.43)
     # v10.4 Fix Bug #9: token_ids vendidos en manage_positions → no re-comprar
     sold_this_cycle = mgmt.get("sold_token_ids", set())
 
@@ -21861,6 +21929,80 @@ def main(client):
                         "qt_match_key": _early_key,
                     },
                 ))
+                # v10.6.43: LOG_ONLY capture for exact/no-QT-match (env var OFF by default)
+                if (
+                    os.getenv("LOG_ONLY_EXACT_NO_QT_MATCH_EVAL_ENABLED", "0") == "1"
+                    and _qt_gate_reason == "no_quality_trader_signal_match"
+                    and c.get("city_mode") in {"active", "canary"}
+                ):
+                    try:
+                        _lonly_prob_yes = estimate_prob_with_city(
+                            forecast_max, threshold_c, c["condition"],
+                            c["days_ahead"], threshold_high_c, city=city,
+                        )
+                        _lonly_prob_no = 1.0 - _lonly_prob_yes
+                        _lonly_edge_yes = _lonly_prob_yes - c["mkt_prob_yes"]
+                        _lonly_edge_no = _lonly_prob_no - c["mkt_prob_no"]
+                        if _lonly_edge_yes > 0 and _lonly_edge_yes >= _lonly_edge_no:
+                            _lonly_best_side = "YES"
+                            _lonly_best_edge = round(_lonly_edge_yes * 100, 4)
+                        elif _lonly_edge_no > 0:
+                            _lonly_best_side = "NO"
+                            _lonly_best_edge = round(_lonly_edge_no * 100, 4)
+                        else:
+                            _lonly_best_side = None
+                            _lonly_best_edge = None
+                        _lonly_passes = (
+                            _lonly_best_edge is not None and _lonly_best_edge >= MIN_EDGE
+                        )
+                        _lonly_mid = c.get("market_id")
+                        _lonly_cid = c.get("condition_id")
+                        _lonly_tyes = c.get("token_id_yes")
+                        _lonly_tno = c.get("token_id_no")
+                        exact_no_qt_eval_batch.append({
+                            "schema_version": 1,
+                            "ts_utc": datetime.now(timezone.utc).isoformat(),
+                            "cycle_id": cycle_id,
+                            "eval_key": c.get("eval_key") or _early_key,
+                            "capture_id": str(uuid.uuid4()),
+                            "market_id": _lonly_mid,
+                            "condition_id": _lonly_cid,
+                            "token_id_yes": _lonly_tyes,
+                            "token_id_no": _lonly_tno,
+                            "identity_resolvable": bool(
+                                _lonly_mid or _lonly_cid or _lonly_tyes or _lonly_tno
+                            ),
+                            "city": city,
+                            "city_mode": c.get("city_mode"),
+                            "date_iso": c["date_iso"],
+                            "days_ahead": c["days_ahead"],
+                            "condition": condition_name,
+                            "threshold": threshold,
+                            "threshold_high": threshold_high,
+                            "unit": c["unit"],
+                            "qt_gate_reason": _qt_gate_reason,
+                            "our_prob_yes": round(_lonly_prob_yes, 6),
+                            "our_prob_no": round(_lonly_prob_no, 6),
+                            "mkt_prob_yes": round(c["mkt_prob_yes"], 6),
+                            "mkt_prob_no": round(c["mkt_prob_no"], 6),
+                            "edge_yes_pct": round(_lonly_edge_yes * 100, 4),
+                            "edge_no_pct": round(_lonly_edge_no * 100, 4),
+                            "best_side_log_only": _lonly_best_side,
+                            "best_edge_pct_log_only": _lonly_best_edge,
+                            "min_edge_reference": MIN_EDGE,
+                            "edge_passes_reference_threshold_log_only": bool(_lonly_passes),
+                            "forecast_max": forecast_max,
+                            "sigma_used": sigma_used_val,
+                            "source_fidelity_status": "unknown",
+                            "log_only": True,
+                            "execution_authorized": False,
+                            "skip_log_eval_key": c.get("eval_key") or _early_key,
+                            "capture_meta": None,  # filled by write_exact_no_qt_match_evals
+                        })
+                    except Exception as _lonly_err:
+                        log.warning(
+                            f"exact_no_qt_match_eval capture error (fail-open): {_lonly_err}"
+                        )
                 continue
             # Quality-trader canary: marcar para edge buffer + size scale aguas abajo
             c["exact_range_canary"] = True
@@ -22444,6 +22586,10 @@ def main(client):
         append_skip_log_entries(skip_log_entries)
     except Exception as _e_skip_log:
         log.warning(f"skip_log flush fallo: {_e_skip_log}")
+
+    # v10.6.43: flush exact/no-QT-match LOG_ONLY batch (env var OFF by default)
+    if exact_no_qt_eval_batch:
+        write_exact_no_qt_match_evals(exact_no_qt_eval_batch)
 
     # ---- v10.2: RESUMEN COMPLETO DEL CICLO ----
     if not DRY_RUN:
