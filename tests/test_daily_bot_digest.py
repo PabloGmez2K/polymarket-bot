@@ -629,3 +629,58 @@ def test_manual_telegram_send_api_error_does_not_retry(monkeypatch):
     assert result["reason"] == "TELEGRAM_API_ERROR"
     assert "secret-token" not in json.dumps(result)
     assert "123456789" not in json.dumps(result)
+
+
+def test_digest_surfaces_funnel_observability_log_only():
+    module = load_tool()
+    with local_tmp_dir() as tmp_dir:
+        snapshot_path = tmp_dir / "data" / "observability" / "leaderboard_pnl_snapshots.jsonl"
+        funnel_path = tmp_dir / "data" / "funnel_observability_log_only.jsonl"
+        write_jsonl(snapshot_path, [snapshot(captured_at_utc="2026-05-23T08:01:00Z")])
+        write_jsonl(
+            funnel_path,
+            [
+                {
+                    "ts_utc": "2026-05-23T04:00:00+00:00",
+                    "cycle_number": 379,
+                    "discovered_markets_unique": 330,
+                    "prefiltered": 20,
+                    "city_window_skipped": 100,
+                    "price_out_of_range": 120,
+                    "date_out_of_range_past": 30,
+                    "condition_filtered": 10,
+                    "edge": 1,
+                    "shadow_edge": 2,
+                    "selected": 1,
+                    "real_buy": 1,
+                },
+                {
+                    "ts_utc": "2026-05-23T08:00:00+00:00",
+                    "cycle_number": 380,
+                    "discovered_markets_unique": 330,
+                    "prefiltered": 30,
+                    "city_window_skipped": 110,
+                    "price_out_of_range": 168,
+                    "date_out_of_range_past": 11,
+                    "condition_filtered": 27,
+                    "edge": 0,
+                    "shadow_edge": 1,
+                    "selected": 0,
+                    "real_buy": 0,
+                },
+            ],
+        )
+
+        digest = module.build_digest(snapshot_path)
+
+    funnel = digest["funnel_observability"]
+    assert funnel["status"] == "ok"
+    assert funnel["log_only"] is True
+    assert funnel["trading_authorization"] == "NO_ACTION"
+    assert funnel["recent_cycles"] == 2
+    assert funnel["discovered_markets_unique"] == 660
+    assert funnel["selected"] == 1
+    assert "Funnel LOG_ONLY:" in digest["message"]
+    assert "discovered=660" in digest["message"]
+    assert "Funnel <b>LOG_ONLY</b>" in digest["telegram_preview"]
+    assert "NO_ACTION: metricas solamente." in digest["telegram_preview"]

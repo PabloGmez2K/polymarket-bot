@@ -1,6 +1,6 @@
 # Funnel Observability LOG_ONLY
 
-**Status:** IMPLEMENTED / LOG_ONLY.
+**Status:** IMPLEMENTED / LOG_ONLY / DIGEST WIRED.
 **Decision source:** Opus strategic decision after live throughput evidence pack, cycle 366 (`2026-05-21T11:38:47Z`): `CODE_LOG_ONLY_METRICS_FIRST + SOURCE_ONBOARDING_FIRST`.
 
 This document records the implemented narrow observability patch for the weather-market funnel. It does not authorize trading, change policy, or change any filter.
@@ -17,6 +17,7 @@ Implemented pieces:
 - `write_funnel_observability_log_only(...)` as a best-effort/no-throw writer.
 - Discovery hook after `all_markets` is collected.
 - Cycle hook beside `cycle_summary.json` and `cycles_history.jsonl`.
+- Daily Bot Digest compact read-only block from `funnel_observability_log_only.jsonl`.
 - Focused tests in `tests/test_funnel_observability.py`.
 
 This status update is documentation-only. It does not reopen the semantic design.
@@ -183,18 +184,19 @@ The implemented patch remains fail-closed:
 
 ## Daily Digest / Telegram Compact View
 
-Recommended compact block:
+Implemented compact block in `tools/daily_bot_digest.py`:
 
 ```text
-Funnel LOG_ONLY 2026-05-21 11:38Z
-discovered=? | prefiltered=22 | edge=2 | selected=2 | BUY=2
-skips: city_window=154 price=121 date_past=33 condition=11 policy/source=4
-shadow_edge=4 top: Hong Kong 54.45
-exec_rejects=0
-NO_ACTION: metrics only, no trading authorization
+Funnel LOG_ONLY:
+window=2026-05-22T08:00:47Z -> 2026-05-23T08:00:47Z cycles=9
+discovered=2970 prefiltered=246 edge=0 shadow_edge=7 selected=0 BUY=0
+skips: city_window=1155 price=1228 date_past=330 condition=234
+LOG_ONLY: No BANKROLL, no BUY/SELL/SKIP, no Fase C.
 ```
 
 If `discovered_markets_unique` is unavailable, show `discovered=?` and mark the cycle `baseline_partial=true`.
+
+Telegram preview includes the same LOG_ONLY metrics in a compact 24h section.
 
 ## Read-Only Baseline, 7 Days
 

@@ -58,6 +58,114 @@ def read_snapshots(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def read_jsonl_tolerant(path: Path, limit: int = 500) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    try:
+        with path.open("r", encoding="utf-8-sig") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(row, dict):
+                    rows.append(row)
+    except OSError:
+        return []
+    return rows[-limit:]
+
+
+def data_dir_for_snapshot(snapshot_file: str | Path) -> Path:
+    path = Path(snapshot_file)
+    parent = path.parent
+    if parent.name == "observability":
+        return parent.parent
+    return parent if str(parent) not in {"", "."} else Path("data")
+
+
+def parse_digest_ts(value: Any) -> datetime | None:
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def funnel_record_ts(record: dict[str, Any]) -> datetime | None:
+    return parse_digest_ts(record.get("ts_utc") or record.get("timestamp_utc") or record.get("timestamp"))
+
+
+def int_value(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def summarize_funnel_observability(snapshot_file: str | Path) -> dict[str, Any]:
+    data_dir = data_dir_for_snapshot(snapshot_file)
+    path = data_dir / "funnel_observability_log_only.jsonl"
+    rows = read_jsonl_tolerant(path, limit=500)
+    if not rows:
+        return {
+            "status": "missing",
+            "source": str(path),
+            "log_only": True,
+            "trading_authorization": "NO_ACTION",
+        }
+
+    dated = [(funnel_record_ts(row), row) for row in rows]
+    dated = [(ts, row) for ts, row in dated if ts is not None]
+    latest_ts, latest = dated[-1] if dated else (None, rows[-1])
+    cutoff = latest_ts - timedelta(hours=24) if latest_ts else None
+    recent = [row for ts, row in dated if cutoff is None or ts >= cutoff] if dated else rows[-24:]
+
+    def total(key: str) -> int:
+        return sum(int_value(row.get(key)) for row in recent)
+
+    return {
+        "status": "ok",
+        "source": str(path),
+        "log_only": True,
+        "trading_authorization": "NO_ACTION",
+        "rows": len(rows),
+        "recent_window_hours": 24,
+        "recent_cycles": len(recent),
+        "window_start_utc": (cutoff.isoformat().replace("+00:00", "Z") if cutoff else None),
+        "window_end_utc": (latest_ts.isoformat().replace("+00:00", "Z") if latest_ts else None),
+        "discovered_markets_unique": total("discovered_markets_unique"),
+        "prefiltered": total("prefiltered"),
+        "city_window_skipped": total("city_window_skipped"),
+        "price_out_of_range": total("price_out_of_range"),
+        "date_out_of_range_past": total("date_out_of_range_past"),
+        "condition_filtered": total("condition_filtered"),
+        "edge": total("edge"),
+        "shadow_edge": total("shadow_edge"),
+        "selected": total("selected"),
+        "real_buy": total("real_buy"),
+        "latest_cycle_number": latest.get("cycle_number"),
+        "latest_discovered_markets_unique": latest.get("discovered_markets_unique"),
+        "latest_prefiltered": latest.get("prefiltered"),
+        "latest_edge": latest.get("edge"),
+        "latest_shadow_edge": latest.get("shadow_edge"),
+        "latest_selected": latest.get("selected"),
+        "latest_real_buy": latest.get("real_buy"),
+    }
+
+
 def as_decimal(value: Any) -> Decimal | None:
     if value is None or isinstance(value, bool):
         return None
@@ -285,6 +393,7 @@ def build_digest_from_rows(
         "latest_snapshot_query_status": latest.get("query_status") if latest else None,
         "no_previous_snapshot": latest_valid is not None and previous_valid is None,
         "db_throughput": db_throughput,
+        "funnel_observability": summarize_funnel_observability(snapshot_file),
     }
     payload["message"] = render_human_digest(payload)
     payload["telegram_preview"] = render_telegram_digest(payload)
@@ -475,6 +584,73 @@ def render_db_throughput_telegram_lines(summary: dict[str, Any] | None) -> list[
     ]
 
 
+def render_funnel_human_lines(summary: dict[str, Any] | None) -> list[str]:
+    if not summary:
+        return []
+    if summary.get("status") != "ok":
+        return [
+            "Funnel LOG_ONLY:",
+            f"status={summary.get('status', 'missing')}",
+            "source=funnel_observability_log_only.jsonl",
+            "LOG_ONLY: No BANKROLL, no BUY/SELL/SKIP, no Fase C.",
+        ]
+    return [
+        "Funnel LOG_ONLY:",
+        (
+            f"window={summary.get('window_start_utc')} -> "
+            f"{summary.get('window_end_utc')} cycles={summary.get('recent_cycles', 0)}"
+        ),
+        (
+            f"discovered={summary.get('discovered_markets_unique', 0)} "
+            f"prefiltered={summary.get('prefiltered', 0)} "
+            f"edge={summary.get('edge', 0)} "
+            f"shadow_edge={summary.get('shadow_edge', 0)} "
+            f"selected={summary.get('selected', 0)} "
+            f"BUY={summary.get('real_buy', 0)}"
+        ),
+        (
+            f"skips: city_window={summary.get('city_window_skipped', 0)} "
+            f"price={summary.get('price_out_of_range', 0)} "
+            f"date_past={summary.get('date_out_of_range_past', 0)} "
+            f"condition={summary.get('condition_filtered', 0)}"
+        ),
+        "LOG_ONLY: No BANKROLL, no BUY/SELL/SKIP, no Fase C.",
+    ]
+
+
+def render_funnel_telegram_lines(summary: dict[str, Any] | None) -> list[str]:
+    if not summary:
+        return []
+    if summary.get("status") != "ok":
+        return [
+            "",
+            f"Funnel {bold('LOG_ONLY')}",
+            "Estado: sin artefacto funnel_observability_log_only.jsonl.",
+            "NO_ACTION: metricas solamente.",
+        ]
+    return [
+        "",
+        f"Funnel {bold('LOG_ONLY')}",
+        (
+            "24h: "
+            f"discovered={summary.get('discovered_markets_unique', 0)} | "
+            f"prefiltered={summary.get('prefiltered', 0)} | "
+            f"edge={summary.get('edge', 0)} | "
+            f"shadow_edge={summary.get('shadow_edge', 0)} | "
+            f"selected={summary.get('selected', 0)} | "
+            f"BUY={summary.get('real_buy', 0)}"
+        ),
+        (
+            "Skips: "
+            f"city_window={summary.get('city_window_skipped', 0)} "
+            f"price={summary.get('price_out_of_range', 0)} "
+            f"date_past={summary.get('date_out_of_range_past', 0)} "
+            f"condition={summary.get('condition_filtered', 0)}"
+        ),
+        "NO_ACTION: metricas solamente.",
+    ]
+
+
 def render_human_digest(digest: dict[str, Any]) -> str:
     latest = digest.get("latest")
     previous = digest.get("previous")
@@ -520,6 +696,9 @@ def render_human_digest(digest: dict[str, Any]) -> str:
         db_lines = render_db_throughput_human_lines(digest.get("db_throughput"))
         if db_lines:
             lines.extend(["", *db_lines])
+        funnel_lines = render_funnel_human_lines(digest.get("funnel_observability"))
+        if funnel_lines:
+            lines.extend(["", *funnel_lines])
         return "\n".join(lines)
 
     lines.extend(
@@ -575,6 +754,9 @@ def render_human_digest(digest: dict[str, Any]) -> str:
     db_lines = render_db_throughput_human_lines(digest.get("db_throughput"))
     if db_lines:
         lines.extend(["", *db_lines])
+    funnel_lines = render_funnel_human_lines(digest.get("funnel_observability"))
+    if funnel_lines:
+        lines.extend(["", *funnel_lines])
     return "\n".join(lines)
 
 
@@ -669,6 +851,7 @@ def render_telegram_digest(digest: dict[str, Any]) -> str:
             str(digest.get("trend_label", "unknown")), deltas
         )
     lines.extend(render_db_throughput_telegram_lines(digest.get("db_throughput")))
+    lines.extend(render_funnel_telegram_lines(digest.get("funnel_observability")))
     return "\n".join(lines)
 
 
