@@ -550,11 +550,11 @@ def build_report(data_dir: str, days: int | None = None) -> dict:
         tal_distribution[tal] = tal_distribution.get(tal, 0) + 1
         es = r.get("evaluation_stage_status", "NOT_AVAILABLE")
         eval_stage_distribution[es] = eval_stage_distribution.get(es, 0) + 1
-        qsr = r.get("qt_gate_sub_reason") or "UNKNOWN"
         qjs = r.get("qt_gate_sub_reason_join_status", "NOT_APPLICABLE")
-        if qjs != "NOT_APPLICABLE":
-            qt_sub_reason_distribution[qsr] = qt_sub_reason_distribution.get(qsr, 0) + 1
         qt_join_status_distribution[qjs] = qt_join_status_distribution.get(qjs, 0) + 1
+        if qjs == "MATCHED":
+            qsr = r.get("qt_gate_sub_reason") or "UNKNOWN"
+            qt_sub_reason_distribution[qsr] = qt_sub_reason_distribution.get(qsr, 0) + 1
 
     blocking_fields: dict[str, int] = {}
     for r in rows_out:
