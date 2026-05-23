@@ -22,6 +22,22 @@ NOTE on join semantics:
   - bot_evaluation_missing_rows: v2+ BSR rows with match_key but no BSE match.
   - legacy_unjoinable_rows: v1 BSR rows missing key fields (city_mode, reason_blocked).
 
+NOTE on evaluation_stage_status:
+  Distinguishes HOW would_buy=False was reached. Three states:
+  - POLICY_BLOCKED_BEFORE_EDGE_EVALUATION: our_prob=None; the bot was blocked by a policy
+    gate (condition_filtered, shadow_only, city_blocked) BEFORE computing any probability
+    or edge. The bot structurally never reached the forecasting/edge step.
+  - EDGE_EVALUATED_NO_BUY: our_prob is not None AND bot_edge_pct_at_signal is not None;
+    the bot computed probability and edge but found insufficient edge to buy.
+  - EDGE_POSITIVE_BUT_POLICY_BLOCKED: our_prob is not None AND a policy gate blocked
+    after probability computation (e.g. fuera_allowlist blocks after our_prob is known).
+  - UNKNOWN_EVALUATION_STAGE: data insufficient to determine.
+  - NOT_AVAILABLE: no BSE join exists.
+
+  A CANDIDATE_FILTERED_WINNER with evaluation_stage_status=POLICY_BLOCKED_BEFORE_EDGE_EVALUATION
+  indicates a market selection policy gap, NOT a model prediction failure. The bot never
+  assessed whether the trade would have been profitable; the condition policy prevented it.
+
 NOTE on temporal alignment:
   BSE rows are selected by EARLIEST ts_utc per eval_key (first bot evaluation of that
   market). temporal_alignment_status = VERIFIED when BSE ts_utc is before the market
@@ -44,7 +60,7 @@ import sys
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
-SCHEMA_VERSION_OUTPUT = 2  # bumped: honest join semantics + temporal alignment
+SCHEMA_VERSION_OUTPUT = 3  # bumped: evaluation_stage_status added
 
 # ---------------------------------------------------------------------------
 # Field derivation helpers
@@ -112,6 +128,58 @@ def _temporal_alignment_status(bse: dict | None, market_date: str | None) -> str
         return "UNVERIFIED"
     except (TypeError, IndexError):
         return "UNVERIFIED"
+
+
+# Gates that indicate a policy check runs BEFORE probability/edge computation.
+# When decision_gate is one of these AND our_prob is None, the bot never reached
+# the forecasting step (condition or city policy blocked first).
+_PRE_EVAL_POLICY_GATES = frozenset({
+    "condition_filtered",
+    "shadow_only",
+    "shadow_only_override",
+    "city_blocked",
+    "source_blocked",
+    "city_mode",
+})
+
+
+def _derive_evaluation_stage(bse: dict | None, would_buy: bool | None) -> str:
+    """
+    Determine at which stage the bot stopped evaluating this market.
+
+    Returns one of:
+      POLICY_BLOCKED_BEFORE_EDGE_EVALUATION — policy gate stopped bot before any
+        probability/edge calculation (our_prob is None, gate in _PRE_EVAL_POLICY_GATES)
+      EDGE_EVALUATED_NO_BUY — bot computed probability and edge; edge insufficient
+      EDGE_POSITIVE_BUT_POLICY_BLOCKED — probability computed but policy gate blocked
+        before or after edge threshold (our_prob not None, policy gate present)
+      UNKNOWN_EVALUATION_STAGE — data insufficient to determine
+      NOT_AVAILABLE — no BSE join
+    """
+    if bse is None:
+        return "NOT_AVAILABLE"
+
+    gate = bse.get("decision_gate") or bse.get("skip_or_block_reason") or ""
+    our_prob = bse.get("our_prob")
+    edge_pct = bse.get("bot_edge_pct_at_signal")
+
+    if our_prob is None and gate in _PRE_EVAL_POLICY_GATES:
+        # Policy gate fired before forecasting pipeline ran
+        return "POLICY_BLOCKED_BEFORE_EDGE_EVALUATION"
+
+    if our_prob is not None:
+        # Probability was computed; check if edge was also calculated
+        if edge_pct is not None:
+            if would_buy is False:
+                return "EDGE_EVALUATED_NO_BUY"
+            # would_buy=True shouldn't appear in BSR (those are BUYs, not blocked signals)
+            return "UNKNOWN_EVALUATION_STAGE"
+        # our_prob present but edge_pct null: probability computed, policy blocked after
+        if gate in _PRE_EVAL_POLICY_GATES or "allowlist" in gate or "fuera" in gate:
+            return "EDGE_POSITIVE_BUT_POLICY_BLOCKED"
+        return "EDGE_EVALUATED_NO_BUY"
+
+    return "UNKNOWN_EVALUATION_STAGE"
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +375,9 @@ def build_report(data_dir: str, days: int | None = None) -> dict:
         market_date = bsr.get("date")  # "YYYY-MM-DD"
         tal_status = _temporal_alignment_status(bse, market_date)
 
+        # ---- Evaluation stage ----
+        eval_stage = _derive_evaluation_stage(bse, bse.get("would_buy") if bse else None)
+
         # ---- Data quality flags ----
         dq_flags: list[str] = []
         if sv is None:
@@ -364,6 +435,8 @@ def build_report(data_dir: str, days: int | None = None) -> dict:
             ),
             # Temporal alignment
             "temporal_alignment_status": tal_status,
+            # Evaluation stage: HOW would_buy=False was reached (see module docstring)
+            "evaluation_stage_status": eval_stage,
             # Dimension 3: execution/block
             "actual_execution_status": exec_status,
             "blocking_gate": blocking_gate,
@@ -398,6 +471,7 @@ def build_report(data_dir: str, days: int | None = None) -> dict:
     bot_eval_missing = 0
     legacy_unjoinable = 0
     tal_distribution: dict[str, int] = {}
+    eval_stage_distribution: dict[str, int] = {}
 
     for r in rows_out:
         c = r["learning_classification"]
@@ -416,6 +490,8 @@ def build_report(data_dir: str, days: int | None = None) -> dict:
             legacy_unjoinable += 1
         tal = r.get("temporal_alignment_status", "NOT_AVAILABLE")
         tal_distribution[tal] = tal_distribution.get(tal, 0) + 1
+        es = r.get("evaluation_stage_status", "NOT_AVAILABLE")
+        eval_stage_distribution[es] = eval_stage_distribution.get(es, 0) + 1
 
     blocking_fields: dict[str, int] = {}
     for r in rows_out:
@@ -458,6 +534,7 @@ def build_report(data_dir: str, days: int | None = None) -> dict:
             "bot_evaluation_missing_rows": bot_eval_missing,
             "legacy_unjoinable_rows": legacy_unjoinable,
             "temporal_alignment_distribution": tal_distribution,
+            "evaluation_stage_distribution": eval_stage_distribution,
             "classification_distribution": cls_counts,
             "execution_status_distribution": exec_counts,
             "confirmed_missed_opportunities": confirmed_missed,
@@ -551,6 +628,17 @@ def format_markdown(report: dict) -> str:
     lines.append(_md_table(["Status", "Count"], [[k, str(v)] for k, v in tal_rows]))
     lines += [
         "",
+        "## Evaluation Stage Distribution",
+        "> How would_buy=False was reached for bot_eval_joined rows.",
+        "> POLICY_BLOCKED_BEFORE_EDGE_EVALUATION = bot never computed probability/edge (our_prob=None).",
+        "> EDGE_EVALUATED_NO_BUY = bot computed probability+edge, edge insufficient.",
+        "> EDGE_POSITIVE_BUT_POLICY_BLOCKED = probability computed, then policy gate blocked.",
+        "",
+    ]
+    es_rows = sorted(s["evaluation_stage_distribution"].items(), key=lambda x: -x[1])
+    lines.append(_md_table(["Evaluation Stage", "Count"], [[k, str(v)] for k, v in es_rows]))
+    lines += [
+        "",
         "## Classification Distribution",
         "> Only rows with bot_eval_joined=True have all 3 dimensions classified.",
         "",
@@ -599,8 +687,8 @@ def format_markdown(report: dict) -> str:
     if sample:
         hdrs = [
             "match_key", "win_for_trader", "bot_would_buy",
-            "actual_exec_status", "blocking_gate", "temporal_align",
-            "classification", "gates_missing",
+            "eval_stage", "actual_exec_status", "blocking_gate",
+            "temporal_align", "classification",
         ]
         sample_rows = []
         for r in sample:
@@ -608,11 +696,11 @@ def format_markdown(report: dict) -> str:
                 r.get("match_key", ""),
                 str(r.get("win_for_trader", "")),
                 str(r.get("bot_would_buy", "")),
+                r.get("evaluation_stage_status", ""),
                 r.get("actual_execution_status", ""),
                 str(r.get("blocking_gate", "")),
                 r.get("temporal_alignment_status", ""),
                 r.get("learning_classification", ""),
-                ", ".join(r.get("gates_missing", [])) or "-",
             ])
         lines.append(_md_table(hdrs, sample_rows))
     else:

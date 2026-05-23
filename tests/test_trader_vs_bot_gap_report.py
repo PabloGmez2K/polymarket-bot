@@ -23,6 +23,7 @@ import pytest
 from tools.trader_vs_bot_gap_report import (
     _classify_row,
     _derive_blocking_gate,
+    _derive_evaluation_stage,
     _derive_execution_status,
     _gates_status,
     _temporal_alignment_status,
@@ -119,6 +120,56 @@ class TestTemporalAlignmentStatus:
     def test_unverified_when_no_market_date(self):
         bse = {"ts_utc": "2026-05-20T10:00:00+00:00"}
         assert _temporal_alignment_status(bse, None) == "UNVERIFIED"
+
+
+# ---------------------------------------------------------------------------
+# _derive_evaluation_stage
+# ---------------------------------------------------------------------------
+
+class TestDeriveEvaluationStage:
+    def test_not_available_when_no_bse(self):
+        assert _derive_evaluation_stage(None, None) == "NOT_AVAILABLE"
+
+    def test_policy_blocked_condition_filtered_no_prob(self):
+        """condition_filtered + our_prob=None -> blocked before edge evaluation."""
+        bse = {
+            "decision_gate": "condition_filtered",
+            "skip_or_block_reason": "condition_filtered",
+            "our_prob": None,
+            "bot_edge_pct_at_signal": None,
+        }
+        assert _derive_evaluation_stage(bse, False) == "POLICY_BLOCKED_BEFORE_EDGE_EVALUATION"
+
+    def test_policy_blocked_shadow_only_no_prob(self):
+        bse = {
+            "decision_gate": "shadow_only",
+            "our_prob": None,
+            "bot_edge_pct_at_signal": None,
+        }
+        assert _derive_evaluation_stage(bse, False) == "POLICY_BLOCKED_BEFORE_EDGE_EVALUATION"
+
+    def test_edge_evaluated_no_buy_when_prob_and_edge_present(self):
+        """Both our_prob and bot_edge_pct present, would_buy=False -> edge evaluated."""
+        bse = {
+            "decision_gate": "edge_below_threshold",
+            "our_prob": 55.0,
+            "bot_edge_pct_at_signal": 8.0,
+        }
+        assert _derive_evaluation_stage(bse, False) == "EDGE_EVALUATED_NO_BUY"
+
+    def test_edge_positive_but_policy_blocked_prob_no_edge(self):
+        """our_prob present, edge_pct null, allowlist policy gate -> policy blocked after prob."""
+        bse = {
+            "decision_gate": "fuera_allowlist",
+            "our_prob": 47.9,
+            "mkt_prob": 21.5,
+            "bot_edge_pct_at_signal": None,
+        }
+        assert _derive_evaluation_stage(bse, False) == "EDGE_POSITIVE_BUT_POLICY_BLOCKED"
+
+    def test_unknown_when_no_gate_and_no_prob(self):
+        bse = {"decision_gate": None, "our_prob": None, "bot_edge_pct_at_signal": None}
+        assert _derive_evaluation_stage(bse, False) == "UNKNOWN_EVALUATION_STAGE"
 
 
 # ---------------------------------------------------------------------------
@@ -514,6 +565,57 @@ class TestBuildReport:
         assert "bot_evaluation_missing_rows" in s
         assert "legacy_unjoinable_rows" in s
         assert "temporal_alignment_distribution" in s
+
+    def test_evaluation_stage_policy_blocked_before_edge(self):
+        """condition_filtered with our_prob=None -> POLICY_BLOCKED_BEFORE_EDGE_EVALUATION."""
+        bse_p, bsr_p, scx_p = self._paths()
+        bse_row = dict(BSE_ROW_CONDITION_FILTERED)
+        bse_row["our_prob"] = None
+        bse_row["bot_edge_pct_at_signal"] = None
+        bse_row["decision_gate"] = "condition_filtered"
+        _write_jsonl(bse_p, [bse_row])
+        _write_jsonl(bsr_p, [BSR_V3_SHADOW])
+        _write_jsonl(scx_p, [])
+        report = build_report(self.tmp)
+        row = report["rows"][0]
+        assert row["evaluation_stage_status"] == "POLICY_BLOCKED_BEFORE_EDGE_EVALUATION"
+        s = report["summary"]
+        assert s["evaluation_stage_distribution"].get("POLICY_BLOCKED_BEFORE_EDGE_EVALUATION", 0) >= 1
+
+    def test_evaluation_stage_edge_evaluated_no_buy(self):
+        """our_prob and bot_edge_pct present, would_buy=False -> EDGE_EVALUATED_NO_BUY."""
+        bse_p, bsr_p, scx_p = self._paths()
+        bse_row = dict(BSE_ROW_CONDITION_FILTERED)
+        bse_row["would_buy"] = False
+        bse_row["our_prob"] = 45.0
+        bse_row["mkt_prob"] = 30.0
+        bse_row["bot_edge_pct_at_signal"] = 5.0
+        bse_row["decision_gate"] = "edge_below_threshold"
+        bse_row["skip_or_block_reason"] = "edge_below_threshold"
+        _write_jsonl(bse_p, [bse_row])
+        _write_jsonl(bsr_p, [BSR_V3_SHADOW])
+        _write_jsonl(scx_p, [])
+        report = build_report(self.tmp)
+        row = report["rows"][0]
+        assert row["evaluation_stage_status"] == "EDGE_EVALUATED_NO_BUY"
+
+    def test_evaluation_stage_not_available_without_bse_join(self):
+        """No BSE join -> evaluation_stage_status = NOT_AVAILABLE."""
+        bse_p, bsr_p, scx_p = self._paths()
+        _write_jsonl(bse_p, [])
+        _write_jsonl(bsr_p, [BSR_V3_SHADOW])
+        _write_jsonl(scx_p, [])
+        report = build_report(self.tmp)
+        row = report["rows"][0]
+        assert row["evaluation_stage_status"] == "NOT_AVAILABLE"
+
+    def test_report_structure_has_evaluation_stage_distribution(self):
+        bse_p, bsr_p, scx_p = self._paths()
+        _write_jsonl(bse_p, [])
+        _write_jsonl(bsr_p, [])
+        _write_jsonl(scx_p, [])
+        report = build_report(self.tmp)
+        assert "evaluation_stage_distribution" in report["summary"]
 
     def test_no_bot_py_import(self):
         """Confirm the module does not import bot.py."""
