@@ -1,9 +1,11 @@
 # Market Evidence Ledger — Contract v1
 
-**Fecha:** 2026-05-23 (Sesión 381, Sonnet, docs-only)
+**Fecha:** 2026-05-23 (Sesión 381-382, Sonnet, docs-only)
 **Clasificación:** `MONETIZATION_RELEVANT / ARCHITECTURE`
 **Decisión Opus:** `DEFINE_MARKET_LEDGER_CONTRACT_BEFORE_ANY_REPORT`
-**Veredicto de cierre:** `LEDGER_CONTRACT_READY_FOR_REVIEW`
+**Veredicto de cierre:** `LEDGER_CONTRACT_READY_FOR_REVIEW_CORRECTED`
+
+> **Corrección v1.1 (Sesión 382):** Cuadrantes del Gap Report reformulados para incluir `actual_execution_status` y `blocking_gate` como tercera dimensión de decisión. Estados de aprendizaje ampliados con `CANDIDATE_FILTERED_WINNER` y `PROTECTIVE_POLICY_EVIDENCE`. Output del primer consumer redefinido para no prometer exclusivamente "oportunidades perdidas".
 
 ---
 
@@ -178,13 +180,19 @@ railway_live (OBSERVED_RUNTIME, HIGH)
 
 | Estado | Significado |
 |---|---|
-| `CANDIDATE_MISSED_OPPORTUNITY` | Evidencia preliminar de oportunidad no tomada, pero sin gates completos |
-| `CONFIRMED_MISSED_OPPORTUNITY` | Todos los gates de confirmación cumplidos (ver §5.2) |
-| `PROTECTIVE_FILTER_EVIDENCE` | El bot bloqueó correctamente: trader perdió o outcome adverso confirmado |
-| `SOURCE_FIDELITY_BLOCKED` | La señal existe pero la fuente de datos no tiene confianza suficiente para operar |
+| `CANDIDATE_MISSED_OPPORTUNITY` | Trader ganó + `bot_would_buy=true` + operación no ejecutada por gate conocido — sin todos los gates de confirmación aún |
+| `CONFIRMED_MISSED_OPPORTUNITY` | Todos los gates de §5.2 cumplidos |
+| `CANDIDATE_FILTERED_WINNER` | Trader ganó + `bot_would_buy=false` por filtro de modelo o condición — no es evidencia protectora; puede indicar debilidad de market selection o que el trader operó con información o timing distinto |
+| `PROTECTIVE_POLICY_EVIDENCE` | Trader perdió + `bot_would_buy=true` + operación bloqueada/no ejecutada por gate conocido — el gate bloqueó una operación comparable que habría perdido |
+| `PROTECTIVE_FILTER_EVIDENCE` | Trader perdió + `bot_would_buy=false` — el modelo/filtro descartó correctamente |
+| `SOURCE_FIDELITY_BLOCKED` | Trader ganó + bloqueo exclusivamente por fuente de datos no confiable — oportunidad perdida atribuible a source, no a modelo |
 | `SHADOW_HYPOTHESIS` | Evidencia acumulada en shadow que merece seguimiento pero sin resolución aún |
 | `EXPERIMENT_CANDIDATE` | Hipótesis con suficiente evidencia para diseñar un experimento LOG_ONLY |
-| `NO_ACTION_INSUFFICIENT_EVIDENCE` | No hay datos suficientes para clasificar en ninguna de las anteriores |
+| `NO_ACTION_INSUFFICIENT_EVIDENCE` | Identidad, precio, source fidelity o ejecutabilidad insuficientes para clasificar |
+
+**Regla crítica:** `CANDIDATE_FILTERED_WINNER` no es `PROTECTIVE_FILTER_EVIDENCE`. Que el bot no habría comprado no prueba que el filtro fue correcto — solo prueba que el modelo no vio edge. Requiere análisis separado para saber si el filtro fue acertado o si existe un gap de market selection.
+
+**Regla crítica:** `PROTECTIVE_POLICY_EVIDENCE` ≠ "riesgo evitado genérico". Solo aplica cuando la operación estaba bloqueada por un gate conocido (`actual_execution_status ∈ {BLOCKED_POLICY, SHADOW_ONLY, SOURCE_BLOCKED}`) Y `bot_would_buy=true`. Un gate solo puede considerarse protector cuando bloqueó una operación comparable que habría perdido.
 
 ### 5.2 Gates para pasar de `CANDIDATE` a `CONFIRMED_MISSED_OPPORTUNITY`
 
@@ -265,10 +273,34 @@ market_evidence_view {
   freshness_status      : enum[FRESH, STALE, UNKNOWN]
   data_quality_flags    : list[string]
 
+  // ejecución y bloqueo real (tercera dimensión — ver §9.3)
+  actual_execution_status : enum[
+    BUY_EXECUTED,          // posición real abierta en Polymarket
+    BLOCKED_POLICY,        // ciudad blocked, guard activo, SL_intra, policy explícita
+    SHADOW_ONLY,           // ciudad en modo shadow — edge detectado pero no ejecutable
+    SOURCE_BLOCKED,        // source fidelity insuficiente para operar
+    FILTERED_NO_EDGE,      // evaluado, bot_would_buy=false
+    PRICE_OUT_OF_RANGE,    // precio OOR en el momento de la señal
+    NOT_OBSERVED,          // el bot no vio este mercado en ese ciclo
+    UNKNOWN                // dato no disponible o no derivable
+  ]
+  blocking_gate           : enum[
+    city_mode,             // ciudad en shadow o blocked
+    source_fidelity,       // source no confiable
+    condition_policy,      // condición filtrada por política
+    price_filter,          // precio fuera de rango
+    edge_threshold,        // bot_edge_pct < umbral
+    guard,                 // SL_intra u otro guard activo
+    insufficient_data,     // no hay datos para determinar
+    none                   // no hubo bloqueo (BUY o FILTERED_NO_EDGE sin gate explícito)
+  ] | null
+
   // clasificación de aprendizaje
   learning_classification : enum[
     CANDIDATE_MISSED_OPPORTUNITY,
     CONFIRMED_MISSED_OPPORTUNITY,
+    CANDIDATE_FILTERED_WINNER,
+    PROTECTIVE_POLICY_EVIDENCE,
     PROTECTIVE_FILTER_EVIDENCE,
     SOURCE_FIDELITY_BLOCKED,
     SHADOW_HYPOTHESIS,
@@ -309,14 +341,27 @@ agent_manifest {
   coverage_period       : { from: date, to: date }
 
   summary_counts {
-    total_observations         : int
-    joinable_with_identity     : int    // tienen condition_id o eval_key
-    with_resolved_outcome      : int
-    candidate_missed_opps_7d   : int
-    confirmed_missed_opps      : int
-    protective_filter_evidence : int
-    shadow_hypotheses_active   : int
-    data_quality_blocked       : int
+    total_observations              : int
+    joinable_with_identity          : int    // tienen condition_id o eval_key
+    with_resolved_outcome           : int
+    candidate_missed_opps_7d        : int    // CANDIDATE_MISSED_OPPORTUNITY
+    confirmed_missed_opps           : int    // CONFIRMED_MISSED_OPPORTUNITY
+    candidate_filtered_winners      : int    // trader ganó, bot no habría comprado
+    protective_policy_evidence      : int    // trader perdió, bot bloqueó con would_buy=true
+    protective_filter_evidence      : int    // trader perdió, bot_would_buy=false
+    source_fidelity_blocked         : int    // bloqueado exclusivamente por source
+    shadow_hypotheses_active        : int
+    data_quality_blocked            : int
+    by_execution_status : {
+      BUY_EXECUTED        : int
+      BLOCKED_POLICY      : int
+      SHADOW_ONLY         : int
+      SOURCE_BLOCKED      : int
+      FILTERED_NO_EDGE    : int
+      PRICE_OUT_OF_RANGE  : int
+      NOT_OBSERVED        : int
+      UNKNOWN             : int
+    }
   }
 
   top_candidate_missed_opportunities : [
@@ -474,23 +519,48 @@ bot_signal_evaluations.eval_key
 
 El join `eval_key ↔ match_key` está contractado en `docs/instrumentation/bot_evaluation_capture.md` y activo via `READ_BOT_EVAL_CAPTURE=1`.
 
-### 9.3 Cuadrantes que debe identificar
+### 9.3 Tres dimensiones de decisión
 
-| Cuadrante | Trader | Bot | Clasificación de aprendizaje |
+El reporte **no puede basarse solo en** `trader_outcome × bot_would_buy`. Requiere tres dimensiones:
+
+1. **Outcome externo:** ¿el trader ganó o perdió?
+2. **Evaluación del bot:** ¿`bot_would_buy=true` o `false`?
+3. **Ejecución/bloqueo real:** ¿cuál fue el `actual_execution_status`?
+
+`bot_would_buy=true` sin comprobar `actual_execution_status` no prueba oportunidad perdida ni riesgo evitado. Una señal ganadora descartada puede indicar una debilidad de market selection aunque el bot no viera edge. Un gate solo puede considerarse protector cuando bloqueó una operación **comparable** que habría perdido.
+
+### 9.4 Clasificaciones iniciales del reporte
+
+| Trader outcome | `bot_would_buy` | `actual_execution_status` | Clasificación |
 |---|---|---|---|
-| Q1 | ganó | habría comprado | `CANDIDATE_MISSED_OPPORTUNITY` (requiere gates de §5.2 para `CONFIRMED`) |
-| Q2 | ganó | no habría comprado / bloqueado | `PROTECTIVE_FILTER_EVIDENCE` o `SOURCE_FIDELITY_BLOCKED` |
-| Q3 | perdió | habría comprado | riesgo evitado (el bot evitó la pérdida del trader) |
-| Q4 | perdió | no habría comprado | filtro correcto o señal incorrecta sin consecuencia |
+| ganó | `true` | `BLOCKED_POLICY` / `SHADOW_ONLY` / `SOURCE_BLOCKED` | `CANDIDATE_MISSED_OPPORTUNITY` |
+| ganó | `true` | `SOURCE_BLOCKED` (exclusivamente) | `SOURCE_FIDELITY_BLOCKED` |
+| ganó | `false` | cualquiera (filtro modelo / condición) | `CANDIDATE_FILTERED_WINNER` |
+| perdió | `true` | `BLOCKED_POLICY` / `SHADOW_ONLY` / `SOURCE_BLOCKED` | `PROTECTIVE_POLICY_EVIDENCE` |
+| perdió | `false` | `FILTERED_NO_EDGE` / `PRICE_OUT_OF_RANGE` | `PROTECTIVE_FILTER_EVIDENCE` |
+| cualquiera | `null` / join sin datos | `UNKNOWN` / identidad insuficiente | `NO_ACTION_INSUFFICIENT_EVIDENCE` |
 
-### 9.4 Output del reporte
+Ninguna de estas clasificaciones equivale automáticamente a `CONFIRMED_MISSED_OPPORTUNITY`. Siguen aplicando los 6 gates de §5.2 (identidad, precio comparable, outcome, ejecutabilidad, contrafactual y data quality).
 
+Cuando `actual_execution_status` o `blocking_gate` no sean derivables de los artefactos disponibles, el campo debe marcarse como `UNKNOWN` y la fila clasificarse como `NO_ACTION_INSUFFICIENT_EVIDENCE`.
+
+### 9.5 Output del reporte
+
+La primera entrega no promete medir exclusivamente "oportunidades perdidas". Debe producir:
+
+- **Candidatos ganadores descartados:** clasificados como `CANDIDATE_MISSED_OPPORTUNITY` o `CANDIDATE_FILTERED_WINNER` según evaluación del bot.
+- **Policy blocks potencialmente costosos:** `BLOCKED_POLICY` + `bot_would_buy=true` + trader ganó.
+- **Filtros/policies potencialmente protectores:** `PROTECTIVE_POLICY_EVIDENCE` y `PROTECTIVE_FILTER_EVIDENCE` con evidencia.
+- **Data gaps que impiden conclusión:** filas `NO_ACTION_INSUFFICIENT_EVIDENCE` con campo `data_quality_flags` detallado.
+- **Clasificación por `actual_execution_status` y `blocking_gate`** en todos los casos donde los datos lo permitan.
+
+Formato:
 - JSON compacto en `data/intelligence/` (gitignored, Railway).
 - Markdown legible en `docs/intelligence/` (versionado).
 - LOG_ONLY — sin consumer ejecutable en Fase 2.
 - Alimenta Agent Manifest y Review Queue en iteraciones posteriores.
 
-### 9.5 Campos ya disponibles para el join
+### 9.6 Campos ya disponibles para el join
 
 | Campo | Disponibilidad | Fuente |
 |---|---|---|
@@ -502,16 +572,18 @@ El join `eval_key ↔ match_key` está contractado en `docs/instrumentation/bot_
 | `city_mode_at_record_time` | ✅ Activo | `blocked_signals_resolutions` v2 |
 | `price_bucket` | ✅ Activo | `blocked_signals_resolutions` v2 |
 
-### 9.6 Campos ausentes que limitarán las conclusiones en Fase 2
+### 9.7 Campos ausentes que limitarán las conclusiones en Fase 2
 
-| Campo ausente | Impacto |
+| Campo ausente | Impacto en clasificación |
 |---|---|
-| `bot_would_have_bought` (nulo, Fase C) | Q1 no puede confirmarse sin este campo; solo es `CANDIDATE` |
-| `settlement_source` / `settlement_fidelity_status` (Fase C) | Outcomes de resolución sin fidelidad verificada |
-| `bot_evaluation=null` en 133/133 filas de `signals_crosscheck` (A7) | Cuadrante TRADER_ONLY no puede cruzarse con evaluación del bot hasta que se resuelva el gap A7 |
-| market identity en `funnel_observability` | Descartes previos a `EVALUATED` no pueden trazarse como candidatos |
+| `bot_would_have_bought` (nulo, Fase C) | Sin este campo, `CANDIDATE_MISSED_OPPORTUNITY` no puede pasar a `CONFIRMED`; la celda `bot_would_buy` se toma de `bot_signal_evaluations.would_buy` como proxy |
+| `actual_execution_status` (derivable parcialmente) | Derivable desde `reason_blocked` + `city_mode_at_record_time` + `city_promotion_gate`; cuando no derivable → `UNKNOWN` |
+| `blocking_gate` (derivable parcialmente) | Derivable desde `reason_blocked` y `skip_or_block_reason`; cuando no derivable → `null` |
+| `settlement_source` / `settlement_fidelity_status` (Fase C) | Outcomes de resolución sin fidelidad verificada — `data_quality_flags: settlement_fidelity_unknown` |
+| `bot_evaluation=null` en 133/133 filas de `signals_crosscheck` (A7) | Señales `TRADER_ONLY` no pueden cruzarse con evaluación del bot; clasifican como `NO_ACTION_INSUFFICIENT_EVIDENCE` hasta resolver gap A7 |
+| market identity en `funnel_observability` | Descartes previos a `EVALUATED` no pueden trazarse como candidatos; confianza de stage = BAJA |
 
-El reporte debe documentar estas limitaciones explícitamente en su output y clasificar apropiadamente como `CANDIDATE` vs `CONFIRMED`.
+El reporte debe documentar estas limitaciones explícitamente en su output. Donde un campo no es derivable, emitir el valor `UNKNOWN`/`DATA_GAP` y no asumir clasificación.
 
 ---
 
@@ -591,13 +663,14 @@ Si el número de observaciones en la queue crece pero el número de `opus_decisi
 **Alcance:** implementar `tools/trader_vs_bot_gap_report.py` que:
   1. Lee `bot_signal_evaluations.jsonl` + `blocked_signals_resolutions.jsonl` + `signals_crosscheck.jsonl`.
   2. Hace join por `eval_key ↔ match_key`.
-  3. Segmenta los 4 cuadrantes de §9.3.
-  4. Clasifica cada fila según §5.1.
-  5. Documenta en output cuáles gates de §5.2 están satisfechos y cuáles no.
-  6. Emite JSON en `data/intelligence/trader_vs_bot_gap_report_<date>.json` y Markdown en `docs/intelligence/`.
-  7. Queda LOG_ONLY. Sin consumer ejecutable.
+  3. Deriva `actual_execution_status` y `blocking_gate` desde `reason_blocked` + `city_mode_at_record_time`; marca `UNKNOWN` donde no sea derivable.
+  4. Clasifica cada fila según las tres dimensiones de §9.3: trader_outcome × bot_would_buy × actual_execution_status.
+  5. Aplica estados de §5.1 con documentación explícita de cuáles gates de §5.2 están satisfechos y cuáles no.
+  6. Produce las 4 secciones de output de §9.5: candidatos ganadores descartados, policy blocks costosos, filtros protectores, data gaps.
+  7. Emite JSON en `data/intelligence/trader_vs_bot_gap_report_<date>.json` y Markdown en `docs/intelligence/`.
+  8. Queda LOG_ONLY. Sin consumer ejecutable.
 
-**Criterio de parada:** reporte con n≥30 filas joined, distribución por cuadrante, y documentación explícita de campos ausentes que limitan conclusiones.
+**Criterio de parada:** reporte con n≥30 filas joined, distribución por las tres dimensiones, y sección explícita de `NO_ACTION_INSUFFICIENT_EVIDENCE` con campos ausentes documentados.
 
 **Guardrail de cierre:** el reporte no autoriza BUY/SELL/SKIP ni cambios de policy. Su único output accionable es alimentar la Learning Review Queue con hipótesis clasificadas.
 
@@ -630,4 +703,4 @@ Verificación de que los 16 producers/capas del audit AS-IS quedan mapeados en e
 
 ---
 
-*Documento generado por Sonnet en Sesión 381, 2026-05-23. Docs-only. Sin código, runtime, env vars, DB ni cambios de trading.*
+*Documento generado por Sonnet en Sesión 381, 2026-05-23. Corrección v1.1 aplicada en Sesión 382, 2026-05-23. Docs-only. Sin código, runtime, env vars, DB ni cambios de trading.*
