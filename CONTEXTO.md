@@ -2598,7 +2598,7 @@ git push
 - **Bankroll:** $19.61 (subió desde $17.68 por Shanghai NO `take_profit_intra` +112.2% a las 05:11 UTC del 2026-05-04). Sigue BLOCKED respecto a $25 tope.
 - **403 Cloudflare (2026-05-01):** cerrado. El error fue transitorio de arranque del deploy. Desde 10:11 UTC en adelante, cero 403. Todos los ciclos 2026-05-01 → 2026-05-04 con `cycle_summary guardado OK`.
 - **WATCH_TECH nuevo — 400 size below min (2026-05-04 00:01 UTC):** intento de BUY Shanghai NO 2.49sh×$0.71 rechazado por CLOB con `status=400 "Size (2.49) lower than the minimum: 5"`. Bot recuperó en ciclo 04:00 UTC (4.48sh×$0.40 aceptado, TP a las 05:11). No hubo pérdida económica. El pre-check de tamaño no garantiza aceptación CLOB en todos los casos.
-- **L2 Hazard Monitor:** confirmado implementado en `bot.py` (commit 81b7586), default OFF (`SL_INTRA_HAZARD_MONITOR_ENABLED=0`).
+- **L2 Hazard Monitor:** ACTIVO desde 2026-05-04T04:11:07 UTC (Sesión 286, commit 81b7586). `SL_INTRA_HAZARD_MONITOR_ENABLED=1`, `SL_INTRA_HAZARD_MONITOR_LOG_ONLY=1`. Al 2026-05-23: 11 tokens observados, tiers deteriorating/deep/terminal/collapsed en múltiples ciudades, `last_telegram_at=2026-05-22T07:43:57 UTC`. Ventana 14d: cumplida (19d desde activación). Estado verificado en Sesión 379.
 - **SL retro:** 14 stop_losses tracked, no nuevo SL desde 2026-05-01T12:00. Muestra post-guard n≈2, insuficiente.
 - **Ciclos 2026-05-01/03:** 0 BUYs confirmado. Patrón roto el 2026-05-04 con Shanghai trade.
 - **PnL reconciliation 2026-05-04 08:01:** fallo urllib timeout al enviar Telegram (benign, network blip).
