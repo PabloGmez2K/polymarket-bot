@@ -19214,7 +19214,7 @@ def recompute_position_edge(position, forecast_cache, lc_by_token=None):
         mkt_price = cur_price
     else:
         our_prob = 1.0 - our_prob_yes
-        mkt_price = 1.0 - cur_price
+        mkt_price = cur_price
 
     edge_pct = (our_prob - mkt_price) * 100
 
