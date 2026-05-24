@@ -523,3 +523,71 @@ no caben bien en el mismo documento. La regla es:
 
 - `CONTEXTO.md` = que esta pasando
 - `OPERATIONS_PLAYBOOK.md` = como trabajamos sin desalinearnos
+
+---
+
+## Secret hygiene
+
+Las variables de Railway (credenciales, tokens, claves API, PK, TELEGRAM_TOKEN,
+DASHBOARD_PASSWORD) no deben volcarse íntegras en chat, logs, handoffs ni docs
+del repo. Regla operativa:
+
+- Consultar solo la variable específica requerida, o filtrar el output para no
+  mostrar valores sensibles.
+- No pegar el output completo de `railway_safe.ps1 variables` en commits,
+  `CONTEXTO.md`, `HISTORIAL_SESIONES.md` ni `agent_events.jsonl`.
+- Si una sesión expone accidentalmente valores sensibles: no documentar la
+  exposición concreta ni los valores en el repo; documentar solo la regla
+  preventiva general.
+- La rotación de credenciales es responsabilidad de Pablo desde la UI de Railway.
+
+---
+
+## Activaciones LOG_ONLY — protocolo mínimo
+
+Secuencia obligatoria antes de activar cualquier experimento LOG_ONLY en Railway:
+
+1. **OFF por defecto**: implementar con env var ausente = OFF; validar tests y
+   deployar con variable OFF.
+2. **Integrity audit**: verificar que el patch no tiene bugs en el hot path antes
+   de activar (ejemplo: COMPUTE_CAP_BUG, sesión 381).
+3. **Decisión Opus**: si el experimento afecta semántica, identidad, riesgo o
+   política → Opus ratifica con veredicto explícito.
+4. **Autorización literal de Pablo**: confirmación explícita antes de ejecutar
+   `railway variables set`.
+5. **Activar solo la variable autorizada**: una variable por deployment; confirmar
+   Railway `SUCCESS` y variable presente en `railway_safe.ps1 variables`.
+6. **Smoke T+1**: leer el artefacto tras el primer ciclo elegible; validar
+   contrato completo (log_only, execution_authorized, condition, qt_gate_reason,
+   city_mode, identity).
+7. **Kill-switch definido antes de activar**: condiciones de rollback con
+   umbrales numéricos y n mínimo, no después de la activación.
+
+---
+
+## Métricas de kill-switch — regla de persistencia
+
+Toda métrica usada en un kill-switch o checkpoint debe ser consultable por SSH
+sin necesidad de leer logs stdout. Si solo existe en logs:
+
+1. Documentar el gap explícitamente en `CONTEXTO.md` al activar el experimento.
+2. Priorizar su persistencia como campo del artefacto JSONL antes de depender
+   de esa métrica para una decisión de rollback.
+3. No usar la métrica como kill-switch efectivo hasta que sea persistida y
+   consultable via `railway_safe.ps1 ssh cat /app/data/<artefacto>`.
+
+Ejemplo: `cycle_compute_overhead_ms` (sesión 383) — presente en stdout,
+ausente del JSONL. Gap documentado; pendiente de persistencia antes de T+5.
+
+---
+
+## Pushes agrupados — regla de cierre
+
+En sesiones LITE/docs-only con commits locales pendientes de sesiones anteriores:
+
+- No hacer push por cada micro-commit; agrupar commits docs-only y hacer un
+  único push final.
+- Si en la misma sesión hay commits de código y commits docs-only de cierre,
+  agruparlos en el mismo push.
+- Railway check breve tras el push (`deployment list`); si no aparece nuevo
+  deployment en docs-only, cerrar como `no new deployment observed`.

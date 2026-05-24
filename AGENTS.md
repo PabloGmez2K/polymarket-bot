@@ -51,6 +51,12 @@ para que una ciudad shadow/active acumule datos en `observed_vs_forecast`.
 - Para Railway, usar `tools/railway_safe.ps1`.
 - Antes de push/deploy con cambios de codigo, correr `python verify_before_deploy.py`.
 - En docs-only/backlog/cierres sin codigo, usar cierre LITE: `git diff --check`, commit/push si procede y Railway check breve si hubo push; no ejecutar verify completo ni session-close-sync completo salvo necesidad real.
+- `identity_available` ≠ `joined_evidence` ≠ `temporally_aligned` ≠ `outcome_resolved`. No elevar `CONFIRMED_MISSED_OPPORTUNITY` sin identidad, temporalidad, ejecutabilidad, outcome, fidelity y contrafactual verificados.
+- Artefacto nuevo de inteligencia: definir consumer y outcome path desde el diseño, no como afterthought.
+- Tooling LOG_ONLY en hot path: aplicar dedup/cap/sampling antes del compute caro (ver COMPUTE_CAP_BUG sesión 381).
+- Tests deben medir llamadas reales al compute/hook, no solo filas escritas en el artefacto.
+- En sesiones de código: consolidar docs y `agent_events.jsonl` antes del último `verify_before_deploy.py` cuando el contrato del repo lo requiera.
+- La memoria externa (Engram) no sustituye la fuente de verdad del repo; toda decisión durable debe quedar en `CONTEXTO.md`, `HISTORIAL_SESIONES.md` y `agent_events.jsonl`.
 
 ## Cierre
 

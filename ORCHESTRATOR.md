@@ -538,3 +538,26 @@ Pedir veredictos únicos y tareas concretas, no ensayos abiertos. Si Opus ya dec
 - **Codex**: implementación, tooling, tests, runtime/read-only técnico.
 - **Sonnet**: docs, dossiers, cierres, síntesis, task cards, auditorías read-only no delicadas.
 - Si ya hay decisión Opus, no reanalizar: ejecutar directamente, validar y cerrar.
+
+---
+
+## 14. Connected Learning Loop — patrón reutilizable
+
+Para workstreams monetizables que generan un experimento LOG_ONLY con outcome
+futuro. Cada paso debe completarse antes del siguiente:
+
+1. **Trigger**: blocker o alarma real con evidencia live; no abrir si solo hay `WATCH_ONLY`.
+2. **Evidencia mínima SSH**: verificar n real y datos disponibles antes de crear tooling.
+3. **Audit de conectividad**: confirmar que el artefacto tendrá consumer y outcome path antes de implementar.
+4. **Contrato de identidad/provenance**: si habrá múltiples fuentes, definir esquema común desde el diseño.
+5. **Consumer pequeño desde el diseño**: wired a digest o alerta concreta; no como afterthought.
+6. **Validación semántica del consumer**: medir llamadas reales al compute/hook, no solo filas escritas.
+7. **Experimento LOG_ONLY**: env var OFF por defecto, kill switch, dedup/cap antes del compute caro, fail-open.
+8. **Integrity audit**: verificar que el patch no tiene bugs en el hot path antes de activar (ejemplo: COMPUTE_CAP_BUG).
+9. **Autorización literal**: Opus ratifica si hay decisión semántica o riesgo; Pablo autoriza explícitamente antes de `railway variables set`.
+10. **Smoke / checkpoints / outcome**: T+1 ciclo (contrato), T+5 (overhead), T+24h (identity), T+7d (intermedio), Phase gate.
+11. **Opus solo** cuando haya decisión semántica o trigger monetizable; no reanalizar lo ya decidido.
+
+Regla anti-drift: "más reporting" ≠ aprendizaje. Toda observación nueva debe
+habilitar una futura decisión medible con trigger, ventana y criterio definidos.
+Si no hay decision path claro → `DEFER_STOP`.
