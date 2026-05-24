@@ -1109,38 +1109,50 @@ def build_funnel_observability_record(cycle_data, discovered_markets_unique=None
     }
 
 
-def write_exact_no_qt_match_evals(batch, jsonl_path=None, cap_per_cycle=20):
+def write_exact_no_qt_match_evals(batch, jsonl_path=None, cap_per_cycle=20, _pre_capped_meta=None):
     """
     Best-effort writer for exact/no-QT-match LOG_ONLY evaluations.
     Deduplicates by eval_key, applies SHA-256 stable cap if needed. Fail-open.
+
+    _pre_capped_meta: if provided by _flush_exact_no_qt_match_evals, skip dedup/cap and
+    use the caller-supplied sampling stats for capture_meta (batch is already selected).
     """
     if not batch:
         return
     jsonl_path = jsonl_path or EXACT_NO_QT_MATCH_EVAL_FILE
-    # Dedup by eval_key within the cycle (keep first occurrence)
-    seen: set = set()
-    deduped = []
-    for r in batch:
-        k = r.get("eval_key")
-        if k not in seen:
-            seen.add(k)
-            deduped.append(r)
-    eligible_before_cap = len(deduped)
-    if eligible_before_cap <= cap_per_cycle:
-        selected = list(deduped)
-        cap_active = False
-        sampling_method = "none"
-        capped_count = 0
+    if _pre_capped_meta is not None:
+        # Upstream flush already deduped+capped; use provided stats verbatim.
+        selected = list(batch)
+        cap_active = _pre_capped_meta.get("cap_active", False)
+        sampling_method = _pre_capped_meta.get("sampling_method", "none")
+        capped_count = _pre_capped_meta.get("capped_count", 0)
+        eligible_before_cap = _pre_capped_meta.get("eligible_before_cap", len(selected))
+        selected_after_cap = len(selected)
     else:
-        def _sha_rank(r):
-            return hashlib.sha256(
-                f"{r.get('cycle_id', '')}|{r.get('eval_key', '')}".encode("utf-8")
-            ).hexdigest()
-        selected = sorted(deduped, key=_sha_rank)[:cap_per_cycle]
-        cap_active = True
-        sampling_method = "sha256_rank"
-        capped_count = eligible_before_cap - cap_per_cycle
-    selected_after_cap = len(selected)
+        # Dedup by eval_key within the cycle (keep first occurrence)
+        seen: set = set()
+        deduped = []
+        for r in batch:
+            k = r.get("eval_key")
+            if k not in seen:
+                seen.add(k)
+                deduped.append(r)
+        eligible_before_cap = len(deduped)
+        if eligible_before_cap <= cap_per_cycle:
+            selected = list(deduped)
+            cap_active = False
+            sampling_method = "none"
+            capped_count = 0
+        else:
+            def _sha_rank(r):
+                return hashlib.sha256(
+                    f"{r.get('cycle_id', '')}|{r.get('eval_key', '')}".encode("utf-8")
+                ).hexdigest()
+            selected = sorted(deduped, key=_sha_rank)[:cap_per_cycle]
+            cap_active = True
+            sampling_method = "sha256_rank"
+            capped_count = eligible_before_cap - cap_per_cycle
+        selected_after_cap = len(selected)
     for r in selected:
         r["capture_meta"] = {
             "sampled": cap_active,
@@ -1168,6 +1180,126 @@ def write_exact_no_qt_match_evals(batch, jsonl_path=None, cap_per_cycle=20):
         )
     except Exception as _e:
         log.warning(f"exact_no_qt_match_eval write failed (LOG_ONLY, no trading impact): {_e}")
+
+
+def _flush_exact_no_qt_match_evals(pre_batch, cap_per_cycle=20):
+    """
+    Two-phase flush for exact/no-QT-match LOG_ONLY evaluations (COMPUTE_CAP fix).
+
+    Phase 1 — dedup by eval_key + SHA-256 stable cap (determines which rows get computed).
+    Phase 2 — call estimate_prob_with_city ONLY for the selected ≤cap rows.
+    Measures cycle_compute_overhead_ms and delegates write to write_exact_no_qt_match_evals.
+    """
+    if not pre_batch:
+        return
+    # Phase 1: dedup by eval_key (keep first occurrence)
+    seen: set = set()
+    deduped = []
+    for r in pre_batch:
+        k = r.get("eval_key")
+        if k not in seen:
+            seen.add(k)
+            deduped.append(r)
+    eligible_before_cap = len(deduped)
+    if eligible_before_cap <= cap_per_cycle:
+        selected_pre = list(deduped)
+        cap_active = False
+        sampling_method = "none"
+        capped_count = 0
+    else:
+        def _sha_rank_pre(r):
+            return hashlib.sha256(
+                f"{r.get('cycle_id', '')}|{r.get('eval_key', '')}".encode("utf-8")
+            ).hexdigest()
+        selected_pre = sorted(deduped, key=_sha_rank_pre)[:cap_per_cycle]
+        cap_active = True
+        sampling_method = "sha256_rank"
+        capped_count = eligible_before_cap - cap_per_cycle
+    # Phase 2: compute only for selected rows
+    _t0 = time.monotonic()
+    full_records = []
+    for pre in selected_pre:
+        try:
+            _prob_yes = estimate_prob_with_city(
+                pre["forecast_max"], pre["threshold_c"], pre["condition"],
+                pre["days_ahead"], pre["threshold_high_c"], city=pre["city"],
+            )
+            _prob_no = 1.0 - _prob_yes
+            _edge_yes = _prob_yes - pre["mkt_prob_yes"]
+            _edge_no = _prob_no - pre["mkt_prob_no"]
+            if _edge_yes > 0 and _edge_yes >= _edge_no:
+                _best_side = "YES"
+                _best_edge = round(_edge_yes * 100, 4)
+            elif _edge_no > 0:
+                _best_side = "NO"
+                _best_edge = round(_edge_no * 100, 4)
+            else:
+                _best_side = None
+                _best_edge = None
+            _passes = _best_edge is not None and _best_edge >= MIN_EDGE
+            _mid = pre.get("market_id")
+            _cid = pre.get("condition_id")
+            _tyes = pre.get("token_id_yes")
+            _tno = pre.get("token_id_no")
+            full_records.append({
+                "schema_version": 1,
+                "ts_utc": datetime.now(timezone.utc).isoformat(),
+                "cycle_id": pre["cycle_id"],
+                "eval_key": pre["eval_key"],
+                "capture_id": str(uuid.uuid4()),
+                "market_id": _mid,
+                "condition_id": _cid,
+                "token_id_yes": _tyes,
+                "token_id_no": _tno,
+                "identity_resolvable": bool(_mid or _cid or _tyes or _tno),
+                "city": pre["city"],
+                "city_mode": pre.get("city_mode"),
+                "date_iso": pre["date_iso"],
+                "days_ahead": pre["days_ahead"],
+                "condition": pre["condition"],
+                "threshold": pre["threshold"],
+                "threshold_high": pre.get("threshold_high"),
+                "unit": pre["unit"],
+                "qt_gate_reason": pre["qt_gate_reason"],
+                "our_prob_yes": round(_prob_yes, 6),
+                "our_prob_no": round(_prob_no, 6),
+                "mkt_prob_yes": round(pre["mkt_prob_yes"], 6),
+                "mkt_prob_no": round(pre["mkt_prob_no"], 6),
+                "edge_yes_pct": round(_edge_yes * 100, 4),
+                "edge_no_pct": round(_edge_no * 100, 4),
+                "best_side_log_only": _best_side,
+                "best_edge_pct_log_only": _best_edge,
+                "min_edge_reference": MIN_EDGE,
+                "edge_passes_reference_threshold_log_only": bool(_passes),
+                "forecast_max": pre["forecast_max"],
+                "sigma_used": pre.get("sigma_used"),
+                "source_fidelity_status": "unknown",
+                "log_only": True,
+                "execution_authorized": False,
+                "skip_log_eval_key": pre["eval_key"],
+                "capture_meta": None,  # filled by write_exact_no_qt_match_evals
+            })
+        except Exception as _e:
+            log.warning(f"exact_no_qt_match_eval compute error (fail-open): {_e}")
+    cycle_compute_overhead_ms = round((time.monotonic() - _t0) * 1000, 2)
+    log.info(
+        f"[exact_no_qt_eval] flush: eligible_before_cap={eligible_before_cap} "
+        f"selected_pre={len(selected_pre)} computed={len(full_records)} "
+        f"capped_count={capped_count} cycle_compute_overhead_ms={cycle_compute_overhead_ms}"
+    )
+    if not full_records:
+        return
+    write_exact_no_qt_match_evals(
+        full_records,
+        cap_per_cycle=cap_per_cycle,
+        _pre_capped_meta={
+            "cap_active": cap_active,
+            "sampling_method": sampling_method,
+            "capped_count": capped_count,
+            "eligible_before_cap": eligible_before_cap,
+            "selected_after_cap": len(full_records),
+        },
+    )
 
 
 def write_funnel_observability_log_only(record, jsonl_path=None, latest_path=None):
@@ -21929,80 +22061,35 @@ def main(client):
                         "qt_match_key": _early_key,
                     },
                 ))
-                # v10.6.43: LOG_ONLY capture for exact/no-QT-match (env var OFF by default)
+                # v10.6.43: collect lightweight pre-record; compute deferred to flush after cap
                 if (
                     os.getenv("LOG_ONLY_EXACT_NO_QT_MATCH_EVAL_ENABLED", "0") == "1"
                     and _qt_gate_reason == "no_quality_trader_signal_match"
                     and c.get("city_mode") in {"active", "canary"}
                 ):
-                    try:
-                        _lonly_prob_yes = estimate_prob_with_city(
-                            forecast_max, threshold_c, c["condition"],
-                            c["days_ahead"], threshold_high_c, city=city,
-                        )
-                        _lonly_prob_no = 1.0 - _lonly_prob_yes
-                        _lonly_edge_yes = _lonly_prob_yes - c["mkt_prob_yes"]
-                        _lonly_edge_no = _lonly_prob_no - c["mkt_prob_no"]
-                        if _lonly_edge_yes > 0 and _lonly_edge_yes >= _lonly_edge_no:
-                            _lonly_best_side = "YES"
-                            _lonly_best_edge = round(_lonly_edge_yes * 100, 4)
-                        elif _lonly_edge_no > 0:
-                            _lonly_best_side = "NO"
-                            _lonly_best_edge = round(_lonly_edge_no * 100, 4)
-                        else:
-                            _lonly_best_side = None
-                            _lonly_best_edge = None
-                        _lonly_passes = (
-                            _lonly_best_edge is not None and _lonly_best_edge >= MIN_EDGE
-                        )
-                        _lonly_mid = c.get("market_id")
-                        _lonly_cid = c.get("condition_id")
-                        _lonly_tyes = c.get("token_id_yes")
-                        _lonly_tno = c.get("token_id_no")
-                        exact_no_qt_eval_batch.append({
-                            "schema_version": 1,
-                            "ts_utc": datetime.now(timezone.utc).isoformat(),
-                            "cycle_id": cycle_id,
-                            "eval_key": c.get("eval_key") or _early_key,
-                            "capture_id": str(uuid.uuid4()),
-                            "market_id": _lonly_mid,
-                            "condition_id": _lonly_cid,
-                            "token_id_yes": _lonly_tyes,
-                            "token_id_no": _lonly_tno,
-                            "identity_resolvable": bool(
-                                _lonly_mid or _lonly_cid or _lonly_tyes or _lonly_tno
-                            ),
-                            "city": city,
-                            "city_mode": c.get("city_mode"),
-                            "date_iso": c["date_iso"],
-                            "days_ahead": c["days_ahead"],
-                            "condition": condition_name,
-                            "threshold": threshold,
-                            "threshold_high": threshold_high,
-                            "unit": c["unit"],
-                            "qt_gate_reason": _qt_gate_reason,
-                            "our_prob_yes": round(_lonly_prob_yes, 6),
-                            "our_prob_no": round(_lonly_prob_no, 6),
-                            "mkt_prob_yes": round(c["mkt_prob_yes"], 6),
-                            "mkt_prob_no": round(c["mkt_prob_no"], 6),
-                            "edge_yes_pct": round(_lonly_edge_yes * 100, 4),
-                            "edge_no_pct": round(_lonly_edge_no * 100, 4),
-                            "best_side_log_only": _lonly_best_side,
-                            "best_edge_pct_log_only": _lonly_best_edge,
-                            "min_edge_reference": MIN_EDGE,
-                            "edge_passes_reference_threshold_log_only": bool(_lonly_passes),
-                            "forecast_max": forecast_max,
-                            "sigma_used": sigma_used_val,
-                            "source_fidelity_status": "unknown",
-                            "log_only": True,
-                            "execution_authorized": False,
-                            "skip_log_eval_key": c.get("eval_key") or _early_key,
-                            "capture_meta": None,  # filled by write_exact_no_qt_match_evals
-                        })
-                    except Exception as _lonly_err:
-                        log.warning(
-                            f"exact_no_qt_match_eval capture error (fail-open): {_lonly_err}"
-                        )
+                    exact_no_qt_eval_batch.append({
+                        "cycle_id": cycle_id,
+                        "eval_key": c.get("eval_key") or _early_key,
+                        "city": city,
+                        "city_mode": c.get("city_mode"),
+                        "date_iso": c["date_iso"],
+                        "days_ahead": c["days_ahead"],
+                        "condition": condition_name,
+                        "threshold": threshold,
+                        "threshold_high": threshold_high,
+                        "unit": c["unit"],
+                        "qt_gate_reason": _qt_gate_reason,
+                        "forecast_max": forecast_max,
+                        "threshold_c": threshold_c,
+                        "threshold_high_c": threshold_high_c,
+                        "mkt_prob_yes": c["mkt_prob_yes"],
+                        "mkt_prob_no": c["mkt_prob_no"],
+                        "market_id": c.get("market_id"),
+                        "condition_id": c.get("condition_id"),
+                        "token_id_yes": c.get("token_id_yes"),
+                        "token_id_no": c.get("token_id_no"),
+                        "sigma_used": sigma_used_val,
+                    })
                 continue
             # Quality-trader canary: marcar para edge buffer + size scale aguas abajo
             c["exact_range_canary"] = True
@@ -22587,9 +22674,9 @@ def main(client):
     except Exception as _e_skip_log:
         log.warning(f"skip_log flush fallo: {_e_skip_log}")
 
-    # v10.6.43: flush exact/no-QT-match LOG_ONLY batch (env var OFF by default)
+    # v10.6.43: flush exact/no-QT-match LOG_ONLY batch — compute only for selected rows
     if exact_no_qt_eval_batch:
-        write_exact_no_qt_match_evals(exact_no_qt_eval_batch)
+        _flush_exact_no_qt_match_evals(exact_no_qt_eval_batch)
 
     # ---- v10.2: RESUMEN COMPLETO DEL CICLO ----
     if not DRY_RUN:

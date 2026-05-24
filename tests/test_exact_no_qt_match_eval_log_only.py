@@ -500,3 +500,228 @@ class TestConsumerNotEnabled:
         summary = _summarize_exact_no_qt_match_log_only(path)
         assert summary["status"] == "NOT_ENABLED_NO_DATA"
         assert summary["rows"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Hook-integration tests (AUDIT 3) — test _flush_exact_no_qt_match_evals
+# ---------------------------------------------------------------------------
+
+def _make_pre_batch(n: int, cycle_id: str = "2026-05-24T10:00", base_city: str = "Seoul") -> list[dict]:
+    """Lightweight pre-records as collected by the in-loop hook."""
+    return [
+        {
+            "cycle_id": cycle_id,
+            "eval_key": f"{base_city}|2026-05-25|exact|{20 + i}|C",
+            "city": base_city,
+            "city_mode": "active",
+            "date_iso": "2026-05-25",
+            "days_ahead": 1,
+            "condition": "exact",
+            "threshold": 20 + i,
+            "threshold_high": None,
+            "unit": "C",
+            "qt_gate_reason": "no_quality_trader_signal_match",
+            "forecast_max": 22.5,
+            "threshold_c": float(20 + i),
+            "threshold_high_c": None,
+            "mkt_prob_yes": 0.20,
+            "mkt_prob_no": 0.80,
+            "market_id": f"mkt-{i}",
+            "condition_id": f"cond-{i}",
+            "token_id_yes": f"yes-{i}",
+            "token_id_no": f"no-{i}",
+            "sigma_used": 1.8,
+        }
+        for i in range(n)
+    ]
+
+
+class TestFlushEnvVarOff:
+    """T_H1: env var OFF — flush is a no-op, estimate_prob_with_city never called."""
+
+    def test_empty_batch_no_compute(self, monkeypatch, tmp_path):
+        calls = []
+        monkeypatch.setattr(bot, "estimate_prob_with_city", lambda *a, **kw: calls.append(1) or 0.5)
+        monkeypatch.setattr(bot, "EXACT_NO_QT_MATCH_EVAL_FILE", str(tmp_path / "out.jsonl"))
+        bot._flush_exact_no_qt_match_evals([])
+        assert calls == []
+
+    def test_flush_with_env_off_produces_no_file(self, monkeypatch, tmp_path):
+        # When env var is OFF the in-loop hook never appends to the batch,
+        # so the batch stays empty and flush is a no-op.
+        monkeypatch.setenv("LOG_ONLY_EXACT_NO_QT_MATCH_EVAL_ENABLED", "0")
+        out = tmp_path / "out.jsonl"
+        monkeypatch.setattr(bot, "EXACT_NO_QT_MATCH_EVAL_FILE", str(out))
+        bot._flush_exact_no_qt_match_evals([])
+        assert not out.exists()
+
+
+class TestFlushComputesOnlySelected:
+    """T_H2: cap limits estimate_prob_with_city calls (not just writes)."""
+
+    def test_compute_called_only_for_selected_rows(self, monkeypatch, tmp_path):
+        calls = []
+        monkeypatch.setattr(
+            bot, "estimate_prob_with_city",
+            lambda *a, **kw: (calls.append(1), 0.60)[1],
+        )
+        monkeypatch.setattr(bot, "EXACT_NO_QT_MATCH_EVAL_FILE", str(tmp_path / "out.jsonl"))
+        pre_batch = _make_pre_batch(25)
+        bot._flush_exact_no_qt_match_evals(pre_batch, cap_per_cycle=20)
+        # Cap=20 → exactly 20 compute calls, NOT 25
+        assert len(calls) == 20
+
+    def test_below_cap_all_rows_computed(self, monkeypatch, tmp_path):
+        calls = []
+        monkeypatch.setattr(
+            bot, "estimate_prob_with_city",
+            lambda *a, **kw: (calls.append(1), 0.60)[1],
+        )
+        monkeypatch.setattr(bot, "EXACT_NO_QT_MATCH_EVAL_FILE", str(tmp_path / "out.jsonl"))
+        pre_batch = _make_pre_batch(10)
+        bot._flush_exact_no_qt_match_evals(pre_batch, cap_per_cycle=20)
+        assert len(calls) == 10
+
+
+class TestFlushFullRecordSchema:
+    """T_H3: flush builds full schema-v1 records with best_side/edge_passes computed."""
+
+    def test_full_record_fields_present(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(bot, "estimate_prob_with_city", lambda *a, **kw: 0.65)
+        out = tmp_path / "out.jsonl"
+        monkeypatch.setattr(bot, "EXACT_NO_QT_MATCH_EVAL_FILE", str(out))
+        bot._flush_exact_no_qt_match_evals(_make_pre_batch(1))
+        rows = [json.loads(l) for l in out.read_text(encoding="utf-8").splitlines()]
+        assert len(rows) == 1
+        r = rows[0]
+        required = [
+            "schema_version", "ts_utc", "cycle_id", "eval_key", "capture_id",
+            "market_id", "condition_id", "identity_resolvable",
+            "city", "city_mode", "date_iso", "days_ahead", "condition",
+            "threshold", "unit", "qt_gate_reason",
+            "our_prob_yes", "our_prob_no", "mkt_prob_yes", "mkt_prob_no",
+            "edge_yes_pct", "edge_no_pct", "best_side_log_only", "best_edge_pct_log_only",
+            "min_edge_reference", "edge_passes_reference_threshold_log_only",
+            "forecast_max", "sigma_used", "source_fidelity_status",
+            "log_only", "execution_authorized", "skip_log_eval_key", "capture_meta",
+        ]
+        missing = [f for f in required if f not in r]
+        assert missing == [], f"Missing: {missing}"
+
+    def test_best_side_computed_by_flush_not_fixture(self, monkeypatch, tmp_path):
+        # prob_yes=0.65 → our_prob_yes=0.65, mkt_prob_yes=0.20 → edge_yes=45%
+        monkeypatch.setattr(bot, "estimate_prob_with_city", lambda *a, **kw: 0.65)
+        out = tmp_path / "out.jsonl"
+        monkeypatch.setattr(bot, "EXACT_NO_QT_MATCH_EVAL_FILE", str(out))
+        bot._flush_exact_no_qt_match_evals(_make_pre_batch(1))
+        r = json.loads(out.read_text(encoding="utf-8").strip())
+        assert r["best_side_log_only"] == "YES"
+        assert r["our_prob_yes"] == pytest.approx(0.65, abs=1e-5)
+
+    def test_edge_passes_false_when_below_min_edge(self, monkeypatch, tmp_path):
+        # prob_yes=0.22 → edge_yes=2% < MIN_EDGE
+        monkeypatch.setattr(bot, "estimate_prob_with_city", lambda *a, **kw: 0.22)
+        out = tmp_path / "out.jsonl"
+        monkeypatch.setattr(bot, "EXACT_NO_QT_MATCH_EVAL_FILE", str(out))
+        bot._flush_exact_no_qt_match_evals(_make_pre_batch(1))
+        r = json.loads(out.read_text(encoding="utf-8").strip())
+        # edge_yes = 0.22 - 0.20 = 0.02 = 2% → below typical MIN_EDGE
+        assert r["edge_passes_reference_threshold_log_only"] is False
+
+
+class TestFlushFailOpen:
+    """T_H4: compute exception in flush is caught — no crash, no write for that row."""
+
+    def test_exception_in_compute_does_not_raise(self, monkeypatch, tmp_path):
+        def _bad_compute(*a, **kw):
+            raise ValueError("simulated compute failure")
+        monkeypatch.setattr(bot, "estimate_prob_with_city", _bad_compute)
+        out = tmp_path / "out.jsonl"
+        monkeypatch.setattr(bot, "EXACT_NO_QT_MATCH_EVAL_FILE", str(out))
+        # Should not raise; fail-open
+        bot._flush_exact_no_qt_match_evals(_make_pre_batch(3))
+        assert not out.exists()  # all computes failed → no records written
+
+    def test_partial_failure_writes_successful_rows(self, monkeypatch, tmp_path):
+        call_count = [0]
+        def _sometimes_fail(*a, **kw):
+            call_count[0] += 1
+            if call_count[0] == 2:
+                raise ValueError("second row fails")
+            return 0.60
+        monkeypatch.setattr(bot, "estimate_prob_with_city", _sometimes_fail)
+        out = tmp_path / "out.jsonl"
+        monkeypatch.setattr(bot, "EXACT_NO_QT_MATCH_EVAL_FILE", str(out))
+        bot._flush_exact_no_qt_match_evals(_make_pre_batch(3))
+        rows = [json.loads(l) for l in out.read_text(encoding="utf-8").splitlines()]
+        assert len(rows) == 2  # row 1 and row 3 succeeded
+
+
+class TestFlushDedup:
+    """T_H5: dedup by eval_key happens before compute — duplicate pre-records → 1 compute call."""
+
+    def test_dedup_before_compute(self, monkeypatch, tmp_path):
+        calls = []
+        monkeypatch.setattr(
+            bot, "estimate_prob_with_city",
+            lambda *a, **kw: (calls.append(1), 0.60)[1],
+        )
+        out = tmp_path / "out.jsonl"
+        monkeypatch.setattr(bot, "EXACT_NO_QT_MATCH_EVAL_FILE", str(out))
+        pre = _make_pre_batch(1)
+        duped = pre * 5  # same eval_key 5 times
+        bot._flush_exact_no_qt_match_evals(duped)
+        assert len(calls) == 1  # dedup before compute → only 1 call
+
+    def test_dedup_only_one_row_written(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(bot, "estimate_prob_with_city", lambda *a, **kw: 0.60)
+        out = tmp_path / "out.jsonl"
+        monkeypatch.setattr(bot, "EXACT_NO_QT_MATCH_EVAL_FILE", str(out))
+        pre = _make_pre_batch(1) * 5
+        bot._flush_exact_no_qt_match_evals(pre)
+        rows = [json.loads(l) for l in out.read_text(encoding="utf-8").splitlines()]
+        assert len(rows) == 1
+
+
+class TestFlushCaptureMeta:
+    """T_H6: capture_meta reflects original eligible count and correct sampling stats."""
+
+    def test_cap_meta_eligible_before_cap_correct(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(bot, "estimate_prob_with_city", lambda *a, **kw: 0.60)
+        out = tmp_path / "out.jsonl"
+        monkeypatch.setattr(bot, "EXACT_NO_QT_MATCH_EVAL_FILE", str(out))
+        bot._flush_exact_no_qt_match_evals(_make_pre_batch(25), cap_per_cycle=20)
+        rows = [json.loads(l) for l in out.read_text(encoding="utf-8").splitlines()]
+        assert len(rows) == 20
+        for r in rows:
+            meta = r["capture_meta"]
+            assert meta["eligible_before_cap"] == 25
+            assert meta["cap_active"] is True
+            assert meta["sampling_method"] == "sha256_rank"
+            assert meta["capped_count"] == 5
+
+    def test_no_cap_meta_when_below_limit(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(bot, "estimate_prob_with_city", lambda *a, **kw: 0.60)
+        out = tmp_path / "out.jsonl"
+        monkeypatch.setattr(bot, "EXACT_NO_QT_MATCH_EVAL_FILE", str(out))
+        bot._flush_exact_no_qt_match_evals(_make_pre_batch(5), cap_per_cycle=20)
+        rows = [json.loads(l) for l in out.read_text(encoding="utf-8").splitlines()]
+        for r in rows:
+            meta = r["capture_meta"]
+            assert meta["cap_active"] is False
+            assert meta["sampling_method"] == "none"
+            assert meta["capped_count"] == 0
+
+
+class TestFlushExecutionGuard:
+    """T_H7: all written records have log_only=True, execution_authorized=False."""
+
+    def test_no_execution_authorized(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(bot, "estimate_prob_with_city", lambda *a, **kw: 0.65)
+        out = tmp_path / "out.jsonl"
+        monkeypatch.setattr(bot, "EXACT_NO_QT_MATCH_EVAL_FILE", str(out))
+        bot._flush_exact_no_qt_match_evals(_make_pre_batch(3))
+        for line in out.read_text(encoding="utf-8").splitlines():
+            r = json.loads(line)
+            assert r["log_only"] is True
+            assert r["execution_authorized"] is False
