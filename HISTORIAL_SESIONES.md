@@ -5898,6 +5898,117 @@ engram ni memory externa por pedido explícito; verdad durable vive en
 
 ---
 
+## Sesión 384 — Seoul source-fidelity pause RKSI vs KMA + post-containment validation
+
+- Fecha: 2026-05-24
+- Agente: Opus
+- Modo: RISK_CONTROL / MONETIZATION_RELEVANT / Railway runtime mutation autorizada + read-only validation
+- Clasificación: explícita; no código bot.py, no env vars, no trading core
+
+### Hallazgo
+
+`RESOLUTION_STATIONS["Seoul"]` en `bot.py:17271` usa coords KMA Seoul
+City (37.5665, 126.9780); estas lat/lon gobiernan forecast, edge,
+probabilidad y captura Pre-Edge LOG_ONLY via
+`get_forecast(station["lat"], station["lon"])` (bot.py:19179, 20986,
+21932, 22343). Sin embargo el rules text del mercado vigente "Highest
+temperature in Seoul on May 25?" declara Resolution Source =
+Wunderground / Incheon Intl Airport Station / ICAO **RKSI**,
+consistente con `RESOLUTION_ICAO["Seoul"]` en `bot.py:17337`. El split
+es heredado de Sesión 185 (17 abr 2026) que cambió Incheon→KMA basándose
+en una pérdida empírica de −$0.97, sin validar literalmente el rules
+text. Pre-Edge LOG_ONLY ya había capturado 8 filas Seoul con
+`city_mode=canary` usando la estación sospechosa.
+
+### Veredicto Opus
+
+`SOURCE_MISMATCH_CONFIRMED_CONTAINMENT_FIRST`. RKSI confirmado como
+settlement source oficial; KMA en forecast queda bajo sospecha hasta
+re-validación empírica observed RKSI vs KMA contra outcome de mercados
+pasados.
+
+### Contención runtime autorizada por Pablo
+
+Mutación mínima sobre `/app/data/city_policy_state.json` (Railway):
+
+- Seoul movida de `auto_canary_cities` a `auto_blocked_cities`.
+- `reason=forecast_station_mismatch_re_audit_2026_05_24` con cita del
+  mismatch RKSI vs KMA y nota de autorización.
+- `previous_canary` preservado dentro del bloque blocked → rollback
+  trivial.
+- `transition_history` append con `from=auto_canary`, `to=auto_blocked`,
+  `at=2026-05-24T00:00:00Z`.
+- Backup remoto:
+  `/app/data/city_policy_state.json.bak-seoul-source-fidelity-2026-05-24`.
+- Patrón de escritura: `railway_safe.ps1 ssh "echo $B64 | base64 -d |
+  python3"` con script mutador in-place (el path "reescribir JSON
+  completo desde cliente" excede el límite de command line de Windows
+  ~8KB; documentar este patrón para próximas mutaciones).
+
+### Validación post-pausa
+
+Snapshot pull y SSH read-only sobre el ciclo `2026-05-24T21:53:50Z` (≈10
+min después de la escritura ~21:43Z):
+
+- `auto_canary_cities`: 13 ciudades, Seoul ausente.
+- `auto_blocked_cities`: solo Seoul.
+- `cycle_summary.json`: `buys_count=0`, `sells=0`; Seoul aparece en
+  `scanned_markets` (`forecast_max=28.6` para 2026-05-25 / 27°C).
+- `skip_log.jsonl` ciclo `21:53`: 11 filas Seoul con
+  `city_mode="shadow"`, `allowlisted=false`, skip_reasons
+  `price_out_of_range` (9) y `condition_filtered` (2). Pre-pausa ciclo
+  `20:00` tenía `city_mode="canary"`, `allowlisted=true`. Confirma
+  degradación efectiva.
+- `decisions.log`: 0 entradas Seoul post-pausa.
+- `exact_no_qt_match_evaluations_log_only.jsonl`: 0 filas Seoul
+  post-pausa; última fila Seoul `ts_utc=2026-05-24T20:00:46Z`. Pre-Edge
+  LOG_ONLY ya no captura Seoul mientras esté en blocked.
+
+### Auditoría riesgo timestamp midnight
+
+`blocked_at` y `transition_history.at` se escribieron como
+`2026-05-24T00:00:00Z` aunque la pausa se aplicó a las ~21:43Z.
+
+- `blocked_at`: no aparece en bot.py runtime (solo trazabilidad).
+- `transition_history.at`: leído por dos anti-flapping checks; ambas
+  filtran por `to=="shadow"` (`bot.py:13256`) y `to=="active_to_canary"`
+  (`bot.py:13455`). Nuestra entrada usa `to=="auto_blocked"`. No
+  triggera ningún cooldown ni reactivación automática.
+
+Veredicto: pure trazabilidad, NO_RUNTIME_RISK.
+
+### Tratamiento de filas Pre-Edge Seoul ya capturadas
+
+8 filas (`cycle_id` 2026-05-24T12:00 ×3, 16:00 ×2, 20:00 ×3) deben
+clasificarse `source_fidelity_suspect` y excluirse de outcome /
+contrafactual hasta que el mapping quede resuelto. No reescribir el
+JSONL; el flag puede aplicarse a nivel de consumidor cuando exista
+patch.
+
+### Verdict final
+
+`SEOUL_CONTAINMENT_EFFECTIVE_CLOSE`.
+
+### Próximo paso
+
+Codex ASK / read-only re-audita rules text de 2 mercados Seoul
+vigentes en Polymarket + cruza observed RKSI vs KMA contra outcome real
+de ≥1 settle Seoul pasado verificable. Entregable:
+`docs/seoul-source-fidelity-reaudit-2026-05-24.md`. No autorizar CODE
+hasta veredicto explícito de Pablo sobre qué estación debe gobernar
+forecast.
+
+### Notas operativas
+
+- Uso previo de Engram (`mem_save` id 468) ocurrió fuera del guardrail
+  "fuente de verdad = repo + Railway"; no se trata como fuente de
+  verdad; queda registrado solo como referencia operativa.
+- No se tocaron bot.py, env vars, DB, otras ciudades, BANKROLL, sizing,
+  thresholds, whitelist, scheduler, guards, SL, trading core, Pre-Edge
+  flag, Fase C.
+
+---
+
 ## Sesión 383 — Smoke T+1 PRE_EDGE_LOG_ONLY_FIRST_CYCLE_VALIDATED
 
 - Fecha: 2026-05-24
