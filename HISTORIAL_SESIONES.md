@@ -5895,3 +5895,109 @@ trading core ni BUY/SELL/SKIP. Cualquier paso operativo posterior
 requiere confirmación humana explícita. No se guardó esta decisión en
 engram ni memory externa por pedido explícito; verdad durable vive en
 `CONTEXTO.md`, `HISTORIAL_SESIONES.md` y `agent_events.jsonl`.
+
+---
+
+## Sesión 383 — Smoke T+1 PRE_EDGE_LOG_ONLY_FIRST_CYCLE_VALIDATED
+
+- Fecha: 2026-05-24
+- Agente: Sonnet
+- Modo: RISK_CONTROL / MONETIZATION_RELEVANT / Railway read-only
+- Clasificación: no código, no env var, no trading
+
+### Objetivo
+
+Comprobar si ya existía el primer ciclo elegible posterior a la
+activación de `LOG_ONLY_EXACT_NO_QT_MATCH_EVAL_ENABLED=1`
+(activation_timestamp `2026-05-24T11:15:04Z`) y ejecutar el smoke
+funcional LOG_ONLY contractual.
+
+### Precheck
+
+- `git status`: solo untracked preexistentes `2026-04-27]` / `342)`.
+- HEAD: `8d3b4b1` (docs session 382).
+- Railway variables: `LOG_ONLY_EXACT_NO_QT_MATCH_EVAL_ENABLED=1` confirmado.
+
+### Primera captura
+
+`/app/data/exact_no_qt_match_evaluations_log_only.jsonl` — 6 filas.
+
+- **cycle_id**: `2026-05-24T12:00`
+- **Primer ts_utc**: `2026-05-24T12:00:50.331841Z` (> activation_timestamp ✅)
+
+### Datos del ciclo
+
+| Campo | Valor |
+|---|---|
+| `eligible_before_cap` | 6 |
+| `selected_after_cap` | 6 |
+| `capped_count` | 0 |
+| `sampling_method` | none |
+| `cap_active` | false |
+| `identity_resolvable_rate` | 6/6 = 100% |
+| `cycle_compute_overhead_ms` | no presente en JSONL (solo stdout) |
+
+### Distribución por ciudad/city_mode
+
+| Ciudad | city_mode | Filas |
+|---|---|---|
+| Toronto | canary | 1 |
+| Seoul | canary | 3 |
+| Singapore | canary | 2 |
+
+### Distribución best_side_log_only
+
+- NO: 6/6
+
+### edge_passes_reference_threshold_log_only=true
+
+3 de 6:
+- Seoul 26C — edge_no 19.35%
+- Seoul 27C — edge_no 18.27%
+- Singapore 32C — edge_no 28.37%
+
+### Validación de contrato
+
+Todas las 6 filas pasan:
+
+- `log_only=true` ✅
+- `execution_authorized=false` ✅
+- `condition=exact` ✅
+- `qt_gate_reason=no_quality_trader_signal_match` ✅
+- `city_mode=canary` (∈ {active, canary}) ✅
+- campo `best_side_log_only` presente ✅
+- `identity_resolvable` presente y verdadero ✅
+
+### Kill-switches
+
+Ninguno activo:
+
+- Sin `execution_authorized=true` ✅
+- Sin cohorte fuera de contrato ✅
+- Sin efecto en BUY/SELL/SKIP ✅ (LOG_ONLY puro)
+- overhead: n=1 ciclo elegible — kill-switch requiere n>=5 ✅
+- identity_rate: 100% — kill-switch requiere n>=30 ✅
+
+### Observación: cycle_compute_overhead_ms ausente del JSONL
+
+El campo no aparece en el artefacto. Implementado como log stdout en
+`_flush_exact_no_qt_match_evals`, no como campo del JSONL. No es
+un trigger de kill-switch (el umbral p95>50ms requiere n>=5 ciclos
+elegibles). Requiere lectura de logs Railway para verificar overhead
+real cuando se alcance n>=5.
+
+### Veredicto
+
+**`PRE_EDGE_LOG_ONLY_FIRST_CYCLE_VALIDATED`**
+
+### Próximos checkpoints
+
+- T+5 ciclos elegibles: verificar p95 overhead via logs Railway.
+- T+24h: `identity_resolvable_rate` (kill-switch n>=30).
+- T+7 días: lectura intermedia del artefacto.
+- Phase 2 T+30=2026-06-09: lectura parcial experiment.
+
+### Guardrails
+
+No se tocaron código, env vars, trading, BUY/SELL/SKIP, city modes,
+thresholds, BANKROLL, sizing, scheduler, guards, SL, DB ni Fase C.
