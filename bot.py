@@ -17268,7 +17268,7 @@ DATA_API_URL = "https://data-api.polymarket.com"
 DAILY_TEMP_TAG_ID = "103040"
 
 RESOLUTION_STATIONS = {
-    "Seoul":          {"lat": 37.5665, "lon": 126.9780, "name": "Seoul City (KMA)"},
+    "Seoul":          {"lat": 37.4602, "lon": 126.4407, "name": "Incheon Intl (RKSI)"},
     "London":         {"lat": 51.5048, "lon": 0.0495,   "name": "London City"},
     "Tel Aviv":       {"lat": 32.0114, "lon": 34.8867,  "name": "Ben Gurion"},
     "Shanghai":       {"lat": 31.1443, "lon": 121.8083, "name": "Pudong"},

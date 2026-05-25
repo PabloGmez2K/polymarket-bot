@@ -82,6 +82,18 @@ def test_canary_cities_remain_permitted_when_not_blocked():
     assert ns["get_effective_city_mode"]("Seoul") == "canary"
 
 
+def test_seoul_blocked_city_overrides_auto_canary():
+    ns = _policy_namespace(
+        blocked={"Seoul"},
+        active={"Seoul"},
+        canary={"Seoul"},
+        auto_canary={"Seoul": {"reason": "auto_promotion"}},
+    )
+
+    assert ns["is_city_blocked"]("Seoul") is True
+    assert ns["get_effective_city_mode"]("Seoul") == "blocked"
+
+
 def test_los_angeles_observed_but_auto_canary_requires_manual_review():
     ns = _policy_namespace(auto_canary={"Los Angeles": {}, "Munich": {}})
 
