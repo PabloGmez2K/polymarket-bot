@@ -6115,3 +6115,87 @@ real cuando se alcance n>=5.
 
 No se tocaron código, env vars, trading, BUY/SELL/SKIP, city modes,
 thresholds, BANKROLL, sizing, scheduler, guards, SL, DB ni Fase C.
+
+---
+
+## Sesión 388 — Pre-Edge T+24h identity checkpoint
+
+- Fecha: 2026-05-25
+- Agente: Sonnet
+- Modo: RISK_CONTROL / LOG_ONLY_CHECKPOINT / read-only
+- Clasificación: no código, no env var, no Railway mutation
+
+### Objetivo
+
+Checkpoint T+24h de calidad/identidad del experimento Pre-Edge
+exact/no-QT-match (activation_timestamp `2026-05-24T11:15:04Z`).
+Confirmar que no existe nueva contradicción runtime y evaluar el
+kill-switch de identity_resolvable_rate con n_clean≥30.
+
+### Precheck
+
+- `git status`: solo untracked preexistentes `2026-04-27]` / `342)`.
+- HEAD: `4ba00a8` (docs session 387) ✅
+- Railway: SHADOW_ONLY_MODE=false, BANKROLL=25.00,
+  LOG_ONLY_EXACT_NO_QT_MATCH_EVAL_ENABLED=1,
+  BLOCKED_CITIES incluye Seoul, ACTIVE_TRADING_CITIES=Shanghai,Tokyo,Buenos Aires,Ankara ✅
+
+### FASE 1 — Seguridad Seoul / NO patch
+
+| Check | Resultado |
+|---|---|
+| BUY/SELL Seoul post-block | 0 ✅ |
+| Nuevas filas Seoul en Pre-Edge | 0 (8 Seoul todas ≤2026-05-24T20:00:46Z) ✅ |
+| Posición Seoul abierta | ninguna ✅ |
+| SELL reason=reeval post-patch | 0 (trade_lifecycle: 0 reeval closes) ✅ |
+| Posiciones abiertas | 1 (Madrid NO, no afecta) ✅ |
+
+Veredicto FASE 1: **LIMPIA** — sin regresión Seoul ni patch NO.
+
+### FASE 2 — Métricas T+24h
+
+| Métrica | Valor |
+|---|---|
+| Filas totales | 43 |
+| Filas Seoul source_fidelity_suspect | 8 (=T+5, sin nuevas) |
+| Filas limpias non-Seoul | 35 (+3 vs T+5) |
+| Cycle_ids limpios | 8 (+1 vs T+5: 2026-05-25T12:00) |
+| identity_resolvable_rate | 100% (35/35) |
+| log_only=true | 35/35 ✅ |
+| execution_authorized=false | 35/35 ✅ |
+| condition=exact | 35/35 ✅ |
+| Edges sobre threshold (≥15%) | 23/35 |
+| best_side_log_only | NO (23/23 con edge) |
+| Capture errors | 0 |
+
+### Distribución cohorte limpia
+
+| Ciudad | Filas |
+|---|---|
+| Singapore | 12 |
+| Wellington | 12 |
+| Tokyo | 4 |
+| Munich | 3 |
+| Toronto | 2 |
+| Shanghai | 2 |
+
+### Kill-switch T+24h
+
+- n_clean=35 ≥ 30 → umbral alcanzado
+- identity_resolvable_rate=100% ≥ 50% → sin activación
+- Sin violaciones log_only / execution_authorized
+
+### Veredictos
+
+- **`PRE_EDGE_T24_IDENTITY_OK_CONTINUE`**
+- **`NO_PATCH_NO_REEVAL_EVENT_YET_CONTINUE_WATCH`** (igual que T+5)
+
+### Siguiente trigger
+
+T+7d = 2026-06-01, o incidencia antes.
+
+### Guardrails
+
+No se tocaron código, Railway, env vars, DB, BANKROLL, trading core,
+city modes, whitelist, scheduler, guards, SL, Pre-Edge flag, Fase C,
+thresholds, sizing ni BUY/SELL/SKIP.
