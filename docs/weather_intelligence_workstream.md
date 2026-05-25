@@ -2,7 +2,8 @@
 
 **Estado:** ACTIVE_RESEARCH — documentado para referencia y backlog  
 **Creado:** 2026-05-25 (Sesión 387 — Sonnet)  
-**Contexto durable:** [CONTEXTO.md](../CONTEXTO.md) §Sesión 387  
+**Última actualización:** 2026-05-25 (Sesión 389 — Sonnet, docs-only: source fidelity sweep post-T+24)  
+**Contexto durable:** [CONTEXTO.md](../CONTEXTO.md) §Sesiones 387–389  
 **Archivo de fuentes externas:** [docs/research_inputs/external_weather_claims_2026-05-24.md](research_inputs/external_weather_claims_2026-05-24.md) — EXTERNAL_SOURCE_ARCHIVE / NO AUTHORITATIVE  
 
 ---
@@ -14,7 +15,7 @@
 - `ACTIVE_TRADING_CITIES=Shanghai,Tokyo,Buenos Aires,Ankara`.
 - `BLOCKED_CITIES=London,Paris,Atlanta,Chicago,Seoul`.
 - `LOG_ONLY_EXACT_NO_QT_MATCH_EVAL_ENABLED=1`.
-- Pre-Edge: **PRE_EDGE_T5_HEALTH_OK_CONTINUE** — 32 filas limpias, 7 ciclos, p95=0.26 ms.
+- Pre-Edge: **PRE_EDGE_T5_HEALTH_OK_CONTINUE** / **PRE_EDGE_T24_IDENTITY_OK_CONTINUE** — T+24: 35 filas limpias non-Seoul (source_fidelity_confirmed), 8 ciclos; Seoul 8 filas source_fidelity_suspect/excluded; pending_verification=0. **PRE_EDGE_CLEAN_COHORT_SOURCE_FIDELITY_CONFIRMED** (Sesión 389).
 - Seoul: hard-blocked. Reactivación requiere evidencia RKSI limpia y decisión Opus.
 - Phase 2 Recalibration abierta — T+30=2026-06-09.
 - Fase C: no autorizada.
@@ -59,7 +60,11 @@ Seoul no está autorizada para trading. Una futura reactivación requiere: (1) m
 | p95 overhead (nearest-rank) | **0.26 ms** |
 | Kill-switches activos | 0 |
 
-Kill-switches Opus: ninguno disparado. Próximos checkpoints: T+24h (identity_rate n≥30), T+7d (~2026-05-31, lectura intermedia), Phase 2 T+30=2026-06-09.
+Kill-switches Opus: ninguno disparado.
+
+**Addendum T+24h (Sesión 388–389):** checkpoint superado. n_clean=35≥30, identity_resolvable_rate=100%. PRE_EDGE_T24_IDENTITY_OK_CONTINUE. Source fidelity sweep completo: PRE_EDGE_CLEAN_COHORT_SOURCE_FIDELITY_CONFIRMED. Ver M7.
+
+Próximos checkpoints: T+7d (~2026-05-31, lectura intermedia), Phase 2 T+30=2026-06-09.
 
 ### M4 — Active cities source audit
 
@@ -72,6 +77,37 @@ Kill-switches Opus: ninguno disparado. Próximos checkpoints: T+24h (identity_ra
 ### M6 — METAR Measurement Layer Wave 1+2
 
 **Sesiones 362-366.** Wave 1 (7 ciudades: Beijing/ZBAA, Shanghai/ZSPD+ZSSS, Tokyo/RJTT+RJAA, Jeddah/OEJN, Buenos Aires/SABE+SAEZ, Ankara/LTAC, Chongqing/ZUCK) + Wave 2 (7 ciudades: Seoul/RKSI, Singapore/WSSS, Toronto/CYYZ, Wellington/NZWN, Madrid/LEMD, Milan/LIMC, Munich/EDDM). LOG_ONLY. Resolution Verification Layer separado: `tools/metar_resolution_verify.py`. Ver `docs/metar_measurement_layer.md`.
+
+### M7 — Pre-Edge Source Fidelity Sweep post-T+24
+
+**Checkpoint:** PRE_EDGE_CLEAN_COHORT_SOURCE_FIDELITY_CONFIRMED (Sesión 389, 2026-05-25).
+
+Auditoría read-only Codex por ciudad de las 35 filas non-Seoul de la cohorte T+24. Fuente de reglas consultada: Polymarket market rules text vía Gamma.
+
+| Ciudad | Filas Pre-Edge | ICAO repo | Fuente Polymarket rules | Resultado |
+|--------|---------------|-----------|------------------------|-----------|
+| Singapore | 12 | WSSS | WU sg/singapore/WSSS / Singapore Changi Airport / whole °C | SOURCE_MATCH_CONFIRMED |
+| Wellington | 12 | NZWN | WU nz/wellington/NZWN / Wellington Intl Airport / whole °C | SOURCE_MATCH_CONFIRMED |
+| Tokyo | 4 | RJTT | Sin drift vs audit durable S356 | NO_DRIFT_CONFIRMED |
+| Munich | 3 | EDDM | WU de/munich/EDDM / Munich Airport / whole °C | SOURCE_MATCH_CONFIRMED |
+| Toronto | 2 | CYYZ | WU ca/mississauga/CYYZ / Toronto Pearson Intl Airport / whole °C | SOURCE_MATCH_CONFIRMED |
+| Shanghai | 2 | ZSPD | Sin drift vs audit durable S356 | NO_DRIFT_CONFIRMED |
+| Madrid | — | LEMD | WU es/madrid/LEMD / Madrid-Barajas Airport / whole °C; BUY real canary autorizado, sin contradicción de policy | SOURCE_MATCH_CONFIRMED |
+
+**Estado final de la cohorte T+24:**
+
+| Categoría | Filas |
+|-----------|-------|
+| source_fidelity_confirmed (non-Seoul) | 35 |
+| source_fidelity_suspect (Seoul, excluidas) | 8 |
+| pending_verification | 0 |
+
+**Implicaciones para Outcome Resolver:**
+- Las 35 filas non-Seoul permanecen válidas técnicamente y quedan confirmadas en source fidelity.
+- El Outcome Resolver debe excluir las 8 filas Seoul suspect; no necesita excluir P1/P2 por identidad de estación.
+- El gate del Outcome Resolver ya no depende de nueva auditoría station mapping para P1/P2; sigue dependiendo de T+7d (~2026-05-31) y diseño aprobado por Opus.
+- No hay riesgo source-fidelity inmediato en ciudades executable/canary auditadas.
+- No se requiere acción runtime ni Opus ahora.
 
 ---
 
@@ -244,6 +280,14 @@ El archivo de fuentes externas incluye un hilo de Maskache (X, 19 mayo 2026) sob
 | Istanbul → LTFM (WRH shadow source) | S351-S354 audit | `VERIFIED_IN_REPO` | — | — |
 | METAR Wave 1+2 operativo | Sesiones 362-366 | `VERIFIED_IN_REPO` | — | — |
 | Pre-Edge T+5 HEALTH_OK, p95=0.26ms | Ciclo #395 leído en Railway | `VERIFIED_IN_REPO` | — | — |
+| Pre-Edge T+24h identity_rate=100% n=35, PRE_EDGE_T24_IDENTITY_OK_CONTINUE | S388 Railway read-only | `VERIFIED_IN_REPO` | — | — |
+| Singapore/WSSS SOURCE_MATCH_CONFIRMED (Pre-Edge T+24) | S389 Codex audit Polymarket rules | `VERIFIED_IN_REPO` | — | — |
+| Wellington/NZWN SOURCE_MATCH_CONFIRMED (Pre-Edge T+24) | S389 Codex audit Polymarket rules | `VERIFIED_IN_REPO` | — | — |
+| Munich/EDDM SOURCE_MATCH_CONFIRMED (Pre-Edge T+24) | S389 Codex audit Polymarket rules | `VERIFIED_IN_REPO` | — | — |
+| Toronto/CYYZ SOURCE_MATCH_CONFIRMED (Pre-Edge T+24) | S389 Codex audit Polymarket rules | `VERIFIED_IN_REPO` | — | — |
+| Madrid/LEMD SOURCE_MATCH_CONFIRMED; BUY canary autorizado, sin contradicción policy | S389 Codex audit Polymarket rules | `VERIFIED_IN_REPO` | — | — |
+| Shanghai/ZSPD, Tokyo/RJTT sin drift vs S356 (cohorte T+24) | S389 Codex read-only | `VERIFIED_IN_REPO` | — | — |
+| PRE_EDGE_CLEAN_COHORT_SOURCE_FIDELITY_CONFIRMED: 35 non-Seoul confirmed, 8 Seoul suspect/excluded, pending_verification=0 | S389 | `VERIFIED_IN_REPO` | — | — |
 | Wellington NO → LOSS_TOTAL (no reeval), Toronto NO → RESOLVED_WIN (no reeval) | Ciclo #395 | `VERIFIED_IN_REPO` | Sin regresión observada | Próximo SELL NO reeval |
 | WU resuelve de METAR de la estación ICAO exacta | Archivo externo (Maskache + js_dun) | `EXTERNAL_CLAIM_PROVIDED` | Alta — confirma source fidelity thesis | Verificar 1 mercado resuelto propio contra METAR |
 | Objetivo: predecir temp en momento del METAR, no daily max absoluto | Archivo externo (Maskache) | `EXTERNAL_CLAIM_PROVIDED` | Alta — matiza interpretación de outcome | Verificar contra Gamma-derived outcome |
@@ -274,9 +318,9 @@ El archivo de fuentes externas incluye un hilo de Maskache (X, 19 mayo 2026) sob
 |-----------|--------|-----|--------|-------------|-------------------|
 | M1-M6 (source audits, METAR, Pre-Edge) | `DONE / ALREADY_MATERIALIZED` | — | — | — | — |
 | Próximo SELL NO reeval — validación matemática del patch | `ACTION_AFTER_RUNTIME_VALIDATION` | Medio — confirma patch completo | Bajo | Primer SELL reason=reeval post-deploy | Verificar `mkt_price=cur_price` applied correctly |
-| Pre-Edge T+24h identity_rate n≥30 | `ACTION_AFTER_RUNTIME_VALIDATION` | Alto — gate kill-switch Phase 2 | Bajo | Sonnet read-only, próximas horas | Si <50%: kill-switch Phase 2 |
+| Pre-Edge T+24h identity_rate n≥30 + source fidelity sweep | `DONE — PRE_EDGE_T24_IDENTITY_OK_CONTINUE + PRE_EDGE_CLEAN_COHORT_SOURCE_FIDELITY_CONFIRMED` | Alto — gate kill-switch Phase 2 | Bajo | Completado S388+S389 | identity_resolvable_rate=100% n=35; source_fidelity_confirmed=35; pending_verification=0 |
 | Pre-Edge T+7d lectura intermedia (~2026-05-31) | `ACTION_AFTER_RUNTIME_VALIDATION` | Alto diferido | Bajo | Sonnet read-only, 2026-05-31 | Separar Seoul suspect; input Outcome Resolver |
-| Outcome Resolver v1 design | `CANDIDATE_LOG_ONLY_AFTER_PRE_EDGE_GATE` | Alto — cierra loop Pre-Edge → P&L contrafactual | Bajo | T+7d completado + identity_rate confirmado | Sonnet doc → Codex impl → Opus gate exact-no-QT |
+| Outcome Resolver v1 design | `CANDIDATE_LOG_ONLY_AFTER_PRE_EDGE_GATE` | Alto — cierra loop Pre-Edge → P&L contrafactual | Bajo | T+7d completado (~2026-05-31); source fidelity ya confirmada (S389, no bloqueante para P1/P2) | Sonnet doc → Codex impl → Opus gate exact-no-QT |
 | Seoul evidencia RKSI limpia → Opus | `CANDIDATE_OPUS_STRATEGY_REVIEW` | Alto — reabre ciudad | Bajo (patch aplicado) | Múltiples ciclos Pre-Edge limpios RKSI post-patch | Opus: `REACTIVATION_AUTHORIZED` o `KEEP_BLOCKED` |
 | Verificación London EGLC vs RESOLUTION_ICAO | `CANDIDATE_LOG_ONLY_AFTER_PRE_EDGE_GATE` | Medio — gate para unblock London | Bajo | Solo cuando London entre en pipeline de unblock | Gamma rules text 1 mercado resuelto |
 | Verificación Paris LFPB vs RESOLUTION_ICAO | `CANDIDATE_LOG_ONLY_AFTER_PRE_EDGE_GATE` | Medio — gate para unblock Paris | Bajo | Solo cuando Paris entre en pipeline de unblock | Igual que London |
@@ -298,7 +342,7 @@ El archivo de fuentes externas incluye un hilo de Maskache (X, 19 mayo 2026) sob
 
 ## Orden de ejecución recomendado
 
-1. **Pre-Edge T+24h identity_rate** (Sonnet, read-only, próximas horas): confirmar identity_rate n≥30. Si <50%: kill-switch Phase 2.
+1. ~~**Pre-Edge T+24h identity_rate**~~ **DONE** — PRE_EDGE_T24_IDENTITY_OK_CONTINUE (S388) + PRE_EDGE_CLEAN_COHORT_SOURCE_FIDELITY_CONFIRMED (S389): identity_rate=100% n=35; source_fidelity_confirmed=35; pending_verification=0.
 2. **Próximo SELL NO reeval** (cuando ocurra): verificar que `mkt_price=cur_price` se aplicó correctamente — `NO_PATCH_NO_REEVAL_EVENT_YET_CONTINUE_WATCH` mientras no ocurra.
 3. **Pre-Edge T+7d lectura (~2026-05-31)** (Sonnet, read-only): artefacto completo, separar Seoul suspect, input para Outcome Resolver.
 4. **Outcome Resolver v1 design** (Sonnet, docs-only): schema join Pre-Edge ↔ blocked_signals_resolutions. Gate: completar Paso 3.

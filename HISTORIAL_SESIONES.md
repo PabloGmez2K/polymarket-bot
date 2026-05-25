@@ -6215,3 +6215,51 @@ correct T+24 traceability and next trigger`).
 No se tocaron código, Railway, env vars, DB, BANKROLL, trading core,
 city modes, whitelist, scheduler, guards, SL, Pre-Edge flag, Fase C,
 thresholds, sizing ni BUY/SELL/SKIP.
+
+---
+
+## Sesión 389 — Pre-Edge clean cohort source fidelity confirmed (25 may 2026, Sonnet)
+
+**Tipo:** LITE / docs-only  
+**Clasificación:** MONETIZATION_RELEVANT / DOCUMENTATION_CLOSE  
+**Agente:** Sonnet  
+**Archivos:** `docs/weather_intelligence_workstream.md`, `CONTEXTO.md`, `HISTORIAL_SESIONES.md`, `agent_events.jsonl`
+
+### Objetivo
+
+Documentar el veredicto durable de la auditoría read-only Codex que confirmó source fidelity para las 35 filas non-Seoul de la cohorte Pre-Edge T+24.
+
+### Veredicto
+
+**PRE_EDGE_CLEAN_COHORT_SOURCE_FIDELITY_CONFIRMED**
+
+### Auditoría por ciudad (read-only, Codex, Polymarket rules text vía Gamma)
+
+| Ciudad | Filas Pre-Edge | ICAO repo | Resultado |
+|--------|---------------|-----------|-----------|
+| Singapore | 12 | WSSS | SOURCE_MATCH_CONFIRMED |
+| Wellington | 12 | NZWN | SOURCE_MATCH_CONFIRMED |
+| Tokyo | 4 | RJTT | NO_DRIFT_CONFIRMED (vs S356) |
+| Munich | 3 | EDDM | SOURCE_MATCH_CONFIRMED |
+| Toronto | 2 | CYYZ | SOURCE_MATCH_CONFIRMED |
+| Shanghai | 2 | ZSPD | NO_DRIFT_CONFIRMED (vs S356) |
+| Madrid | — | LEMD | SOURCE_MATCH_CONFIRMED (canary autorizado) |
+
+### Estado final de la cohorte T+24
+
+| Categoría | Filas |
+|-----------|-------|
+| source_fidelity_confirmed (non-Seoul) | 35 |
+| source_fidelity_suspect (Seoul, excluidas) | 8 |
+| pending_verification | 0 |
+
+### Implicaciones durables
+
+- Outcome Resolver: excluir Seoul suspect; no excluir P1/P2 por identidad de estación.
+- Gate Outcome Resolver: ya no depende de nueva auditoría station mapping para P1/P2. Sigue dependiendo de T+7d (~2026-05-31) y diseño aprobado por Opus.
+- No hay riesgo source-fidelity inmediato en ciudades executable/canary.
+- No se requiere acción runtime ni Opus ahora.
+
+### Guardrails
+
+No se tocaron bot.py, env vars, Railway, DB, BANKROLL, trading core, city modes, whitelist, scheduler, guards, SL, Pre-Edge flag, Fase C, thresholds, sizing ni BUY/SELL/SKIP.
