@@ -303,7 +303,7 @@ source promotion y Fase C requieren Opus o confirmación humana según modo.
 - Contención runtime: antes de aplicar una capa temporal, verificar si auto-promotions u overlays pueden revertirla. Si fue revertida automáticamente, buscar hard-block efectivo antes de repetir la misma mutación. Runtime containment y patch pueden encadenarse en un solo bloque solo si la decisión semántica ya está tomada y todos los gates están cerrados.
 - Gate T+N bloquea únicamente las decisiones que dependen de esa evidencia; no congela workstreams independientes como auditorías read-only, source fidelity, data contracts o diseños sin ejecución con ROI claro.
 - En docs-only: no acceder a Railway ni runtime para registrar eventos. Si se añade entrada a `agent_events.jsonl`, usar timestamp obtenido explícitamente del sistema en UTC; no inventarlo ni calcularlo de memoria.
-- "Fase C" está reservada para el escalado real de trading ($35/$50/$100). Para fases internas de tooling o diseño, usar R1/R2/R3/R4 u otra nomenclatura no conflictiva.
+- "Fase C" está reservada para la fase estratégica/operativa definida en el contrato durable del proyecto y no puede reutilizarse como nombre de fases internas de tooling, observabilidad o diseño. Para estas usar R1/R2/R3/R4 u otra nomenclatura no conflictiva.
 - No tocar el untracked preexistente `2026-04-27]`.
 
 ---
