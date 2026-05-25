@@ -23,6 +23,7 @@ No cargar `CONTEXTO.md` completo ni sesiones antiguas sin necesidad.
 - `Best-of-N` solo para comparar planes, prompts o alternativas de diseño con coste justificado; no para multiplicar implementaciones, Railway checks ni análisis `WATCH_ONLY`.
 - La cola/backlog de Codex requiere trigger, ROI esperado y criterio de cierre; evitar cementerios `WATCH`.
 - Codex implementa, testea y valida; no decide semántica de trading/riesgo: BANKROLL, sizing, whitelist, city modes, scheduler, BUY/SELL/SKIP, guards/SL, source promotion y Fase C requieren Opus o confirmación humana según modo.
+- `/plan` es apropiado para arquitectura LOG_ONLY o pre-implementation cuando Opus ya fijó semántica; no autoriza CODE. `/goal` solo para implementación iterativa ya autorizada, con objetivo verificable y stop condition; nunca para decisiones de trading/riesgo/BANKROLL/city modes/guards/Fase C/env vars. Para patches runtime concretos ya decididos, usar prompt normal cerrado.
 
 ## Modos de ciudad — regla canónica
 
@@ -57,6 +58,7 @@ para que una ciudad shadow/active acumule datos en `observed_vs_forecast`.
 - Tests deben medir llamadas reales al compute/hook, no solo filas escritas en el artefacto.
 - En sesiones de código: consolidar docs y `agent_events.jsonl` antes del último `verify_before_deploy.py` cuando el contrato del repo lo requiera.
 - La memoria externa (Engram) no sustituye la fuente de verdad del repo; toda decisión durable debe quedar en `CONTEXTO.md`, `HISTORIAL_SESIONES.md` y `agent_events.jsonl`.
+- Si se añade entrada a `agent_events.jsonl`, usar timestamp obtenido del sistema en UTC; no inventarlo. En docs-only, no acceder a Railway para registrar eventos.
 
 ## Cierre
 

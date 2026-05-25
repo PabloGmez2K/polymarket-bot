@@ -40,6 +40,7 @@ El orquestador **no implementa directamente** salvo petición explícita. Su tra
 - No repetir contexto ya leído dentro de la misma sesión o bloque; referenciar archivos.
 - No pedir cierre previo si la sesión anterior ya cerró limpia con commit/push, validaciones, Railway observado si aplica y `git status` final.
 - Pedir cierre previo si queda worktree sucio, contexto no durable, tarea incompleta, resultado ambiguo o cambio delicado de agente.
+- Sesión compactada: si un agente compacta contexto, puede terminar el bloque ya abierto si conserva scope y gates; no debe comenzar el siguiente workstream. Abrir sesión nueva desde repo.
 
 ---
 
@@ -273,6 +274,8 @@ validación y formato de entrega.
 cuando el coste está justificado. No usarlo para multiplicar implementaciones,
 Railway checks ni análisis `WATCH_ONLY`.
 
+Codex `/plan` es apropiado para arquitectura compleja LOG_ONLY o pre-implementation cuando Opus ya fijó la semántica; `/plan` no autoriza CODE. Codex `/goal` solo para implementación iterativa ya autorizada, con objetivo verificable, validaciones y stop condition; nunca para decisiones de trading/riesgo/BANKROLL/city modes/guards/Fase C/env vars sensibles. Para patches runtime concretos ya decididos, usar prompt normal cerrado, no `/goal`.
+
 La cola/backlog de Codex queda subordinada a trigger, ROI esperado y criterio
 de cierre. Evitar cementerios `WATCH`: si no mueve P&L, throughput, riesgo,
 BANKROLL readiness o calidad de decisión en <=30d, cerrar como `DEFER_STOP`.
@@ -295,6 +298,12 @@ source promotion y Fase C requieren Opus o confirmación humana según modo.
 - Cambios en `bot.py`, aunque sean LOG_ONLY/copy/logging: validaciones, commit, push si autorizado y Railway observado hasta `SUCCESS` / `FAILED`.
 - No ejecutar comandos que puedan quedar colgados salvo necesidad clara.
 - No usar checks opcionales si ya hay evidencia suficiente para cerrar.
+- External claims y research (herramientas de pago, fuentes externas): archivar como non-authoritative. Solo pasan a backlog accionable tras verificación focal y clasificación monetizable/riesgo. Herramienta de pago descartada por decisión explícita no genera nuevo backlog salvo nueva autorización de Pablo.
+- Data contracts: no confundir realized PnL, market outcome, forecast correctness y liquidity exit. Si una tarea deriva hacia semántica de learning/PnL/outcome, Opus decide el contrato antes de que Codex diseñe o implemente.
+- Contención runtime: antes de aplicar una capa temporal, verificar si auto-promotions u overlays pueden revertirla. Si fue revertida automáticamente, buscar hard-block efectivo antes de repetir la misma mutación. Runtime containment y patch pueden encadenarse en un solo bloque solo si la decisión semántica ya está tomada y todos los gates están cerrados.
+- Gate T+N bloquea únicamente las decisiones que dependen de esa evidencia; no congela workstreams independientes como auditorías read-only, source fidelity, data contracts o diseños sin ejecución con ROI claro.
+- En docs-only: no acceder a Railway ni runtime para registrar eventos. Si se añade entrada a `agent_events.jsonl`, usar timestamp obtenido explícitamente del sistema en UTC; no inventarlo ni calcularlo de memoria.
+- "Fase C" está reservada para el escalado real de trading ($35/$50/$100). Para fases internas de tooling o diseño, usar R1/R2/R3/R4 u otra nomenclatura no conflictiva.
 - No tocar el untracked preexistente `2026-04-27]`.
 
 ---
