@@ -2,7 +2,7 @@
 
 **Estado:** ACTIVE_RESEARCH — documentado para referencia y backlog  
 **Creado:** 2026-05-25 (Sesión 387 — Sonnet)  
-**Última actualización:** 2026-05-25 (Sesión 389 — Sonnet, docs-only: source fidelity sweep post-T+24)  
+**Última actualización:** 2026-05-25 (Sesión 390 — Sonnet, docs-only: learning data contract + Wethr closure)  
 **Contexto durable:** [CONTEXTO.md](../CONTEXTO.md) §Sesiones 387–389  
 **Archivo de fuentes externas:** [docs/research_inputs/external_weather_claims_2026-05-24.md](research_inputs/external_weather_claims_2026-05-24.md) — EXTERNAL_SOURCE_ARCHIVE / NO AUTHORITATIVE  
 
@@ -129,22 +129,21 @@ El archivo de fuentes externas incluye un listado de estaciones atribuido a Alte
 
 ---
 
-### Línea B — Wethr.net como benchmark externo
+### Línea B — Wethr.net
 
-**Qué:** Wethr.net fue mencionado en el archivo de fuentes externas como herramienta con "all info and models in one place", útil especialmente para mercados US. Potencial candidato a benchmark externo sin necesidad de scraping directo de WU.
+**Clasificación:** `DISCARD_AS_PAID_DEPENDENCY / BUILD_OWN_CAPABILITY_FUTURE`
 
-**Clasificación del claim:** `EXTERNAL_CLAIM_PROVIDED` — no verificado funcionalmente.
+**Decisión (Sesión 390, Pablo):** Wethr.net requiere pago/suscripción. No se integra ni se dedican nuevos parity tests, API work o verificaciones de pago. Pablo prefiere construir capacidades equivalentes propias en el futuro.
 
-**Nunca:** canonical_source, ni influencia en BUY/SELL/SKIP, ni reemplazo de Open-Meteo en runtime.
+**Aprendizajes transferibles conservados (no borrar):**
+- Concepto de benchmark externo settlement vs predictive signals: válido para diseño propio futuro.
+- Idea de parity METAR/WU por ICAO: ya implementada en METAR Layer (M6).
+- Comparación de modelos y calibración ciudad+horizonte: en Línea D (Truth Pipeline propio).
+- Dashboards y alertas propias: candidato diferido de backlog propio.
 
-**Verificaciones mínimas antes de integrar:**
-1. Confirmar que Wethr.net muestra temperatura WU por ICAO (no city-center ni modelo propio).
-2. Comparar manualmente vs Open-Meteo para ≥3 mercados resueltos en ciudades activas.
-3. Si alinea con Gamma-derived outcomes: candidato a shadow source de observabilidad.
+**No abrir:** nuevas verificaciones Wethr, API calls, parity tests ni integración de pago.
 
-**Agente:** Sonnet (investigación read-only) → Opus si resultado justifica integración.
-
-**Gate:** Después de Phase 2 T+30 (2026-06-09) y solo si throughput lo justifica.
+**Archivo externo:** el claim original permanece en `docs/research_inputs/external_weather_claims_2026-05-24.md` como `EXTERNAL_SOURCE_ARCHIVE` — no autorizante.
 
 ---
 
@@ -297,7 +296,7 @@ El archivo de fuentes externas incluye un hilo de Maskache (X, 19 mayo 2026) sob
 | HK → HK Observatory (no VHHH) | Archivo externo (AlterEgo) | `EXTERNAL_CLAIM_PROVIDED` | Media (ciudad fuera del universo) | HK Observatory no es ICAO estándar — audit específico |
 | ASOS 5-min: WU NO usa 5-min, solo METAR oficial | Archivo externo (js_dun) | `EXTERNAL_CLAIM_PROVIDED` | Alta — ASOS es predictivo intra-hora, no settlement | — |
 | ASOS 5-min disponible para US (excepto Denver) | Archivo externo (js_dun) | `EXTERNAL_CLAIM_PROVIDED` | Media — solo si bot opera US | Verificar disponibilidad KBKF |
-| Wethr.net: all info and models, útil para US | Archivo externo (Maskache) | `EXTERNAL_CLAIM_PROVIDED` | Media — benchmark potencial | Verificación manual ≥3 mercados activos |
+| Wethr.net: all info and models, útil para US | Archivo externo (Maskache) | `DISCARD_AS_PAID_DEPENDENCY` | — | Cerrado S390: requiere pago, no integrar |
 | ECMWF gold standard global; HRRR para US corto plazo; ICON-EU Europa | Archivo externo (AlterEgo) | `EXTERNAL_CLAIM_PROVIDED` | Alta contextual | Benchmark n≥30 outcomes por ciudad vs modelo actual |
 | ICON-D2 EPS: distribución probabilística para binarios | Archivo externo (AlterEgo) | `EXTERNAL_CLAIM_PROVIDED` | Alta estratégica | n≥30 outcomes ciudades EU + ciudades EU en universo |
 | Open-Meteo soporta `bias_correction=true` para ECMWF | Archivo externo (alteregoeth código) | `EXTERNAL_CODE_EXCERPT_PROVIDED_NEEDS_DIRECT_RECHECK` | Media — potencial mejora gratuita | Verificar API docs Open-Meteo + benchmark n≥30 |
@@ -320,7 +319,7 @@ El archivo de fuentes externas incluye un hilo de Maskache (X, 19 mayo 2026) sob
 | Próximo SELL NO reeval — validación matemática del patch | `ACTION_AFTER_RUNTIME_VALIDATION` | Medio — confirma patch completo | Bajo | Primer SELL reason=reeval post-deploy | Verificar `mkt_price=cur_price` applied correctly |
 | Pre-Edge T+24h identity_rate n≥30 + source fidelity sweep | `DONE — PRE_EDGE_T24_IDENTITY_OK_CONTINUE + PRE_EDGE_CLEAN_COHORT_SOURCE_FIDELITY_CONFIRMED` | Alto — gate kill-switch Phase 2 | Bajo | Completado S388+S389 | identity_resolvable_rate=100% n=35; source_fidelity_confirmed=35; pending_verification=0 |
 | Pre-Edge T+7d lectura intermedia (~2026-05-31) | `ACTION_AFTER_RUNTIME_VALIDATION` | Alto diferido | Bajo | Sonnet read-only, 2026-05-31 | Separar Seoul suspect; input Outcome Resolver |
-| Outcome Resolver v1 design | `CANDIDATE_LOG_ONLY_AFTER_PRE_EDGE_GATE` | Alto — cierra loop Pre-Edge → P&L contrafactual | Bajo | T+7d completado (~2026-05-31); source fidelity ya confirmada (S389, no bloqueante para P1/P2) | Sonnet doc → Codex impl → Opus gate exact-no-QT |
+| Outcome Resolver v1 design | `CANDIDATE_LOG_ONLY_AFTER_PRE_EDGE_GATE` | Alto — cierra loop Pre-Edge → P&L contrafactual | Bajo | **DATA_CONTRACT_REQUIRED (docs/learning_data_contract.md ✅ S390)** + T+7d completado (~2026-05-31); source fidelity ya confirmada (S389, no bloqueante para P1/P2) | Sonnet doc → Codex impl → Opus gate exact-no-QT |
 | Seoul evidencia RKSI limpia → Opus | `CANDIDATE_OPUS_STRATEGY_REVIEW` | Alto — reabre ciudad | Bajo (patch aplicado) | Múltiples ciclos Pre-Edge limpios RKSI post-patch | Opus: `REACTIVATION_AUTHORIZED` o `KEEP_BLOCKED` |
 | Verificación London EGLC vs RESOLUTION_ICAO | `CANDIDATE_LOG_ONLY_AFTER_PRE_EDGE_GATE` | Medio — gate para unblock London | Bajo | Solo cuando London entre en pipeline de unblock | Gamma rules text 1 mercado resuelto |
 | Verificación Paris LFPB vs RESOLUTION_ICAO | `CANDIDATE_LOG_ONLY_AFTER_PRE_EDGE_GATE` | Medio — gate para unblock Paris | Bajo | Solo cuando Paris entre en pipeline de unblock | Igual que London |
@@ -329,7 +328,7 @@ El archivo de fuentes externas incluye un hilo de Maskache (X, 19 mayo 2026) sob
 | ColdMath en Traders Intelligence census | `CANDIDATE_OPUS_STRATEGY_REVIEW` | Alto diferido | Medio | ColdMath en census + directionality suficiente | Opus gate antes de whitelist |
 | ICON-D2 EPS para ciudades EU (distribución probabilística) | `CANDIDATE_OPUS_STRATEGY_REVIEW` | Alto estratégico | Medio | n≥30 outcomes ciudades EU; ciudades EU en universo activo | Opus aprueba si mejora WR vs ECMWF determinístico |
 | Bias correction ciudad+horizonte (Truth Pipeline) | `CANDIDATE_OPUS_STRATEGY_REVIEW` | Alto diferido | Medio | n≥30 observaciones limpias `observed_vs_forecast` + Truth Pipeline canonical | Opus aprueba; bias inestable → DISCARD |
-| Wethr.net como benchmark | `CANDIDATE_OPUS_STRATEGY_REVIEW` | Medio incierto | Bajo | Verificación manual ≥3 mercados activos | Wethr = WU en n≥3: `WETHR_PARITY_CONFIRMED`; si no: DISCARD |
+| Wethr.net como benchmark | `DISCARD_AS_PAID_DEPENDENCY` | — | — | — | Cerrado S390: requiere pago, BUILD_OWN_CAPABILITY_FUTURE |
 | Istanbul WRH parity n≥20 | `CANDIDATE_LOG_ONLY_AFTER_PRE_EDGE_GATE` | Medio | Bajo | n≥20 mercados Istanbul resueltos con WRH observado | |delta|_mediana >0.5°C: no promover |
 | ASOS 5-minute (US cities) | `WATCH_ONLY` | Bajo (sin US en universo) | Bajo | US cities en ACTIVE_TRADING_CITIES | DISCARD si no |
 | TAF como señal auxiliar | `WATCH_ONLY` | Bajo directo | Bajo | Completar parity METAR-WU primero | DISCARD si no mejora WR en backtesting |
@@ -345,7 +344,7 @@ El archivo de fuentes externas incluye un hilo de Maskache (X, 19 mayo 2026) sob
 1. ~~**Pre-Edge T+24h identity_rate**~~ **DONE** — PRE_EDGE_T24_IDENTITY_OK_CONTINUE (S388) + PRE_EDGE_CLEAN_COHORT_SOURCE_FIDELITY_CONFIRMED (S389): identity_rate=100% n=35; source_fidelity_confirmed=35; pending_verification=0.
 2. **Próximo SELL NO reeval** (cuando ocurra): verificar que `mkt_price=cur_price` se aplicó correctamente — `NO_PATCH_NO_REEVAL_EVENT_YET_CONTINUE_WATCH` mientras no ocurra.
 3. **Pre-Edge T+7d lectura (~2026-05-31)** (Sonnet, read-only): artefacto completo, separar Seoul suspect, input para Outcome Resolver.
-4. **Outcome Resolver v1 design** (Sonnet, docs-only): schema join Pre-Edge ↔ blocked_signals_resolutions. Gate: completar Paso 3.
+4. **Outcome Resolver v1 design** (Sonnet, docs-only): schema join Pre-Edge ↔ blocked_signals_resolutions. Gate: completar Paso 3 + `docs/learning_data_contract.md` aprobado (✅ S390) + diseño Opus.
 5. **Outcome Resolver v1 implementation** (Codex, NORMAL): según diseño Paso 4.
 6. **Seoul evidencia RKSI limpia** (Codex read-only → Opus): múltiples ciclos Pre-Edge limpios RKSI. Opus decide reactivación.
 7. **METAR parity vs WU** (Codex, NORMAL): Wave 1 con WU CSV si disponible. Si Beijing parity pass → candidato a unblock.

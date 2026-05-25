@@ -6263,3 +6263,51 @@ Documentar el veredicto durable de la auditoría read-only Codex que confirmó s
 ### Guardrails
 
 No se tocaron bot.py, env vars, Railway, DB, BANKROLL, trading core, city modes, whitelist, scheduler, guards, SL, Pre-Edge flag, Fase C, thresholds, sizing ni BUY/SELL/SKIP.
+
+---
+
+## Sesión 390 — Learning Data Contract v1 + cierre Wethr (25 may 2026, Sonnet)
+
+**Tipo:** LITE / docs-only  
+**Clasificación:** MONETIZATION_RELEVANT / DATA_GOVERNANCE / DOCUMENTATION_CLOSE  
+**Agente:** Sonnet  
+**Archivos:** `docs/learning_data_contract.md` (nuevo), `docs/pnl_clean_source_policy.md`, `docs/weather_intelligence_workstream.md`, `CONTEXTO.md`, `HISTORIAL_SESIONES.md`, `agent_events.jsonl`
+
+### Objetivo
+
+Materializar el veredicto Opus DATA_CONTRACT_REQUIRED_BEFORE_OUTCOME_RESOLVER y cerrar Wethr.net como dependencia de pago no deseada.
+
+### Veredicto Opus materializado
+
+**DATA_CONTRACT_REQUIRED_BEFORE_OUTCOME_RESOLVER**
+
+### Contrato canónico por artefacto
+
+| Artefacto | Clasificación |
+|-----------|--------------|
+| `trades.log` / fills reconciliados | CANONICAL_FOR_REALIZED_PNL |
+| `postmortem.json` | OBSERVABILITY_ONLY |
+| `performance.json` | REQUIRES_RECONCILIATION + PROHIBITED_FOR_TRAINING_UNTIL_FIXED |
+| `trade_lifecycle.json` | PROHIBITED_FOR_TRAINING_UNTIL_FIXED (contaminated 1.0) |
+| Artefacto Pre-Edge | CANONICAL_FOR_FORECAST_IDENTITY |
+| Settlement oficial Polymarket | CANONICAL_FOR_MARKET_OUTCOME |
+| Future Outcome Resolver output | CANONICAL_FOR_LEARNING solo si cumple contrato |
+
+### Decisión Wethr.net (Pablo)
+
+**DISCARD_AS_PAID_DEPENDENCY / BUILD_OWN_CAPABILITY_FUTURE**
+
+Wethr.net requiere pago/suscripción. No se integra. Aprendizajes conceptuales (settlement vs predictive, calibración propia, dashboards futuros) conservados en Línea B (cerrada).
+
+### Archivos creados/modificados
+
+- `docs/learning_data_contract.md` — nuevo, v1.0: contrato completo con política micro_position_unsellable, reconciliation epoch, bloqueo Outcome Resolver CODE.
+- `docs/pnl_clean_source_policy.md` — v1.2: añade prohibición training/calibración/Outcome Resolver + referencia a learning_data_contract.md.
+- `docs/weather_intelligence_workstream.md` — Línea B cerrada (DISCARD_AS_PAID_DEPENDENCY), gate Outcome Resolver actualizado, backlog y claim register actualizados.
+- `CONTEXTO.md` — entrada durable Sesión 390.
+- `HISTORIAL_SESIONES.md` — esta entrada.
+- `agent_events.jsonl` — evento de documentación.
+
+### Guardrails
+
+No se tocaron bot.py, env vars, Railway, DB, BANKROLL, trading core, city modes, whitelist, scheduler, guards, SL, Pre-Edge flag, Fase C, thresholds, sizing ni BUY/SELL/SKIP.

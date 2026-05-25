@@ -92,6 +92,8 @@ P/L no canónico:
 - `data/wallet_cash_flows.jsonl` real no debe versionarse ni crearse antes de Patch B/Patch C y aprobación manual explícita de Pablo.
 - La ausencia sigue siendo el estado correcto hasta que exista attestation manual; `canonical_source=none` y `bankroll_readiness=blocked` permanecen.
 - Esta política no autoriza cambios en trading core, bot.py, scheduler, whitelist, city modes, sizing, reglas de riesgo, BANKROLL ni Fase C.
+- **Prohibición training/calibración/Outcome Resolver:** `trade_lifecycle.json` (contaminated 1.0) y `performance.json` no reconciliado están **PROHIBITED_FOR_TRAINING_UNTIL_FIXED**. No pueden ser input del Outcome Resolver, calibración meteorológica ni etiquetado de `forecast_correctness`. Ver contrato completo en [`docs/learning_data_contract.md`](learning_data_contract.md).
+- **Fuente canónica para PnL realizado:** `trades.log` / fills reconciliados por `order_id + fill_value`. Ver §Contrato en [`docs/learning_data_contract.md`](learning_data_contract.md).
 
 ---
 
@@ -99,5 +101,6 @@ P/L no canónico:
 
 | Versión | Fecha | Autor | Cambio |
 |---------|-------|-------|--------|
+| 1.2 | 2026-05-25 | Sonnet (Sesión 390) | Añade prohibición training/calibración/Outcome Resolver + referencia a learning_data_contract.md |
 | 1.1 | 2026-05-06 | Codex (Sesión 303) | Aclara que un archivo vacío no es attestation y no desbloquea readiness |
 | 1.0 | 2026-05-06 | Opus + Sonnet 4.6 (Sesión 301) | Creación inicial |
