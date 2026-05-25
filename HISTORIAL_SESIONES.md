@@ -6192,7 +6192,23 @@ Veredicto FASE 1: **LIMPIA** — sin regresión Seoul ni patch NO.
 
 ### Siguiente trigger
 
-T+7d = 2026-06-01, o incidencia antes.
+T+7d = 2026-05-31T11:15:04Z (ejecutar tras ciclo natural post 14:05 CEST),
+o incidencia antes.
+
+### Estado Railway post-push
+
+RAILWAY_DOCS_ONLY_SERVICE_ACTIVE / DEPLOYMENT_TERMINAL_NOT_CONFIRMED.
+Servicio activo observado en logs (`v10.6.50`, ciclo 396), pero estado
+terminal del deployment no confirmado en ventana de cierre.
+
+### Desviación procedural
+
+Durante el cierre docs-only se escribió por error una entrada en
+`/app/data/agent_events.jsonl` en Railway via SSH. Esa escritura runtime
+no estaba autorizada por el guardrail docs-only. No se corrige con nueva
+escritura runtime. La entrada durable y canónica de Sesión 388 está en
+`agent_events.jsonl` del repo (commit correctivo `docs(session-388):
+correct T+24 traceability and next trigger`).
 
 ### Guardrails
 
