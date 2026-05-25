@@ -868,6 +868,9 @@ SKIP_REASONS_VALID = frozenset({
 })
 
 WELLINGTON_EXACT_NO_PAUSE_ID = "PAUSE_WELLINGTON_EXACT_NO"
+EXACT_NO_NEAR_THRESHOLD_SHADOW_ID = "SHADOW_EXACT_NO_NEAR_THRESHOLD"
+EXACT_NO_NEAR_THRESHOLD_C = 1.5
+EXACT_NO_NEAR_THRESHOLD_F = EXACT_NO_NEAR_THRESHOLD_C * 9.0 / 5.0
 
 
 def _is_wellington_exact_no_paused(city, condition, side):
@@ -876,6 +879,23 @@ def _is_wellington_exact_no_paused(city, condition, side):
         and str(condition or "").strip().lower() == "exact"
         and str(side or "").strip().upper() == "NO"
     )
+
+
+def _is_exact_no_near_threshold_shadowed(condition, side, forecast_max, threshold, unit, threshold_high=None):
+    if str(condition or "").strip().lower() != "exact":
+        return False
+    if str(side or "").strip().upper() != "NO":
+        return False
+    if threshold_high is not None:
+        return False
+    try:
+        forecast_val = float(forecast_max)
+        threshold_val = float(threshold)
+    except (TypeError, ValueError):
+        return False
+    unit_text = str(unit or "").strip().upper()
+    max_abs_diff = EXACT_NO_NEAR_THRESHOLD_F if unit_text == "F" else EXACT_NO_NEAR_THRESHOLD_C
+    return abs(forecast_val - threshold_val) < max_abs_diff
 
 
 def _unsellable_guard_match_zone_bucket(price_at_guard):
@@ -22281,6 +22301,72 @@ def main(client):
             if float(position.get("amount", 0) or 0) < _er_floor:
                 position = _resize_position_amount(position, _er_floor, our_prob)
                 position["min_amount_floor_applied"] = _er_floor
+
+        if _is_exact_no_near_threshold_shadowed(
+            condition_name, side, forecast_max, threshold, c["unit"], threshold_high
+        ):
+            shadow_trades.append({
+                "question": c["question"], "city": city, "date": c["date_iso"],
+                "days_ahead": c["days_ahead"], "forecast_max": forecast_max,
+                "threshold": threshold, "threshold_high": threshold_high,
+                "unit": c["unit"], "condition": c["condition"],
+                "city_mode": c.get("city_mode", "active"),
+                "side": side, "our_prob": round(our_prob * 100, 1),
+                "mkt_price": round(mkt_price * 100, 1), "edge_pct": round(edge_pct, 1),
+                "position": position, "volume_24h": c["volume_24h"],
+                "liquidity": c["liquidity"], "token_id": token_id,
+                "eval_key": c.get("eval_key"),
+                "shadow_reason": EXACT_NO_NEAR_THRESHOLD_SHADOW_ID,
+            })
+            edge_analysis.append(
+                f"  SHADOW {city} {side} {temp_label} {c['date_iso']} | "
+                f"cohort={EXACT_NO_NEAR_THRESHOLD_SHADOW_ID} | "
+                f"forecast={forecast_max:.1f} threshold={threshold} | "
+                f"edge={edge_pct:.1f}% | ${position['amount']:.2f} virtual"
+            )
+            skip_log_entries.append(_make_skip_entry(
+                "shadow_only_override", cycle_id=cycle_id,
+                city=city, date_iso=c["date_iso"], side=side, days_ahead=c["days_ahead"],
+                city_mode=c.get("city_mode"), allowlisted=c.get("allowlisted"),
+                edge_pct=round(edge_pct, 2),
+                our_prob=round(our_prob * 100, 2), mkt_prob=round(mkt_price * 100, 2),
+                min_edge=_effective_min_edge,
+                forecast_max=forecast_max, threshold=threshold, threshold_high=threshold_high,
+                unit=c["unit"], condition=condition_name, sigma_used=sigma_used_val,
+                question=c["question"],
+                extras={
+                    "shadow_only_id": EXACT_NO_NEAR_THRESHOLD_SHADOW_ID,
+                    "scope": "condition+side+near_threshold",
+                    "condition": condition_name,
+                    "side": side,
+                    "abs_forecast_target_diff": round(abs(float(forecast_max) - float(threshold)), 4),
+                    "near_threshold_c": EXACT_NO_NEAR_THRESHOLD_C,
+                    "unit": c["unit"],
+                    "virtual_amount": position.get("amount"),
+                    "virtual_ev": position.get("expected_value"),
+                },
+            ))
+            record_bot_evaluation(
+                cycle_id,
+                c.get("eval_key"),
+                False,
+                city=city,
+                date_iso=c["date_iso"],
+                condition=condition_name,
+                threshold=threshold,
+                threshold_high=threshold_high,
+                unit=c["unit"],
+                edge_pct=round(edge_pct, 2),
+                skip_or_block_reason="shadow_only_override",
+                decision_gate=EXACT_NO_NEAR_THRESHOLD_SHADOW_ID,
+                decision_confidence=round(our_prob * 100, 2),
+                our_prob=round(our_prob * 100, 2),
+                mkt_prob=round(mkt_price * 100, 2),
+                forecast_max=forecast_max,
+                sigma_used=sigma_used_val,
+                days_ahead=c["days_ahead"],
+            )
+            continue
 
         if not c.get("allowlisted", True):
             shadow_trades.append({
