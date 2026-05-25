@@ -851,6 +851,7 @@ SKIP_REASONS_VALID = frozenset({
     "sl_city_cooldown",
     "existing_position",
     "low_exact_gap_risk",
+    "cohort_paused",
     "unsellable_guard_candidate",
     "unsellable_liquidity_guard",
     # Grupo B — datos parciales (Loop A, pre-edge)
@@ -865,6 +866,16 @@ SKIP_REASONS_VALID = frozenset({
     # Grupo C — parse fail
     "parse_fail",
 })
+
+WELLINGTON_EXACT_NO_PAUSE_ID = "PAUSE_WELLINGTON_EXACT_NO"
+
+
+def _is_wellington_exact_no_paused(city, condition, side):
+    return (
+        str(city or "").strip().lower() == "wellington"
+        and str(condition or "").strip().lower() == "exact"
+        and str(side or "").strip().upper() == "NO"
+    )
 
 
 def _unsellable_guard_match_zone_bucket(price_at_guard):
@@ -22200,6 +22211,50 @@ def main(client):
                 question=c["question"],
                 extras={"min_bet": MIN_BET, "effective_bankroll": round(effective_bankroll, 2)},
             ))
+            continue
+        if _is_wellington_exact_no_paused(city, condition_name, side):
+            edge_analysis.append(
+                f"  PAUSE {city} {side} {temp_label} {c['date_iso']} | "
+                f"cohort={WELLINGTON_EXACT_NO_PAUSE_ID} | no BUY"
+            )
+            skip_log_entries.append(_make_skip_entry(
+                "cohort_paused", cycle_id=cycle_id,
+                city=city, date_iso=c["date_iso"], side=side, days_ahead=c["days_ahead"],
+                city_mode=c.get("city_mode"), allowlisted=c.get("allowlisted"),
+                edge_pct=round(edge_pct, 2),
+                our_prob=round(our_prob * 100, 2), mkt_prob=round(mkt_price * 100, 2),
+                min_edge=_effective_min_edge,
+                forecast_max=forecast_max, threshold=threshold, threshold_high=threshold_high,
+                unit=c["unit"], condition=condition_name, sigma_used=sigma_used_val,
+                question=c["question"],
+                extras={
+                    "cohort_pause_id": WELLINGTON_EXACT_NO_PAUSE_ID,
+                    "scope": "city+condition+side",
+                    "city": city,
+                    "condition": condition_name,
+                    "side": side,
+                },
+            ))
+            record_bot_evaluation(
+                cycle_id,
+                c.get("eval_key"),
+                False,
+                city=city,
+                date_iso=c["date_iso"],
+                condition=condition_name,
+                threshold=threshold,
+                threshold_high=threshold_high,
+                unit=c["unit"],
+                edge_pct=round(edge_pct, 2),
+                skip_or_block_reason="cohort_paused",
+                decision_gate=WELLINGTON_EXACT_NO_PAUSE_ID,
+                decision_confidence=round(our_prob * 100, 2),
+                our_prob=round(our_prob * 100, 2),
+                mkt_prob=round(mkt_price * 100, 2),
+                forecast_max=forecast_max,
+                sigma_used=sigma_used_val,
+                days_ahead=c["days_ahead"],
+            )
             continue
         position = _scaled_position(position, our_prob, c.get("city_mode"))
         # v10.6.15: sizing adicional para exact/range canary (25% del normal: canary×exact_range)
