@@ -34,7 +34,7 @@
 Construir una capa de reconciliación que una fills/ejecuciones reales con outcomes oficiales Polymarket para generar datos de aprendizaje limpios y contrafactuales verificables.
 
 **No-objetivos:**
-- No emitir cifra PnL canónica (sigue siendo `canonical_source=none` hasta R2 operando correctamente).
+- No presentar PnL agregado como fuente canónica para BANKROLL, readiness, Telegram accionable o decisiones operativas sin gate/decisión separada. `canonical_source=none` se refiere al PnL agregado/operativo; no al campo técnico `pnl_realized` por ejecución reconciliada que R1 sí puede materializar.
 - No reemplazar `trades.log` ni `postmortem.json` como fuentes de trazabilidad operativa.
 - No tocar BUY/SELL/SKIP, guards, SL, BANKROLL, sizing, whitelist, scheduler, city modes ni Fase C.
 - No retroetiquetar histórico pre-reconciliación (`legacy_observability / contaminated 1.0`).
@@ -72,6 +72,8 @@ Si falta identidad suficiente:
 - `reconciliation_blocker="missing_fill_identity"`
 
 El campo `provenance` es **obligatorio**; si falta, la fila se **rechaza**.
+
+**`pnl_realized` en R1:** R1 puede materializar `pnl_realized` por ejecución como resultado LOG_ONLY reconciliado desde fills canónicos de `trades.log`, siempre con provenance e identidad suficientes. R2 **no** es prerequisito para reconocer PnL económico realizado por ejecución; R2 es prerequisito para añadir `market_outcome` y contrafactuales ligados a settlement. Lo que permanece prohibido es presentar cualquier suma/agregado de `pnl_realized` como fuente canónica para BANKROLL, readiness o reporting operativo sin gate/decisión separada.
 
 **Primer bloque implementable** tras Pre-Edge T+7 sano + autorización Pablo.
 
@@ -241,4 +243,6 @@ Escalar a Opus si ocurre cualquiera de:
 - No usar `performance.json` ni `trade_lifecycle.json` como input de R1 (prohibidos por data contract hasta reconciliación).
 - No emitir PnL canónico hasta R2 operativo ≥7 días y decisión Pablo.
 - No activar R4 sin nueva sesión Opus.
-- No tocar: `bot.py`, `bot.py` trading core, `BANKROLL`, sizing, whitelist, scheduler, guards, SL, city modes, env vars, DB, Railway, Fase C, BUY/SELL/SKIP.
+- **Durante diseño y hasta autorización CODE:** no acceder ni mutar Railway.
+- **En futura implementación/validación autorizada de R1:** se permite lectura read-only de `/app/data/trades.log` mediante `tools/railway_safe.ps1`, o exportación controlada con provenance (sha256 incluido). Queda prohibida cualquier mutación Railway (env vars, state files, data files) salvo autorización explícita separada.
+- No tocar: `bot.py`, trading core, `BANKROLL`, sizing, whitelist, scheduler, guards, SL, city modes, env vars, DB, Fase C, BUY/SELL/SKIP.
