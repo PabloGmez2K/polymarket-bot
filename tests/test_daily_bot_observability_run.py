@@ -331,6 +331,11 @@ def test_runner_includes_cohort_intelligence_by_default(monkeypatch):
                 "OPUS_REVIEW_REQUIRED_NOW": "YES",
             },
             "directional_no_next_trigger": {"resolutions_missing_for_min_sample": 0},
+            "directional_forward_capture": {
+                "directional_forward_seen": 10,
+                "directional_forward_resolved_calibration_unique": 10,
+                "status": "CALIBRATION_ACCUMULATING",
+            },
         },
     )
 
@@ -342,6 +347,7 @@ def test_runner_includes_cohort_intelligence_by_default(monkeypatch):
     assert result["cohort_intelligence"]["ok"] is True
     assert "Cohort Intelligence (LOG_ONLY)" in result["telegram_preview"]
     assert "directional_candidate=YES" in result["telegram_preview"]
+    assert "directional forward: seen=10 | cal=10 | CALIBRATION_ACCUMULATING" in result["telegram_preview"]
     assert "No BUY/SELL/SKIP" in result["telegram_preview"]
 
 

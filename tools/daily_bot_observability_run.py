@@ -187,6 +187,7 @@ def build_cohort_intelligence_summary(args: argparse.Namespace) -> dict[str, Any
             "best_directional_no_subcohort": report.get("best_directional_no_subcohort"),
             "summary_verdicts": report.get("summary_verdicts", {}),
             "directional_no_next_trigger": report.get("directional_no_next_trigger", {}),
+            "directional_forward_capture": report.get("directional_forward_capture", {}),
         }
     except Exception as exc:
         return {"ok": False, "error": str(exc)[:300]}
@@ -222,6 +223,7 @@ def render_cohort_intelligence_telegram(summary: dict[str, Any]) -> str:
     best = summary.get("best_directional_no_subcohort") or {}
     verdicts = summary.get("summary_verdicts", {})
     trigger = summary.get("directional_no_next_trigger", {})
+    forward = summary.get("directional_forward_capture", {})
     lines = [
         "",
         "<b>Cohort Intelligence (LOG_ONLY)</b>",
@@ -273,7 +275,13 @@ def render_cohort_intelligence_telegram(summary: dict[str, Any]) -> str:
         f"opus_now={verdicts.get('OPUS_REVIEW_REQUIRED_NOW', 'NO')}"
     )
     lines.append(
-        "trigger: Opus review only when directional NO reaches CANDIDATE_FOR_CANARY_REVIEW; "
+        "directional forward: "
+        f"seen={forward.get('directional_forward_seen', 0)} | "
+        f"cal={forward.get('directional_forward_resolved_calibration_unique', 0)} | "
+        f"{forward.get('status', 'CAPTURE_ACTIVE_NO_RESOLUTIONS_YET')}"
+    )
+    lines.append(
+        "trigger: Opus review only when directional NO forward linked outcomes reach CANDIDATE_FOR_CANARY_REVIEW; "
         f"missing_to_min_sample={trigger.get('resolutions_missing_for_min_sample', 0)}."
     )
     lines.append("Manual review only. No BUY/SELL/SKIP, BANKROLL, sizing, city modes, whitelist, env vars, or Fase C.")

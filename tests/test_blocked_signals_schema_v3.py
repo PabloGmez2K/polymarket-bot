@@ -68,5 +68,26 @@ def test_blocked_signals_v3_scope_guardrails():
     assert "BANKROLL" not in src
 
 
+def test_directional_no_with_match_key_is_forward_resolution_candidate():
+    signal = _base_signal(
+        condition="at_or_above",
+        outcome="No",
+        match_key="Reykjavik|2026-05-05|at_or_above|7|C",
+    )
+
+    assert bot._is_blocked_signal_resolution_candidate(signal, "2026-05-06") is True
+
+
+def test_directional_yes_or_missing_match_key_is_not_forward_resolution_candidate():
+    assert bot._is_blocked_signal_resolution_candidate(
+        _base_signal(condition="at_or_above", outcome="Yes", match_key="Reykjavik|2026-05-05|at_or_above|7|C"),
+        "2026-05-06",
+    ) is False
+    assert bot._is_blocked_signal_resolution_candidate(
+        _base_signal(condition="at_or_below", outcome="No", match_key=""),
+        "2026-05-06",
+    ) is False
+
+
 def test_blocked_signals_writer_is_append_only():
     assert "a" in bot.maybe_run_blocked_signals_check.__code__.co_consts

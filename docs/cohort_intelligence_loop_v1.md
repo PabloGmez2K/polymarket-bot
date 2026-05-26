@@ -52,6 +52,26 @@ The first Cohort Intelligence v1 digest counts for exact/NO were diagnostic raw
 counts, not calibration-safe sample sizes. The current report keeps those raw
 counts visible while preventing them from driving calibration gates.
 
+## Directional NO Forward Capture
+
+Forward capture for directional NO starts at `2026-05-26T16:15:11Z`. The link is
+LOG_ONLY and uses the demonstrated live identity path:
+
+- `bot_signal_evaluations.eval_key`
+- `signals.json` / resolver `match_key`
+- closed Polymarket/Gamma market metadata (`condition_id`, `market_id`,
+  `token_id_yes`, `token_id_no`, `market_slug`)
+
+Only `condition in {at_or_above, at_or_below}`, side/outcome `NO`, with a real
+`match_key` is eligible for forward directional resolution capture. The resolver
+continues to match the closed market by the signal title and writes the resolved
+outcome into `blocked_signals_resolutions.jsonl`.
+
+Legacy directional trades in `trade_lifecycle.json` are deliberately not
+backfilled into calibration. They can remain visible as executed P&L only, but
+promotion gates for directional NO use only forward linked outcomes from the
+forward start above.
+
 ## Metrics
 
 For each cohort the report emits:
@@ -69,6 +89,11 @@ For each cohort the report emits:
 - `duplicate_diagnostics.top_duplicate_calibration_keys`
 - `data_quality_verdict`, `decision_verdict`
 - `last_seen`, `gate_current`
+- `directional_forward_seen`
+- `directional_forward_resolved_calibration_unique`
+- directional forward capture status:
+  `CAPTURE_ACTIVE_NO_RESOLUTIONS_YET`, `CALIBRATION_ACCUMULATING`, or
+  `DATA_CAPTURE_BLOCKER`
 
 ## Manual Verdicts
 

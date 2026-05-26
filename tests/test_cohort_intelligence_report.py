@@ -22,9 +22,10 @@ def eval_row(
     our_prob: float = 84.0,
     mkt_prob: float = 52.0,
     gate: str = "SHADOW_EXACT_NO_GLOBAL",
+    ts_utc: str = "2026-05-27T00:00:00+00:00",
 ) -> dict:
     return {
-        "ts_utc": "2026-05-26T00:00:00+00:00",
+        "ts_utc": ts_utc,
         "cycle_id": "2026-05-26T00:00",
         "eval_key": key,
         "city": city,
@@ -177,6 +178,8 @@ def test_insufficient_sample_reports_missing_resolution_count(tmp_path):
 
     assert built["summary_verdicts"]["DIRECTIONAL_NO_CANARY_CANDIDATE_FOUND"] == "INSUFFICIENT_SAMPLE"
     assert built["directional_no_next_trigger"]["resolutions_missing_for_min_sample"] == 10
+    assert built["directional_forward_capture"]["directional_forward_seen"] == 1
+    assert built["directional_forward_capture"]["status"] == "CAPTURE_ACTIVE_NO_RESOLUTIONS_YET"
 
 
 def test_resolution_only_directional_no_rows_are_counted():
@@ -313,6 +316,64 @@ def test_two_real_trades_same_market_do_not_disappear_from_executed_pnl():
     assert metrics["n_closed_calibration_unique"] == 1
     assert metrics["n_executed_trades_unique"] == 2
     assert metrics["pnl_real_reported_noncanonical"] == 0.3
+
+
+def test_directional_forward_linked_outcome_produces_one_calibration_unique(tmp_path):
+    data_dir = tmp_path / "data"
+    key = "Tokyo|2026-05-27|at_or_above|26|C"
+    write_jsonl(
+        data_dir / "bot_signal_evaluations.jsonl",
+        [
+            eval_row(key, city="Tokyo", condition="at_or_above", threshold=26, gate="", ts_utc="2026-05-27T00:00:00+00:00"),
+            eval_row(key, city="Tokyo", condition="at_or_above", threshold=26, gate="", ts_utc="2026-05-27T04:00:00+00:00"),
+        ],
+    )
+    write_jsonl(
+        data_dir / "blocked_signals_resolutions.jsonl",
+        [resolution_row(key, city="Tokyo", condition="at_or_above", outcome="No")],
+    )
+    write_jsonl(data_dir / "skip_log.jsonl", [])
+    (data_dir / "trade_lifecycle.json").write_text(json.dumps({"records": []}), encoding="utf-8")
+
+    built = report.build_report(data_dir=data_dir)
+    directional = {row["cohort"]: row for row in built["main_cohorts"]}["directional NO"]
+
+    assert directional["n_closed_raw"] == 2
+    assert directional["n_closed_calibration_unique"] == 1
+    assert directional["duplicates_removed_for_calibration"] == 1
+    assert built["directional_forward_capture"]["directional_forward_seen"] == 2
+    assert built["directional_forward_capture"]["directional_forward_resolved_calibration_unique"] == 1
+    assert built["directional_forward_capture"]["status"] == "CALIBRATION_ACCUMULATING"
+
+
+def test_historical_directional_resolution_does_not_drive_forward_gate(tmp_path):
+    data_dir = tmp_path / "data"
+    key = "Tokyo|2026-05-20|at_or_above|26|C"
+    write_jsonl(
+        data_dir / "bot_signal_evaluations.jsonl",
+        [
+            eval_row(
+                key,
+                city="Tokyo",
+                condition="at_or_above",
+                threshold=26,
+                gate="",
+                ts_utc="2026-05-20T00:00:00+00:00",
+            )
+        ],
+    )
+    write_jsonl(
+        data_dir / "blocked_signals_resolutions.jsonl",
+        [resolution_row(key, city="Tokyo", condition="at_or_above", outcome="No")],
+    )
+    write_jsonl(data_dir / "skip_log.jsonl", [])
+    (data_dir / "trade_lifecycle.json").write_text(json.dumps({"records": []}), encoding="utf-8")
+
+    built = report.build_report(data_dir=data_dir)
+
+    assert {row["cohort"]: row for row in built["main_cohorts"]}["directional NO"]["n_closed_calibration_unique"] == 1
+    assert built["directional_forward_capture"]["directional_forward_resolved_calibration_unique"] == 0
+    assert built["summary_verdicts"]["DIRECTIONAL_NO_CANARY_CANDIDATE_FOUND"] == "INSUFFICIENT_SAMPLE"
 
 
 def test_directional_no_clean_resolution_cohort_is_not_artificially_reduced():

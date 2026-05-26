@@ -22,6 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATA_DIR = REPO_ROOT / "data"
 EXACT_NO_NEAR_THRESHOLD_C = 1.5
 MIN_REVIEW_SAMPLE = 10
+DIRECTIONAL_FORWARD_CAPTURE_START_UTC = "2026-05-26T16:15:11Z"
 VERDICTS = {
     "DATA_QUALITY_BLOCKER",
     "INSUFFICIENT_SAMPLE",
@@ -54,6 +55,27 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def now_utc() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def parse_utc_timestamp(value: Any) -> datetime | None:
+    text = normalize_text(value)
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def is_forward_directional_row(row: dict[str, Any]) -> bool:
+    ts = parse_utc_timestamp(row.get("last_seen") or row.get("ts_utc"))
+    start = parse_utc_timestamp(DIRECTIONAL_FORWARD_CAPTURE_START_UTC)
+    return bool(ts and start and ts >= start)
 
 
 def as_float(value: Any) -> float | None:
@@ -729,6 +751,17 @@ def build_directional_subcohorts(rows: list[dict[str, Any]]) -> dict[str, list[d
     return dict(grouped)
 
 
+def directional_forward_capture_status(metrics: dict[str, Any]) -> str:
+    diag = metrics.get("duplicate_diagnostics", {})
+    if diag.get("missing_calibration_key_rows"):
+        return "DATA_CAPTURE_BLOCKER"
+    if int(metrics.get("n_seen_raw", 0) or 0) == 0:
+        return "CAPTURE_ACTIVE_NO_RESOLUTIONS_YET"
+    if int(metrics.get("n_closed_calibration_unique", 0) or 0) == 0:
+        return "CAPTURE_ACTIVE_NO_RESOLUTIONS_YET"
+    return "CALIBRATION_ACCUMULATING"
+
+
 def best_directional_subcohort(metrics: list[dict[str, Any]]) -> dict[str, Any] | None:
     if not metrics:
         return None
@@ -786,6 +819,13 @@ def build_report(
     ]
     sub_metrics.sort(key=lambda row: (-int(row.get("n_closed", 0) or 0), row.get("cohort", "")))
     best_sub = best_directional_subcohort(sub_metrics)
+    directional_forward_rows = [row for row in directional_rows if is_forward_directional_row(row)]
+    directional_forward_metrics = cohort_metrics("directional NO / forward", directional_forward_rows, [])
+    directional_forward_sub_metrics = [
+        cohort_metrics(name, rows, [])
+        for name, rows in build_directional_subcohorts(directional_forward_rows).items()
+    ]
+    directional_forward_status = directional_forward_capture_status(directional_forward_metrics)
 
     exact_near = next(row for row in main_metrics if row["cohort"] == "exact/NO near-threshold")
     directional = next(row for row in main_metrics if row["cohort"] == "directional NO")
@@ -796,12 +836,15 @@ def build_report(
         if exact_near["verdict"] == "INSUFFICIENT_SAMPLE"
         else "NO"
     )
-    candidate_found = any(row["decision_verdict"] == "CANDIDATE_FOR_CANARY_REVIEW" for row in [directional, *sub_metrics])
+    candidate_found = any(
+        row["decision_verdict"] == "CANDIDATE_FOR_CANARY_REVIEW"
+        for row in [directional_forward_metrics, *directional_forward_sub_metrics]
+    )
     directional_status = (
         "YES"
         if candidate_found
         else "INSUFFICIENT_SAMPLE"
-        if directional["n_closed_calibration_unique"] < MIN_REVIEW_SAMPLE
+        if directional_forward_metrics["n_closed_calibration_unique"] < MIN_REVIEW_SAMPLE
         else "NO"
     )
     return {
@@ -826,7 +869,19 @@ def build_report(
             "exact_no_near_threshold_c": EXACT_NO_NEAR_THRESHOLD_C,
             "min_review_sample": MIN_REVIEW_SAMPLE,
         },
+        "directional_forward_capture": {
+            "forward_capture_start": DIRECTIONAL_FORWARD_CAPTURE_START_UTC,
+            "directional_forward_seen": directional_forward_metrics["n_seen_raw"],
+            "directional_forward_resolved_calibration_unique": directional_forward_metrics["n_closed_calibration_unique"],
+            "status": directional_forward_status,
+            "note": (
+                "Directional NO promotion gates use only forward linked outcomes from "
+                f"{DIRECTIONAL_FORWARD_CAPTURE_START_UTC}; legacy executed trades remain P&L-only."
+            ),
+        },
         "main_cohorts": main_metrics,
+        "directional_no_forward": directional_forward_metrics,
+        "directional_no_forward_subcohorts": directional_forward_sub_metrics,
         "directional_no_subcohorts": sub_metrics,
         "best_directional_no_subcohort": best_sub,
         "summary_verdicts": {
@@ -836,8 +891,9 @@ def build_report(
         },
         "directional_no_next_trigger": {
             "condition": "Open Opus review when directional NO or any subcohort reaches CANDIDATE_FOR_CANARY_REVIEW.",
-            "current_n_closed_calibration_unique": directional["n_closed_calibration_unique"],
-            "resolutions_missing_for_min_sample": required_more(directional["n_closed_calibration_unique"]),
+            "condition_detail": "Directional NO review gates use forward linked outcomes only.",
+            "current_n_closed_calibration_unique": directional_forward_metrics["n_closed_calibration_unique"],
+            "resolutions_missing_for_min_sample": required_more(directional_forward_metrics["n_closed_calibration_unique"]),
         },
     }
 
@@ -891,6 +947,7 @@ def render_markdown(report: dict[str, Any]) -> str:
             )
         )
     best = report.get("best_directional_no_subcohort")
+    forward = report.get("directional_forward_capture", {})
     lines.extend(["", "## Directional NO Best Subcohort", ""])
     if best:
         lines.append(
@@ -909,6 +966,14 @@ def render_markdown(report: dict[str, Any]) -> str:
     trigger = report["directional_no_next_trigger"]
     lines.extend(
         [
+            "",
+            "## Directional NO Forward Capture",
+            "",
+            f"- forward_capture_start = `{forward.get('forward_capture_start')}`",
+            f"- directional_forward_seen = `{forward.get('directional_forward_seen', 0)}`",
+            f"- directional_forward_resolved_calibration_unique = `{forward.get('directional_forward_resolved_calibration_unique', 0)}`",
+            f"- status = `{forward.get('status', 'CAPTURE_ACTIVE_NO_RESOLUTIONS_YET')}`",
+            f"- {forward.get('note', '')}",
             "",
             "## Verdicts",
             "",

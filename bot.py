@@ -11154,6 +11154,21 @@ def _build_blocked_signal_canonical_id(signal: dict, outcome: str) -> str:
         return f"{mk}|{outcome}|{tr}"
 
 
+def _is_blocked_signal_resolution_candidate(signal: dict, cutoff: str) -> bool:
+    """LOG_ONLY outcome candidate for blocked-signal and directional forward calibration."""
+    if not isinstance(signal, dict):
+        return False
+    if signal.get("date", "") > cutoff:
+        return False
+    condition = str(signal.get("condition", "") or "").strip()
+    if condition in {"exact", "range"}:
+        return True
+    if condition in {"at_or_above", "at_or_below"}:
+        side = str(signal.get("outcome", "") or "").strip().upper()
+        return side == "NO" and bool(str(signal.get("match_key", "") or "").strip())
+    return False
+
+
 def _price_bucket(price) -> str:
     try:
         if price is None:
@@ -11573,9 +11588,7 @@ def maybe_run_blocked_signals_check(state, now=None):
         cutoff = (now.date() - timedelta(days=1)).isoformat()
         candidates = [
             s for s in signals
-            if isinstance(s, dict)
-            and s.get("condition") in {"exact", "range"}
-            and s.get("date", "") <= cutoff
+            if _is_blocked_signal_resolution_candidate(s, cutoff)
         ]
 
         if not candidates:
