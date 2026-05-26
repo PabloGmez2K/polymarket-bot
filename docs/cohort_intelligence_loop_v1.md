@@ -30,16 +30,45 @@ shadow-only globally via `SHADOW_EXACT_NO_GLOBAL`. The near/far split remains a
 reporting segment based on distance telemetry; it is no longer an execution
 boundary. `PAUSE_WELLINGTON_EXACT_NO` remains as a redundant city-scoped pause.
 
+## Analysis Units
+
+The report intentionally keeps three views separate:
+
+- `raw_signals`: one row per observed evaluation/signal. This is for throughput
+  and traceability only; it can include repeated evaluations of the same market.
+- `resolved_market_calibration`: one independent resolved market outcome per
+  market identity + side + outcome. This is the only view used for WR,
+  calibration gap and simulated unit P&L.
+- `executed_trade_pnl`: one identifiable executed lifecycle record. This is used
+  only for `pnl_real_reported_noncanonical`; it does not feed calibration.
+
+Calibration identity uses the resolver's demonstrated market key first:
+`eval_key`/`match_key` (`city|date|condition|threshold|unit`) + side + resolved
+outcome. `condition_id` and then `market_id` are fallback identities only,
+because live weather artifacts can reuse a condition identifier across multiple
+temperature strikes.
+
+The first Cohort Intelligence v1 digest counts for exact/NO were diagnostic raw
+counts, not calibration-safe sample sizes. The current report keeps those raw
+counts visible while preventing them from driving calibration gates.
+
 ## Metrics
 
-For closed/resolved rows the report emits:
+For each cohort the report emits:
 
-- `n_closed`, `wins`, `losses`, `wr_observed`
-- `avg_our_prob`
-- `calibration_gap = avg_our_prob - wr_observed`
-- `pnl_simulated_unit`
-- `pnl_real_reported_noncanonical` when a trade lifecycle join is available
-- `last_seen`, `gate_current`, `verdict`
+- `n_seen_raw`, `n_closed_raw`
+- `n_closed_calibration_unique`, `wins_calibration`, `losses_calibration`,
+  `wr_calibration`
+- `avg_our_prob_calibration`
+- `calibration_gap = avg_our_prob_calibration - wr_calibration`
+- `pnl_simulated_unit_calibration`
+- `n_executed_trades_unique`
+- `pnl_real_reported_noncanonical` from executed trades only; non-canonical and
+  not eligible for BANKROLL/readiness/accounting
+- `duplicates_removed_for_calibration`
+- `duplicate_diagnostics.top_duplicate_calibration_keys`
+- `data_quality_verdict`, `decision_verdict`
+- `last_seen`, `gate_current`
 
 ## Manual Verdicts
 
@@ -51,11 +80,17 @@ The report emits only:
 - `CANDIDATE_FOR_CANARY_REVIEW`
 - `REVIEW_OPUS`
 
-Initial v1 gates:
+Current gates:
 
-- `REVIEW_BLOCK_LIVE`: `n_closed >= 10` and (`wr_observed <= 0.40` or `calibration_gap >= 0.20`) and negative P&L.
-- `CANDIDATE_FOR_CANARY_REVIEW`: shadow cohort with `n_closed >= 10`, `wr_observed >= 0.60`, `calibration_gap <= 0.10`, and positive simulated P&L.
-- `INSUFFICIENT_SAMPLE`: minimum sample not reached.
+- `DATA_QUALITY_BLOCKER`: missing calibration identity or executed-trade
+  identity where needed.
+- `REVIEW_BLOCK_LIVE`: `n_closed_calibration_unique >= 10` and
+  (`wr_calibration <= 0.40` or `calibration_gap >= 0.20`) and negative simulated
+  unit P&L.
+- `CANDIDATE_FOR_CANARY_REVIEW`: shadow cohort with
+  `n_closed_calibration_unique >= 10`, `wr_calibration >= 0.60`,
+  `calibration_gap <= 0.10`, and positive simulated unit P&L.
+- `INSUFFICIENT_SAMPLE`: calibration-unique minimum sample not reached.
 
 These are report-only recommendations. They do not authorize BUY/SELL/SKIP,
 BANKROLL changes, sizing, guards, scheduler changes, whitelist changes, city

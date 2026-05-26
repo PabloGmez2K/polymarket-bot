@@ -227,32 +227,44 @@ def render_cohort_intelligence_telegram(summary: dict[str, Any]) -> str:
         "<b>Cohort Intelligence (LOG_ONLY)</b>",
         (
             "exact/NO near: "
-            f"n={near.get('n_closed', 0)} WR={fmt_pct(near.get('wr_observed'))} "
+            f"raw={near.get('n_closed_raw', near.get('n_closed', 0))} "
+            f"cal={near.get('n_closed_calibration_unique', near.get('n_closed', 0))} "
+            f"exec={near.get('n_executed_trades_unique', 0)} "
+            f"WR={fmt_pct(near.get('wr_calibration', near.get('wr_observed')))} "
             f"gap={fmt_pct(near.get('calibration_gap'))} "
-            f"pnl={fmt_money(near.get('pnl_simulated_unit'))} "
-            f"-> {near.get('verdict', 'INSUFFICIENT_SAMPLE')}"
+            f"sim={fmt_money(near.get('pnl_simulated_unit_calibration', near.get('pnl_simulated_unit')))} "
+            f"real={fmt_money(near.get('pnl_real_reported_noncanonical'))} "
+            f"-> {near.get('decision_verdict', near.get('verdict', 'INSUFFICIENT_SAMPLE'))}"
         ),
         (
             "exact/NO far: "
-            f"n={far.get('n_closed', 0)} WR={fmt_pct(far.get('wr_observed'))} "
+            f"raw={far.get('n_closed_raw', far.get('n_closed', 0))} "
+            f"cal={far.get('n_closed_calibration_unique', far.get('n_closed', 0))} "
+            f"exec={far.get('n_executed_trades_unique', 0)} "
+            f"WR={fmt_pct(far.get('wr_calibration', far.get('wr_observed')))} "
             f"gap={fmt_pct(far.get('calibration_gap'))} "
-            f"pnl={fmt_money(far.get('pnl_simulated_unit'))} "
-            f"-> {far.get('verdict', 'INSUFFICIENT_SAMPLE')}"
+            f"sim={fmt_money(far.get('pnl_simulated_unit_calibration', far.get('pnl_simulated_unit')))} "
+            f"real={fmt_money(far.get('pnl_real_reported_noncanonical'))} "
+            f"-> {far.get('decision_verdict', far.get('verdict', 'INSUFFICIENT_SAMPLE'))}"
         ),
         (
             "directional NO: "
-            f"n={directional.get('n_closed', 0)} WR={fmt_pct(directional.get('wr_observed'))} "
+            f"raw={directional.get('n_closed_raw', directional.get('n_closed', 0))} "
+            f"cal={directional.get('n_closed_calibration_unique', directional.get('n_closed', 0))} "
+            f"exec={directional.get('n_executed_trades_unique', 0)} "
+            f"WR={fmt_pct(directional.get('wr_calibration', directional.get('wr_observed')))} "
             f"gap={fmt_pct(directional.get('calibration_gap'))} "
-            f"pnl={fmt_money(directional.get('pnl_simulated_unit'))} "
-            f"-> {directional.get('verdict', 'INSUFFICIENT_SAMPLE')}"
+            f"sim={fmt_money(directional.get('pnl_simulated_unit_calibration', directional.get('pnl_simulated_unit')))} "
+            f"real={fmt_money(directional.get('pnl_real_reported_noncanonical'))} "
+            f"-> {directional.get('decision_verdict', directional.get('verdict', 'INSUFFICIENT_SAMPLE'))}"
         ),
     ]
     if best:
         lines.append(
             "best subcohort: "
-            f"{best.get('cohort')} | n={best.get('n_closed', 0)} "
-            f"WR={fmt_pct(best.get('wr_observed'))} "
-            f"-> {best.get('verdict', 'INSUFFICIENT_SAMPLE')}"
+            f"{best.get('cohort')} | cal={best.get('n_closed_calibration_unique', best.get('n_closed', 0))} "
+            f"WR={fmt_pct(best.get('wr_calibration', best.get('wr_observed')))} "
+            f"-> {best.get('decision_verdict', best.get('verdict', 'INSUFFICIENT_SAMPLE'))}"
         )
     lines.append(
         "verdicts: "
@@ -265,6 +277,7 @@ def render_cohort_intelligence_telegram(summary: dict[str, Any]) -> str:
         f"missing_to_min_sample={trigger.get('resolutions_missing_for_min_sample', 0)}."
     )
     lines.append("Manual review only. No BUY/SELL/SKIP, BANKROLL, sizing, city modes, whitelist, env vars, or Fase C.")
+    lines.append("Units: raw signals, calibration-unique outcomes, executed-trade P&L.")
     return "\n".join(lines)
 
 

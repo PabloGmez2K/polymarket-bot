@@ -55,8 +55,8 @@ def resolution_row(key: str, *, outcome: str = "No", city: str = "Singapore", co
         "avg_price_entered": 0.52,
         "resolved": True,
         "win_for_trader": outcome == "No",
-        "market_id": "m1",
-        "condition_id": "c1",
+        "market_id": f"m:{key}",
+        "condition_id": f"c:{key}",
         "city_mode_at_record_time": "shadow",
         "reason_blocked": "condition_filtered",
     }
@@ -236,9 +236,150 @@ def test_trade_lifecycle_directional_no_rows_are_counted_with_real_pnl():
     }
 
     rows = report.lifecycle_signal_rows(payload)
-    metrics = report.cohort_metrics("directional NO", rows)
+    metrics = report.cohort_metrics("directional NO", [], rows)
 
-    assert metrics["n_closed"] == 2
-    assert metrics["wins"] == 1
-    assert metrics["losses"] == 1
+    assert metrics["n_closed"] == 0
+    assert metrics["n_executed_trades_unique"] == 2
     assert metrics["pnl_real_reported_noncanonical"] == -0.5
+
+
+def test_duplicate_evaluations_same_market_count_once_for_calibration():
+    key = "Singapore|2026-05-26|exact|33|C"
+    evals = [
+        eval_row(key, condition="exact", forecast=31.6, our_prob=80.0, mkt_prob=52.0),
+        eval_row(key, condition="exact", forecast=31.7, our_prob=84.0, mkt_prob=52.0),
+        eval_row(key, condition="exact", forecast=31.8, our_prob=82.0, mkt_prob=52.0),
+    ]
+    resolutions = [resolution_row(key, outcome="No")]
+
+    signals = report.build_signal_rows(evals, [], resolutions)
+    metrics = report.cohort_metrics("exact/NO near-threshold", signals)
+
+    assert metrics["n_seen_raw"] == 3
+    assert metrics["n_closed_raw"] == 3
+    assert metrics["n_closed_calibration_unique"] == 1
+    assert metrics["duplicates_removed_for_calibration"] == 2
+    assert metrics["wins_calibration"] == 1
+    assert metrics["data_quality_verdict"] == "DEDUPED_OK"
+    assert metrics["duplicate_diagnostics"]["top_duplicate_calibration_keys"][0]["duplicates_removed"] == 2
+
+
+def test_two_real_trades_same_market_do_not_disappear_from_executed_pnl():
+    key = "Shanghai|2026-05-26|at_or_above|26|C"
+    signals = [
+        report.build_signal_rows(
+            [eval_row(key, city="Shanghai", condition="at_or_above", threshold=26, gate="")],
+            [],
+            [resolution_row(key, city="Shanghai", condition="at_or_above", outcome="No")],
+        )[0]
+    ]
+    lifecycle = {
+        "records": [
+            {
+                "id": "buy-a",
+                "position_key": "token:x|date:2026-05-26|side:NO",
+                "city": "Shanghai",
+                "side": "NO",
+                "date": "2026-05-26",
+                "condition": "at_or_above",
+                "status": "closed",
+                "opened_at": "2026-05-26T04:00:00+00:00",
+                "closed_at": "2026-05-26T08:00:00+00:00",
+                "entry_context": {"forecast_max": 25.3, "our_prob": 60.0, "mkt_price": 30.0},
+                "close_context": {"close_action": "RESOLVED_WIN", "pnl_cash": 0.7},
+            },
+            {
+                "id": "buy-b",
+                "position_key": "token:x|date:2026-05-26|side:NO",
+                "city": "Shanghai",
+                "side": "NO",
+                "date": "2026-05-26",
+                "condition": "at_or_above",
+                "status": "closed",
+                "opened_at": "2026-05-26T10:00:00+00:00",
+                "closed_at": "2026-05-26T14:00:00+00:00",
+                "entry_context": {"forecast_max": 25.2, "our_prob": 61.0, "mkt_price": 31.0},
+                "close_context": {"close_action": "LOSS_TOTAL", "pnl_cash": -0.4},
+            },
+        ]
+    }
+
+    metrics = report.cohort_metrics(
+        "directional NO",
+        signals,
+        report.lifecycle_signal_rows(lifecycle),
+    )
+
+    assert metrics["n_closed_calibration_unique"] == 1
+    assert metrics["n_executed_trades_unique"] == 2
+    assert metrics["pnl_real_reported_noncanonical"] == 0.3
+
+
+def test_directional_no_clean_resolution_cohort_is_not_artificially_reduced():
+    evals = []
+    resolutions = []
+    for idx in range(18):
+        key = f"Tokyo|2026-05-{idx + 1:02d}|at_or_above|26|C"
+        evals.append(
+            eval_row(
+                key,
+                city="Tokyo",
+                condition="at_or_above",
+                threshold=26,
+                forecast=24,
+                our_prob=61.0,
+                mkt_prob=40.0,
+                gate="",
+            )
+        )
+        resolutions.append(
+            resolution_row(
+                key,
+                city="Tokyo",
+                condition="at_or_above",
+                outcome="No" if idx < 10 else "Yes",
+            )
+        )
+
+    metrics = report.cohort_metrics("directional NO", report.build_signal_rows(evals, [], resolutions))
+
+    assert metrics["n_seen_raw"] == 18
+    assert metrics["n_closed_raw"] == 18
+    assert metrics["n_closed_calibration_unique"] == 18
+    assert metrics["duplicates_removed_for_calibration"] == 0
+
+
+def test_verdict_uses_calibration_unique_count_not_raw_duplicate_count():
+    key = "Singapore|2026-05-26|exact|33|C"
+    evals = [
+        eval_row(key, condition="exact", forecast=31.6, our_prob=84.0, mkt_prob=52.0)
+        for _ in range(12)
+    ]
+    signals = report.build_signal_rows(evals, [], [resolution_row(key, outcome="Yes")])
+
+    metrics = report.cohort_metrics("exact/NO near-threshold", signals)
+
+    assert metrics["n_closed_raw"] == 12
+    assert metrics["n_closed_calibration_unique"] == 1
+    assert metrics["decision_verdict"] == "INSUFFICIENT_SAMPLE"
+
+
+def test_missing_calibration_key_degrades_to_data_quality_blocker():
+    rows = [
+        {
+            "condition": "exact",
+            "side": "NO",
+            "outcome": "YES",
+            "resolved": True,
+            "win": False,
+            "our_prob": 84.0,
+            "simulated_unit_pnl": -0.52,
+            "gate_current": "SHADOW",
+        }
+        for _ in range(10)
+    ]
+
+    metrics = report.cohort_metrics("exact/NO near-threshold", rows)
+
+    assert metrics["data_quality_verdict"] == "DATA_QUALITY_BLOCKER"
+    assert metrics["decision_verdict"] == "DATA_QUALITY_BLOCKER"

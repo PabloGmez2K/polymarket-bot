@@ -23,6 +23,7 @@ DEFAULT_DATA_DIR = REPO_ROOT / "data"
 EXACT_NO_NEAR_THRESHOLD_C = 1.5
 MIN_REVIEW_SAMPLE = 10
 VERDICTS = {
+    "DATA_QUALITY_BLOCKER",
     "INSUFFICIENT_SAMPLE",
     "KEEP_SHADOW",
     "REVIEW_BLOCK_LIVE",
@@ -461,18 +462,140 @@ def lifecycle_signal_rows(lifecycle_payload: Any) -> list[dict[str, Any]]:
                 "win": win,
                 "simulated_unit_pnl": simulated_unit_pnl(win, price_probability({"mkt_prob": entry_context.get("mkt_price")})),
                 "real_pnl": pnl,
+                "execution_key": executed_trade_key(record),
+                "data_quality_issues": [],
             }
         )
     return rows
 
 
-def cohort_metrics(name: str, rows: list[dict[str, Any]], real_pnl_by_key: dict[str, float] | None = None) -> dict[str, Any]:
-    real_pnl_by_key = real_pnl_by_key or {}
+def market_identity_key(row: dict[str, Any]) -> str:
+    eval_key = normalize_text(row.get("eval_key"))
+    if eval_key:
+        return f"eval_key:{eval_key}"
+    condition_id = normalize_text(row.get("condition_id"))
+    if condition_id:
+        return f"condition_id:{condition_id}"
+    market_id = normalize_text(row.get("market_id"))
+    if market_id:
+        return f"market_id:{market_id}"
+    return ""
+
+
+def calibration_key(row: dict[str, Any]) -> str:
+    identity = market_identity_key(row)
+    side = normalize_side(row.get("side"))
+    outcome = normalize_side(row.get("outcome"))
+    if not identity or not side or not outcome:
+        return ""
+    return f"{identity}|side:{side}|outcome:{outcome}"
+
+
+def row_sort_ts(row: dict[str, Any]) -> str:
+    return normalize_text(row.get("last_seen") or row.get("ts_utc"))
+
+
+def choose_calibration_representative(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    def rank(row: dict[str, Any]) -> tuple[int, int, str]:
+        return (
+            1 if as_float(row.get("our_prob")) is not None else 0,
+            1 if as_float(row.get("simulated_unit_pnl")) is not None else 0,
+            row_sort_ts(row),
+        )
+
+    return sorted(rows, key=rank, reverse=True)[0]
+
+
+def dedupe_calibration_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     closed = [row for row in rows if row.get("resolved") and row.get("win") is not None]
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    missing_key = 0
+    for row in closed:
+        key = calibration_key(row)
+        if not key:
+            missing_key += 1
+            continue
+        grouped[key].append(row)
+    unique = [choose_calibration_representative(items) for items in grouped.values()]
+    top_duplicates = [
+        {
+            "key": key,
+            "raw_rows": len(items),
+            "duplicates_removed": len(items) - 1,
+        }
+        for key, items in sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0]))
+        if len(items) > 1
+    ][:5]
+    diagnostics = {
+        "n_closed_raw": len(closed),
+        "n_closed_calibration_unique": len(unique),
+        "duplicates_removed_for_calibration": max(0, len(closed) - len(unique)),
+        "missing_calibration_key_rows": missing_key,
+        "top_duplicate_calibration_keys": top_duplicates,
+    }
+    return unique, diagnostics
+
+
+def executed_trade_key(record: dict[str, Any]) -> str:
+    record_id = normalize_text(record.get("id"))
+    if record_id:
+        return f"id:{record_id}"
+    position_key = normalize_text(record.get("position_key"))
+    opened_at = normalize_text(record.get("opened_at"))
+    closed_at = normalize_text(record.get("closed_at"))
+    entry_context = record.get("entry_context") if isinstance(record.get("entry_context"), dict) else {}
+    entry_ts = normalize_text(entry_context.get("timestamp"))
+    if position_key and (opened_at or entry_ts or closed_at):
+        return f"position_key:{position_key}|entry:{opened_at or entry_ts}|closed:{closed_at}"
+    return ""
+
+
+def dedupe_executed_trade_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    missing_key = 0
+    for row in rows:
+        key = normalize_text(row.get("execution_key"))
+        if not key:
+            missing_key += 1
+            continue
+        grouped[key].append(row)
+    unique = [sorted(items, key=row_sort_ts, reverse=True)[0] for items in grouped.values()]
+    top_duplicates = [
+        {
+            "key": key,
+            "raw_rows": len(items),
+            "duplicates_removed": len(items) - 1,
+        }
+        for key, items in sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0]))
+        if len(items) > 1
+    ][:5]
+    diagnostics = {
+        "n_executed_trade_rows_raw": len(rows),
+        "n_executed_trades_unique": len(unique),
+        "duplicates_removed_for_executed_trades": max(0, len(rows) - len(unique)),
+        "missing_execution_key_rows": missing_key,
+        "top_duplicate_execution_keys": top_duplicates,
+    }
+    return unique, diagnostics
+
+
+def data_quality_verdict(calibration_diag: dict[str, Any], execution_diag: dict[str, Any]) -> str:
+    if calibration_diag.get("missing_calibration_key_rows") or execution_diag.get("missing_execution_key_rows"):
+        return "DATA_QUALITY_BLOCKER"
+    if calibration_diag.get("duplicates_removed_for_calibration") or execution_diag.get("duplicates_removed_for_executed_trades"):
+        return "DEDUPED_OK"
+    return "OK"
+
+
+def cohort_metrics(name: str, raw_rows: list[dict[str, Any]], executed_rows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    executed_rows = executed_rows or []
+    calibration_closed, calibration_diag = dedupe_calibration_rows(raw_rows)
+    executed_unique, execution_diag = dedupe_executed_trade_rows(executed_rows)
+    closed = calibration_closed
     wins = sum(1 for row in closed if row.get("win") is True)
     losses = sum(1 for row in closed if row.get("win") is False)
-    n_closed = len(closed)
-    wr_observed = round(wins / n_closed, 4) if n_closed else None
+    n_closed_calibration_unique = len(closed)
+    wr_observed = round(wins / n_closed_calibration_unique, 4) if n_closed_calibration_unique else None
     probs = [as_float(row.get("our_prob")) for row in closed]
     probs = [prob for prob in probs if prob is not None]
     avg_our_prob = round((sum(probs) / len(probs)) / 100.0, 4) if probs else None
@@ -484,52 +607,72 @@ def cohort_metrics(name: str, rows: list[dict[str, Any]], real_pnl_by_key: dict[
     sim_values = [as_float(row.get("simulated_unit_pnl")) for row in closed]
     sim_values = [value for value in sim_values if value is not None]
     simulated_unit_pnl_total = round(sum(sim_values), 4) if sim_values else None
-    real_keys = {row["eval_key"] for row in closed}
-    real_values = [value for key, value in real_pnl_by_key.items() if key in real_keys]
-    real_values.extend(value for value in (as_float(row.get("real_pnl")) for row in closed) if value is not None)
+    real_values = [as_float(row.get("real_pnl")) for row in executed_unique]
+    real_values = [value for value in real_values if value is not None]
     real_pnl_total = round(sum(real_values), 4) if real_values else None
-    gates = [normalize_text(row.get("gate_current")) for row in rows if normalize_text(row.get("gate_current"))]
+    gates = [normalize_text(row.get("gate_current")) for row in raw_rows if normalize_text(row.get("gate_current"))]
     gate_current = max(set(gates), key=gates.count) if gates else "UNKNOWN"
-    last_seen = max((normalize_text(row.get("last_seen")) for row in rows if row.get("last_seen")), default=None)
+    last_seen = max((normalize_text(row.get("last_seen")) for row in [*raw_rows, *executed_rows] if row.get("last_seen")), default=None)
+    dq_verdict = data_quality_verdict(calibration_diag, execution_diag)
     verdict = classify_verdict(
-        n_closed=n_closed,
+        n_closed_calibration_unique=n_closed_calibration_unique,
         wr_observed=wr_observed,
         calibration_gap=calibration_gap,
         simulated_unit_pnl_total=simulated_unit_pnl_total,
         real_pnl_total=real_pnl_total,
         gate_current=gate_current,
+        data_quality_verdict=dq_verdict,
     )
     return {
         "cohort": name,
-        "n_seen": len(rows),
-        "n_closed": n_closed,
+        "n_seen_raw": len(raw_rows),
+        "n_closed_raw": calibration_diag["n_closed_raw"],
+        "n_closed_calibration_unique": n_closed_calibration_unique,
+        "n_executed_trades_unique": execution_diag["n_executed_trades_unique"],
+        "duplicates_removed_for_calibration": calibration_diag["duplicates_removed_for_calibration"],
+        "wins_calibration": wins,
+        "losses_calibration": losses,
+        "wr_calibration": wr_observed,
+        "avg_our_prob_calibration": avg_our_prob,
+        "calibration_gap": calibration_gap,
+        "pnl_real_reported_noncanonical": real_pnl_total,
+        "pnl_simulated_unit_calibration": simulated_unit_pnl_total,
+        "last_seen": last_seen,
+        "gate_current": gate_current,
+        "data_quality_verdict": dq_verdict,
+        "decision_verdict": verdict,
+        "duplicate_diagnostics": {
+            **calibration_diag,
+            **execution_diag,
+        },
+        "manual_only": True,
+        # Backward-compatible aliases for older digest/tests.
+        "n_seen": len(raw_rows),
+        "n_closed": n_closed_calibration_unique,
         "wins": wins,
         "losses": losses,
         "wr_observed": wr_observed,
         "avg_our_prob": avg_our_prob,
-        "calibration_gap": calibration_gap,
-        "pnl_real_reported_noncanonical": real_pnl_total,
         "pnl_simulated_unit": simulated_unit_pnl_total,
-        "last_seen": last_seen,
-        "gate_current": gate_current,
         "verdict": verdict,
-        "manual_only": True,
     }
 
 
 def classify_verdict(
     *,
-    n_closed: int,
+    n_closed_calibration_unique: int,
     wr_observed: float | None,
     calibration_gap: float | None,
     simulated_unit_pnl_total: float | None,
     real_pnl_total: float | None,
     gate_current: str,
+    data_quality_verdict: str = "OK",
 ) -> str:
-    if n_closed < MIN_REVIEW_SAMPLE:
+    if data_quality_verdict == "DATA_QUALITY_BLOCKER":
+        return "DATA_QUALITY_BLOCKER"
+    if n_closed_calibration_unique < MIN_REVIEW_SAMPLE:
         return "INSUFFICIENT_SAMPLE"
-    pnl_for_gate = simulated_unit_pnl_total if simulated_unit_pnl_total is not None else real_pnl_total
-    negative_pnl = bool(pnl_for_gate is not None and pnl_for_gate < 0)
+    negative_pnl = bool(simulated_unit_pnl_total is not None and simulated_unit_pnl_total < 0)
     positive_shadow_pnl = bool(simulated_unit_pnl_total is not None and simulated_unit_pnl_total > 0)
     if (
         (wr_observed is not None and wr_observed <= 0.40)
@@ -599,10 +742,10 @@ def best_directional_subcohort(metrics: list[dict[str, Any]]) -> dict[str, Any] 
     return sorted(
         metrics,
         key=lambda row: (
-            candidate_rank.get(row.get("verdict"), 9),
-            -int(row.get("n_closed", 0) or 0),
-            -(row.get("wr_observed") if row.get("wr_observed") is not None else -1),
-            -(row.get("pnl_simulated_unit") if row.get("pnl_simulated_unit") is not None else -999),
+            candidate_rank.get(row.get("decision_verdict"), 9),
+            -int(row.get("n_closed_calibration_unique", 0) or 0),
+            -(row.get("wr_calibration") if row.get("wr_calibration") is not None else -1),
+            -(row.get("pnl_simulated_unit_calibration") if row.get("pnl_simulated_unit_calibration") is not None else -999),
             row.get("cohort", ""),
         ),
     )[0]
@@ -626,14 +769,19 @@ def build_report(
     resolution_rows = read_jsonl(resolutions)
     lifecycle_payload = read_json(trade_lifecycle)
     signals = build_signal_rows(eval_rows, skip_rows, resolution_rows)
-    signals.extend(lifecycle_signal_rows(lifecycle_payload))
-    real_pnl_by_key = match_real_lifecycle_pnl(signals, lifecycle_payload)
+    lifecycle_rows = lifecycle_signal_rows(lifecycle_payload)
 
     cohorts = select_cohorts(signals)
-    main_metrics = [cohort_metrics(name, rows, real_pnl_by_key) for name, rows in cohorts.items()]
+    executed_cohorts = select_cohorts(lifecycle_rows)
+    main_metrics = [
+        cohort_metrics(name, rows, executed_cohorts.get(name, []))
+        for name, rows in cohorts.items()
+    ]
     directional_rows = cohorts["directional NO"]
+    directional_executed_rows = executed_cohorts.get("directional NO", [])
+    directional_executed_subcohorts = build_directional_subcohorts(directional_executed_rows)
     sub_metrics = [
-        cohort_metrics(name, rows, real_pnl_by_key)
+        cohort_metrics(name, rows, directional_executed_subcohorts.get(name, []))
         for name, rows in build_directional_subcohorts(directional_rows).items()
     ]
     sub_metrics.sort(key=lambda row: (-int(row.get("n_closed", 0) or 0), row.get("cohort", "")))
@@ -648,12 +796,12 @@ def build_report(
         if exact_near["verdict"] == "INSUFFICIENT_SAMPLE"
         else "NO"
     )
-    candidate_found = any(row["verdict"] == "CANDIDATE_FOR_CANARY_REVIEW" for row in [directional, *sub_metrics])
+    candidate_found = any(row["decision_verdict"] == "CANDIDATE_FOR_CANARY_REVIEW" for row in [directional, *sub_metrics])
     directional_status = (
         "YES"
         if candidate_found
         else "INSUFFICIENT_SAMPLE"
-        if directional["n_closed"] < MIN_REVIEW_SAMPLE
+        if directional["n_closed_calibration_unique"] < MIN_REVIEW_SAMPLE
         else "NO"
     )
     return {
@@ -670,7 +818,9 @@ def build_report(
             "bot_evaluations": len(eval_rows),
             "skip_log": len(skip_rows),
             "resolutions": len(resolution_rows),
-            "joined_signals": len(signals),
+            "raw_signals": len(signals),
+            "executed_trade_rows": len(lifecycle_rows),
+            "joined_signals": len(signals) + len(lifecycle_rows),
         },
         "thresholds": {
             "exact_no_near_threshold_c": EXACT_NO_NEAR_THRESHOLD_C,
@@ -686,8 +836,8 @@ def build_report(
         },
         "directional_no_next_trigger": {
             "condition": "Open Opus review when directional NO or any subcohort reaches CANDIDATE_FOR_CANARY_REVIEW.",
-            "current_n_closed": directional["n_closed"],
-            "resolutions_missing_for_min_sample": required_more(directional["n_closed"]),
+            "current_n_closed_calibration_unique": directional["n_closed_calibration_unique"],
+            "resolutions_missing_for_min_sample": required_more(directional["n_closed_calibration_unique"]),
         },
     }
 
@@ -716,23 +866,28 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
         "## Main Cohorts",
         "",
-        "| cohort | n_closed | W-L | WR | avg_our_prob | gap | sim_unit_pnl | real_pnl_noncanonical | gate | verdict |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---|---|",
+        "| cohort | raw_seen | raw_closed | calibration_unique | executed_trades | dupes_removed | W-L cal | WR cal | avg_our_prob cal | gap | sim_unit_pnl cal | real_pnl_noncanonical | DQ | gate | verdict |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|",
     ]
     for row in report["main_cohorts"]:
         lines.append(
-            "| {cohort} | {n_closed} | {wins}-{losses} | {wr} | {prob} | {gap} | {sim} | {real} | {gate} | {verdict} |".format(
+            "| {cohort} | {n_seen_raw} | {n_closed_raw} | {n_closed_calibration_unique} | {n_executed_trades_unique} | {duplicates_removed_for_calibration} | {wins}-{losses} | {wr} | {prob} | {gap} | {sim} | {real} | {dq} | {gate} | {verdict} |".format(
                 cohort=row["cohort"],
-                n_closed=row["n_closed"],
-                wins=row["wins"],
-                losses=row["losses"],
-                wr=pct_text(row["wr_observed"]),
-                prob=pct_text(row["avg_our_prob"]),
+                n_seen_raw=row["n_seen_raw"],
+                n_closed_raw=row["n_closed_raw"],
+                n_closed_calibration_unique=row["n_closed_calibration_unique"],
+                n_executed_trades_unique=row["n_executed_trades_unique"],
+                duplicates_removed_for_calibration=row["duplicates_removed_for_calibration"],
+                wins=row["wins_calibration"],
+                losses=row["losses_calibration"],
+                wr=pct_text(row["wr_calibration"]),
+                prob=pct_text(row["avg_our_prob_calibration"]),
                 gap=pct_text(row["calibration_gap"]),
-                sim=money_text(row["pnl_simulated_unit"]),
+                sim=money_text(row["pnl_simulated_unit_calibration"]),
                 real=money_text(row["pnl_real_reported_noncanonical"]),
+                dq=row["data_quality_verdict"],
                 gate=row["gate_current"],
-                verdict=row["verdict"],
+                verdict=row["decision_verdict"],
             )
         )
     best = report.get("best_directional_no_subcohort")
@@ -741,11 +896,11 @@ def render_markdown(report: dict[str, Any]) -> str:
         lines.append(
             "- `{cohort}`: n_closed={n_closed}, WR={wr}, gap={gap}, sim_unit_pnl={sim}, verdict=`{verdict}`.".format(
                 cohort=best["cohort"],
-                n_closed=best["n_closed"],
-                wr=pct_text(best["wr_observed"]),
+                n_closed=best["n_closed_calibration_unique"],
+                wr=pct_text(best["wr_calibration"]),
                 gap=pct_text(best["calibration_gap"]),
-                sim=money_text(best["pnl_simulated_unit"]),
-                verdict=best["verdict"],
+                sim=money_text(best["pnl_simulated_unit_calibration"]),
+                verdict=best["decision_verdict"],
             )
         )
     else:
