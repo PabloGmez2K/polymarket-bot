@@ -186,6 +186,7 @@ def build_cohort_intelligence_summary(args: argparse.Namespace) -> dict[str, Any
             "main_cohorts": report.get("main_cohorts", []),
             "live_side_visibility_forward": report.get("live_side_visibility_forward", {}),
             "surviving_cohorts_by_side": report.get("surviving_cohorts_by_side", []),
+            "price_filter_counterfactual": report.get("price_filter_counterfactual", {}),
             "best_directional_no_subcohort": report.get("best_directional_no_subcohort"),
             "summary_verdicts": report.get("summary_verdicts", {}),
             "directional_no_next_trigger": report.get("directional_no_next_trigger", {}),
@@ -228,6 +229,7 @@ def render_cohort_intelligence_telegram(summary: dict[str, Any]) -> str:
     forward = summary.get("directional_forward_capture", {})
     side_forward = summary.get("live_side_visibility_forward", {})
     surviving = summary.get("surviving_cohorts_by_side", [])
+    price_cf = summary.get("price_filter_counterfactual", {})
     lines = [
         "",
         "<b>Cohort Intelligence (LOG_ONLY)</b>",
@@ -301,6 +303,16 @@ def render_cohort_intelligence_telegram(summary: dict[str, Any]) -> str:
             f"start={side_forward.get('forward_visibility_start', 'n/a')} | "
             "no forward rows with recorded side yet"
         )
+    lines.append(
+        "PRICE_FILTER_COUNTERFACTUAL: "
+        f"sampled={price_cf.get('n_sampled', 0)} | "
+        f"eval={price_cf.get('n_evaluated', 0)} | "
+        f"cache_miss={price_cf.get('n_forecast_not_in_existing_cache', 0)} | "
+        f"protected_exact_no={price_cf.get('n_excluded_protected_exact_no', 0)} | "
+        f"edge_gt_min={price_cf.get('n_hypothetical_edge_over_threshold', 0)} | "
+        f"linked={price_cf.get('n_resolved_linked', 0)} | "
+        f"{price_cf.get('manual_review_state', 'CAPTURE_ACTIVE_NO_RESOLUTIONS_YET')}"
+    )
     lines.append(
         "trigger: Opus review only when directional NO forward linked outcomes reach CANDIDATE_FOR_CANARY_REVIEW; "
         f"missing_to_min_sample={trigger.get('resolutions_missing_for_min_sample', 0)}."

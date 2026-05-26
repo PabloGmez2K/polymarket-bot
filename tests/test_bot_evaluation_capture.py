@@ -189,3 +189,94 @@ def test_shadow_only_skip_records_shadow_decision_gate(monkeypatch, tmp_path):
     assert row["city_mode"] == "shadow"
     assert row["skip_or_block_reason"] == "shadow_only_override"
     assert row["decision_gate"] == "shadow_only"
+
+
+def test_price_filter_counterfactual_uses_existing_cache_and_excludes_exact_no(monkeypatch, tmp_path):
+    target = tmp_path / "price_filter_counterfactual_log_only.jsonl"
+    monkeypatch.setattr(bot, "PRICE_FILTER_COUNTERFACTUAL_FILE", str(target))
+    calls = []
+
+    def fake_estimate(forecast_max, threshold_c, condition, days_ahead, threshold_high_c=None, city=None):
+        calls.append((forecast_max, threshold_c, condition, city))
+        return 0.0
+
+    monkeypatch.setattr(bot, "estimate_prob_with_city", fake_estimate)
+    pending = [
+        {
+            "city": "Toronto",
+            "city_mode": "active",
+            "date_iso": "2026-05-27",
+            "days_ahead": 1,
+            "condition": "exact",
+            "threshold": 28,
+            "threshold_high": None,
+            "unit": "C",
+            "question": "Will Toronto be 28C?",
+            "mkt_prob_yes": 0.05,
+            "mkt_prob_no": 0.95,
+            "market_id": "m1",
+            "condition_id": "c1",
+            "market_slug": "toronto-28c",
+            "token_id_yes": "yes",
+            "token_id_no": "no",
+        },
+        {
+            "city": "Shadowtown",
+            "city_mode": "shadow",
+            "date_iso": "2026-05-27",
+            "condition": "at_or_above",
+            "threshold": 30,
+            "unit": "C",
+            "mkt_prob_yes": 0.05,
+            "mkt_prob_no": 0.95,
+        },
+    ]
+
+    rows = bot._build_price_filter_counterfactual_records(
+        pending,
+        cycle_id="2026-05-26T20:00",
+        forecast_cache={"Toronto": {"2026-05-27": {"temp_max": 25.0}}},
+        trader_signals={},
+    )
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert calls == [(25.0, 28, "exact", "Toronto")]
+    assert row["uses_new_external_forecast_calls"] is False
+    assert row["condition_id"] == "c1"
+    assert row["market_id"] == "m1"
+    assert row["price_yes"] == 0.05
+    assert row["price_no"] == 0.95
+    assert row["side"] == "NO"
+    assert row["counterfactual_status"] == "excluded_protected_exact_no"
+    assert row["candidate_allowed"] is False
+    assert row["candidate_exclusion_reason"] == "EXACT_NO_REMAINS_SHADOW_PROTECTED"
+
+
+def test_price_filter_counterfactual_respects_cap_and_cache_miss(monkeypatch):
+    monkeypatch.setattr(bot, "estimate_prob_with_city", lambda *args, **kwargs: 0.9)
+    pending = [
+        {
+            "city": f"City{idx}",
+            "city_mode": "canary",
+            "date_iso": "2026-05-27",
+            "days_ahead": 1,
+            "condition": "at_or_above",
+            "threshold": 30 + idx,
+            "unit": "C",
+            "mkt_prob_yes": 0.05,
+            "mkt_prob_no": 0.95,
+        }
+        for idx in range(3)
+    ]
+
+    rows = bot._build_price_filter_counterfactual_records(
+        pending,
+        cycle_id="2026-05-26T20:00",
+        forecast_cache={},
+        max_records=2,
+    )
+
+    assert len(rows) == 2
+    assert {row["counterfactual_status"] for row in rows} == {"forecast_not_in_existing_cycle_cache"}
+    assert all(row["candidate_allowed"] is False for row in rows)

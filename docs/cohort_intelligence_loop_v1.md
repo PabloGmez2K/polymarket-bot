@@ -89,6 +89,32 @@ explicit recorded side. It does not reconstruct historical side from old rows.
 `exact / NO` remains shadow-protected and is excluded from recovery candidates,
 although it can appear in the block for traceability.
 
+## Price Filter Counterfactual
+
+`PRICE_FILTER_COUNTERFACTUAL` starts as a LOG_ONLY forward experiment for
+`price_out_of_range` rejects in `city_mode in {active, canary}`. It does not
+change the live price range, admission, gates, BUY/SELL/SKIP, sizing, city
+modes, BANKROLL, env vars or Fase C.
+
+Cost guard: the writer never adds external forecast/API calls. It only evaluates
+rows whose city/date forecast already exists in the current cycle's
+`forecast_cache`, caps processing at 40 rows per cycle, and marks all other
+sampled rows as `forecast_not_in_existing_cycle_cache`.
+
+The artifact is `data/price_filter_counterfactual_log_only.jsonl`. It persists
+the real market identity (`eval_key`/`identity_key`, `market_id`,
+`condition_id`, token IDs, market slug when available), city/date/condition,
+YES/NO prices, hypothetical side, `our_prob`, `mkt_prob`, `edge_pct`, cohort key
+and outcome-link fields. `condition == exact AND side == NO` is always marked
+`excluded_protected_exact_no` and is never surfaced as a recovery candidate
+because `SHADOW_EXACT_NO_GLOBAL` remains canonical.
+
+The digest/report can emit `CAPTURE_ACTIVE_NO_RESOLUTIONS_YET`, `NO_EDGE_FOUND`,
+`INSUFFICIENT_SAMPLE`, `DATA_CAPTURE_BLOCKER` or `REVIEW_PRICE_POLICY`. Raw
+hypothetical edge alone never emits `CANDIDATE_FOR_CANARY_REVIEW` and never
+authorizes policy changes; outcome-linked evidence must go back to Opus/manual
+review.
+
 ## Metrics
 
 For each cohort the report emits:

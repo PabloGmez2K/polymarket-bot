@@ -520,3 +520,69 @@ def test_missing_calibration_key_degrades_to_data_quality_blocker():
 
     assert metrics["data_quality_verdict"] == "DATA_QUALITY_BLOCKER"
     assert metrics["decision_verdict"] == "DATA_QUALITY_BLOCKER"
+
+
+def test_price_filter_counterfactual_reports_allowed_cohorts_without_policy_recommendation(tmp_path):
+    data_dir = tmp_path / "data"
+    write_jsonl(data_dir / "bot_signal_evaluations.jsonl", [])
+    write_jsonl(data_dir / "skip_log.jsonl", [])
+    write_jsonl(data_dir / "blocked_signals_resolutions.jsonl", [])
+    (data_dir / "trade_lifecycle.json").write_text(json.dumps({"records": []}), encoding="utf-8")
+    write_jsonl(
+        data_dir / "price_filter_counterfactual_log_only.jsonl",
+        [
+            {
+                "skip_reason": "price_out_of_range",
+                "city": "Toronto",
+                "city_mode": "active",
+                "identity_key": "Toronto|2026-05-27|at_or_above|30|C",
+                "condition": "at_or_above",
+                "side": "YES",
+                "forecast_max": 32.0,
+                "counterfactual_status": "hypothetical_edge_over_threshold",
+                "candidate_allowed": True,
+                "cohort_key": "directional/YES/mode=active/gate=price_out_of_range",
+            },
+            {
+                "skip_reason": "price_out_of_range",
+                "city": "Toronto",
+                "city_mode": "active",
+                "identity_key": "Toronto|2026-05-27|exact|30|C",
+                "condition": "exact",
+                "side": "NO",
+                "forecast_max": 28.0,
+                "counterfactual_status": "excluded_protected_exact_no",
+                "candidate_allowed": False,
+                "cohort_key": "exact/NO/mode=active/gate=price_out_of_range",
+            },
+        ],
+    )
+
+    built = report.build_report(data_dir=data_dir)
+    price = built["price_filter_counterfactual"]
+
+    assert price["n_sampled"] == 2
+    assert price["n_evaluated"] == 2
+    assert price["n_hypothetical_edge_over_threshold"] == 1
+    assert price["n_excluded_protected_exact_no"] == 1
+    assert price["n_resolved_linked"] == 0
+    assert price["manual_review_state"] == "INSUFFICIENT_SAMPLE"
+    assert any(row["cohort_key"] == "directional/YES/mode=active/gate=price_out_of_range" for row in price["by_cohort_key"])
+
+
+def test_price_filter_counterfactual_missing_identity_is_data_capture_blocker():
+    summary = report.build_price_filter_counterfactual(
+        [
+            {
+                "skip_reason": "price_out_of_range",
+                "city_mode": "canary",
+                "condition": "at_or_above",
+                "side": "YES",
+                "forecast_max": 31.0,
+                "counterfactual_status": "hypothetical_edge_over_threshold",
+            }
+        ],
+        [],
+    )
+
+    assert summary["manual_review_state"] == "DATA_CAPTURE_BLOCKER"

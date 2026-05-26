@@ -24,6 +24,7 @@ EXACT_NO_NEAR_THRESHOLD_C = 1.5
 MIN_REVIEW_SAMPLE = 10
 DIRECTIONAL_FORWARD_CAPTURE_START_UTC = "2026-05-26T16:15:11Z"
 LIVE_SIDE_VISIBILITY_FORWARD_START_UTC = "2026-05-26T20:58:28Z"
+PRICE_FILTER_COUNTERFACTUAL_FILE = "price_filter_counterfactual_log_only.jsonl"
 VERDICTS = {
     "DATA_QUALITY_BLOCKER",
     "INSUFFICIENT_SAMPLE",
@@ -34,6 +35,9 @@ VERDICTS = {
     "REVIEW_LIVE_COHORT_QUALITY",
     "REVIEW_LIVE_CONTAINMENT",
     "CANDIDATE_FOR_CANARY_REVIEW",
+    "CAPTURE_ACTIVE_NO_RESOLUTIONS_YET",
+    "NO_EDGE_FOUND",
+    "REVIEW_PRICE_POLICY",
 }
 LOG_ONLY_DISCLAIMER = (
     "LOG_ONLY: manual recommendations only. No BUY/SELL/SKIP, BANKROLL, sizing, "
@@ -53,6 +57,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--skip-log", help="Path to skip_log.jsonl")
     parser.add_argument("--resolutions", help="Path to blocked_signals_resolutions.jsonl")
     parser.add_argument("--trade-lifecycle", help="Path to trade_lifecycle.json")
+    parser.add_argument("--price-counterfactual", help="Path to price_filter_counterfactual_log_only.jsonl")
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of Markdown.")
     return parser.parse_args(argv)
 
@@ -863,6 +868,122 @@ def build_surviving_cohorts_by_side(signals: list[dict[str, Any]]) -> list[dict[
     return metrics_rows
 
 
+def price_counterfactual_status(rows: list[dict[str, Any]], resolutions: list[dict[str, Any]]) -> str:
+    if not rows:
+        return "CAPTURE_ACTIVE_NO_RESOLUTIONS_YET"
+    missing_identity = sum(1 for row in rows if not normalize_text(row.get("identity_key") or row.get("eval_key")))
+    if missing_identity:
+        return "DATA_CAPTURE_BLOCKER"
+    resolution_keys = {
+        normalize_text(row.get("match_key") or row.get("eval_key"))
+        for row in resolutions
+        if normalize_text(row.get("match_key") or row.get("eval_key")) and row.get("resolved")
+    }
+    linked = sum(
+        1
+        for row in rows
+        if normalize_text(row.get("identity_key") or row.get("eval_key")) in resolution_keys
+    )
+    evaluated = [row for row in rows if row.get("forecast_max") is not None]
+    edge_rows = [
+        row
+        for row in rows
+        if normalize_text(row.get("counterfactual_status")) == "hypothetical_edge_over_threshold"
+    ]
+    if not evaluated:
+        return "CAPTURE_ACTIVE_NO_RESOLUTIONS_YET"
+    if not edge_rows:
+        return "NO_EDGE_FOUND"
+    if linked < MIN_REVIEW_SAMPLE:
+        return "INSUFFICIENT_SAMPLE"
+    return "REVIEW_PRICE_POLICY"
+
+
+def build_price_filter_counterfactual(
+    rows: list[dict[str, Any]],
+    resolutions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    allowed_modes = {"active", "canary"}
+    scoped = [
+        row for row in rows
+        if normalize_text(row.get("skip_reason")) == "price_out_of_range"
+        and normalize_text(row.get("city_mode")).lower() in allowed_modes
+    ]
+    resolution_keys = {
+        normalize_text(row.get("match_key") or row.get("eval_key"))
+        for row in resolutions
+        if normalize_text(row.get("match_key") or row.get("eval_key")) and row.get("resolved")
+    }
+    cohorts: dict[str, dict[str, Any]] = {}
+    for row in scoped:
+        cohort_key = normalize_text(row.get("cohort_key")) or (
+            f"{condition_family(row)}/{normalize_side(row.get('side')) or 'UNKNOWN_SIDE'}/mode="
+            f"{normalize_text(row.get('city_mode')).lower() or 'unknown'}/gate=price_out_of_range"
+        )
+        item = cohorts.setdefault(
+            cohort_key,
+            {
+                "cohort_key": cohort_key,
+                "n": 0,
+                "n_edge_over_threshold": 0,
+                "n_candidate_allowed": 0,
+                "n_resolved_linked": 0,
+            },
+        )
+        item["n"] += 1
+        if normalize_text(row.get("counterfactual_status")) == "hypothetical_edge_over_threshold":
+            item["n_edge_over_threshold"] += 1
+        if row.get("candidate_allowed") is True:
+            item["n_candidate_allowed"] += 1
+        identity = normalize_text(row.get("identity_key") or row.get("eval_key"))
+        if identity in resolution_keys:
+            item["n_resolved_linked"] += 1
+    by_status = defaultdict(int)
+    for row in scoped:
+        by_status[normalize_text(row.get("counterfactual_status")) or "unknown"] += 1
+    edge_rows = [
+        row
+        for row in scoped
+        if normalize_text(row.get("counterfactual_status")) == "hypothetical_edge_over_threshold"
+    ]
+    linked = sum(
+        1
+        for row in scoped
+        if normalize_text(row.get("identity_key") or row.get("eval_key")) in resolution_keys
+    )
+    return {
+        "mode": "LOG_ONLY",
+        "artifact": PRICE_FILTER_COUNTERFACTUAL_FILE,
+        "n_sampled": len(scoped),
+        "n_evaluated": sum(1 for row in scoped if row.get("forecast_max") is not None),
+        "n_forecast_not_in_existing_cache": sum(
+            1
+            for row in scoped
+            if normalize_text(row.get("counterfactual_status")) == "forecast_not_in_existing_cycle_cache"
+        ),
+        "n_excluded_protected_exact_no": sum(
+            1
+            for row in scoped
+            if normalize_text(row.get("counterfactual_status")) == "excluded_protected_exact_no"
+        ),
+        "n_hypothetical_edge_over_threshold": len(edge_rows),
+        "n_candidate_allowed": sum(1 for row in scoped if row.get("candidate_allowed") is True),
+        "n_resolved_linked": linked,
+        "outcome_linkage_status": "PENDING_FORWARD_RESOLUTIONS" if linked == 0 else "LINKED_OUTCOMES_PRESENT",
+        "by_status": dict(sorted(by_status.items())),
+        "by_cohort_key": sorted(
+            cohorts.values(),
+            key=lambda row: (-int(row["n_edge_over_threshold"]), row["cohort_key"]),
+        ),
+        "manual_review_state": price_counterfactual_status(scoped, resolutions),
+        "note": (
+            "Uses only existing per-cycle forecast_cache; it does not add external forecast/API calls. "
+            "Raw hypothetical edge is LOG_ONLY and does not authorize price range, BUY/SELL/SKIP, BANKROLL, "
+            "sizing, city modes, whitelist, env vars, or Fase C changes."
+        ),
+    }
+
+
 def build_directional_subcohorts(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -915,19 +1036,26 @@ def build_report(
     skip_log: Path | None = None,
     resolutions: Path | None = None,
     trade_lifecycle: Path | None = None,
+    price_counterfactual: Path | None = None,
 ) -> dict[str, Any]:
     bot_evaluations = bot_evaluations or data_dir / "bot_signal_evaluations.jsonl"
     skip_log = skip_log or data_dir / "skip_log.jsonl"
     resolutions = resolutions or data_dir / "blocked_signals_resolutions.jsonl"
     trade_lifecycle = trade_lifecycle or data_dir / "trade_lifecycle.json"
+    price_counterfactual = price_counterfactual or data_dir / PRICE_FILTER_COUNTERFACTUAL_FILE
 
     eval_rows = read_jsonl(bot_evaluations)
     skip_rows = read_jsonl(skip_log)
     resolution_rows = read_jsonl(resolutions)
     lifecycle_payload = read_json(trade_lifecycle)
+    price_counterfactual_rows = read_jsonl(price_counterfactual)
     signals = build_signal_rows(eval_rows, skip_rows, resolution_rows)
     lifecycle_rows = lifecycle_signal_rows(lifecycle_payload)
     surviving_by_side = build_surviving_cohorts_by_side(signals)
+    price_counterfactual_summary = build_price_filter_counterfactual(
+        price_counterfactual_rows,
+        resolution_rows,
+    )
 
     cohorts = select_cohorts(signals)
     executed_cohorts = select_cohorts(lifecycle_rows)
@@ -981,11 +1109,13 @@ def build_report(
             "skip_log": str(skip_log),
             "resolutions": str(resolutions),
             "trade_lifecycle": str(trade_lifecycle),
+            "price_counterfactual": str(price_counterfactual),
         },
         "source_counts": {
             "bot_evaluations": len(eval_rows),
             "skip_log": len(skip_rows),
             "resolutions": len(resolution_rows),
+            "price_counterfactual": len(price_counterfactual_rows),
             "raw_signals": len(signals),
             "executed_trade_rows": len(lifecycle_rows),
             "joined_signals": len(signals) + len(lifecycle_rows),
@@ -1015,6 +1145,7 @@ def build_report(
         },
         "main_cohorts": main_metrics,
         "surviving_cohorts_by_side": surviving_by_side,
+        "price_filter_counterfactual": price_counterfactual_summary,
         "directional_no_forward": directional_forward_metrics,
         "directional_no_forward_subcohorts": directional_forward_sub_metrics,
         "directional_no_subcohorts": sub_metrics,
@@ -1085,6 +1216,7 @@ def render_markdown(report: dict[str, Any]) -> str:
     forward = report.get("directional_forward_capture", {})
     side_forward = report.get("live_side_visibility_forward", {})
     surviving = report.get("surviving_cohorts_by_side", [])
+    price_cf = report.get("price_filter_counterfactual", {})
     lines.extend(
         [
             "",
@@ -1118,6 +1250,38 @@ def render_markdown(report: dict[str, Any]) -> str:
             )
     else:
         lines.append("| none yet | n/a | 0 | 0 | 0 | 0 | 0 | n/a | n/a | n/a | n/a | ACCUMULATING_FORWARD_EVIDENCE |")
+    lines.extend(
+        [
+            "",
+            "## PRICE_FILTER_COUNTERFACTUAL",
+            "",
+            f"- n_sampled = `{price_cf.get('n_sampled', 0)}`",
+            f"- n_evaluated = `{price_cf.get('n_evaluated', 0)}`",
+            f"- n_forecast_not_in_existing_cache = `{price_cf.get('n_forecast_not_in_existing_cache', 0)}`",
+            f"- n_excluded_protected_exact_no = `{price_cf.get('n_excluded_protected_exact_no', 0)}`",
+            f"- n_hypothetical_edge_over_threshold = `{price_cf.get('n_hypothetical_edge_over_threshold', 0)}`",
+            f"- n_resolved_linked = `{price_cf.get('n_resolved_linked', 0)}`",
+            f"- state = `{price_cf.get('manual_review_state', 'CAPTURE_ACTIVE_NO_RESOLUTIONS_YET')}`",
+            f"- {price_cf.get('note', '')}",
+            "",
+            "| cohort_key | n | edge_gt_threshold | candidate_allowed | resolved_linked |",
+            "|---|---:|---:|---:|---:|",
+        ]
+    )
+    price_rows = price_cf.get("by_cohort_key") or []
+    if price_rows:
+        for row in price_rows[:8]:
+            lines.append(
+                "| {cohort} | {n} | {edge} | {candidate} | {linked} |".format(
+                    cohort=row.get("cohort_key"),
+                    n=row.get("n", 0),
+                    edge=row.get("n_edge_over_threshold", 0),
+                    candidate=row.get("n_candidate_allowed", 0),
+                    linked=row.get("n_resolved_linked", 0),
+                )
+            )
+    else:
+        lines.append("| none yet | 0 | 0 | 0 | 0 |")
     lines.extend(["", "## Directional NO Best Subcohort", ""])
     if best:
         lines.append(
@@ -1165,6 +1329,7 @@ def main(argv: list[str] | None = None) -> int:
         skip_log=Path(args.skip_log) if args.skip_log else None,
         resolutions=Path(args.resolutions) if args.resolutions else None,
         trade_lifecycle=Path(args.trade_lifecycle) if args.trade_lifecycle else None,
+        price_counterfactual=Path(args.price_counterfactual) if args.price_counterfactual else None,
     )
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))

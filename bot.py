@@ -807,6 +807,9 @@ BOT_SIGNAL_EVALUATIONS_FILE = _data_path("bot_signal_evaluations.jsonl")
 BOT_SIGNAL_EVALUATION_SCHEMA_VERSION = 2
 BOT_SIGNAL_EVALUATION_COHORT_SCHEMA_VERSION = "live_surviving_cohort_visibility_v1"
 EXACT_NO_QT_MATCH_EVAL_FILE = _data_path("exact_no_qt_match_evaluations_log_only.jsonl")
+PRICE_FILTER_COUNTERFACTUAL_FILE = _data_path("price_filter_counterfactual_log_only.jsonl")
+PRICE_FILTER_COUNTERFACTUAL_MAX_PER_CYCLE = 40
+PRICE_FILTER_COUNTERFACTUAL_VERSION = "price_filter_counterfactual_v1"
 TRADERS_DB_FILE = _seed_data_file("traders_db.json")
 LIFECYCLE_REVIEW_JSON_FILE = _data_path("city_lifecycle_review.json")
 LIFECYCLE_REVIEW_COOLDOWN_HOURS = 24
@@ -1031,6 +1034,196 @@ def _build_bot_eval_key(city, date_iso, condition, threshold, threshold_high=Non
         return None
     temp_part = f"{threshold}-{threshold_high}" if threshold_high is not None else str(threshold)
     return f"{city}|{date_iso}|{condition}|{temp_part}|{unit}"
+
+
+def _price_filter_counterfactual_identity(row):
+    if not isinstance(row, dict):
+        return ""
+    return (
+        _build_bot_eval_key(
+            row.get("city"),
+            row.get("date_iso"),
+            row.get("condition"),
+            row.get("threshold"),
+            row.get("threshold_high"),
+            row.get("unit"),
+        )
+        or str(row.get("condition_id") or row.get("market_id") or row.get("question") or "")
+    )
+
+
+def _price_filter_counterfactual_cohort(condition, side, city_mode):
+    family = _condition_family_for_bot_eval(condition)
+    return f"{family}/{side or 'UNKNOWN_SIDE'}/mode={str(city_mode or 'unknown').lower()}/gate=price_out_of_range"
+
+
+def _build_price_filter_counterfactual_records(
+    pending,
+    *,
+    cycle_id,
+    forecast_cache,
+    trader_signals=None,
+    max_records=PRICE_FILTER_COUNTERFACTUAL_MAX_PER_CYCLE,
+):
+    """Build bounded LOG_ONLY counterfactual rows without making forecast/API calls."""
+    if not pending:
+        return []
+    trader_signals = trader_signals or {}
+    records = []
+    sampled = sorted(
+        [row for row in pending if str(row.get("city_mode") or "").lower() in {"active", "canary"}],
+        key=lambda row: _price_filter_counterfactual_identity(row),
+    )[: max(0, int(max_records or 0))]
+    for row in sampled:
+        identity_key = _price_filter_counterfactual_identity(row)
+        city = row.get("city")
+        date_iso = row.get("date_iso")
+        condition = str(row.get("condition") or "").strip().lower()
+        threshold = row.get("threshold")
+        threshold_high = row.get("threshold_high")
+        unit = row.get("unit")
+        base = {
+            "schema_version": 1,
+            "counterfactual_version": PRICE_FILTER_COUNTERFACTUAL_VERSION,
+            "ts_utc": datetime.now(timezone.utc).isoformat(),
+            "cycle_id": cycle_id,
+            "identity_key": identity_key,
+            "eval_key": identity_key,
+            "skip_reason": "price_out_of_range",
+            "city": city,
+            "city_mode": row.get("city_mode"),
+            "date_iso": date_iso,
+            "days_ahead": row.get("days_ahead"),
+            "condition": condition,
+            "threshold": threshold,
+            "threshold_high": threshold_high,
+            "unit": unit,
+            "market_id": row.get("market_id"),
+            "condition_id": row.get("condition_id"),
+            "token_id_yes": row.get("token_id_yes"),
+            "token_id_no": row.get("token_id_no"),
+            "market_slug": row.get("market_slug"),
+            "question": row.get("question"),
+            "price_yes": row.get("mkt_prob_yes"),
+            "price_no": row.get("mkt_prob_no"),
+            "min_price": MIN_PRICE,
+            "max_price": MAX_PRICE,
+            "uses_new_external_forecast_calls": False,
+            "forecast_source": "existing_cycle_forecast_cache",
+            "outcome_link_identity": identity_key,
+            "outcome_link_status": "pending_resolution",
+        }
+        city_forecast = forecast_cache.get(city) if isinstance(forecast_cache, dict) else None
+        day_forecast = city_forecast.get(date_iso) if isinstance(city_forecast, dict) else None
+        if not day_forecast:
+            records.append({
+                **base,
+                "counterfactual_status": "forecast_not_in_existing_cycle_cache",
+                "candidate_allowed": False,
+                "candidate_exclusion_reason": "forecast_not_in_existing_cycle_cache",
+                "forecast_max": None,
+                "side": None,
+                "our_prob": None,
+                "mkt_prob": None,
+                "edge_pct": None,
+                "cohort_key": _price_filter_counterfactual_cohort(condition, None, row.get("city_mode")),
+            })
+            continue
+        forecast_max = day_forecast.get("temp_max")
+        threshold_c = (threshold - 32) * 5 / 9 if unit == "F" else float(threshold)
+        threshold_high_c = None
+        if threshold_high is not None:
+            threshold_high_c = (threshold_high - 32) * 5 / 9 if unit == "F" else float(threshold_high)
+        try:
+            our_prob_yes = estimate_prob_with_city(
+                forecast_max,
+                threshold_c,
+                condition,
+                row.get("days_ahead"),
+                threshold_high_c,
+                city=city,
+            )
+        except Exception as exc:
+            records.append({
+                **base,
+                "counterfactual_status": "probability_compute_failed",
+                "candidate_allowed": False,
+                "candidate_exclusion_reason": "probability_compute_failed",
+                "compute_error": str(exc)[:200],
+                "forecast_max": forecast_max,
+                "side": None,
+                "our_prob": None,
+                "mkt_prob": None,
+                "edge_pct": None,
+                "cohort_key": _price_filter_counterfactual_cohort(condition, None, row.get("city_mode")),
+            })
+            continue
+        our_prob_no = 1.0 - our_prob_yes
+        mkt_prob_yes = float(row.get("mkt_prob_yes"))
+        mkt_prob_no = float(row.get("mkt_prob_no"))
+        edge_yes = our_prob_yes - mkt_prob_yes
+        edge_no = our_prob_no - mkt_prob_no
+        if edge_yes > edge_no and edge_yes > 0:
+            side, our_prob, mkt_prob, edge = "YES", our_prob_yes, mkt_prob_yes, edge_yes
+        elif edge_no > 0:
+            side, our_prob, mkt_prob, edge = "NO", our_prob_no, mkt_prob_no, edge_no
+        else:
+            side, our_prob, mkt_prob, edge = None, None, None, None
+        edge_pct = round(edge * 100, 2) if edge is not None else None
+        qt_match = bool(identity_key and trader_signals.get(identity_key))
+        condition_live_admissible = condition in ALLOWED_CONDITIONS or qt_match
+        if condition == "exact" and side == "NO":
+            status = "excluded_protected_exact_no"
+            allowed = False
+            reason = "EXACT_NO_REMAINS_SHADOW_PROTECTED"
+        elif side is None:
+            status = "no_hypothetical_edge"
+            allowed = False
+            reason = "no_hypothetical_edge"
+        elif not condition_live_admissible:
+            status = "not_live_admissible_condition"
+            allowed = False
+            reason = "condition_not_live_admissible_without_quality_trader_match"
+        elif edge_pct is not None and edge_pct > MIN_EDGE:
+            status = "hypothetical_edge_over_threshold"
+            allowed = True
+            reason = None
+        else:
+            status = "hypothetical_edge_below_threshold"
+            allowed = False
+            reason = "edge_below_threshold"
+        records.append({
+            **base,
+            "counterfactual_status": status,
+            "candidate_allowed": allowed,
+            "candidate_exclusion_reason": reason,
+            "quality_trader_match": qt_match,
+            "forecast_max": forecast_max,
+            "side": side,
+            "our_prob": round(our_prob * 100, 2) if our_prob is not None else None,
+            "mkt_prob": round(mkt_prob * 100, 2) if mkt_prob is not None else None,
+            "edge_pct": edge_pct,
+            "min_edge": MIN_EDGE,
+            "cohort_key": _price_filter_counterfactual_cohort(condition, side, row.get("city_mode")),
+        })
+    return records
+
+
+def append_price_filter_counterfactual_records(records, path=None):
+    if not records:
+        return False
+    target = path or PRICE_FILTER_COUNTERFACTUAL_FILE
+    try:
+        target_dir = os.path.dirname(target)
+        if target_dir:
+            os.makedirs(target_dir, exist_ok=True)
+        with open(target, "a", encoding="utf-8") as f:
+            for record in records:
+                f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+        return True
+    except Exception as exc:
+        log.warning(f"price filter counterfactual LOG_ONLY write failed: {exc}")
+        return False
 
 
 def _funnel_market_identifier(market):
@@ -21844,6 +22037,7 @@ def main(client):
     liq_fail = 0
     city_window_skipped = 0
     city_window_cities = set()
+    price_filter_counterfactual_pending = []
 
     for market in all_markets:
         question = market.get("question", "")
@@ -21985,6 +22179,25 @@ def main(client):
             mkt_prob_no = 1.0 - mkt_prob_yes
             if mkt_prob_no < MIN_PRICE or mkt_prob_no > MAX_PRICE:
                 price_fail += 1
+                if city_mode in {"active", "canary"}:
+                    price_filter_counterfactual_pending.append({
+                        "city": city,
+                        "city_mode": city_mode,
+                        "date_iso": date_iso,
+                        "days_ahead": days_ahead,
+                        "condition": parsed.get("condition"),
+                        "threshold": parsed.get("temp_threshold"),
+                        "threshold_high": parsed.get("temp_threshold_high"),
+                        "unit": parsed.get("unit"),
+                        "question": question,
+                        "mkt_prob_yes": mkt_prob_yes,
+                        "mkt_prob_no": mkt_prob_no,
+                        "market_id": market.get("id") or None,
+                        "condition_id": market.get("conditionId") or None,
+                        "market_slug": market.get("slug") or None,
+                        "token_id_yes": clob_ids[0],
+                        "token_id_no": clob_ids[1],
+                    })
                 skip_log_entries.append(_make_skip_entry(
                     "price_out_of_range", cycle_id=cycle_id,
                     city=city, date_iso=date_iso, days_ahead=days_ahead,
@@ -22041,6 +22254,24 @@ def main(client):
         forecast_cache[city] = get_forecast(lat, lon)
 
     dl.append(f"PREVISIONES: {len(forecast_cache)} ciudades consultadas")
+    try:
+        price_counterfactual_rows = _build_price_filter_counterfactual_records(
+            price_filter_counterfactual_pending,
+            cycle_id=cycle_id,
+            forecast_cache=forecast_cache,
+            trader_signals=trader_signals,
+            max_records=PRICE_FILTER_COUNTERFACTUAL_MAX_PER_CYCLE,
+        )
+        if append_price_filter_counterfactual_records(price_counterfactual_rows):
+            evaluated = sum(1 for row in price_counterfactual_rows if row.get("forecast_max") is not None)
+            candidates_log_only = sum(1 for row in price_counterfactual_rows if row.get("candidate_allowed"))
+            dl.append(
+                "PRICE_FILTER_COUNTERFACTUAL LOG_ONLY: "
+                f"{len(price_counterfactual_rows)}/{len(price_filter_counterfactual_pending)} sampled, "
+                f"{evaluated} evaluated from existing forecast_cache, {candidates_log_only} edge candidates"
+            )
+    except Exception as exc:
+        log.warning(f"price filter counterfactual LOG_ONLY failed: {exc}")
 
     # ---- PASO 4: Edge ----
     trades = []

@@ -336,6 +336,15 @@ def test_runner_includes_cohort_intelligence_by_default(monkeypatch):
                 "directional_forward_resolved_calibration_unique": 10,
                 "status": "CALIBRATION_ACCUMULATING",
             },
+            "price_filter_counterfactual": {
+                "n_sampled": 4,
+                "n_evaluated": 3,
+                "n_forecast_not_in_existing_cache": 1,
+                "n_excluded_protected_exact_no": 1,
+                "n_hypothetical_edge_over_threshold": 2,
+                "n_resolved_linked": 0,
+                "manual_review_state": "INSUFFICIENT_SAMPLE",
+            },
         },
     )
 
@@ -348,10 +357,13 @@ def test_runner_includes_cohort_intelligence_by_default(monkeypatch):
     assert "Cohort Intelligence (LOG_ONLY)" in result["telegram_preview"]
     assert "directional_candidate=YES" in result["telegram_preview"]
     assert "directional forward: seen=10 | cal=10 | CALIBRATION_ACCUMULATING" in result["telegram_preview"]
+    assert "PRICE_FILTER_COUNTERFACTUAL: sampled=4 | eval=3 | cache_miss=1" in result["telegram_preview"]
     assert "No BUY/SELL/SKIP" in result["telegram_preview"]
 
 
-def test_runner_json_cli_with_fixture_path():
+def test_runner_json_cli_with_fixture_path(monkeypatch):
+    for name in ("FUNDER", "POLYMARKET_WALLET", "WALLET_ADDRESS", "PROXY_WALLET"):
+        monkeypatch.delenv(name, raising=False)
     with local_tmp_dir() as tmp_dir:
         path = tmp_dir / "leaderboard_pnl_snapshots.jsonl"
         result = run_cli("--json", "--dry-run", "--wallet", "", "--env-file", "__missing_env_file__", snapshot_file=path)
