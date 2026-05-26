@@ -48,8 +48,12 @@ def test_record_bot_evaluation_writes_jsonl(monkeypatch, tmp_path):
         city="Reykjavik",
         date_iso="2026-05-05",
         condition="exact",
+        side="YES",
+        city_mode="active",
         threshold=7,
         unit="C",
+        condition_id="cond-1",
+        market_id="market-1",
         edge_pct=12.3,
         our_prob=67.1,
         mkt_prob=54.8,
@@ -60,7 +64,38 @@ def test_record_bot_evaluation_writes_jsonl(monkeypatch, tmp_path):
     assert len(rows) == 1
     assert rows[0]["evaluation_source"] == "live_eval"
     assert rows[0]["would_buy"] is True
+    assert rows[0]["side"] == "YES"
+    assert rows[0]["city_mode"] == "active"
+    assert rows[0]["condition_id"] == "cond-1"
+    assert rows[0]["market_id"] == "market-1"
+    assert rows[0]["cohort_key"] == "exact/YES/mode=active/gate=live_or_passed_gate"
     assert rows[0]["bot_edge_pct_at_signal"] == 12.3
+
+
+def test_record_bot_evaluation_persists_no_side_cohort(monkeypatch, tmp_path):
+    target = tmp_path / "bot_signal_evaluations.jsonl"
+    monkeypatch.setattr(bot, "BOT_SIGNAL_EVALUATIONS_FILE", str(target))
+    monkeypatch.delenv("DISABLE_BOT_EVAL_CAPTURE", raising=False)
+
+    ok = bot.record_bot_evaluation(
+        "2026-05-18T08:00",
+        "Tokyo|2026-05-05|at_or_above|28|C",
+        False,
+        city="Tokyo",
+        city_mode="shadow",
+        date_iso="2026-05-05",
+        condition="at_or_above",
+        side="NO",
+        threshold=28,
+        unit="C",
+        edge_pct=15.0,
+        decision_gate="fuera_allowlist",
+    )
+
+    assert ok is True
+    row = json.loads(target.read_text(encoding="utf-8").strip())
+    assert row["side"] == "NO"
+    assert row["cohort_key"] == "directional/NO/mode=shadow/gate=fuera_allowlist"
 
 
 def test_record_bot_evaluation_disable_switch_blocks_write(monkeypatch, tmp_path):
@@ -138,6 +173,8 @@ def test_shadow_only_skip_records_shadow_decision_gate(monkeypatch, tmp_path):
         cycle_id="2026-05-18T08:00",
         city="Reykjavik",
         date_iso="2026-05-05",
+        side="NO",
+        city_mode="shadow",
         condition="exact",
         threshold=7,
         unit="C",
@@ -148,5 +185,7 @@ def test_shadow_only_skip_records_shadow_decision_gate(monkeypatch, tmp_path):
     assert ok is True
     row = json.loads(target.read_text(encoding="utf-8").strip())
     assert row["would_buy"] is False
+    assert row["side"] == "NO"
+    assert row["city_mode"] == "shadow"
     assert row["skip_or_block_reason"] == "shadow_only_override"
     assert row["decision_gate"] == "shadow_only"

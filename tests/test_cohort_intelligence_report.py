@@ -23,6 +23,9 @@ def eval_row(
     mkt_prob: float = 52.0,
     gate: str = "SHADOW_EXACT_NO_GLOBAL",
     ts_utc: str = "2026-05-27T00:00:00+00:00",
+    side: str | None = None,
+    city_mode: str = "shadow",
+    would_buy: bool = False,
 ) -> dict:
     return {
         "ts_utc": ts_utc,
@@ -34,7 +37,9 @@ def eval_row(
         "threshold": threshold,
         "threshold_high": None,
         "unit": unit,
-        "would_buy": False,
+        "side": side,
+        "city_mode": city_mode,
+        "would_buy": would_buy,
         "bot_edge_pct_at_signal": round(our_prob - mkt_prob, 2),
         "skip_or_block_reason": "shadow_only_override" if gate in {"SHADOW_EXACT_NO_GLOBAL", "SHADOW_EXACT_NO_NEAR_THRESHOLD"} else None,
         "decision_gate": gate,
@@ -42,6 +47,7 @@ def eval_row(
         "our_prob": our_prob,
         "mkt_prob": mkt_prob,
         "forecast_max": forecast,
+        "cohort_key": f"{condition}/{side or 'UNKNOWN'}/mode={city_mode}",
     }
 
 
@@ -374,6 +380,76 @@ def test_historical_directional_resolution_does_not_drive_forward_gate(tmp_path)
     assert {row["cohort"]: row for row in built["main_cohorts"]}["directional NO"]["n_closed_calibration_unique"] == 1
     assert built["directional_forward_capture"]["directional_forward_resolved_calibration_unique"] == 0
     assert built["summary_verdicts"]["DIRECTIONAL_NO_CANARY_CANDIDATE_FOUND"] == "INSUFFICIENT_SAMPLE"
+
+
+def test_surviving_cohorts_by_side_groups_forward_recorded_side_and_mode(tmp_path):
+    data_dir = tmp_path / "data"
+    exact_yes = "Dallas|2026-05-27|exact|28|C"
+    directional_yes = "Dallas|2026-05-27|at_or_above|28|C"
+    directional_no = "Tokyo|2026-05-27|at_or_below|20|C"
+    write_jsonl(
+        data_dir / "bot_signal_evaluations.jsonl",
+        [
+            eval_row(exact_yes, city="Dallas", condition="exact", threshold=28, side="YES", city_mode="active", would_buy=True),
+            eval_row(directional_yes, city="Dallas", condition="at_or_above", threshold=28, side="YES", city_mode="active", would_buy=True),
+            eval_row(directional_no, city="Tokyo", condition="at_or_below", threshold=20, side="NO", city_mode="shadow"),
+        ],
+    )
+    write_jsonl(data_dir / "blocked_signals_resolutions.jsonl", [])
+    write_jsonl(data_dir / "skip_log.jsonl", [])
+    (data_dir / "trade_lifecycle.json").write_text(json.dumps({"records": []}), encoding="utf-8")
+
+    built = report.build_report(data_dir=data_dir)
+    rows = {(row["cohort"], row["city_mode"]): row for row in built["surviving_cohorts_by_side"]}
+
+    assert rows[("exact / YES", "active")]["n_eval_forward"] == 1
+    assert rows[("exact / YES", "active")]["n_would_buy"] == 1
+    assert rows[("directional / YES", "active")]["n_eval_forward"] == 1
+    assert rows[("directional / NO", "shadow")]["n_shadow"] == 1
+    assert rows[("directional / NO", "shadow")]["n_resolved_calibration_unique"] == 0
+
+
+def test_surviving_exact_no_is_protected_not_recovery_candidate(tmp_path):
+    data_dir = tmp_path / "data"
+    key = "Singapore|2026-05-27|exact|33|C"
+    write_jsonl(
+        data_dir / "bot_signal_evaluations.jsonl",
+        [eval_row(key, condition="exact", side="NO", gate="SHADOW_EXACT_NO_GLOBAL", city_mode="shadow")],
+    )
+    write_jsonl(
+        data_dir / "blocked_signals_resolutions.jsonl",
+        [resolution_row(key, outcome="No")],
+    )
+    write_jsonl(data_dir / "skip_log.jsonl", [])
+    (data_dir / "trade_lifecycle.json").write_text(json.dumps({"records": []}), encoding="utf-8")
+
+    built = report.build_report(data_dir=data_dir)
+    row = next(row for row in built["surviving_cohorts_by_side"] if row["cohort"] == "exact / NO")
+
+    assert row["candidate_allowed"] is False
+    assert row["protected_reason"] == "EXACT_NO_REMAINS_SHADOW_PROTECTED"
+    assert row["manual_review_state"] == "ACCUMULATING_FORWARD_EVIDENCE"
+    assert row["n_resolved_calibration_unique"] == 1
+
+
+def test_legacy_rows_without_recorded_side_do_not_enter_surviving_forward_block(tmp_path):
+    data_dir = tmp_path / "data"
+    key = "Tokyo|2026-05-27|at_or_above|26|C"
+    write_jsonl(
+        data_dir / "bot_signal_evaluations.jsonl",
+        [eval_row(key, city="Tokyo", condition="at_or_above", threshold=26, side=None, gate="")],
+    )
+    write_jsonl(
+        data_dir / "blocked_signals_resolutions.jsonl",
+        [resolution_row(key, city="Tokyo", condition="at_or_above", outcome="No")],
+    )
+    write_jsonl(data_dir / "skip_log.jsonl", [])
+    (data_dir / "trade_lifecycle.json").write_text(json.dumps({"records": []}), encoding="utf-8")
+
+    built = report.build_report(data_dir=data_dir)
+
+    assert built["surviving_cohorts_by_side"] == []
+    assert built["live_side_visibility_forward"]["n_forward_rows_with_recorded_side"] == 0
 
 
 def test_directional_no_clean_resolution_cohort_is_not_artificially_reduced():

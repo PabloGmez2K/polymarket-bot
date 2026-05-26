@@ -804,6 +804,8 @@ CITY_INTELLIGENCE_RUNTIME_BRIDGE_ENABLED = os.getenv("CITY_INTELLIGENCE_RUNTIME_
 CITY_INTELLIGENCE_RUNTIME_BRIDGE_HOUR_UTC = int(os.getenv("CITY_INTELLIGENCE_RUNTIME_BRIDGE_HOUR_UTC", "7"))
 BLOCKED_SIGNALS_FILE = _data_path("blocked_signals_resolutions.jsonl")
 BOT_SIGNAL_EVALUATIONS_FILE = _data_path("bot_signal_evaluations.jsonl")
+BOT_SIGNAL_EVALUATION_SCHEMA_VERSION = 2
+BOT_SIGNAL_EVALUATION_COHORT_SCHEMA_VERSION = "live_surviving_cohort_visibility_v1"
 EXACT_NO_QT_MATCH_EVAL_FILE = _data_path("exact_no_qt_match_evaluations_log_only.jsonl")
 TRADERS_DB_FILE = _seed_data_file("traders_db.json")
 LIFECYCLE_REVIEW_JSON_FILE = _data_path("city_lifecycle_review.json")
@@ -1377,20 +1379,33 @@ def record_bot_evaluation(cycle_id, eval_key, would_buy: bool, **fields):
     if _bot_eval_capture_disabled() or not eval_key:
         return False
     try:
+        condition = fields.get("condition")
+        side = _normalize_bot_eval_side(fields.get("side"))
+        city_mode = fields.get("city_mode")
+        cohort_key = fields.get("cohort_key") or _build_bot_evaluation_cohort_key(
+            condition=condition,
+            side=side,
+            city_mode=city_mode,
+            decision_gate=fields.get("decision_gate"),
+        )
         record = {
-            "schema_version": 1,
+            "schema_version": BOT_SIGNAL_EVALUATION_SCHEMA_VERSION,
             "ts_utc": datetime.now(timezone.utc).isoformat(),
             "cycle_id": cycle_id,
             "eval_key": eval_key,
             "city": fields.get("city"),
+            "city_mode": city_mode,
             "date_iso": fields.get("date_iso"),
-            "condition": fields.get("condition"),
+            "condition": condition,
+            "side": side,
             "threshold": fields.get("threshold"),
             "threshold_high": fields.get("threshold_high"),
             "unit": fields.get("unit"),
+            "condition_id": fields.get("condition_id"),
+            "market_id": fields.get("market_id"),
             "would_buy": bool(would_buy),
             "bot_edge_pct_at_signal": fields.get("bot_edge_pct_at_signal", fields.get("edge_pct")),
-            "evaluation_source": "live_eval",
+            "evaluation_source": fields.get("evaluation_source") or "live_eval",
             "skip_or_block_reason": fields.get("skip_or_block_reason"),
             "decision_gate": fields.get("decision_gate"),
             "decision_confidence": fields.get("decision_confidence"),
@@ -1399,6 +1414,8 @@ def record_bot_evaluation(cycle_id, eval_key, would_buy: bool, **fields):
             "forecast_max": fields.get("forecast_max"),
             "sigma_used": fields.get("sigma_used"),
             "days_ahead": fields.get("days_ahead"),
+            "cohort_schema_version": BOT_SIGNAL_EVALUATION_COHORT_SCHEMA_VERSION,
+            "cohort_key": cohort_key,
         }
         target_dir = os.path.dirname(BOT_SIGNAL_EVALUATIONS_FILE)
         if target_dir:
@@ -1408,6 +1425,34 @@ def record_bot_evaluation(cycle_id, eval_key, would_buy: bool, **fields):
         return True
     except Exception:
         return False
+
+
+def _normalize_bot_eval_side(value):
+    text = str(value or "").strip().upper()
+    if text in {"YES", "Y"}:
+        return "YES"
+    if text in {"NO", "N"}:
+        return "NO"
+    return None
+
+
+def _condition_family_for_bot_eval(condition):
+    text = str(condition or "").strip().lower()
+    if text == "exact":
+        return "exact"
+    if text in {"at_or_above", "at_or_below"}:
+        return "directional"
+    if text == "range":
+        return "range"
+    return text or "unknown_condition"
+
+
+def _build_bot_evaluation_cohort_key(*, condition, side, city_mode=None, decision_gate=None):
+    family = _condition_family_for_bot_eval(condition)
+    side_label = side or "UNKNOWN_SIDE"
+    mode = str(city_mode or "unknown_mode").strip().lower() or "unknown_mode"
+    gate = str(decision_gate or "live_or_passed_gate").strip() or "live_or_passed_gate"
+    return f"{family}/{side_label}/mode={mode}/gate={gate}"
 
 
 def _load_bot_evaluation_index():
@@ -1496,6 +1541,8 @@ def _record_bot_evaluation_from_skip_entry(entry):
             threshold_high=entry.get("threshold_high"),
             unit=entry.get("unit"),
             edge_pct=entry.get("edge_pct"),
+            side=entry.get("side"),
+            city_mode=entry.get("city_mode"),
             skip_or_block_reason=skip_reason,
             decision_gate=decision_gate,
             decision_confidence=entry.get("our_prob"),
@@ -22283,11 +22330,15 @@ def main(client):
                 c.get("eval_key"),
                 False,
                 city=city,
+                city_mode=c.get("city_mode"),
                 date_iso=c["date_iso"],
                 condition=condition_name,
+                side=side,
                 threshold=threshold,
                 threshold_high=threshold_high,
                 unit=c["unit"],
+                condition_id=c.get("condition_id"),
+                market_id=c.get("market_id"),
                 edge_pct=round(edge_pct, 2),
                 skip_or_block_reason="cohort_paused",
                 decision_gate=WELLINGTON_EXACT_NO_PAUSE_ID,
@@ -22377,11 +22428,15 @@ def main(client):
                 c.get("eval_key"),
                 False,
                 city=city,
+                city_mode=c.get("city_mode"),
                 date_iso=c["date_iso"],
                 condition=condition_name,
+                side=side,
                 threshold=threshold,
                 threshold_high=threshold_high,
                 unit=c["unit"],
+                condition_id=c.get("condition_id"),
+                market_id=c.get("market_id"),
                 edge_pct=round(edge_pct, 2),
                 skip_or_block_reason="shadow_only_override",
                 decision_gate=EXACT_NO_GLOBAL_SHADOW_ID,
@@ -22518,6 +22573,8 @@ def main(client):
             "mkt_price": round(mkt_price * 100, 1), "edge_pct": round(edge_pct, 1),
             "position": position, "volume_24h": c["volume_24h"],
             "liquidity": c["liquidity"],
+            "market_id": c.get("market_id"),
+            "condition_id": c.get("condition_id"),
             "station": RESOLUTION_STATIONS.get(city, {}).get("name", "?"),
             "resolution_icao": resolution_meta.get("icao", "?"),
             "resolution_wu_url": resolution_meta.get("wu_url", ""),
@@ -22668,11 +22725,15 @@ def main(client):
                         trade.get("eval_key"),
                         False,
                         city=trade.get("city"),
+                        city_mode=trade.get("city_mode"),
                         date_iso=trade.get("date"),
                         condition=trade.get("condition"),
+                        side=trade.get("side"),
                         threshold=trade.get("threshold"),
                         threshold_high=trade.get("threshold_high"),
                         unit=trade.get("unit"),
+                        condition_id=trade.get("condition_id"),
+                        market_id=trade.get("market_id"),
                         edge_pct=trade.get("edge_pct"),
                         skip_or_block_reason=guard_skip_reason,
                         decision_gate=guard_skip_reason,
@@ -22701,11 +22762,15 @@ def main(client):
                 trade.get("eval_key"),
                 True,
                 city=trade.get("city"),
+                city_mode=trade.get("city_mode"),
                 date_iso=trade.get("date"),
                 condition=trade.get("condition"),
+                side=trade.get("side"),
                 threshold=trade.get("threshold"),
                 threshold_high=trade.get("threshold_high"),
                 unit=trade.get("unit"),
+                condition_id=trade.get("condition_id"),
+                market_id=trade.get("market_id"),
                 edge_pct=trade.get("edge_pct"),
                 skip_or_block_reason=None,
                 decision_gate=None,

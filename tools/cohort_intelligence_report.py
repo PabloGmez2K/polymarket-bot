@@ -23,13 +23,17 @@ DEFAULT_DATA_DIR = REPO_ROOT / "data"
 EXACT_NO_NEAR_THRESHOLD_C = 1.5
 MIN_REVIEW_SAMPLE = 10
 DIRECTIONAL_FORWARD_CAPTURE_START_UTC = "2026-05-26T16:15:11Z"
+LIVE_SIDE_VISIBILITY_FORWARD_START_UTC = "2026-05-26T20:58:28Z"
 VERDICTS = {
     "DATA_QUALITY_BLOCKER",
     "INSUFFICIENT_SAMPLE",
+    "ACCUMULATING_FORWARD_EVIDENCE",
     "KEEP_SHADOW",
     "REVIEW_BLOCK_LIVE",
-    "CANDIDATE_FOR_CANARY_REVIEW",
     "REVIEW_OPUS",
+    "REVIEW_LIVE_COHORT_QUALITY",
+    "REVIEW_LIVE_CONTAINMENT",
+    "CANDIDATE_FOR_CANARY_REVIEW",
 }
 LOG_ONLY_DISCLAIMER = (
     "LOG_ONLY: manual recommendations only. No BUY/SELL/SKIP, BANKROLL, sizing, "
@@ -76,6 +80,12 @@ def is_forward_directional_row(row: dict[str, Any]) -> bool:
     ts = parse_utc_timestamp(row.get("last_seen") or row.get("ts_utc"))
     start = parse_utc_timestamp(DIRECTIONAL_FORWARD_CAPTURE_START_UTC)
     return bool(ts and start and ts >= start)
+
+
+def is_live_side_forward_row(row: dict[str, Any]) -> bool:
+    ts = parse_utc_timestamp(row.get("last_seen") or row.get("ts_utc"))
+    start = parse_utc_timestamp(LIVE_SIDE_VISIBILITY_FORWARD_START_UTC)
+    return bool(ts and start and ts >= start and row.get("side_recorded") is True)
 
 
 def as_float(value: Any) -> float | None:
@@ -241,6 +251,9 @@ def distance_band(value: float | None) -> str:
 
 
 def infer_side(eval_row: dict[str, Any], skip_row: dict[str, Any] | None, resolution: dict[str, Any] | None) -> str | None:
+    recorded_side = normalize_side(eval_row.get("side"))
+    if recorded_side:
+        return recorded_side
     if skip_row:
         side = normalize_side(skip_row.get("side"))
         if side:
@@ -265,6 +278,11 @@ def infer_gate(eval_row: dict[str, Any], skip_row: dict[str, Any] | None, resolu
         return "SHADOW"
     if bool(eval_row.get("would_buy")):
         return "LIVE"
+    city_mode = normalize_text(eval_row.get("city_mode")).lower()
+    if city_mode == "blocked":
+        return "BLOCK"
+    if city_mode == "shadow":
+        return "SHADOW"
     if resolution:
         mode = normalize_text(resolution.get("city_mode_at_record_time")).lower()
         if mode == "blocked":
@@ -313,6 +331,7 @@ def build_signal_rows(
         resolution = resolution_index.get(key)
         skip_row = skip_index.get(key)
         side = infer_side(merged, skip_row, resolution)
+        recorded_side = normalize_side(merged.get("side"))
         outcome = normalize_side(resolution.get("outcome")) if resolution else None
         resolved = bool(resolution and resolution.get("resolved") and outcome in {"YES", "NO"})
         win = (side == outcome) if resolved and side else None
@@ -329,6 +348,11 @@ def build_signal_rows(
                 "date_iso": merged.get("date_iso") or merged.get("date"),
                 "condition": normalize_condition(merged.get("condition")),
                 "side": side,
+                "side_recorded": bool(recorded_side),
+                "city_mode": normalize_text(merged.get("city_mode")).lower() or None,
+                "cohort_key": normalize_text(merged.get("cohort_key")) or None,
+                "evaluation_source": normalize_text(merged.get("evaluation_source")) or None,
+                "would_buy": bool(merged.get("would_buy")),
                 "threshold": merged.get("threshold"),
                 "threshold_high": merged.get("threshold_high"),
                 "unit": merged.get("unit"),
@@ -372,6 +396,11 @@ def build_signal_rows(
                 "date_iso": resolution.get("date") or parsed.get("date_iso"),
                 "condition": condition,
                 "side": side,
+                "side_recorded": False,
+                "city_mode": normalize_text(resolution.get("city_mode_at_record_time")).lower() or None,
+                "cohort_key": None,
+                "evaluation_source": "resolution_only",
+                "would_buy": False,
                 "threshold": parsed.get("threshold"),
                 "threshold_high": parsed.get("threshold_high"),
                 "unit": parsed.get("unit"),
@@ -739,6 +768,101 @@ def select_cohorts(signals: list[dict[str, Any]]) -> dict[str, list[dict[str, An
     return cohorts
 
 
+def condition_family(row: dict[str, Any]) -> str:
+    condition = normalize_condition(row.get("condition"))
+    if condition == "exact":
+        return "exact"
+    if condition in {"at_or_above", "at_or_below"}:
+        return "directional"
+    if condition == "range":
+        return "range"
+    return condition or "unknown_condition"
+
+
+def surviving_cohort_name(row: dict[str, Any]) -> str:
+    return f"{condition_family(row)} / {normalize_side(row.get('side')) or 'UNKNOWN'}"
+
+
+def live_side_verdict(metrics: dict[str, Any], *, protected_exact_no: bool) -> str:
+    n_unique = int(metrics.get("n_closed_calibration_unique", 0) or 0)
+    if n_unique < MIN_REVIEW_SAMPLE:
+        return "ACCUMULATING_FORWARD_EVIDENCE" if int(metrics.get("n_eval_forward", 0) or 0) else "INSUFFICIENT_SAMPLE"
+    gate = normalize_text(metrics.get("dominant_gate"))
+    wr = metrics.get("wr_calibration")
+    gap = metrics.get("calibration_gap")
+    sim = metrics.get("pnl_simulated_unit_calibration")
+    negative = bool(sim is not None and sim < 0)
+    positive = bool(sim is not None and sim > 0)
+    if gate == "LIVE" and (((wr is not None and wr <= 0.40) or (gap is not None and gap >= 0.20)) and negative):
+        return "REVIEW_LIVE_CONTAINMENT"
+    if gate == "LIVE":
+        return "REVIEW_LIVE_COHORT_QUALITY"
+    if protected_exact_no:
+        return "ACCUMULATING_FORWARD_EVIDENCE"
+    if (
+        gate in {"SHADOW", "UNKNOWN"}
+        and wr is not None
+        and wr >= 0.60
+        and gap is not None
+        and gap <= 0.10
+        and positive
+    ):
+        return "CANDIDATE_FOR_CANARY_REVIEW"
+    return "ACCUMULATING_FORWARD_EVIDENCE"
+
+
+def build_surviving_cohorts_by_side(signals: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    forward_rows = [row for row in signals if is_live_side_forward_row(row)]
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for row in forward_rows:
+        name = surviving_cohort_name(row)
+        mode = normalize_text(row.get("city_mode")).lower() or "unknown"
+        grouped[(name, mode)].append(row)
+
+    metrics_rows: list[dict[str, Any]] = []
+    for (name, mode), rows in grouped.items():
+        base = cohort_metrics(name, rows, [])
+        gates = [normalize_text(row.get("gate_current")) for row in rows if normalize_text(row.get("gate_current"))]
+        dominant_gate = max(set(gates), key=gates.count) if gates else "UNKNOWN"
+        protected_exact_no = name == "exact / NO"
+        candidate_allowed = not protected_exact_no
+        verdict = live_side_verdict(
+            {
+                **base,
+                "n_eval_forward": len(rows),
+                "dominant_gate": dominant_gate,
+            },
+            protected_exact_no=protected_exact_no,
+        )
+        metrics_rows.append(
+            {
+                "cohort": name,
+                "city_mode": mode,
+                "n_eval_forward": len(rows),
+                "n_would_buy": sum(1 for row in rows if row.get("would_buy")),
+                "n_shadow": sum(1 for row in rows if row.get("gate_current") == "SHADOW"),
+                "n_blocked": sum(1 for row in rows if row.get("gate_current") == "BLOCK"),
+                "n_resolved_calibration_unique": base["n_closed_calibration_unique"],
+                "wr_calibration": base["wr_calibration"],
+                "pnl_simulated_unit_calibration": base["pnl_simulated_unit_calibration"],
+                "calibration_gap": base["calibration_gap"],
+                "dominant_gate": dominant_gate,
+                "candidate_allowed": candidate_allowed,
+                "protected_reason": "EXACT_NO_REMAINS_SHADOW_PROTECTED" if protected_exact_no else None,
+                "manual_review_state": verdict,
+                "last_seen": base["last_seen"],
+            }
+        )
+    metrics_rows.sort(
+        key=lambda row: (
+            row["cohort"] == "exact / NO",
+            row["cohort"],
+            row["city_mode"],
+        )
+    )
+    return metrics_rows
+
+
 def build_directional_subcohorts(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -803,6 +927,7 @@ def build_report(
     lifecycle_payload = read_json(trade_lifecycle)
     signals = build_signal_rows(eval_rows, skip_rows, resolution_rows)
     lifecycle_rows = lifecycle_signal_rows(lifecycle_payload)
+    surviving_by_side = build_surviving_cohorts_by_side(signals)
 
     cohorts = select_cohorts(signals)
     executed_cohorts = select_cohorts(lifecycle_rows)
@@ -869,6 +994,15 @@ def build_report(
             "exact_no_near_threshold_c": EXACT_NO_NEAR_THRESHOLD_C,
             "min_review_sample": MIN_REVIEW_SAMPLE,
         },
+        "live_side_visibility_forward": {
+            "forward_visibility_start": LIVE_SIDE_VISIBILITY_FORWARD_START_UTC,
+            "n_forward_rows_with_recorded_side": sum(1 for row in signals if is_live_side_forward_row(row)),
+            "note": (
+                "SURVIVING_COHORTS_BY_SIDE uses only bot_signal_evaluations rows at or after "
+                f"{LIVE_SIDE_VISIBILITY_FORWARD_START_UTC} with side explicitly recorded by the live evaluator. "
+                "No historical side reconstruction is used."
+            ),
+        },
         "directional_forward_capture": {
             "forward_capture_start": DIRECTIONAL_FORWARD_CAPTURE_START_UTC,
             "directional_forward_seen": directional_forward_metrics["n_seen_raw"],
@@ -880,6 +1014,7 @@ def build_report(
             ),
         },
         "main_cohorts": main_metrics,
+        "surviving_cohorts_by_side": surviving_by_side,
         "directional_no_forward": directional_forward_metrics,
         "directional_no_forward_subcohorts": directional_forward_sub_metrics,
         "directional_no_subcohorts": sub_metrics,
@@ -948,6 +1083,41 @@ def render_markdown(report: dict[str, Any]) -> str:
         )
     best = report.get("best_directional_no_subcohort")
     forward = report.get("directional_forward_capture", {})
+    side_forward = report.get("live_side_visibility_forward", {})
+    surviving = report.get("surviving_cohorts_by_side", [])
+    lines.extend(
+        [
+            "",
+            "## SURVIVING_COHORTS_BY_SIDE",
+            "",
+            f"- forward_visibility_start = `{side_forward.get('forward_visibility_start')}`",
+            f"- n_forward_rows_with_recorded_side = `{side_forward.get('n_forward_rows_with_recorded_side', 0)}`",
+            f"- {side_forward.get('note', '')}",
+            "",
+            "| cohort | city_mode | n_eval_forward | would_buy | shadow | blocked | resolved_cal_unique | WR cal | sim_unit_pnl cal | gate | candidate_allowed | state |",
+            "|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|---|",
+        ]
+    )
+    if surviving:
+        for row in surviving:
+            lines.append(
+                "| {cohort} | {mode} | {n_eval} | {n_buy} | {n_shadow} | {n_blocked} | {n_resolved} | {wr} | {sim} | {gate} | {candidate} | {state} |".format(
+                    cohort=row["cohort"],
+                    mode=row["city_mode"],
+                    n_eval=row["n_eval_forward"],
+                    n_buy=row["n_would_buy"],
+                    n_shadow=row["n_shadow"],
+                    n_blocked=row["n_blocked"],
+                    n_resolved=row["n_resolved_calibration_unique"],
+                    wr=pct_text(row["wr_calibration"]),
+                    sim=money_text(row["pnl_simulated_unit_calibration"]),
+                    gate=row["dominant_gate"],
+                    candidate="YES" if row["candidate_allowed"] else "NO",
+                    state=row["manual_review_state"],
+                )
+            )
+    else:
+        lines.append("| none yet | n/a | 0 | 0 | 0 | 0 | 0 | n/a | n/a | n/a | n/a | ACCUMULATING_FORWARD_EVIDENCE |")
     lines.extend(["", "## Directional NO Best Subcohort", ""])
     if best:
         lines.append(

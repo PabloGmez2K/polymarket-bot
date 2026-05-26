@@ -72,6 +72,23 @@ backfilled into calibration. They can remain visible as executed P&L only, but
 promotion gates for directional NO use only forward linked outcomes from the
 forward start above.
 
+## Live Side Visibility Forward Epoch
+
+Forward visibility for side-segmented surviving cohorts starts at
+`2026-05-26T20:58:28Z`.
+
+From this epoch onward, future `bot_signal_evaluations.jsonl` rows written after
+the live evaluator has chosen a side persist the real `side` (`YES` or `NO`),
+`city_mode`, `evaluation_source`, `cohort_schema_version` and a stable
+`cohort_key`. The writer only records fields already available at that point in
+the existing evaluation path; it does not change admission, gates, sizing,
+BUY/SELL/SKIP or any risk policy.
+
+`SURVIVING_COHORTS_BY_SIDE` uses only rows at or after this epoch with an
+explicit recorded side. It does not reconstruct historical side from old rows.
+`exact / NO` remains shadow-protected and is excluded from recovery candidates,
+although it can appear in the block for traceability.
+
 ## Metrics
 
 For each cohort the report emits:

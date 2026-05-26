@@ -184,6 +184,8 @@ def build_cohort_intelligence_summary(args: argparse.Namespace) -> dict[str, Any
             "ok": True,
             "generated_at": report.get("generated_at"),
             "main_cohorts": report.get("main_cohorts", []),
+            "live_side_visibility_forward": report.get("live_side_visibility_forward", {}),
+            "surviving_cohorts_by_side": report.get("surviving_cohorts_by_side", []),
             "best_directional_no_subcohort": report.get("best_directional_no_subcohort"),
             "summary_verdicts": report.get("summary_verdicts", {}),
             "directional_no_next_trigger": report.get("directional_no_next_trigger", {}),
@@ -224,6 +226,8 @@ def render_cohort_intelligence_telegram(summary: dict[str, Any]) -> str:
     verdicts = summary.get("summary_verdicts", {})
     trigger = summary.get("directional_no_next_trigger", {})
     forward = summary.get("directional_forward_capture", {})
+    side_forward = summary.get("live_side_visibility_forward", {})
+    surviving = summary.get("surviving_cohorts_by_side", [])
     lines = [
         "",
         "<b>Cohort Intelligence (LOG_ONLY)</b>",
@@ -280,6 +284,23 @@ def render_cohort_intelligence_telegram(summary: dict[str, Any]) -> str:
         f"cal={forward.get('directional_forward_resolved_calibration_unique', 0)} | "
         f"{forward.get('status', 'CAPTURE_ACTIVE_NO_RESOLUTIONS_YET')}"
     )
+    if surviving:
+        compact_rows = []
+        for row in surviving[:4]:
+            compact_rows.append(
+                f"{row.get('cohort')}/{row.get('city_mode')}: "
+                f"eval={row.get('n_eval_forward', 0)} buy={row.get('n_would_buy', 0)} "
+                f"sh={row.get('n_shadow', 0)} blk={row.get('n_blocked', 0)} "
+                f"cal={row.get('n_resolved_calibration_unique', 0)} "
+                f"-> {row.get('manual_review_state', 'ACCUMULATING_FORWARD_EVIDENCE')}"
+            )
+        lines.append("surviving by side: " + " | ".join(compact_rows))
+    else:
+        lines.append(
+            "surviving by side: "
+            f"start={side_forward.get('forward_visibility_start', 'n/a')} | "
+            "no forward rows with recorded side yet"
+        )
     lines.append(
         "trigger: Opus review only when directional NO forward linked outcomes reach CANDIDATE_FOR_CANARY_REVIEW; "
         f"missing_to_min_sample={trigger.get('resolutions_missing_for_min_sample', 0)}."
