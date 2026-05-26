@@ -21,7 +21,7 @@ def eval_row(
     forecast: float = 31.6,
     our_prob: float = 84.0,
     mkt_prob: float = 52.0,
-    gate: str = "SHADOW_EXACT_NO_NEAR_THRESHOLD",
+    gate: str = "SHADOW_EXACT_NO_GLOBAL",
 ) -> dict:
     return {
         "ts_utc": "2026-05-26T00:00:00+00:00",
@@ -35,7 +35,7 @@ def eval_row(
         "unit": unit,
         "would_buy": False,
         "bot_edge_pct_at_signal": round(our_prob - mkt_prob, 2),
-        "skip_or_block_reason": "shadow_only_override" if gate == "SHADOW_EXACT_NO_NEAR_THRESHOLD" else None,
+        "skip_or_block_reason": "shadow_only_override" if gate in {"SHADOW_EXACT_NO_GLOBAL", "SHADOW_EXACT_NO_NEAR_THRESHOLD"} else None,
         "decision_gate": gate,
         "decision_confidence": our_prob,
         "our_prob": our_prob,

@@ -25,6 +25,11 @@ Minimum v1 cohorts:
 - `directional NO`: `condition in {at_or_above, at_or_below}`, side `NO`
 - directional NO subcohorts by city, source, and distance band
 
+Current live policy: new executable `condition=exact`, side `NO` signals are
+shadow-only globally via `SHADOW_EXACT_NO_GLOBAL`. The near/far split remains a
+reporting segment based on distance telemetry; it is no longer an execution
+boundary. `PAUSE_WELLINGTON_EXACT_NO` remains as a redundant city-scoped pause.
+
 ## Metrics
 
 For closed/resolved rows the report emits:

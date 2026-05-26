@@ -223,7 +223,7 @@ def infer_side(eval_row: dict[str, Any], skip_row: dict[str, Any] | None, resolu
         if side:
             return side
     gate = normalize_text(eval_row.get("decision_gate"))
-    if gate in {"SHADOW_EXACT_NO_NEAR_THRESHOLD", "PAUSE_WELLINGTON_EXACT_NO"}:
+    if gate in {"SHADOW_EXACT_NO_GLOBAL", "SHADOW_EXACT_NO_NEAR_THRESHOLD", "PAUSE_WELLINGTON_EXACT_NO"}:
         return "NO"
     condition = normalize_condition(eval_row.get("condition"))
     if condition in {"exact", "at_or_above", "at_or_below"}:
@@ -236,7 +236,7 @@ def infer_gate(eval_row: dict[str, Any], skip_row: dict[str, Any] | None, resolu
     skip_reason = normalize_text(eval_row.get("skip_or_block_reason"))
     if gate == "PAUSE_WELLINGTON_EXACT_NO":
         return "BLOCK"
-    if gate == "SHADOW_EXACT_NO_NEAR_THRESHOLD" or skip_reason == "shadow_only_override":
+    if gate in {"SHADOW_EXACT_NO_GLOBAL", "SHADOW_EXACT_NO_NEAR_THRESHOLD"} or skip_reason == "shadow_only_override":
         return "SHADOW"
     if skip_row and normalize_text(skip_row.get("skip_reason")) == "shadow_only_override":
         return "SHADOW"
