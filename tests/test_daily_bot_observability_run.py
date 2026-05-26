@@ -311,6 +311,40 @@ def test_runner_db_throughput_report_adds_log_only_digest_section(monkeypatch, t
     assert "Revision manual" in result["telegram_preview"]
 
 
+def test_runner_includes_cohort_intelligence_by_default(monkeypatch):
+    module = load_tool()
+    monkeypatch.setattr(module.leaderboard_pnl_snapshot, "build_snapshot", lambda args: snapshot())
+    monkeypatch.setattr(
+        module,
+        "build_cohort_intelligence_summary",
+        lambda args: {
+            "ok": True,
+            "main_cohorts": [
+                {"cohort": "exact/NO near-threshold", "n_closed": 10, "wr_observed": 0.3, "calibration_gap": 0.5, "pnl_simulated_unit": -2.0, "verdict": "REVIEW_BLOCK_LIVE"},
+                {"cohort": "exact/NO far", "n_closed": 2, "wr_observed": 0.5, "calibration_gap": 0.1, "pnl_simulated_unit": 0.1, "verdict": "INSUFFICIENT_SAMPLE"},
+                {"cohort": "directional NO", "n_closed": 10, "wr_observed": 0.7, "calibration_gap": -0.05, "pnl_simulated_unit": 2.0, "verdict": "CANDIDATE_FOR_CANARY_REVIEW"},
+            ],
+            "best_directional_no_subcohort": {"cohort": "directional NO / city=Tokyo", "n_closed": 10, "wr_observed": 0.7, "verdict": "CANDIDATE_FOR_CANARY_REVIEW"},
+            "summary_verdicts": {
+                "EXACT_NO_NEAR_SHADOW_STILL_JUSTIFIED": "YES",
+                "DIRECTIONAL_NO_CANARY_CANDIDATE_FOUND": "YES",
+                "OPUS_REVIEW_REQUIRED_NOW": "YES",
+            },
+            "directional_no_next_trigger": {"resolutions_missing_for_min_sample": 0},
+        },
+    )
+
+    with local_tmp_dir() as tmp_dir:
+        path = tmp_dir / "leaderboard_pnl_snapshots.jsonl"
+        args = module.parse_args(["--dry-run", "--snapshot-file", str(path)])
+        result = module.build_run(args)
+
+    assert result["cohort_intelligence"]["ok"] is True
+    assert "Cohort Intelligence (LOG_ONLY)" in result["telegram_preview"]
+    assert "directional_candidate=YES" in result["telegram_preview"]
+    assert "No BUY/SELL/SKIP" in result["telegram_preview"]
+
+
 def test_runner_json_cli_with_fixture_path():
     with local_tmp_dir() as tmp_dir:
         path = tmp_dir / "leaderboard_pnl_snapshots.jsonl"

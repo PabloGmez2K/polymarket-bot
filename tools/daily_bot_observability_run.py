@@ -19,6 +19,13 @@ import db_throughput_report
 import leaderboard_pnl_snapshot
 
 try:
+    import cohort_intelligence_report as _cohort
+    _COHORT_AVAILABLE = True
+except Exception:
+    _cohort = None  # type: ignore[assignment]
+    _COHORT_AVAILABLE = False
+
+try:
     import traders_activity_profile as _tap
     _TAP_AVAILABLE = True
 except Exception:
@@ -164,6 +171,103 @@ def build_traders_activity_summary(args: argparse.Namespace) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)[:300]}
 
 
+def build_cohort_intelligence_summary(args: argparse.Namespace) -> dict[str, Any]:
+    """Build cohort intelligence summary. Fail-open; LOG_ONLY only."""
+    if not getattr(args, "cohort_intelligence", True):
+        return {"ok": False, "error": "disabled"}
+    if not _COHORT_AVAILABLE or _cohort is None:
+        return {"ok": False, "error": "module_not_available"}
+    try:
+        data_dir = Path(args.cohort_data_dir)
+        report = _cohort.build_report(data_dir=data_dir)
+        return {
+            "ok": True,
+            "generated_at": report.get("generated_at"),
+            "main_cohorts": report.get("main_cohorts", []),
+            "best_directional_no_subcohort": report.get("best_directional_no_subcohort"),
+            "summary_verdicts": report.get("summary_verdicts", {}),
+            "directional_no_next_trigger": report.get("directional_no_next_trigger", {}),
+        }
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:300]}
+
+
+def render_cohort_intelligence_telegram(summary: dict[str, Any]) -> str:
+    """Render compact cohort intelligence section for Telegram."""
+    error = summary.get("error", "")
+    if not summary.get("ok"):
+        if error == "disabled":
+            return ""
+        return (
+            "\n\n<b>Cohort Intelligence (LOG_ONLY)</b>"
+            f"\nError: <code>{str(error)[:120]}</code>"
+        )
+
+    def fmt_pct(value: Any) -> str:
+        try:
+            return f"{float(value) * 100:.1f}%"
+        except (TypeError, ValueError):
+            return "n/a"
+
+    def fmt_money(value: Any) -> str:
+        try:
+            return f"{float(value):+.2f}"
+        except (TypeError, ValueError):
+            return "n/a"
+
+    rows = {row.get("cohort"): row for row in summary.get("main_cohorts", [])}
+    near = rows.get("exact/NO near-threshold", {})
+    far = rows.get("exact/NO far", {})
+    directional = rows.get("directional NO", {})
+    best = summary.get("best_directional_no_subcohort") or {}
+    verdicts = summary.get("summary_verdicts", {})
+    trigger = summary.get("directional_no_next_trigger", {})
+    lines = [
+        "",
+        "<b>Cohort Intelligence (LOG_ONLY)</b>",
+        (
+            "exact/NO near: "
+            f"n={near.get('n_closed', 0)} WR={fmt_pct(near.get('wr_observed'))} "
+            f"gap={fmt_pct(near.get('calibration_gap'))} "
+            f"pnl={fmt_money(near.get('pnl_simulated_unit'))} "
+            f"-> {near.get('verdict', 'INSUFFICIENT_SAMPLE')}"
+        ),
+        (
+            "exact/NO far: "
+            f"n={far.get('n_closed', 0)} WR={fmt_pct(far.get('wr_observed'))} "
+            f"gap={fmt_pct(far.get('calibration_gap'))} "
+            f"pnl={fmt_money(far.get('pnl_simulated_unit'))} "
+            f"-> {far.get('verdict', 'INSUFFICIENT_SAMPLE')}"
+        ),
+        (
+            "directional NO: "
+            f"n={directional.get('n_closed', 0)} WR={fmt_pct(directional.get('wr_observed'))} "
+            f"gap={fmt_pct(directional.get('calibration_gap'))} "
+            f"pnl={fmt_money(directional.get('pnl_simulated_unit'))} "
+            f"-> {directional.get('verdict', 'INSUFFICIENT_SAMPLE')}"
+        ),
+    ]
+    if best:
+        lines.append(
+            "best subcohort: "
+            f"{best.get('cohort')} | n={best.get('n_closed', 0)} "
+            f"WR={fmt_pct(best.get('wr_observed'))} "
+            f"-> {best.get('verdict', 'INSUFFICIENT_SAMPLE')}"
+        )
+    lines.append(
+        "verdicts: "
+        f"exact_near_shadow={verdicts.get('EXACT_NO_NEAR_SHADOW_STILL_JUSTIFIED', 'INSUFFICIENT_SAMPLE')} | "
+        f"directional_candidate={verdicts.get('DIRECTIONAL_NO_CANARY_CANDIDATE_FOUND', 'INSUFFICIENT_SAMPLE')} | "
+        f"opus_now={verdicts.get('OPUS_REVIEW_REQUIRED_NOW', 'NO')}"
+    )
+    lines.append(
+        "trigger: Opus review only when directional NO reaches CANDIDATE_FOR_CANARY_REVIEW; "
+        f"missing_to_min_sample={trigger.get('resolutions_missing_for_min_sample', 0)}."
+    )
+    lines.append("Manual review only. No BUY/SELL/SKIP, BANKROLL, sizing, city modes, whitelist, env vars, or Fase C.")
+    return "\n".join(lines)
+
+
 def render_traders_activity_telegram(summary: dict[str, Any]) -> str:
     """Render compact traders activity section for Telegram. Returns empty string if disabled."""
     error = summary.get("error", "")
@@ -222,7 +326,13 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
 
     traders_activity = build_traders_activity_summary(args)
     traders_section = render_traders_activity_telegram(traders_activity)
-    extended_preview = digest["telegram_preview"] + (traders_section if traders_section else "")
+    cohort_intelligence = build_cohort_intelligence_summary(args)
+    cohort_section = render_cohort_intelligence_telegram(cohort_intelligence)
+    extended_preview = (
+        digest["telegram_preview"]
+        + (cohort_section if cohort_section else "")
+        + (traders_section if traders_section else "")
+    )
 
     telegram_send_result = {"sent": False, "reason": "not_attempted"}
     if args.send_telegram_manual:
@@ -241,6 +351,7 @@ def build_run(args: argparse.Namespace) -> dict[str, Any]:
         "usable_for_trend": True,
         "usable_for_bankroll": False,
         "db_throughput": db_summary,
+        "cohort_intelligence": cohort_intelligence,
         "traders_activity": traders_activity,
         "decision": {
             "bankroll": "No BANKROLL increase.",
@@ -325,6 +436,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "Include a compact traders activity section (local-registry cohort, max "
             f"{TRADERS_ACTIVITY_MAX_WALLETS} wallets). LOG_ONLY. Fail-open."
         ),
+    )
+    parser.add_argument(
+        "--cohort-intelligence",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Include Cohort Intelligence Loop v1 in the daily digest. LOG_ONLY, fail-open.",
+    )
+    parser.add_argument(
+        "--cohort-data-dir",
+        default="data",
+        help=argparse.SUPPRESS,
     )
     args = parser.parse_args(argv)
     if not args.write_snapshot:
