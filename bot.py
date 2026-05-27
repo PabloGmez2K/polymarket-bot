@@ -17597,6 +17597,9 @@ RESOLUTION_STATIONS = {
     "Wuhan":          {"lat": 30.7748,  "lon": 114.2137, "name": "Tianhe"},
     # Añadidas en v10.6.21 — expansion QUALITY_TRADER_CITIES_WHITELIST (sesion 200)
     "Houston":        {"lat": 29.9902,  "lon": -95.3368,  "name": "George Bush Intercontinental"},
+    # Denver: Polymarket/WU settlement anchor is Buckley Space Force Base (KBKF);
+    # FAA-derived airport reference point: 39-42-06.3400N, 104-45-07.0600W.
+    "Denver":         {"lat": 39.701761, "lon": -104.751961, "name": "Buckley Space Force Base (KBKF)"},
     # Añadidas en v10.6.22 — expansion QUALITY_TRADER_CITIES_WHITELIST (sesion 201)
     # Tel Aviv ya en RESOLUTION_STATIONS + ICAO + noaa_station_id; añadida a whitelist en v10.6.27 (sesion 213)
     # Jakarta: WIHH (Halim Perdanakusuma) — Polymarket resuelve contra esa estación vía WU, NO WIII/Soekarno-Hatta
@@ -17669,6 +17672,8 @@ RESOLUTION_ICAO = {
     "Wuhan":          {"icao": "ZHHH", "wu_url": _wu_history_url("ZHHH")},
     # Añadidas en v10.6.21 — ICAO pendiente verificación Polymarket resolution source
     "Houston":        {"icao": "KIAH", "wu_url": _wu_history_url("KIAH")},
+    # Denver KBKF aligned for forward shadow validation; NOAA IDs not added until verified.
+    "Denver":         {"icao": "KBKF", "wu_url": _wu_history_url("KBKF")},
     # Añadidas en v10.6.22 — Polymarket resuelve contra WU; sin NOAA diario reciente
     # Jakarta: WIHH (Halim Perdanakusuma) — ISD 96749599999 confirmado sin CSV global-hourly 2026; GHCND ID000096745/IDM00096741 sin TMAX reportado en 2026 (yearly file)
     # Kuala Lumpur: WMKK (KLIA) — ISD 48650099999 confirmado sin CSV global-hourly 2026; GHCND MYM00048650 sin TMAX reportado en 2026

@@ -6206,6 +6206,19 @@ def run_tests():
         and "and not needs_manual_proxy_review" in code
         and "auto_canary_revoked" in code,
     )
+    denver_observed_match = re.search(r"OBSERVED_AUDIT_CITIES\s*=\s*\{(?P<body>.*?)\n\}", code, re.S)
+    test(
+        "v10.6.51: Denver en RESOLUTION_STATIONS con Buckley Space Force Base KBKF",
+        '"Denver":         {"lat": 39.701761, "lon": -104.751961, "name": "Buckley Space Force Base (KBKF)"}' in code,
+    )
+    test(
+        "v10.6.51: Denver en RESOLUTION_ICAO con KBKF y WU history",
+        '"Denver":         {"icao": "KBKF", "wu_url": _wu_history_url("KBKF")}' in code,
+    )
+    test(
+        "v10.6.51: Denver no queda en OBSERVED_AUDIT_CITIES sin NOAA IDs verificados",
+        denver_observed_match is not None and '"Denver"' not in denver_observed_match.group("body"),
+    )
 
     # ---- v10.6.40: guard SL_intra para condition=exact + days<=N (Opus, sesion 246) ----
     test(
