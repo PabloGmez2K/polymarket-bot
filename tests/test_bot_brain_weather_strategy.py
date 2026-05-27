@@ -254,8 +254,50 @@ def test_directional_no_separate_from_exact_no(tmp_path: Path) -> None:
     # Only at_or_above and at_or_below count, not exact
     assert directional["directional_no_rows"] == 2
     assert directional["resolved_rows"] == 2
+    assert directional["status"] == "ACCUMULATING_RESOLVED_SAMPLE"
     assert directional["live_promotion_authorized"] is False
     assert directional["shadow_exact_no_global_active"] is True
+
+
+# ── 8b. DIRECTIONAL_NO_FORWARD status taxonomy ───────────────────────────────
+
+def test_directional_no_artifact_missing_when_no_file(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    result = build_weather_strategy_result(data_dir, repo_root, now=NOW)
+    registry = result["weather_experiment_registry"]
+    directional = next(e for e in registry["experiments"] if e["key"] == "DIRECTIONAL_NO_FORWARD")
+    assert directional["status"] == "ARTIFACT_MISSING"
+    assert directional["artifact_present"] is False
+
+
+def test_directional_no_no_matching_rows_when_exact_only(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    # BSR has exact/NO only — no at_or_above or at_or_below
+    _write_jsonl(data_dir / "blocked_signals_resolutions.jsonl", [
+        {"match_key": "k1", "city": "Tokyo", "condition": "exact", "side": "NO", "win_for_trader": True},
+        {"match_key": "k2", "city": "Paris", "condition": "exact", "side": "YES", "win_for_trader": False},
+    ])
+    result = build_weather_strategy_result(data_dir, repo_root, now=NOW)
+    registry = result["weather_experiment_registry"]
+    directional = next(e for e in registry["experiments"] if e["key"] == "DIRECTIONAL_NO_FORWARD")
+    assert directional["status"] == "NO_MATCHING_ROWS_OBSERVED"
+    assert directional["artifact_present"] is True
+    assert directional["directional_no_rows"] == 0
+
+
+def test_directional_no_accumulating_unresolved(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    # at_or_above rows with no resolved outcome
+    _write_jsonl(data_dir / "blocked_signals_resolutions.jsonl", [
+        {"match_key": "k1", "city": "Tokyo", "condition": "at_or_above", "side": "NO"},
+        {"match_key": "k2", "city": "Paris", "condition": "at_or_below", "side": "NO"},
+    ])
+    result = build_weather_strategy_result(data_dir, repo_root, now=NOW)
+    registry = result["weather_experiment_registry"]
+    directional = next(e for e in registry["experiments"] if e["key"] == "DIRECTIONAL_NO_FORWARD")
+    assert directional["status"] == "ACCUMULATING_UNRESOLVED"
+    assert directional["directional_no_rows"] == 2
+    assert directional["resolved_rows"] == 0
 
 
 # ── 9. Provenance — diagnostic evidence stays diagnostic ─────────────────────
@@ -494,3 +536,187 @@ def test_found_lookup_includes_enriched_detail(tmp_path: Path) -> None:
     assert rec["close_action"] == "SELL"
     assert rec["classification"] == "pnl_diagnostic"
     assert rec["provenance_level"] == "pnl_diagnostic"
+
+
+# ── 16. Madrid May 25 — stop_loss enriched diagnostic flags ──────────────────
+
+def test_madrid_may25_enriched_stop_loss_flags(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    _write_json(data_dir / "trade_lifecycle.json", {
+        "records": [
+            {
+                "id": "tok52089",
+                "city": "Madrid",
+                "date": "2026-05-25",
+                "condition": "exact",
+                "side": "NO",
+                "token_id": "tok52089",
+                "entry_context": {"edge_pct": 38.4, "our_prob": 80.9, "forecast_max": 31.5},
+                "close_context": {
+                    "close_action": "SELL",
+                    "close_reason": "stop_loss",
+                    "pnl_cash": -13.94,
+                },
+            }
+        ]
+    })
+    result = build_weather_strategy_result(data_dir, repo_root, city="Madrid", date="2026-05-25", now=NOW)
+    lookup = result["trade_truth_ledger"]["city_date_lookup"]
+    assert lookup["status"] == "FOUND"
+    rec = lookup["records"][0]
+    assert rec["pnl_value"] == -13.94
+    assert rec["close_action"] == "SELL"
+    assert rec["close_reason"] == "stop_loss"
+    flags = rec.get("diagnostic_evidence_flags", [])
+    assert "DIAGNOSTIC_EXIT_DAMAGE_EVIDENCE_PRESENT" in flags
+    assert "DIAGNOSTIC_ALPHA_LOSS_EVIDENCE_PRESENT" in flags
+    assert "UNRESOLVED_BY_OUTCOME_JOIN_GAP" in flags
+    # token_id present so no SOURCE_OR_EPOCH_GAP
+    assert "SOURCE_OR_EPOCH_GAP" not in flags
+    assert rec.get("join_method") == "BLOCKED_match_key_absent"
+    assert rec.get("outcome_join_gap") == "match_key_absent_in_lifecycle_record"
+    assert rec.get("entry_edge_pct") == 38.4
+    assert rec.get("entry_our_prob") == 80.9
+    assert rec.get("entry_forecast_max") == 31.5
+
+
+def test_madrid_no_alpha_flag_when_no_entry_context(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    _write_json(data_dir / "trade_lifecycle.json", {
+        "records": [
+            {
+                "id": "tok1",
+                "city": "Madrid",
+                "date": "2026-05-25",
+                "token_id": "tok1",
+                "close_context": {"close_action": "SELL", "close_reason": "stop_loss", "pnl_cash": -5.0},
+            }
+        ]
+    })
+    result = build_weather_strategy_result(data_dir, repo_root, city="Madrid", date="2026-05-25", now=NOW)
+    rec = result["trade_truth_ledger"]["city_date_lookup"]["records"][0]
+    flags = rec.get("diagnostic_evidence_flags", [])
+    assert "DIAGNOSTIC_EXIT_DAMAGE_EVIDENCE_PRESENT" in flags
+    assert "DIAGNOSTIC_ALPHA_LOSS_EVIDENCE_PRESENT" not in flags
+
+
+# ── 17. Ledger join_key_analysis ─────────────────────────────────────────────
+
+def test_ledger_join_key_analysis_blocked_when_no_keys(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    # Records with id but no match_key or eval_key (real Railway schema)
+    _write_json(data_dir / "trade_lifecycle.json", {
+        "records": [
+            {"id": "t1", "token_id": "tok1", "city": "Madrid", "date": "2026-05-25"},
+            {"id": "t2", "token_id": "tok2", "city": "Seoul", "date": "2026-05-10"},
+        ]
+    })
+    result = build_weather_strategy_result(data_dir, repo_root, now=NOW)
+    jka = result["trade_truth_ledger"]["join_key_analysis"]
+    assert jka["lifecycle_to_postmortem"] == "EXACT_via_id_position_key_token_id"
+    assert "BLOCKED" in jka["lifecycle_to_resolutions"]
+    assert "BLOCKED" in jka["lifecycle_to_evaluations"]
+    assert jka["records_with_match_key"] == 0
+    assert jka["records_with_eval_key"] == 0
+    assert jka["records_with_token_id"] == 2
+    assert jka["outcome_resolution_available"] is False
+
+
+def test_ledger_join_key_partial_when_some_records_have_match_key(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    _write_json(data_dir / "trade_lifecycle.json", {
+        "records": [
+            {"id": "t1", "match_key": "mk1", "city": "Seoul"},
+            {"id": "t2", "city": "Paris"},
+        ]
+    })
+    result = build_weather_strategy_result(data_dir, repo_root, now=NOW)
+    jka = result["trade_truth_ledger"]["join_key_analysis"]
+    assert jka["records_with_match_key"] == 1
+    assert "PARTIAL_1" in jka["lifecycle_to_resolutions"]
+
+
+# ── 18. Price filter — edge_pct field and rich stats ─────────────────────────
+
+def test_price_filter_edge_pct_counted(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    _write_jsonl(data_dir / "price_filter_counterfactual_log_only.jsonl", [
+        {
+            "cycle_id": "2026-05-27T00:00", "eval_key": "Shanghai|2026-05-27|at_or_above|32|C",
+            "city": "Shanghai", "edge_pct": 8.5, "token_id_yes": "tok_y1", "token_id_no": "tok_n1",
+        },
+        {
+            "cycle_id": "2026-05-27T00:00", "eval_key": "Shanghai|2026-05-27|at_or_above|30|C",
+            "city": "Shanghai", "edge_pct": 3.0, "token_id_yes": "tok_y2", "token_id_no": "tok_n2",
+        },
+        {
+            "cycle_id": "2026-05-27T00:00", "eval_key": "Tokyo|2026-05-27|exact|30|C",
+            "city": "Tokyo", "edge_pct": 12.0,
+        },
+    ])
+    result = build_weather_strategy_result(data_dir, repo_root, now=NOW)
+    registry = result["weather_experiment_registry"]
+    pf = next(e for e in registry["experiments"] if e["key"] == "PRICE_FILTER_COUNTERFACTUAL")
+    assert pf["row_count"] == 3
+    assert pf["unique_cycles"] == 1
+    assert pf["unique_eval_keys"] == 3
+    assert pf["rows_with_edge_pct"] == 3
+    assert pf["edge_pct_above_5pp"] == 2  # 8.5 and 12.0 qualify
+    assert pf["outcomes_resolved"] == 0
+    assert pf["status"] == "ACCUMULATING_NO_RESOLVED_OUTCOMES"
+    assert pf["live_promotion_authorized"] is False
+
+
+def test_price_filter_no_edge_field_counts_zero(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    # Records have no edge_pct field at all
+    _write_jsonl(data_dir / "price_filter_counterfactual_log_only.jsonl", [
+        {"cycle_id": "c1", "eval_key": "Paris|2026-05-01|exact|30|C", "city": "Paris"},
+    ])
+    result = build_weather_strategy_result(data_dir, repo_root, now=NOW)
+    registry = result["weather_experiment_registry"]
+    pf = next(e for e in registry["experiments"] if e["key"] == "PRICE_FILTER_COUNTERFACTUAL")
+    assert pf["rows_with_edge_pct"] == 0
+    assert pf["edge_pct_above_5pp"] == 0
+
+
+# ── 19. Verdict packet — opus ratification flag and diagnostic lines ──────────
+
+def test_verdict_packet_has_opus_ratification_flag(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    result = build_weather_strategy_result(data_dir, repo_root, now=NOW)
+    packet = result["weather_strategy_verdict_packet"]
+    assert packet.get("requires_opus_ratification_before_policy_design") is True
+
+
+def test_verdict_packet_has_diagnostic_lines(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    _write_json(data_dir / "trade_lifecycle.json", {"records": [
+        {"id": "t1", "city": "Paris", "date": "2026-05-20", "close_context": {"pnl_cash": -2.0}},
+    ]})
+    _write_json(data_dir / "bankroll_readiness_state.json", {"status": "WATCH"})
+    result = build_weather_strategy_result(data_dir, repo_root, now=NOW)
+    packet = result["weather_strategy_verdict_packet"]
+    assert "lines_with_diagnostic_evidence" in packet
+    assert "lines_blocked_by_truth_gap" in packet
+    # With lifecycle + bankroll, at least EXITS_SL and PNL_BANKROLL are accumulating
+    evidence_keys = {e["key"] for e in packet["lines_with_diagnostic_evidence"]}
+    assert "EXITS_SL" in evidence_keys
+    assert "PNL_BANKROLL" in evidence_keys
+    # PHASE_2 and DIRECTIONAL_NO (no BSR file) should be in blocked
+    blocked_keys = {e["key"] for e in packet["lines_blocked_by_truth_gap"]}
+    assert "PHASE_2" in blocked_keys
+
+
+# ── 20. Phase 2 extended description ─────────────────────────────────────────
+
+def test_phase2_extended_description_has_t30_and_mixed_condition(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    result = build_weather_strategy_result(data_dir, repo_root, now=NOW)
+    registry = result["weather_experiment_registry"]
+    p2 = next(e for e in registry["experiments"] if e["key"] == "PHASE_2")
+    assert p2.get("trigger_date") == "2026-06-09"
+    assert p2.get("mixed_condition_included") is True
+    assert p2.get("exact_slice_protected") is True
+    assert isinstance(p2.get("exact_slice_known_issues"), list)
+    assert any("match_key" in issue for issue in p2["exact_slice_known_issues"])

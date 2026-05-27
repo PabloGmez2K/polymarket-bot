@@ -98,14 +98,25 @@ def _probe_phase2(data_dir: Path) -> dict[str, Any]:
         "key": "PHASE_2",
         "status": "PHASE2_STATE_NOT_MACHINE_READABLE",
         "description": (
-            "exact/NO global shadow experiment (SHADOW_EXACT_NO_GLOBAL). "
+            "Phase 2 Recalibration general: exact/NO global shadow experiment (SHADOW_EXACT_NO_GLOBAL). "
+            "Mixed-condition slice included. T+30 = 2026-06-09 (30 days from 2026-05-10 shadow activation). "
+            "Exact slice protected/affected by: historical bugs (Seoul active during pause, "
+            "match_key=None in lifecycle records), Phase 2 gate drift, S341. "
             "No canonical machine-readable state persisted in V1."
         ),
         "canonical_state": None,
         "trigger": "T+30 = 2026-06-09 (30 days from 2026-05-10 shadow activation)",
+        "trigger_date": "2026-06-09",
         "decision_candidate": "Outcome Resolver R1 CODE after T+30 + Opus design + Pablo approval",
         "live_promotion_authorized": False,
         "shadow_exact_no_global_active": True,
+        "mixed_condition_included": True,
+        "exact_slice_protected": True,
+        "exact_slice_known_issues": [
+            "match_key_absent_in_lifecycle_records",
+            "historical_gate_drift_Phase2_S341",
+            "Seoul_active_during_pause_incident",
+        ],
     }
     if ok and rows:
         non_seoul = [r for r in rows if str(r.get("city", "")).casefold() != "seoul"]
@@ -162,15 +173,16 @@ def _probe_directional_no(data_dir: Path) -> dict[str, Any]:
     """Directional NO forward calibration (at_or_above / at_or_below), separate from exact/NO."""
     path = data_dir / "blocked_signals_resolutions.jsonl"
     rows, ok = _read_jsonl(path)
+    _desc = (
+        "Passive forward calibration of directional NO signals "
+        "(at_or_above / at_or_below). Separate from exact/NO. "
+        "No live promotion authorized. SHADOW_EXACT_NO_GLOBAL protects exact/NO."
+    )
     if not ok:
         return {
             "key": "DIRECTIONAL_NO_FORWARD",
-            "status": "DATA_GAP",
-            "description": (
-                "Passive forward calibration of directional NO signals "
-                "(at_or_above / at_or_below). Separate from exact/NO. "
-                "No live promotion authorized. SHADOW_EXACT_NO_GLOBAL protects exact/NO."
-            ),
+            "status": "ARTIFACT_MISSING",
+            "description": _desc,
             "artifact": str(path),
             "artifact_present": False,
             "gap_reason": "artifact_not_found_locally",
@@ -185,17 +197,19 @@ def _probe_directional_no(data_dir: Path) -> dict[str, Any]:
         and str(r.get("side", "")).strip().upper() == "NO"
     ]
     resolved = [r for r in directional if r.get("win_for_trader") is not None]
-    status = "ACCUMULATING" if resolved else ("ACCUMULATING" if directional else "DATA_GAP")
+    if not directional:
+        status = "NO_MATCHING_ROWS_OBSERVED"
+    elif resolved:
+        status = "ACCUMULATING_RESOLVED_SAMPLE"
+    else:
+        status = "ACCUMULATING_UNRESOLVED"
     return {
         "key": "DIRECTIONAL_NO_FORWARD",
         "status": status,
-        "description": (
-            "Passive forward calibration of directional NO signals "
-            "(at_or_above / at_or_below). Separate from exact/NO. "
-            "No live promotion authorized. SHADOW_EXACT_NO_GLOBAL protects exact/NO."
-        ),
+        "description": _desc,
         "artifact": str(path),
         "artifact_present": True,
+        "total_bsr_rows": len(rows),
         "directional_no_rows": len(directional),
         "resolved_rows": len(resolved),
         "trigger": "WR>=55% n>=30 (calibration-unique outcomes) for Cohort Intelligence candidacy",
@@ -221,17 +235,76 @@ def _probe_price_filter(data_dir: Path) -> dict[str, Any]:
             "live_promotion_authorized": False,
             "exact_no_excluded": True,
         }
+    if not rows:
+        return {
+            "key": "PRICE_FILTER_COUNTERFACTUAL",
+            "status": "DATA_GAP",
+            "description": "LOG_ONLY captures of price_out_of_range skips for active/canary cities",
+            "artifact": str(path),
+            "artifact_present": True,
+            "row_count": 0,
+            "gap_reason": "artifact_present_but_empty",
+            "trigger": "Sufficient resolved counterfactuals with edge data",
+            "decision_candidate": "REVIEW_PRICE_POLICY if resolved counterfactuals accumulate with edge",
+            "live_promotion_authorized": False,
+            "exact_no_excluded": True,
+        }
+    # Rich stats — field is edge_pct (not edge) in Railway schema v1
+    unique_cycles = len({str(r.get("cycle_id", "")) for r in rows if r.get("cycle_id")})
+    unique_eval_keys = len({str(r.get("eval_key", "")) for r in rows if r.get("eval_key")})
+    cities: dict[str, int] = {}
+    for r in rows:
+        c = str(r.get("city", ""))
+        if c:
+            cities[c] = cities.get(c, 0) + 1
+    # Token candidates via token_id_yes / token_id_no (eval_key acts as identity if no token_id)
+    token_candidates: set[str] = set()
+    for r in rows:
+        if r.get("token_id_yes"):
+            token_candidates.add(str(r["token_id_yes"]))
+        if r.get("token_id_no"):
+            token_candidates.add(str(r["token_id_no"]))
+    # edge_pct is the correct field name in the Railway schema
+    rows_with_edge = [r for r in rows if r.get("edge_pct") is not None]
+    try:
+        edge_above_5pp = sum(1 for r in rows_with_edge if float(r.get("edge_pct", 0)) >= 5.0)
+    except (TypeError, ValueError):
+        edge_above_5pp = 0
+    # Independent candidates after dedupe by eval_key
+    deduped_candidates = len({str(r.get("eval_key", i)) for i, r in enumerate(rows)})
+    # Outcomes linked
+    outcomes_resolved = sum(
+        1 for r in rows
+        if r.get("win_for_trader") is not None
+        or str(r.get("outcome_link_status", "")).lower() in ("resolved", "confirmed")
+    )
+    if outcomes_resolved > 0:
+        status = "READY_FOR_OFFLINE_REVIEW"
+    else:
+        status = "ACCUMULATING_NO_RESOLVED_OUTCOMES"
     return {
         "key": "PRICE_FILTER_COUNTERFACTUAL",
-        "status": "ACCUMULATING" if rows else "DATA_GAP",
+        "status": status,
         "description": "LOG_ONLY captures of price_out_of_range skips for active/canary cities",
         "artifact": str(path),
         "artifact_present": True,
         "row_count": len(rows),
-        "trigger": "Sufficient resolved counterfactuals with edge data",
+        "unique_cycles": unique_cycles,
+        "unique_eval_keys": unique_eval_keys,
+        "cities": cities,
+        "token_candidates_unique": len(token_candidates),
+        "rows_with_edge_pct": len(rows_with_edge),
+        "edge_pct_above_5pp": edge_above_5pp,
+        "deduped_candidates_by_eval_key": deduped_candidates,
+        "outcomes_resolved": outcomes_resolved,
+        "trigger": (
+            "outcomes_resolved > 0 for READY_FOR_OFFLINE_REVIEW; "
+            "offline review requires edge_pct data + Opus design + Pablo approval"
+        ),
         "decision_candidate": "REVIEW_PRICE_POLICY if resolved counterfactuals accumulate with edge",
         "live_promotion_authorized": False,
         "exact_no_excluded": True,
+        "note": "price_out_of_range policy unchanged. No promotion authorized in V1.",
     }
 
 
@@ -396,9 +469,16 @@ def _build_experiment_registry(data_dir: Path) -> dict[str, Any]:
         _probe_pnl_bankroll(data_dir),
         _probe_exits_sl(data_dir),
     ]
-    gap_count = sum(1 for e in entries if e.get("status") in ("DATA_GAP", "PHASE2_STATE_NOT_MACHINE_READABLE"))
-    ready_count = sum(1 for e in entries if e.get("status") == "READY")
-    accumulating_count = sum(1 for e in entries if e.get("status") == "ACCUMULATING")
+    _gap_statuses = {
+        "DATA_GAP", "PHASE2_STATE_NOT_MACHINE_READABLE", "ARTIFACT_MISSING",
+    }
+    _accumulating_statuses = {
+        "ACCUMULATING", "ACCUMULATING_UNRESOLVED", "ACCUMULATING_RESOLVED_SAMPLE",
+        "ACCUMULATING_NO_RESOLVED_OUTCOMES",
+    }
+    gap_count = sum(1 for e in entries if e.get("status") in _gap_statuses)
+    ready_count = sum(1 for e in entries if e.get("status") in ("READY", "READY_FOR_OFFLINE_REVIEW"))
+    accumulating_count = sum(1 for e in entries if e.get("status") in _accumulating_statuses)
     return {
         "experiments": entries,
         "total": len(entries),
@@ -473,6 +553,34 @@ def _classify_lifecycle_record(
         else ("pnl_diagnostic" if has_pnl else "identity_only")
     )
 
+    # Diagnostic evidence flags — non-exclusive, describe what evidence exists
+    evidence_flags: list[str] = []
+    if has_pnl and "stop" in str(close_reason or "").lower():
+        evidence_flags.append("DIAGNOSTIC_EXIT_DAMAGE_EVIDENCE_PRESENT")
+    entry_ctx = record.get("entry_context") or record.get("latest_entry_context") or {}
+    if entry_ctx.get("edge_pct") is not None or entry_ctx.get("our_prob") is not None:
+        evidence_flags.append("DIAGNOSTIC_ALPHA_LOSS_EVIDENCE_PRESENT")
+    if identity and not outcome_resolved:
+        evidence_flags.append("UNRESOLVED_BY_OUTCOME_JOIN_GAP")
+    token_id = str(record.get("token_id") or "").strip()
+    if not token_id:
+        evidence_flags.append("SOURCE_OR_EPOCH_GAP")
+
+    # Join method — exact via match_key if resolution linked; blocked otherwise
+    if outcome_resolved:
+        join_method = "exact_match_key"
+        outcome_join_gap = None
+    elif identity:
+        if record.get("match_key"):
+            join_method = "exact_match_key_present_unresolved"
+            outcome_join_gap = "resolution_not_yet_available"
+        else:
+            join_method = "BLOCKED_match_key_absent"
+            outcome_join_gap = "match_key_absent_in_lifecycle_record"
+    else:
+        join_method = "BLOCKED_no_identity"
+        outcome_join_gap = "identity_missing"
+
     result: dict[str, Any] = {
         "classification": classification,
         "reason": reason,
@@ -487,6 +595,9 @@ def _classify_lifecycle_record(
         "close_reason": close_reason,
         "outcome_resolved": outcome_resolved,
         "provenance_level": provenance_level,
+        "diagnostic_evidence_flags": evidence_flags,
+        "join_method": join_method,
+        "outcome_join_gap": outcome_join_gap,
     }
 
     gaps = []
@@ -546,7 +657,8 @@ def _lookup_city_date(
         enriched = []
         for r in date_records[:3]:
             cl = _classify_lifecycle_record(r, resolutions)
-            enriched.append({
+            entry_ctx = r.get("entry_context") or r.get("latest_entry_context") or {}
+            rec: dict[str, Any] = {
                 "city": r.get("city"),
                 "date": _record_date(r),
                 "condition": r.get("condition"),
@@ -557,7 +669,17 @@ def _lookup_city_date(
                 "classification": cl.get("classification"),
                 "provenance_level": cl.get("provenance_level"),
                 "diagnostic_gaps": cl.get("diagnostic_gaps"),
-            })
+                "diagnostic_evidence_flags": cl.get("diagnostic_evidence_flags"),
+                "join_method": cl.get("join_method"),
+                "outcome_join_gap": cl.get("outcome_join_gap"),
+            }
+            if entry_ctx.get("edge_pct") is not None:
+                rec["entry_edge_pct"] = entry_ctx["edge_pct"]
+            if entry_ctx.get("our_prob") is not None:
+                rec["entry_our_prob"] = entry_ctx["our_prob"]
+            if entry_ctx.get("forecast_max") is not None:
+                rec["entry_forecast_max"] = entry_ctx["forecast_max"]
+            enriched.append(rec)
         return {
             "city": city,
             "date_requested": date,
@@ -623,14 +745,44 @@ def _build_trade_truth_ledger(
         }
 
     records = lifecycle.get("records", []) if isinstance(lifecycle, dict) else []
+    records_list = records if isinstance(records, list) else []
     entries = [
         _classify_lifecycle_record(r, resolutions)
-        for r in (records if isinstance(records, list) else [])
+        for r in records_list
         if isinstance(r, dict)
     ]
     unresolved = [e for e in entries if e["classification"] == "unresolved"]
     diagnostic = [e for e in entries if e["classification"] in ("diagnostic_only", "pnl_diagnostic")]
     confirmed = [e for e in entries if e["classification"] == "settlement_confirmed"]
+
+    # Dynamic join key analysis based on actual lifecycle data
+    lc_with_match_key = sum(1 for r in records_list if isinstance(r, dict) and r.get("match_key"))
+    lc_with_eval_key = sum(1 for r in records_list if isinstance(r, dict) and r.get("eval_key"))
+    lc_with_token_id = sum(1 for r in records_list if isinstance(r, dict) and r.get("token_id"))
+    lc_with_id = sum(1 for r in records_list if isinstance(r, dict) and r.get("id"))
+    join_key_analysis = {
+        "lifecycle_to_postmortem": (
+            "EXACT_via_id_position_key_token_id" if lc_with_token_id > 0 or lc_with_id > 0
+            else "BLOCKED_no_id_or_token_id"
+        ),
+        "lifecycle_to_resolutions": (
+            f"PARTIAL_{lc_with_match_key}_records_have_match_key" if lc_with_match_key > 0
+            else "BLOCKED_match_key_absent_in_all_records"
+        ),
+        "lifecycle_to_evaluations": (
+            f"PARTIAL_{lc_with_eval_key}_records_have_eval_key" if lc_with_eval_key > 0
+            else "BLOCKED_eval_key_absent_in_all_records"
+        ),
+        "records_with_match_key": lc_with_match_key,
+        "records_with_eval_key": lc_with_eval_key,
+        "records_with_token_id": lc_with_token_id,
+        "records_with_id": lc_with_id,
+        "outcome_resolution_available": False,
+        "trigger_to_unlock_outcome_resolution": (
+            "Outcome Resolver R1 CODE: backfill match_key in lifecycle records "
+            "or implement token_id->market_outcome lookup via Polymarket API"
+        ),
+    }
 
     return {
         "status": "LOADED" if entries else "EMPTY",
@@ -641,6 +793,7 @@ def _build_trade_truth_ledger(
         "settlement_confirmed_count": len(confirmed),
         "pnl_canonical_confirmed": False,
         "canonical_source": "none",
+        "join_key_analysis": join_key_analysis,
         "sample_unresolved": [
             {k: e[k] for k in ("classification", "reason", "city", "date", "condition", "side") if k in e}
             for e in unresolved[:3]
@@ -737,9 +890,34 @@ def _build_verdict_packet(
             f"ledger_status={ledger_status}"
         )
 
+    _gap_statuses = {"DATA_GAP", "PHASE2_STATE_NOT_MACHINE_READABLE", "ARTIFACT_MISSING"}
+    _accumulating_statuses = {
+        "ACCUMULATING", "ACCUMULATING_UNRESOLVED", "ACCUMULATING_RESOLVED_SAMPLE",
+        "ACCUMULATING_NO_RESOLVED_OUTCOMES",
+    }
     gaps_listed = [
         e["key"] for e in registry.get("experiments", [])
-        if e.get("status") in ("DATA_GAP", "PHASE2_STATE_NOT_MACHINE_READABLE")
+        if e.get("status") in _gap_statuses
+    ]
+
+    # Per-line diagnostic breakdown
+    lines_with_evidence = [
+        {
+            "key": e["key"],
+            "status": e.get("status"),
+            "trigger": e.get("trigger"),
+        }
+        for e in registry.get("experiments", [])
+        if e.get("status") in _accumulating_statuses or e.get("status") in ("READY", "READY_FOR_OFFLINE_REVIEW")
+    ]
+    lines_blocked = [
+        {
+            "key": e["key"],
+            "status": e.get("status"),
+            "blocker_trigger": e.get("trigger") or e.get("decision_candidate"),
+        }
+        for e in registry.get("experiments", [])
+        if e.get("status") in _gap_statuses
     ]
 
     return {
@@ -752,11 +930,14 @@ def _build_verdict_packet(
             "Outcome Resolver R1 CODE pending. BANKROLL $25 HOLD. Fase C not authorized."
         ),
         "autoexecute": False,
+        "requires_opus_ratification_before_policy_design": True,
         "disclaimer": _V1_DISCLAIMER,
         "registry_gap_count": gap_count,
         "registry_gaps": gaps_listed,
         "unresolved_ledger_entries": unresolved_count,
         "epoch_status": epoch_status,
+        "lines_with_diagnostic_evidence": lines_with_evidence,
+        "lines_blocked_by_truth_gap": lines_blocked,
         "available_verdicts_v1": [
             VERDICT_KEEP_ACCUMULATING,
             VERDICT_TRUTH_GAP,
