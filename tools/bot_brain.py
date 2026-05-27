@@ -26,6 +26,11 @@ if hasattr(sys.stderr, "reconfigure"):
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATA_DIR = REPO_ROOT / "data"
+
+# Ensure repo root is on sys.path so tools._weather_strategy_engine is importable
+# both when run as a script (python tools/bot_brain.py) and as a package (from tests).
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 LOG_ONLY_DISCLAIMER = (
     "LOG_ONLY/read-only. Pointer and linkage report only; no trading "
     "authorization, no BANKROLL, no BUY/SELL/SKIP, no city-mode, scheduler, "
@@ -52,6 +57,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--scope", required=True, help="overview, city:<name>, cycle:<n>, eval_key:<key>, or match_key:<key>")
     parser.add_argument("--window", default="7d", help="Lookback window such as 7d, 14d, 24h, or all")
     parser.add_argument("--format", choices=["json", "md"], default="json")
+    parser.add_argument("--city", default=None, help="City filter for weather_strategy ledger lookup")
+    parser.add_argument("--date", default=None, help="Date filter YYYY-MM-DD for weather_strategy ledger lookup")
     parser.add_argument("--repo-root", default=str(REPO_ROOT), help=argparse.SUPPRESS)
     parser.add_argument("--data-dir", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--now", default=None, help=argparse.SUPPRESS)
@@ -313,6 +320,8 @@ def build_brain_report(
     repo_root: Path | None = None,
     data_dir: Path | None = None,
     now: datetime | None = None,
+    city: str | None = None,
+    date: str | None = None,
 ) -> dict[str, Any]:
     repo_root = Path(repo_root or REPO_ROOT)
     data_dir = Path(data_dir or (repo_root / "data"))
@@ -365,6 +374,9 @@ def build_brain_report(
         report["results"] = build_cycle_result(scope_value, cycles, funnels, evals, resolutions)
     elif scope_type in {"eval_key", "match_key"}:
         report["results"] = build_key_result(scope_type, scope_value, join)
+    elif scope_type == "weather_strategy":
+        from tools._weather_strategy_engine import build_weather_strategy_result
+        report["results"] = build_weather_strategy_result(data_dir, repo_root, city=city, date=date, now=now)
     else:
         report["no_match"] = True
         report["results"] = {"error": "unsupported_scope"}
@@ -381,8 +393,8 @@ def build_brain_report(
 
 def parse_scope(scope: str) -> dict[str, str]:
     text = str(scope or "").strip()
-    if text == "overview":
-        return {"type": "overview"}
+    if text in {"overview", "weather_strategy"}:
+        return {"type": text}
     if ":" not in text:
         return {"type": "unknown", "value": text}
     kind, value = text.split(":", 1)
@@ -531,7 +543,54 @@ def build_key_result(scope_type: str, key: str, join: dict[str, Any]) -> dict[st
     }
 
 
+def _render_weather_strategy_markdown(report: dict[str, Any]) -> str:
+    results = report.get("results", {})
+    packet = results.get("weather_strategy_verdict_packet", {})
+    registry = results.get("weather_experiment_registry", {})
+    ledger = results.get("trade_truth_ledger", {})
+    epoch = results.get("epoch_and_regime_attribution", {})
+    lines = [
+        "# Bot Brain — Weather Strategy V1",
+        "",
+        f"Generated: `{results.get('generated_at', report.get('generated_at'))}`",
+        "",
+        "LOG_ONLY / NO_ACTION. LIVE_POLICY_ELIGIBLE=false. No trading authorization.",
+        "",
+        "## Verdict",
+        f"- `verdict`: `{packet.get('verdict')}`",
+        f"- `pnl_canonical_confirmed`: `{packet.get('pnl_canonical_confirmed')}`",
+        f"- `live_policy_eligible`: `{packet.get('live_policy_eligible')}`",
+        f"- `reason`: {packet.get('verdict_reason', '')}",
+        "",
+        "## Experiment Registry",
+        f"- total: `{registry.get('total')}` | gaps: `{registry.get('gap_count')}` | accumulating: `{registry.get('accumulating_count')}`",
+    ]
+    for exp in registry.get("experiments", []):
+        lines.append(f"  - `{exp.get('key')}`: `{exp.get('status')}`")
+    lines += [
+        "",
+        "## Trade Truth Ledger",
+        f"- status: `{ledger.get('status')}`",
+        f"- total_records: `{ledger.get('total_records')}` | unresolved: `{ledger.get('unresolved_count')}` | pnl_canonical_confirmed: `{ledger.get('pnl_canonical_confirmed')}`",
+    ]
+    city_lookup = ledger.get("city_date_lookup")
+    if city_lookup:
+        lines.append(f"- city_date_lookup ({city_lookup.get('city')} {city_lookup.get('date_requested')}): `{city_lookup.get('status')}` nearest=`{city_lookup.get('nearest_match')}`")
+    lines += [
+        "",
+        "## Epoch Attribution",
+        f"- status: `{epoch.get('status')}`",
+        "",
+        "## Gaps",
+    ]
+    for gap in packet.get("registry_gaps", []):
+        lines.append(f"- `{gap}`")
+    return "\n".join(lines) + "\n"
+
+
 def render_markdown(report: dict[str, Any]) -> str:
+    if report.get("scope_type") == "weather_strategy":
+        return _render_weather_strategy_markdown(report)
     lines = [
         "# Bot Brain v0",
         "",
@@ -570,7 +629,7 @@ def main(argv: list[str] | None = None) -> int:
     now = parse_ts(args.now) if args.now else None
     repo_root = Path(args.repo_root)
     data_dir = Path(args.data_dir) if args.data_dir else repo_root / "data"
-    report = build_brain_report(args.scope, args.window, repo_root=repo_root, data_dir=data_dir, now=now)
+    report = build_brain_report(args.scope, args.window, repo_root=repo_root, data_dir=data_dir, now=now, city=args.city, date=args.date)
     if args.format == "md":
         print(render_markdown(report), end="")
     else:
