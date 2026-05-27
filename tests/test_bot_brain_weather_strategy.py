@@ -169,13 +169,15 @@ def test_verdict_packet_has_required_fields(tmp_path: Path) -> None:
     }
 
 
-def test_verdict_is_truth_gap_when_canonical_source_none(tmp_path: Path) -> None:
+def test_verdict_insufficient_when_no_artifacts(tmp_path: Path) -> None:
     repo_root, data_dir = _data_dir(tmp_path)
     result = build_weather_strategy_result(data_dir, repo_root, now=NOW)
     packet = result["weather_strategy_verdict_packet"]
-    # With no artifacts and pnl_canonical_confirmed=false → TRUTH_GAP_BLOCKS_DECISION
-    assert packet["verdict"] == VERDICT_TRUTH_GAP
+    # No artifacts at all → all DATA_GAP + ledger DATA_GAP → INSUFFICIENT_EVIDENCE
+    # pnl_canonical_confirmed=false is a live-blocker, NOT a diagnostic blocker in V1
+    assert packet["verdict"] == VERDICT_INSUFFICIENT
     assert packet["pnl_canonical_confirmed"] is False
+    assert packet["live_policy_eligible"] is False
 
 
 # ── 7. Madrid synthetic — UNRESOLVED_PNL_DISCREPANCY with nearest_match ──────
@@ -216,7 +218,7 @@ def test_madrid_lookup_data_gap_when_no_lifecycle(tmp_path: Path) -> None:
     assert lookup["nearest_match"] is None
 
 
-def test_madrid_unresolved_propagates_to_verdict(tmp_path: Path) -> None:
+def test_madrid_unresolved_lookup_live_still_blocked(tmp_path: Path) -> None:
     repo_root, data_dir = _data_dir(tmp_path)
     _write_json(data_dir / "trade_lifecycle.json", {
         "records": [
@@ -225,9 +227,14 @@ def test_madrid_unresolved_propagates_to_verdict(tmp_path: Path) -> None:
     })
     result = build_weather_strategy_result(data_dir, repo_root, city="Madrid", date="2026-05-25", now=NOW)
     packet = result["weather_strategy_verdict_packet"]
-    # pnl_canonical_confirmed=false always → TRUTH_GAP_BLOCKS_DECISION
-    assert packet["verdict"] == VERDICT_TRUTH_GAP
+    lookup = result["trade_truth_ledger"]["city_date_lookup"]
+    # City/date lookup is UNRESOLVED_PNL_DISCREPANCY (May 25 not found, nearest May 21)
+    assert lookup["status"] == "UNRESOLVED_PNL_DISCREPANCY"
+    # The record IS classified in the ledger (not a ledger-level unresolved entry)
+    # so unresolved_count=0 → verdict is NOT forced to TRUTH_GAP
+    # Live is always blocked regardless of diagnostic verdict
     assert packet["live_policy_eligible"] is False
+    assert packet["pnl_canonical_confirmed"] is False
 
 
 # ── 8. DIRECTIONAL_NO_FORWARD is not exact/NO ────────────────────────────────
@@ -334,3 +341,156 @@ def test_main_weather_strategy_with_city_date(tmp_path: Path, capsys) -> None:
     lookup = out["results"]["trade_truth_ledger"]["city_date_lookup"]
     assert lookup["status"] == "UNRESOLVED_PNL_DISCREPANCY"
     assert lookup["nearest_match"] == "2026-05-21"
+
+
+# ── 11. pnl_cash in close_context recognized as P&L diagnostic ───────────────
+
+def test_pnl_cash_in_close_context_recognized(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    # Real Railway schema: pnl_cash lives inside close_context, not at top level
+    _write_json(data_dir / "trade_lifecycle.json", {
+        "records": [
+            {
+                "id": "real-id-123",
+                "city": "Madrid",
+                "date": "2026-05-25",
+                "condition": "exact",
+                "side": "NO",
+                "close_context": {"close_action": "SELL", "close_reason": "sl_intra", "pnl_cash": -13.94},
+            }
+        ]
+    })
+    result = build_weather_strategy_result(data_dir, repo_root, city="Madrid", date="2026-05-25", now=NOW)
+    ledger = result["trade_truth_ledger"]
+    assert ledger["diagnostic_count"] == 1
+    assert ledger["unresolved_count"] == 0
+    lookup = ledger["city_date_lookup"]
+    assert lookup["status"] == "FOUND"
+    assert lookup["records"][0]["pnl_value"] == -13.94
+    assert lookup["records"][0]["close_action"] == "SELL"
+    assert lookup["records"][0]["classification"] == "pnl_diagnostic"
+
+
+def test_pnl_cash_top_level_also_recognized(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    _write_json(data_dir / "trade_lifecycle.json", {
+        "records": [{"id": "t1", "city": "Seoul", "date": "2026-05-10", "pnl_cash": 1.23}]
+    })
+    result = build_weather_strategy_result(data_dir, repo_root, now=NOW)
+    assert result["trade_truth_ledger"]["diagnostic_count"] == 1
+
+
+# ── 12. date field (not date_iso) finds record ────────────────────────────────
+
+def test_date_field_not_date_iso_finds_record(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    # Record uses 'date' field, date_iso is empty/absent (real Railway schema)
+    _write_json(data_dir / "trade_lifecycle.json", {
+        "records": [
+            {"id": "r1", "city": "Madrid", "date": "2026-05-25", "date_iso": "", "side": "NO",
+             "close_context": {"pnl_cash": -13.94}}
+        ]
+    })
+    result = build_weather_strategy_result(data_dir, repo_root, city="Madrid", date="2026-05-25", now=NOW)
+    lookup = result["trade_truth_ledger"]["city_date_lookup"]
+    assert lookup["status"] == "FOUND"
+    assert lookup["records"][0]["date"] == "2026-05-25"
+
+
+# ── 13. Diagnostic verdict emitted while LIVE_POLICY_ELIGIBLE=false ──────────
+
+def test_diagnostic_verdict_keep_accumulating_with_live_false(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    # Provide enough evidence for accumulating verdict
+    _write_json(data_dir / "trade_lifecycle.json", {
+        "records": [
+            {"id": "t1", "city": "Paris", "date": "2026-05-20", "close_context": {"pnl_cash": -2.19}},
+            {"id": "t2", "city": "Tokyo", "date": "2026-05-21", "close_context": {"pnl_cash": 1.50}},
+        ]
+    })
+    _write_json(data_dir / "bankroll_readiness_state.json", {"status": "WATCH", "composite": 0.4})
+    result = build_weather_strategy_result(data_dir, repo_root, now=NOW)
+    packet = result["weather_strategy_verdict_packet"]
+    # With lifecycle + bankroll present, accumulating_count >= 2 → KEEP_ACCUMULATING
+    assert packet["verdict"] == VERDICT_KEEP_ACCUMULATING
+    # V1 invariants always hold even with positive diagnostic verdict
+    assert packet["live_policy_eligible"] is False
+    assert packet["pnl_canonical_confirmed"] is False
+    assert packet["autoexecute"] is False
+
+
+def test_truth_gap_when_ledger_has_unresolved_entries(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    # Records with no identity → unresolved
+    _write_json(data_dir / "trade_lifecycle.json", {
+        "records": [
+            {"city": "Paris", "date": "2026-05-20"},  # no id
+        ]
+    })
+    _write_json(data_dir / "bankroll_readiness_state.json", {"status": "WATCH"})
+    result = build_weather_strategy_result(data_dir, repo_root, now=NOW)
+    packet = result["weather_strategy_verdict_packet"]
+    assert packet["verdict"] == VERDICT_TRUTH_GAP
+    assert packet["unresolved_ledger_entries"] == 1
+    assert packet["live_policy_eligible"] is False
+
+
+# ── 14. Phase 2 always PHASE2_STATE_NOT_MACHINE_READABLE ─────────────────────
+
+def test_phase2_always_not_machine_readable_when_no_file(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    result = build_weather_strategy_result(data_dir, repo_root, now=NOW)
+    registry = result["weather_experiment_registry"]
+    p2 = next(e for e in registry["experiments"] if e["key"] == "PHASE_2")
+    assert p2["status"] == "PHASE2_STATE_NOT_MACHINE_READABLE"
+    assert p2["canonical_state"] is None
+    assert p2["live_promotion_authorized"] is False
+    assert "2026-06-09" in p2["trigger"]
+
+
+def test_phase2_not_machine_readable_even_with_log_only_file(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    # Provide the LOG_ONLY artifact — Phase 2 must still be NOT_MACHINE_READABLE
+    _write_jsonl(data_dir / "exact_no_qt_match_evaluations_log_only.jsonl", [
+        {"city": "Paris", "condition": "exact", "side": "NO", "eval_key": "k1"},
+        {"city": "Tokyo", "condition": "exact", "side": "NO", "eval_key": "k2"},
+    ])
+    result = build_weather_strategy_result(data_dir, repo_root, now=NOW)
+    registry = result["weather_experiment_registry"]
+    p2 = next(e for e in registry["experiments"] if e["key"] == "PHASE_2")
+    assert p2["status"] == "PHASE2_STATE_NOT_MACHINE_READABLE"
+    # Supporting artifact info is present but clearly marked as non-canonical
+    assert p2["supporting_artifact"]["present"] is True
+    assert p2["supporting_artifact"]["row_count"] == 2
+    assert "not canonical" in p2["supporting_artifact"]["note"].lower()
+
+
+# ── 15. FOUND lookup includes enriched record detail ─────────────────────────
+
+def test_found_lookup_includes_enriched_detail(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    _write_json(data_dir / "trade_lifecycle.json", {
+        "records": [
+            {
+                "id": "tok123",
+                "city": "Seoul",
+                "date": "2026-05-15",
+                "condition": "exact",
+                "side": "YES",
+                "close_context": {"close_action": "SELL", "close_reason": "sl_intra", "pnl_cash": 2.50},
+            }
+        ]
+    })
+    result = build_weather_strategy_result(data_dir, repo_root, city="Seoul", date="2026-05-15", now=NOW)
+    lookup = result["trade_truth_ledger"]["city_date_lookup"]
+    assert lookup["status"] == "FOUND"
+    assert lookup["record_count"] == 1
+    rec = lookup["records"][0]
+    assert rec["city"] == "Seoul"
+    assert rec["date"] == "2026-05-15"
+    assert rec["condition"] == "exact"
+    assert rec["side"] == "YES"
+    assert rec["pnl_value"] == 2.50
+    assert rec["close_action"] == "SELL"
+    assert rec["classification"] == "pnl_diagnostic"
+    assert rec["provenance_level"] == "pnl_diagnostic"

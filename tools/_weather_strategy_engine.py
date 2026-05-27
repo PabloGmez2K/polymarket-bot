@@ -61,35 +61,72 @@ def _read_jsonl(path: Path) -> tuple[list[dict[str, Any]], bool]:
         return [], False
 
 
+# ── P&L extraction ────────────────────────────────────────────────────────────
+
+def _get_pnl_value(record: dict[str, Any]) -> float | None:
+    """Extract diagnostic P&L from record top-level or close_context.pnl_cash."""
+    for key in ("pnl", "realized_pnl", "pnl_cash"):
+        v = record.get(key)
+        if v is not None:
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                pass
+    cc = record.get("close_context")
+    if isinstance(cc, dict):
+        for key in ("pnl_cash", "pnl", "realized_pnl"):
+            v = cc.get(key)
+            if v is not None:
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    pass
+    return None
+
+
 # ── Experiment registry probes ────────────────────────────────────────────────
 
 def _probe_phase2(data_dir: Path) -> dict[str, Any]:
+    """Phase 2 is always PHASE2_STATE_NOT_MACHINE_READABLE in V1.
+
+    No canonical machine-readable state persisted for exact/NO shadow experiment.
+    Trigger T+30 = 2026-06-09. Any supporting artifacts are non-canonical.
+    """
     path = data_dir / "exact_no_qt_match_evaluations_log_only.jsonl"
     rows, ok = _read_jsonl(path)
-    if not ok:
-        return {
-            "key": "PHASE_2",
-            "status": "DATA_GAP",
-            "description": "Pre-Edge LOG_ONLY exact/no-QT-match evaluations",
-            "artifact": str(path),
-            "artifact_present": False,
-            "gap_reason": "artifact_not_found_locally",
-            "trigger": "T+7d sano (~2026-05-31); Outcome Resolver R1 CODE requires Opus design + Pablo approval",
-            "decision_candidate": "Outcome Resolver R1 CODE blocked on T+7d + Opus design",
-        }
-    non_seoul = [r for r in rows if str(r.get("city", "")).casefold() != "seoul"]
-    status = "ACCUMULATING" if rows else "DATA_GAP"
-    return {
+    result: dict[str, Any] = {
         "key": "PHASE_2",
-        "status": status,
-        "description": "Pre-Edge LOG_ONLY exact/no-QT-match evaluations",
-        "artifact": str(path),
-        "artifact_present": True,
-        "row_count": len(rows),
-        "non_seoul_clean": len(non_seoul),
-        "trigger": "T+7d sano (~2026-05-31) + Opus design + Pablo approval",
-        "decision_candidate": "Outcome Resolver R1 CODE",
+        "status": "PHASE2_STATE_NOT_MACHINE_READABLE",
+        "description": (
+            "exact/NO global shadow experiment (SHADOW_EXACT_NO_GLOBAL). "
+            "No canonical machine-readable state persisted in V1."
+        ),
+        "canonical_state": None,
+        "trigger": "T+30 = 2026-06-09 (30 days from 2026-05-10 shadow activation)",
+        "decision_candidate": "Outcome Resolver R1 CODE after T+30 + Opus design + Pablo approval",
+        "live_promotion_authorized": False,
+        "shadow_exact_no_global_active": True,
     }
+    if ok and rows:
+        non_seoul = [r for r in rows if str(r.get("city", "")).casefold() != "seoul"]
+        result["supporting_artifact"] = {
+            "path": str(path),
+            "present": True,
+            "row_count": len(rows),
+            "non_seoul_rows": len(non_seoul),
+            "note": (
+                "LOG_ONLY supporting evidence only. "
+                "Not canonical Phase 2 state. "
+                "Do not recompute Phase 2 from this artifact."
+            ),
+        }
+    else:
+        result["supporting_artifact"] = {
+            "path": str(path),
+            "present": ok,
+            "note": "LOG_ONLY artifact absent or empty.",
+        }
+    return result
 
 
 def _probe_surviving_cohorts(data_dir: Path) -> dict[str, Any]:
@@ -233,8 +270,7 @@ def _probe_denver_kbkf(data_dir: Path) -> dict[str, Any]:
         "description": _description,
         "artifact": str(policy_path),
         "artifact_present": True,
-        "artifact_note": "runtime_policy_effective_view.json is a dev fixture (data/runtime_import). Not live production state.",
-        "effective_mode_in_fixture": effective_mode,
+        "effective_mode_in_snapshot": effective_mode,
         "trigger": "Forward KBKF observations accumulate and source_fidelity audit passes",
         "decision_candidate": "ACCUMULATING_FORWARD_EVIDENCE — no canary/active promotion yet",
     }
@@ -242,7 +278,7 @@ def _probe_denver_kbkf(data_dir: Path) -> dict[str, Any]:
 
 def _probe_traders_intelligence(data_dir: Path) -> dict[str, Any]:
     census_path = data_dir / "directional_trader_census.json"
-    summary_path = data_dir / "_tmp_traders_intelligence_daily_summary_v1_ready_state.json"
+    summary_path = data_dir / "traders_intelligence_daily_summary_state.json"
     census, census_ok = _read_json(census_path)
     summary, summary_ok = _read_json(summary_path)
     if not census_ok and not summary_ok:
@@ -326,7 +362,9 @@ def _probe_exits_sl(data_dir: Path) -> dict[str, Any]:
     records = lifecycle.get("records", []) if isinstance(lifecycle, dict) else []
     sl_records = [
         r for r in (records if isinstance(records, list) else [])
-        if isinstance(r, dict) and "sl" in str(r.get("close_reason", "")).lower()
+        if isinstance(r, dict) and "sl" in str(
+            (r.get("close_context") or {}).get("close_reason", "") or r.get("close_reason", "")
+        ).lower()
     ]
     return {
         "key": "EXITS_SL",
@@ -358,7 +396,7 @@ def _build_experiment_registry(data_dir: Path) -> dict[str, Any]:
         _probe_pnl_bankroll(data_dir),
         _probe_exits_sl(data_dir),
     ]
-    gap_count = sum(1 for e in entries if e.get("status") == "DATA_GAP")
+    gap_count = sum(1 for e in entries if e.get("status") in ("DATA_GAP", "PHASE2_STATE_NOT_MACHINE_READABLE"))
     ready_count = sum(1 for e in entries if e.get("status") == "READY")
     accumulating_count = sum(1 for e in entries if e.get("status") == "ACCUMULATING")
     return {
@@ -372,14 +410,108 @@ def _build_experiment_registry(data_dir: Path) -> dict[str, Any]:
 
 # ── Trade Truth Ledger ────────────────────────────────────────────────────────
 
+def _record_date(r: dict[str, Any]) -> str:
+    """Return first non-empty date string from a record, or empty string."""
+    for key in ("date_iso", "date"):
+        val = str(r.get(key, "")).strip()
+        if val:
+            return val
+    ts = str(r.get("ts_utc", "")).strip()
+    return ts[:10] if len(ts) >= 10 else ""
+
+
+def _find_nearest_date(records: list[dict[str, Any]], target_date: str) -> str | None:
+    dates: list[str] = []
+    for r in records:
+        val = _record_date(r)
+        if val:
+            dates.append(val[:10])
+    if not dates:
+        return None
+    try:
+        target = datetime.strptime(target_date[:10], "%Y-%m-%d")
+        return min(dates, key=lambda d: abs((datetime.strptime(d[:10], "%Y-%m-%d") - target).days))
+    except Exception:
+        return dates[0] if dates else None
+
+
+def _classify_lifecycle_record(
+    record: dict[str, Any],
+    resolutions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    identity = (
+        record.get("id")
+        or record.get("position_key")
+        or record.get("eval_key")
+        or record.get("match_key")
+        or record.get("token_id")
+    )
+    pnl_value = _get_pnl_value(record)
+    has_pnl = pnl_value is not None
+
+    matched_resolution = next(
+        (r for r in resolutions if r.get("match_key") and r.get("match_key") == record.get("match_key")),
+        None,
+    )
+    outcome_resolved = matched_resolution is not None and matched_resolution.get("win_for_trader") is not None
+
+    cc = record.get("close_context") or {}
+    close_action = cc.get("close_action") or record.get("close_action")
+    close_reason = cc.get("close_reason") or cc.get("close_subtype") or record.get("close_reason")
+
+    if not identity:
+        classification, reason = "unresolved", "missing_identity"
+    elif outcome_resolved:
+        classification, reason = "settlement_confirmed", "outcome_resolved_diagnostic"
+    elif has_pnl:
+        classification, reason = "pnl_diagnostic", "pnl_present_outcome_unresolved"
+    else:
+        classification, reason = "diagnostic_only", "no_pnl_no_outcome"
+
+    provenance_level = (
+        "settlement_confirmed" if outcome_resolved
+        else ("pnl_diagnostic" if has_pnl else "identity_only")
+    )
+
+    result: dict[str, Any] = {
+        "classification": classification,
+        "reason": reason,
+        "city": record.get("city"),
+        "date": _record_date(record) or None,
+        "condition": record.get("condition"),
+        "side": record.get("side"),
+        "has_identity": bool(identity),
+        "has_pnl": has_pnl,
+        "pnl_value": pnl_value,
+        "close_action": close_action,
+        "close_reason": close_reason,
+        "outcome_resolved": outcome_resolved,
+        "provenance_level": provenance_level,
+    }
+
+    gaps = []
+    if not identity:
+        gaps.append("MISSING_IDENTITY")
+    if not has_pnl:
+        gaps.append("MISSING_PNL_DIAGNOSTIC")
+    if not outcome_resolved:
+        gaps.append("OUTCOME_NOT_RESOLVED")
+    if gaps:
+        result["diagnostic_gaps"] = gaps
+
+    return result
+
+
 def _lookup_city_date(
     lifecycle: Any,
     lifecycle_ok: bool,
     lifecycle_path: Path,
     city: str,
     date: str | None,
+    resolutions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     city_cf = city.casefold()
+    resolutions = resolutions or []
     if not lifecycle_ok:
         return {
             "city": city,
@@ -411,11 +543,27 @@ def _lookup_city_date(
         }
     date_records = [r for r in city_records if date in _record_date(r)]
     if date_records:
+        enriched = []
+        for r in date_records[:3]:
+            cl = _classify_lifecycle_record(r, resolutions)
+            enriched.append({
+                "city": r.get("city"),
+                "date": _record_date(r),
+                "condition": r.get("condition"),
+                "side": r.get("side"),
+                "pnl_value": cl.get("pnl_value"),
+                "close_action": cl.get("close_action"),
+                "close_reason": cl.get("close_reason"),
+                "classification": cl.get("classification"),
+                "provenance_level": cl.get("provenance_level"),
+                "diagnostic_gaps": cl.get("diagnostic_gaps"),
+            })
         return {
             "city": city,
             "date_requested": date,
             "status": "FOUND",
             "record_count": len(date_records),
+            "records": enriched,
         }
     nearest = _find_nearest_date(city_records, date)
     return {
@@ -425,64 +573,6 @@ def _lookup_city_date(
         "reason": "date_not_found_in_city_records",
         "nearest_match": nearest,
         "note": "Do not hardcode absence. Verify with Railway snapshot before concluding.",
-    }
-
-
-def _record_date(r: dict[str, Any]) -> str:
-    """Return first non-empty date string from a record, or empty string."""
-    for key in ("date_iso", "date"):
-        val = str(r.get(key, "")).strip()
-        if val:
-            return val
-    ts = str(r.get("ts_utc", "")).strip()
-    return ts[:10] if len(ts) >= 10 else ""
-
-
-def _find_nearest_date(records: list[dict[str, Any]], target_date: str) -> str | None:
-    dates: list[str] = []
-    for r in records:
-        val = _record_date(r)
-        if val:
-            dates.append(val[:10])
-    if not dates:
-        return None
-    try:
-        target = datetime.strptime(target_date[:10], "%Y-%m-%d")
-        return min(dates, key=lambda d: abs((datetime.strptime(d[:10], "%Y-%m-%d") - target).days))
-    except Exception:
-        return dates[0] if dates else None
-
-
-def _classify_lifecycle_record(
-    record: dict[str, Any],
-    resolutions: list[dict[str, Any]],
-) -> dict[str, Any]:
-    identity = record.get("id") or record.get("eval_key") or record.get("match_key")
-    has_pnl = record.get("pnl") is not None or record.get("realized_pnl") is not None
-    matched_resolution = next(
-        (r for r in resolutions if r.get("match_key") and r.get("match_key") == record.get("match_key")),
-        None,
-    )
-    outcome_resolved = matched_resolution is not None and matched_resolution.get("win_for_trader") is not None
-
-    if not identity:
-        classification, reason = "unresolved", "missing_identity"
-    elif outcome_resolved:
-        classification, reason = "settlement_confirmed", "outcome_resolved_diagnostic"
-    elif has_pnl:
-        classification, reason = "pnl_diagnostic", "pnl_present_outcome_unresolved"
-    else:
-        classification, reason = "diagnostic_only", "no_pnl_no_outcome"
-
-    return {
-        "classification": classification,
-        "reason": reason,
-        "city": record.get("city"),
-        "date": _record_date(record) or None,
-        "side": record.get("side"),
-        "has_identity": bool(identity),
-        "has_pnl": has_pnl,
-        "outcome_resolved": outcome_resolved,
     }
 
 
@@ -513,7 +603,9 @@ def _build_trade_truth_ledger(
 
     city_date_lookup: dict[str, Any] | None = None
     if city:
-        city_date_lookup = _lookup_city_date(lifecycle, lifecycle_ok, lifecycle_path, city, date)
+        city_date_lookup = _lookup_city_date(
+            lifecycle, lifecycle_ok, lifecycle_path, city, date, resolutions
+        )
 
     if not any(artifacts_present.values()):
         return {
@@ -550,7 +642,7 @@ def _build_trade_truth_ledger(
         "pnl_canonical_confirmed": False,
         "canonical_source": "none",
         "sample_unresolved": [
-            {k: e[k] for k in ("classification", "reason", "city", "date", "side") if k in e}
+            {k: e[k] for k in ("classification", "reason", "city", "date", "condition", "side") if k in e}
             for e in unresolved[:3]
         ],
         "note_provenance": _note_provenance,
@@ -600,42 +692,65 @@ def _build_verdict_packet(
     epoch: dict[str, Any],
 ) -> dict[str, Any]:
     gap_count = registry.get("gap_count", 0)
+    total = registry.get("total", 8)
+    accumulating_count = registry.get("accumulating_count", 0)
     unresolved_count = ledger.get("unresolved_count", 0)
     ledger_status = ledger.get("status", "DATA_GAP")
     epoch_status = epoch.get("status", "EPOCH_MANIFEST_GAP")
 
-    # V1 invariant: pnl_canonical_confirmed=false until Outcome Resolver produces canonical source
+    # V1 invariant: pnl_canonical_confirmed=false — blocks LIVE eligibility, NOT diagnostic verdicts.
+    # EPOCH_MANIFEST_GAP is by design in V1 — does NOT block diagnostic verdicts.
     pnl_canonical_confirmed = False
 
-    # Critical gaps block any positive verdict
-    has_critical_gap = (
-        not pnl_canonical_confirmed
-        or ledger_status == "DATA_GAP"
-        or epoch_status == "EPOCH_MANIFEST_GAP"
-        or gap_count >= 4
-    )
+    # Diagnostic verdict logic:
+    #   TRUTH_GAP_BLOCKS_DECISION  — unresolved ledger entries block the conclusion
+    #   INSUFFICIENT_EVIDENCE      — no meaningful data at all
+    #   KEEP_ACCUMULATING_UNTIL_TRIGGER — evidence accumulating, no critical issues
+    has_unresolved = unresolved_count > 0
+    all_data_absent = ledger_status == "DATA_GAP" and gap_count >= total
 
-    if has_critical_gap or unresolved_count > 0:
+    if has_unresolved:
         verdict = VERDICT_TRUTH_GAP
         verdict_reason = (
-            f"pnl_canonical_confirmed=false (canonical_source=none); "
-            f"registry_gaps={gap_count}/{registry.get('total', 8)}; "
+            f"unresolved_ledger_entries={unresolved_count}; "
+            f"registry_gaps={gap_count}/{total}; ledger_status={ledger_status}"
+        )
+    elif all_data_absent:
+        verdict = VERDICT_INSUFFICIENT
+        verdict_reason = (
+            f"all_registry_DATA_GAP ({gap_count}/{total}) and ledger_DATA_GAP: "
+            "no evidence to form diagnostic conclusion"
+        )
+    elif accumulating_count >= 2:
+        verdict = VERDICT_KEEP_ACCUMULATING
+        verdict_reason = (
+            f"accumulating_count={accumulating_count}/{total}; "
             f"ledger_status={ledger_status}; "
-            f"epoch_status={epoch_status}; "
-            f"unresolved_ledger_entries={unresolved_count}"
+            f"epoch_status={epoch_status} (by-design V1, does not block diagnostics); "
+            f"registry_gaps={gap_count}/{total}; "
+            "pnl_canonical_confirmed=false (V1 live-blocker, not diagnostic blocker)"
         )
     else:
-        accumulating = registry.get("accumulating_count", 0)
-        verdict = VERDICT_KEEP_ACCUMULATING if accumulating >= 2 else VERDICT_INSUFFICIENT
-        verdict_reason = f"accumulating_count={accumulating}"
+        verdict = VERDICT_INSUFFICIENT
+        verdict_reason = (
+            f"accumulating_count={accumulating_count} < 2 threshold; "
+            f"ledger_status={ledger_status}"
+        )
 
-    gaps_listed = [e["key"] for e in registry.get("experiments", []) if e.get("status") == "DATA_GAP"]
+    gaps_listed = [
+        e["key"] for e in registry.get("experiments", [])
+        if e.get("status") in ("DATA_GAP", "PHASE2_STATE_NOT_MACHINE_READABLE")
+    ]
 
     return {
         "verdict": verdict,
         "verdict_reason": verdict_reason,
         "pnl_canonical_confirmed": pnl_canonical_confirmed,
         "live_policy_eligible": False,
+        "live_blocked_reason": (
+            "V1_invariant: canonical_source=none. "
+            "Outcome Resolver R1 CODE pending. BANKROLL $25 HOLD. Fase C not authorized."
+        ),
         "autoexecute": False,
         "disclaimer": _V1_DISCLAIMER,
         "registry_gap_count": gap_count,
