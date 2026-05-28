@@ -164,3 +164,122 @@ No crear todavía `data/policy_epochs_manifest.json` ni ningún state file.
 - `memory/session_254_sl_intra_guard_v10_6_40.md`
 - `memory/universe_recovery_decision_2026_05_26.md`
 - `memory/sl_intra_post_fix_still_bleeds_2026_04_26.md`
+
+---
+
+## Addendum — MARKET_TRUTH_LEDGER_JOIN_BRIDGE_V1
+
+**Decisión:** Opus Max, 2026-05-28.
+**Veredicto:** `A — REPRIORITIZE_MINIMAL_MARKET_TRUTH_BRIDGE_BEFORE_R1`
+**Estado:** `DESIGN_APPROVED / CODE_PENDING_AUTHORIZATION`
+**Relación con R1:** R1 (Outcome Resolver) no cambia de scope ni de gate (Pre-Edge T+7d sano ~2026-05-31 + Pablo signoff). Este bridge es un workstream paralelo más pequeño que resuelve la arista diagnóstica sin bloquear ni reemplazar R1.
+
+### Objetivo
+
+Completar la arista diagnóstica `lifecycle → observed market outcome` dentro del `TRADE_TRUTH_LEDGER`, sin convertirla en settlement canónico ni en señal ejecutable.
+
+El primer check monetizable del Bot Brain — relacionar trades cerrados con outcomes de mercado observados para evaluar exits históricos — no necesita esperar a R1. Railway ya contiene el trade Madrid May 25 en `trade_lifecycle.json` y un outcome observado asociable en `blocked_signals_resolutions.jsonl`; el gap es que `lifecycle.match_key` está ausente y debe derivarse de forma segura.
+
+### Inputs read-only (existentes en Railway)
+
+- `data/trade_lifecycle.json` — registros de trades con `question`, `city`, `date`, `condition`, `token_id`, `close_context`
+- `data/blocked_signals_resolutions.jsonl` — resoluciones de señales con `match_key`, `outcome`, `market_id`, `condition_id`, `win_for_trader`, `resolution_source`
+
+**No se crean artefactos nuevos. No se modifica ningún otro archivo del sistema.**
+
+### Join fallback requerido: `derive_match_key_from_lifecycle_record(record)`
+
+No derivar el match_key solo desde `question` text. Usar prioritariamente los campos estructurados del registro lifecycle:
+
+**Fuentes en orden de prioridad:**
+1. `record.city` — nombre de ciudad (obligatorio)
+2. `record.date` — fecha ISO (obligatorio)
+3. `record.condition` — `exact`, `at_or_above`, `at_or_below` (obligatorio)
+4. threshold y unit — extraídos desde `record.question` solo cuando no estén disponibles como campos propios, usando parsing conservador
+
+**Formato de salida:** `{city}|{date}|{condition}|{threshold}|{unit}` (mismo formato que `match_key` en BSR)
+
+**Falla cerrado si:**
+- falta `city`, `date` o `condition` en el registro
+- el threshold o la unidad no pueden extraerse de forma inequívoca desde `question`
+- el formato de mercado no está soportado (por ejemplo, mercados `at_or_below` con phrasing ambiguo)
+- existe contradicción entre campos estructurados y `question` text
+- `question` está vacío o nulo cuando se necesita para threshold
+
+En caso de fallo: `derived_match_key = null`, `match_key_derivation_status = "failed_closed"` con razón explícita. No propagar un match_key incierto.
+
+### Output diagnóstico esperado por registro
+
+```
+derived_match_key               str | null
+match_key_derivation_status     "derived" | "failed_closed" | "not_attempted"
+market_outcome_observed         "YES" | "NO" | "unresolved" | null
+market_outcome_observed_source  "polymarket_market_price" | null
+market_id                       str | null
+condition_id                    str | null
+join_method                     "derived_match_key" | "BLOCKED_no_match_key"
+hold_vs_exit_flag               dict | null  — comparación diagnóstica hold-to-resolution
+                                             vs exit_price; claramente NOT_CANONICAL
+```
+
+**`hold_vs_exit_flag` cuando disponible (NO canónico, NO autorizante):**
+```
+{
+  "exit_price": float,          # precio al que salió el bot
+  "exit_pnl_cash": float,       # P&L realizado al salir
+  "resolution_outcome": str,    # YES | NO desde BSR
+  "hold_pnl_estimate": float,   # estimación de P&L si hubiera aguantado a resolución
+                                 # (solo calculable si se conoce outcome y shares)
+  "flag": "EXIT_LIMITED_LOSS" | "EXIT_DESTROYED_ALPHA" | "INSUFFICIENT_DATA",
+  "canonical": false,           # siempre false en este bridge
+  "note": str
+}
+```
+
+### Capas de verdad — separación obligatoria
+
+| Capa | Fuente | Scope de este bridge |
+|------|--------|---------------------|
+| `MARKET_TRUTH_OBSERVED` | BSR vía `polymarket_market_price` | ✅ Habilitado — diagnóstico histórico |
+| `MARKET_TRUTH_CANONICAL` | Settlement Gamma/Polygon con URL+sha256 | ❌ Fuera de scope — pertenece a R2 |
+| `WEATHER_TRUTH` | Temperatura oficial estación ICAO | ❌ Fuera de scope — pertenece a diseño separado |
+
+### Labels que deben corregirse en CODE
+
+Dos sobreafirmaciones existentes en `tools/_weather_strategy_engine.py` que CODE debe corregir en el mismo commit:
+
+1. `settlement_confirmed` como clasificación de registro lifecycle con `win_for_trader` conocido.
+   - Motivo: BSR `polymarket_market_price` es observado, no settlement canónico.
+   - Sustituir por: `market_outcome_observed` (o etiqueta equivalente honesta).
+
+2. `lifecycle_to_postmortem = "EXACT_via_id_position_key_token_id"` en `join_key_analysis`.
+   - Motivo: el engine no lee `postmortem.json`; la presencia de `id`/`token_id` en lifecycle no implica join validado.
+   - Sustituir por: `"KEYS_PRESENT_NOT_VALIDATED_AGAINST_POSTMORTEM"`.
+   - Test impactado: `tests/test_bot_brain_weather_strategy.py` línea ~616; actualizar el assert correspondiente.
+
+### Guardrails absolutos
+
+- `LIVE_POLICY_ELIGIBLE = false` — invariante V1, no cambia
+- `P&L_CANONICAL_CONFIRMED = false` — invariante V1, no cambia
+- No eleva `CONFIRMED_MISSED_OPPORTUNITY`
+- No cambia BUY/SELL/SKIP ni recomienda policy live
+- No toca R1, R2, WEATHER_TRUTH ni ninguna fuente de settlement canónico
+- No toca `bot.py`, env vars, Railway writes, DB, BANKROLL, trading core, city modes, guards, SL, scheduler, whitelist, Fase C, `SHADOW_ONLY_MODE`, `price_out_of_range`, exact/NO live
+- No retroetiqueta histórico pre-reconciliación
+- `hold_vs_exit_flag` siempre marcado `canonical=false`
+
+### Archivos candidatos para CODE
+
+| Archivo | Operación |
+|---------|-----------|
+| `tools/_weather_strategy_engine.py` | Añadir `derive_match_key_from_lifecycle_record()` + lógica de join BSR en `_classify_lifecycle_record()` y `_build_trade_truth_ledger()` |
+| `tests/test_bot_brain_weather_strategy.py` | Tests focales del bridge + corrección del assert postmortem label |
+
+No crear herramientas nuevas, state files ni artefactos persistentes.
+
+### Relación con Outcome Resolver (R1/R2)
+
+- Este bridge no reemplaza R1. R1 sigue siendo necesario para fills canónicas desde `trades.log` y para BANKROLL readiness.
+- R2 sigue siendo necesario para `official_settlement_temp` con URL/sha256 verificado (Polygon).
+- Este bridge proporciona la capa diagnóstica intermedia que permite evaluar exits históricos sin esperar a R1.
+- Gate T+7 (~2026-05-31) aplica a R1 CODE; no bloquea este bridge.
