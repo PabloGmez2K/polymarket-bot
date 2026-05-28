@@ -6321,3 +6321,65 @@ Wethr.net requiere pago/suscripción. No se integra. Aprendizajes conceptuales (
 ### Guardrails
 
 No se tocaron bot.py, env vars, Railway, DB, BANKROLL, trading core, city modes, whitelist, scheduler, guards, SL, Pre-Edge flag, Fase C, thresholds, sizing ni BUY/SELL/SKIP.
+
+---
+
+## Sesión 406 — MARKET_TRUTH_LEDGER_JOIN_BRIDGE_V1 implementado y validado (28 may 2026, Sonnet)
+
+**Tipo:** NORMAL / CODE + TESTS
+**Clasificación:** MONETIZATION_RELEVANT / RISK_CONTROL / NORMAL CLOSURE
+**Agente:** Sonnet
+**Archivos:** `tools/_weather_strategy_engine.py`, `tests/test_bot_brain_weather_strategy.py`, `docs/bot_brain_weather_strategy_v1_contract.md`
+
+### Trazabilidad del bloque
+
+- Commit de código: `48c8abb feat: join observed market outcomes into weather strategy ledger`
+- Commit de diseño (Addendum): `add32d8 docs: prioritize market truth bridge before outcome resolver R1`
+- Workstream: `MARKET_TRUTH_LEDGER_JOIN_BRIDGE_V1`
+
+### Implementación
+
+- `derive_match_key_from_lifecycle_record()` fail-closed: deriva `match_key` desde campos estructurados lifecycle (`city|date|condition|threshold|unit`), falla cerrado si faltan campos obligatorios o threshold ambiguo
+- `join_lifecycle_to_market_outcomes()`: une lifecycle → BSR via `derived_match_key`
+- Label sobreafirmado `settlement_confirmed` corregido a `market_outcome_observed` en clasificación de registros lifecycle con `win_for_trader` conocido
+
+### Validaciones
+
+- `py_compile tools/_weather_strategy_engine.py` OK
+- `pytest tests/test_bot_brain_weather_strategy.py -x -q` → 55/55
+- `git diff --check` OK
+- `verify_before_deploy.py` 1258/1258
+- Smoke real Railway read-only: `REAL_DATA_SMOKE_PASS_READY_FOR_PUSH_DECISION`
+
+### Cobertura inicial (snapshot Railway fresco)
+
+| Métrica | Valor |
+|---------|-------|
+| Total records lifecycle | 150 |
+| Derivación intentada | 150 |
+| Derivación exitosa | 103 |
+| Join exitoso BSR | 12 |
+| Sin BSR correspondiente | 91 |
+| Ambigüedad | 0 |
+| Failed_closed | 47 (range 26, fecha ausente 12, question ausente 9) |
+
+### Madrid May 25 (caso de aceptación)
+
+- `derived_match_key = Madrid|2026-05-25|exact|32|C`
+- `join_method = derived_match_key`
+- `market_outcome_observed = YES`
+- `bot_side_aligned_with_observed_outcome = false`
+- `pnl_counterfactual_status = R1_REQUIRED_FOR_CASH_COUNTERFACTUAL`
+- `LIVE_POLICY_ELIGIBLE = false`
+- `P&L_CANONICAL_CONFIRMED = false`
+
+### Estado del checklist
+
+- `trade → observed market outcome para cohorte cubierta por BSR = VALIDATED`
+- `full lifecycle market truth coverage = PENDING`
+- `canonical P&L / R1 = PENDING`
+- `canonical market / weather truth = PENDING`
+
+### Guardrails
+
+No se tocaron bot.py, env vars, Railway writes, DB, BANKROLL, trading core, city modes, exits, guards, SL, SHADOW_ONLY_MODE, exact/NO live ni BUY/SELL/SKIP.
