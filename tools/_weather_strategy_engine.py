@@ -13,6 +13,7 @@ No Truth Pipeline activation. No env vars. No Phase 2 runtime changes.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -82,6 +83,88 @@ def _get_pnl_value(record: dict[str, Any]) -> float | None:
                 except (TypeError, ValueError):
                     pass
     return None
+
+
+# ── Match key derivation ──────────────────────────────────────────────────────
+
+_SUPPORTED_CONDITIONS = frozenset({"exact", "at_or_above", "at_or_below"})
+
+_QUESTION_PATTERNS: dict[str, re.Pattern[str]] = {
+    "exact": re.compile(
+        r"be\s+(\d+(?:\.\d+)?)\s*°?([CF])\s+on\b",
+        re.IGNORECASE,
+    ),
+    "at_or_above": re.compile(
+        r"be\s+(\d+(?:\.\d+)?)\s*°?([CF])\s+or\s+higher\b",
+        re.IGNORECASE,
+    ),
+    "at_or_below": re.compile(
+        r"be\s+(\d+(?:\.\d+)?)\s*°?([CF])\s+or\s+below\b",
+        re.IGNORECASE,
+    ),
+}
+
+
+def derive_match_key_from_lifecycle_record(record: dict[str, Any]) -> dict[str, Any]:
+    """Derive a BSR match key from lifecycle record fields conservatively.
+
+    Uses city/date/condition first; question only for threshold+unit extraction.
+    Returns:
+      derived_match_key: str | None
+      match_key_derivation_status: "derived" | "failed_closed"
+      derivation_failure_reason: str | None
+    Fails closed on any ambiguity.
+    """
+    city = str(record.get("city") or "").strip()
+    date = _record_date(record).strip()
+    condition = str(record.get("condition") or "").strip()
+    question = str(record.get("question") or "").strip()
+
+    def _fail(reason: str) -> dict[str, Any]:
+        return {
+            "derived_match_key": None,
+            "match_key_derivation_status": "failed_closed",
+            "derivation_failure_reason": reason,
+        }
+
+    if not city:
+        return _fail("city_absent")
+    if not date:
+        return _fail("date_absent")
+    if not condition:
+        return _fail("condition_absent")
+    if condition not in _SUPPORTED_CONDITIONS:
+        return _fail(f"condition_unsupported:{condition}")
+    if not question:
+        return _fail("question_absent_cannot_extract_threshold")
+
+    pattern = _QUESTION_PATTERNS[condition]
+    m = pattern.search(question)
+
+    if not m:
+        for other_cond, other_pat in _QUESTION_PATTERNS.items():
+            if other_cond != condition and other_pat.search(question):
+                return _fail(
+                    f"condition_contradiction:record_condition={condition}_question_implies={other_cond}"
+                )
+        return _fail("threshold_not_extractable_from_question")
+
+    threshold_str = m.group(1)
+    unit = m.group(2).upper()
+
+    try:
+        threshold_f = float(threshold_str)
+        threshold_display = str(int(threshold_f)) if threshold_f == int(threshold_f) else threshold_str
+    except ValueError:
+        return _fail("threshold_parse_error")
+
+    date_iso = date[:10] if len(date) >= 10 else date
+    derived = f"{city}|{date_iso}|{condition}|{threshold_display}|{unit}"
+    return {
+        "derived_match_key": derived,
+        "match_key_derivation_status": "derived",
+        "derivation_failure_reason": None,
+    }
 
 
 # ── Experiment registry probes ────────────────────────────────────────────────
@@ -529,31 +612,107 @@ def _classify_lifecycle_record(
     pnl_value = _get_pnl_value(record)
     has_pnl = pnl_value is not None
 
-    matched_resolution = next(
-        (r for r in resolutions if r.get("match_key") and r.get("match_key") == record.get("match_key")),
-        None,
-    )
-    outcome_resolved = matched_resolution is not None and matched_resolution.get("win_for_trader") is not None
-
     cc = record.get("close_context") or {}
     close_action = cc.get("close_action") or record.get("close_action")
     close_reason = cc.get("close_reason") or cc.get("close_subtype") or record.get("close_reason")
 
+    # ── Join logic: exact match_key first, then derived ───────────────────────
+    record_mk = record.get("match_key")
+    matched_resolution: dict[str, Any] | None = None
+    derived_mk_result: dict[str, Any] | None = None
+    join_method: str
+
+    def _has_outcome(r: dict[str, Any]) -> bool:
+        return r.get("win_for_trader") is not None or bool(r.get("outcome"))
+
+    if record_mk:
+        candidate = next(
+            (r for r in resolutions if r.get("match_key") and r.get("match_key") == record_mk),
+            None,
+        )
+        if candidate and _has_outcome(candidate):
+            matched_resolution = candidate
+            join_method = "exact_match_key"
+        elif candidate:
+            join_method = "exact_match_key_present_unresolved"
+        else:
+            join_method = "exact_match_key_present_no_bsr_match"
+    else:
+        derived_mk_result = derive_match_key_from_lifecycle_record(record)
+        if derived_mk_result["match_key_derivation_status"] == "derived":
+            derived_mk = derived_mk_result["derived_match_key"]
+            bsr_matches = [r for r in resolutions if r.get("match_key") == derived_mk]
+            if len(bsr_matches) == 1 and _has_outcome(bsr_matches[0]):
+                matched_resolution = bsr_matches[0]
+                join_method = "derived_match_key"
+            elif len(bsr_matches) == 1:
+                join_method = "derived_match_key_bsr_unresolved"
+            elif len(bsr_matches) > 1:
+                join_method = "BLOCKED_ambiguous_bsr_matches"
+            else:
+                join_method = "BLOCKED_derived_key_no_bsr_match"
+        else:
+            join_method = "BLOCKED_no_match_key"
+
+    outcome_resolved = matched_resolution is not None and _has_outcome(matched_resolution)
+
+    # ── Classification ────────────────────────────────────────────────────────
     if not identity:
         classification, reason = "unresolved", "missing_identity"
     elif outcome_resolved:
-        classification, reason = "settlement_confirmed", "outcome_resolved_diagnostic"
+        classification, reason = "market_outcome_observed", "outcome_observed_via_bsr"
     elif has_pnl:
         classification, reason = "pnl_diagnostic", "pnl_present_outcome_unresolved"
     else:
         classification, reason = "diagnostic_only", "no_pnl_no_outcome"
 
     provenance_level = (
-        "settlement_confirmed" if outcome_resolved
+        "market_outcome_observed" if outcome_resolved
         else ("pnl_diagnostic" if has_pnl else "identity_only")
     )
 
-    # Diagnostic evidence flags — non-exclusive, describe what evidence exists
+    # ── Market truth fields (populated only when outcome observed) ────────────
+    market_truth_fields: dict[str, Any] = {}
+    if outcome_resolved and matched_resolution is not None:
+        raw_outcome = str(matched_resolution.get("outcome") or "").strip().lower()
+        if raw_outcome in ("yes", "true", "1"):
+            mo = "YES"
+        elif raw_outcome in ("no", "false", "0"):
+            mo = "NO"
+        else:
+            mo = "unresolved"
+        bot_side = str(record.get("side") or "").strip().upper()
+        bot_aligned: bool | None = (bot_side == mo) if mo in ("YES", "NO") and bot_side in ("YES", "NO") else None
+        market_truth_fields = {
+            "market_outcome_observed": mo,
+            "market_outcome_observed_source": matched_resolution.get("resolution_source") or None,
+            "market_id": str(matched_resolution.get("market_id") or "").strip() or None,
+            "condition_id": str(matched_resolution.get("condition_id") or "").strip() or None,
+            "market_truth_canonical": False,
+            "weather_truth_available": False,
+            "pnl_counterfactual_status": "R1_REQUIRED_FOR_CASH_COUNTERFACTUAL",
+        }
+        if bot_aligned is not None:
+            market_truth_fields["bot_side_aligned_with_observed_outcome"] = bot_aligned
+
+    # ── Outcome join gap ──────────────────────────────────────────────────────
+    outcome_join_gap: str | None
+    if not identity:
+        outcome_join_gap = "identity_missing"
+    elif outcome_resolved:
+        outcome_join_gap = None
+    elif record_mk:
+        outcome_join_gap = "bsr_match_found_outcome_unresolved" if join_method == "exact_match_key_present_unresolved" else "bsr_match_not_found"
+    elif derived_mk_result:
+        if derived_mk_result["match_key_derivation_status"] == "derived":
+            outcome_join_gap = "bsr_match_not_found_for_derived_key"
+        else:
+            reason_str = derived_mk_result.get("derivation_failure_reason") or "unknown"
+            outcome_join_gap = f"match_key_derivation_failed:{reason_str}"
+    else:
+        outcome_join_gap = "match_key_absent_in_lifecycle_record"
+
+    # ── Diagnostic evidence flags ─────────────────────────────────────────────
     evidence_flags: list[str] = []
     if has_pnl and "stop" in str(close_reason or "").lower():
         evidence_flags.append("DIAGNOSTIC_EXIT_DAMAGE_EVIDENCE_PRESENT")
@@ -566,21 +725,7 @@ def _classify_lifecycle_record(
     if not token_id:
         evidence_flags.append("SOURCE_OR_EPOCH_GAP")
 
-    # Join method — exact via match_key if resolution linked; blocked otherwise
-    if outcome_resolved:
-        join_method = "exact_match_key"
-        outcome_join_gap = None
-    elif identity:
-        if record.get("match_key"):
-            join_method = "exact_match_key_present_unresolved"
-            outcome_join_gap = "resolution_not_yet_available"
-        else:
-            join_method = "BLOCKED_match_key_absent"
-            outcome_join_gap = "match_key_absent_in_lifecycle_record"
-    else:
-        join_method = "BLOCKED_no_identity"
-        outcome_join_gap = "identity_missing"
-
+    # ── Result ────────────────────────────────────────────────────────────────
     result: dict[str, Any] = {
         "classification": classification,
         "reason": reason,
@@ -599,6 +744,13 @@ def _classify_lifecycle_record(
         "join_method": join_method,
         "outcome_join_gap": outcome_join_gap,
     }
+    result.update(market_truth_fields)
+
+    if derived_mk_result is not None:
+        result["derived_match_key"] = derived_mk_result["derived_match_key"]
+        result["match_key_derivation_status"] = derived_mk_result["match_key_derivation_status"]
+        if derived_mk_result.get("derivation_failure_reason"):
+            result["derivation_failure_reason"] = derived_mk_result["derivation_failure_reason"]
 
     gaps = []
     if not identity:
@@ -673,6 +825,15 @@ def _lookup_city_date(
                 "join_method": cl.get("join_method"),
                 "outcome_join_gap": cl.get("outcome_join_gap"),
             }
+            for _bridge_field in (
+                "derived_match_key", "match_key_derivation_status", "derivation_failure_reason",
+                "market_outcome_observed", "market_outcome_observed_source",
+                "market_id", "condition_id", "market_truth_canonical", "weather_truth_available",
+                "bot_side_aligned_with_observed_outcome", "pnl_counterfactual_status",
+            ):
+                _v = cl.get(_bridge_field)
+                if _v is not None:
+                    rec[_bridge_field] = _v
             if entry_ctx.get("edge_pct") is not None:
                 rec["entry_edge_pct"] = entry_ctx["edge_pct"]
             if entry_ctx.get("our_prob") is not None:
@@ -736,7 +897,7 @@ def _build_trade_truth_ledger(
             "total_records": 0,
             "unresolved_count": 0,
             "diagnostic_count": 0,
-            "settlement_confirmed_count": 0,
+            "market_outcome_observed_count": 0,
             "pnl_canonical_confirmed": False,
             "canonical_source": "none",
             "gap_reason": "no_trading_artifacts_found_locally",
@@ -753,7 +914,7 @@ def _build_trade_truth_ledger(
     ]
     unresolved = [e for e in entries if e["classification"] == "unresolved"]
     diagnostic = [e for e in entries if e["classification"] in ("diagnostic_only", "pnl_diagnostic")]
-    confirmed = [e for e in entries if e["classification"] == "settlement_confirmed"]
+    confirmed = [e for e in entries if e["classification"] == "market_outcome_observed"]
 
     # Dynamic join key analysis based on actual lifecycle data
     lc_with_match_key = sum(1 for r in records_list if isinstance(r, dict) and r.get("match_key"))
@@ -762,7 +923,7 @@ def _build_trade_truth_ledger(
     lc_with_id = sum(1 for r in records_list if isinstance(r, dict) and r.get("id"))
     join_key_analysis = {
         "lifecycle_to_postmortem": (
-            "EXACT_via_id_position_key_token_id" if lc_with_token_id > 0 or lc_with_id > 0
+            "KEYS_PRESENT_NOT_VALIDATED_AGAINST_POSTMORTEM" if lc_with_token_id > 0 or lc_with_id > 0
             else "BLOCKED_no_id_or_token_id"
         ),
         "lifecycle_to_resolutions": (
@@ -790,7 +951,7 @@ def _build_trade_truth_ledger(
         "total_records": len(entries),
         "unresolved_count": len(unresolved),
         "diagnostic_count": len(diagnostic),
-        "settlement_confirmed_count": len(confirmed),
+        "market_outcome_observed_count": len(confirmed),
         "pnl_canonical_confirmed": False,
         "canonical_source": "none",
         "join_key_analysis": join_key_analysis,

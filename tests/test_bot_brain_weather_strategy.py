@@ -20,6 +20,7 @@ import pytest
 from tools.bot_brain import build_brain_report, main, render_markdown
 from tools._weather_strategy_engine import (
     build_weather_strategy_result,
+    derive_match_key_from_lifecycle_record,
     VERDICT_TRUTH_GAP,
     VERDICT_KEEP_ACCUMULATING,
     VERDICT_INSUFFICIENT,
@@ -143,7 +144,7 @@ def test_ledger_classifies_pnl_without_outcome_as_pnl_diagnostic(tmp_path: Path)
     result = build_weather_strategy_result(data_dir, repo_root, now=NOW)
     ledger = result["trade_truth_ledger"]
     assert ledger["diagnostic_count"] == 1
-    assert ledger["settlement_confirmed_count"] == 0
+    assert ledger["market_outcome_observed_count"] == 0
 
 
 # ── 6. Verdict global — required fields ──────────────────────────────────────
@@ -302,7 +303,7 @@ def test_directional_no_accumulating_unresolved(tmp_path: Path) -> None:
 
 # ── 9. Provenance — diagnostic evidence stays diagnostic ─────────────────────
 
-def test_settlement_confirmed_marked_as_diagnostic_not_live(tmp_path: Path) -> None:
+def test_market_outcome_observed_marked_as_diagnostic_not_live(tmp_path: Path) -> None:
     repo_root, data_dir = _data_dir(tmp_path)
     # Trade with resolved outcome (win_for_trader known)
     _write_json(data_dir / "trade_lifecycle.json", {
@@ -313,10 +314,11 @@ def test_settlement_confirmed_marked_as_diagnostic_not_live(tmp_path: Path) -> N
     ])
     result = build_weather_strategy_result(data_dir, repo_root, now=NOW)
     ledger = result["trade_truth_ledger"]
-    # Even with settlement_confirmed, pnl_canonical_confirmed stays false in V1
-    assert ledger["settlement_confirmed_count"] == 1
+    # BSR join via exact match_key → market_outcome_observed classification
+    assert ledger["market_outcome_observed_count"] == 1
     assert ledger["pnl_canonical_confirmed"] is False
-    # And live_policy_eligible stays false
+    # settlement_confirmed label no longer used
+    assert "settlement_confirmed" not in str(ledger)
     assert result["weather_strategy_verdict_packet"]["live_policy_eligible"] is False
 
 
@@ -573,8 +575,10 @@ def test_madrid_may25_enriched_stop_loss_flags(tmp_path: Path) -> None:
     assert "UNRESOLVED_BY_OUTCOME_JOIN_GAP" in flags
     # token_id present so no SOURCE_OR_EPOCH_GAP
     assert "SOURCE_OR_EPOCH_GAP" not in flags
-    assert rec.get("join_method") == "BLOCKED_match_key_absent"
-    assert rec.get("outcome_join_gap") == "match_key_absent_in_lifecycle_record"
+    # No question field → derivation fails → BLOCKED_no_match_key
+    assert rec.get("join_method") == "BLOCKED_no_match_key"
+    assert rec.get("match_key_derivation_status") == "failed_closed"
+    assert "question_absent" in (rec.get("derivation_failure_reason") or "")
     assert rec.get("entry_edge_pct") == 38.4
     assert rec.get("entry_our_prob") == 80.9
     assert rec.get("entry_forecast_max") == 31.5
@@ -613,7 +617,7 @@ def test_ledger_join_key_analysis_blocked_when_no_keys(tmp_path: Path) -> None:
     })
     result = build_weather_strategy_result(data_dir, repo_root, now=NOW)
     jka = result["trade_truth_ledger"]["join_key_analysis"]
-    assert jka["lifecycle_to_postmortem"] == "EXACT_via_id_position_key_token_id"
+    assert jka["lifecycle_to_postmortem"] == "KEYS_PRESENT_NOT_VALIDATED_AGAINST_POSTMORTEM"
     assert "BLOCKED" in jka["lifecycle_to_resolutions"]
     assert "BLOCKED" in jka["lifecycle_to_evaluations"]
     assert jka["records_with_match_key"] == 0
@@ -720,3 +724,272 @@ def test_phase2_extended_description_has_t30_and_mixed_condition(tmp_path: Path)
     assert p2.get("exact_slice_protected") is True
     assert isinstance(p2.get("exact_slice_known_issues"), list)
     assert any("match_key" in issue for issue in p2["exact_slice_known_issues"])
+
+
+# ── 21. MARKET_TRUTH_LEDGER_JOIN_BRIDGE_V1 — derive_match_key unit tests ──────
+
+def test_derive_match_key_exact_success() -> None:
+    record = {
+        "city": "Madrid",
+        "date": "2026-05-25",
+        "condition": "exact",
+        "question": "Will the highest temperature in Madrid be 32°C on May 25?",
+    }
+    r = derive_match_key_from_lifecycle_record(record)
+    assert r["match_key_derivation_status"] == "derived"
+    assert r["derived_match_key"] == "Madrid|2026-05-25|exact|32|C"
+    assert r["derivation_failure_reason"] is None
+
+
+def test_derive_match_key_at_or_above_success() -> None:
+    record = {
+        "city": "Tokyo",
+        "date": "2026-06-01",
+        "condition": "at_or_above",
+        "question": "Will the highest temperature in Tokyo be 30°C or higher on June 1?",
+    }
+    r = derive_match_key_from_lifecycle_record(record)
+    assert r["match_key_derivation_status"] == "derived"
+    assert r["derived_match_key"] == "Tokyo|2026-06-01|at_or_above|30|C"
+
+
+def test_derive_match_key_at_or_below_success() -> None:
+    record = {
+        "city": "Paris",
+        "date": "2026-06-02",
+        "condition": "at_or_below",
+        "question": "Will the highest temperature in Paris be 20°C or below on June 2?",
+    }
+    r = derive_match_key_from_lifecycle_record(record)
+    assert r["match_key_derivation_status"] == "derived"
+    assert r["derived_match_key"] == "Paris|2026-06-02|at_or_below|20|C"
+
+
+def test_derive_match_key_empty_question_failed_closed() -> None:
+    record = {"city": "Madrid", "date": "2026-05-25", "condition": "exact", "question": ""}
+    r = derive_match_key_from_lifecycle_record(record)
+    assert r["match_key_derivation_status"] == "failed_closed"
+    assert r["derived_match_key"] is None
+    assert "question_absent" in r["derivation_failure_reason"]
+
+
+def test_derive_match_key_no_question_field_failed_closed() -> None:
+    record = {"city": "Madrid", "date": "2026-05-25", "condition": "exact"}
+    r = derive_match_key_from_lifecycle_record(record)
+    assert r["match_key_derivation_status"] == "failed_closed"
+    assert "question_absent" in r["derivation_failure_reason"]
+
+
+def test_derive_match_key_city_absent_failed_closed() -> None:
+    record = {"date": "2026-05-25", "condition": "exact", "question": "Will the highest temperature in Madrid be 32°C on May 25?"}
+    r = derive_match_key_from_lifecycle_record(record)
+    assert r["match_key_derivation_status"] == "failed_closed"
+    assert "city_absent" in r["derivation_failure_reason"]
+
+
+def test_derive_match_key_date_absent_failed_closed() -> None:
+    record = {"city": "Madrid", "condition": "exact", "question": "Will the highest temperature in Madrid be 32°C on May 25?"}
+    r = derive_match_key_from_lifecycle_record(record)
+    assert r["match_key_derivation_status"] == "failed_closed"
+    assert "date_absent" in r["derivation_failure_reason"]
+
+
+def test_derive_match_key_condition_absent_failed_closed() -> None:
+    record = {"city": "Madrid", "date": "2026-05-25", "question": "Will the highest temperature in Madrid be 32°C on May 25?"}
+    r = derive_match_key_from_lifecycle_record(record)
+    assert r["match_key_derivation_status"] == "failed_closed"
+    assert "condition_absent" in r["derivation_failure_reason"]
+
+
+def test_derive_match_key_contradiction_failed_closed() -> None:
+    # condition=exact but question says "or higher"
+    record = {
+        "city": "Paris",
+        "date": "2026-06-01",
+        "condition": "exact",
+        "question": "Will the highest temperature in Paris be 25°C or higher on June 1?",
+    }
+    r = derive_match_key_from_lifecycle_record(record)
+    assert r["match_key_derivation_status"] == "failed_closed"
+    assert "contradiction" in r["derivation_failure_reason"]
+    assert "at_or_above" in r["derivation_failure_reason"]
+
+
+# ── 22. Bridge join — Madrid exact full success (Tarea 5 item 1) ──────────────
+
+def test_bridge_madrid_exact_success(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    _write_json(data_dir / "trade_lifecycle.json", {
+        "records": [{
+            "id": "tok52089",
+            "city": "Madrid",
+            "date": "2026-05-25",
+            "condition": "exact",
+            "side": "NO",
+            "question": "Will the highest temperature in Madrid be 32°C on May 25?",
+            "close_context": {"close_action": "SELL", "close_reason": "stop_loss", "pnl_cash": -13.94},
+        }]
+    })
+    _write_jsonl(data_dir / "blocked_signals_resolutions.jsonl", [
+        {
+            "match_key": "Madrid|2026-05-25|exact|32|C",
+            "outcome": "Yes",
+            "market_id": "2336912",
+            "condition_id": "cond123",
+            "resolution_source": "polymarket_market_price",
+            "win_for_trader": False,
+        }
+    ])
+    result = build_weather_strategy_result(data_dir, repo_root, city="Madrid", date="2026-05-25", now=NOW)
+    lookup = result["trade_truth_ledger"]["city_date_lookup"]
+    assert lookup["status"] == "FOUND"
+    rec = lookup["records"][0]
+    assert rec["derived_match_key"] == "Madrid|2026-05-25|exact|32|C"
+    assert rec["join_method"] == "derived_match_key"
+    assert rec["market_outcome_observed"] == "YES"
+    assert rec["bot_side_aligned_with_observed_outcome"] is False
+    assert rec["market_truth_canonical"] is False
+    assert rec["weather_truth_available"] is False
+    assert rec["pnl_counterfactual_status"] == "R1_REQUIRED_FOR_CASH_COUNTERFACTUAL"
+    # No overasserted labels
+    assert "settlement_confirmed" not in str(rec)
+    # No P&L counterfactual cash
+    assert "hold_pnl_estimate" not in rec
+    assert "EXIT_LIMITED_LOSS" not in str(rec)
+    assert "EXIT_DESTROYED_ALPHA" not in str(rec)
+
+
+def test_bridge_at_or_above_success(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    _write_json(data_dir / "trade_lifecycle.json", {
+        "records": [{
+            "id": "t1",
+            "city": "Tokyo",
+            "date": "2026-06-01",
+            "condition": "at_or_above",
+            "side": "YES",
+            "question": "Will the highest temperature in Tokyo be 30°C or higher on June 1?",
+        }]
+    })
+    _write_jsonl(data_dir / "blocked_signals_resolutions.jsonl", [
+        {
+            "match_key": "Tokyo|2026-06-01|at_or_above|30|C",
+            "outcome": "No",
+            "market_id": "m1",
+            "condition_id": "c1",
+            "resolution_source": "polymarket_market_price",
+            "win_for_trader": False,
+        }
+    ])
+    result = build_weather_strategy_result(data_dir, repo_root, city="Tokyo", date="2026-06-01", now=NOW)
+    rec = result["trade_truth_ledger"]["city_date_lookup"]["records"][0]
+    assert rec["derived_match_key"] == "Tokyo|2026-06-01|at_or_above|30|C"
+    assert rec["join_method"] == "derived_match_key"
+    assert rec["market_outcome_observed"] == "NO"
+    assert rec["bot_side_aligned_with_observed_outcome"] is False  # YES bet, NO outcome
+
+
+def test_bridge_at_or_below_success(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    _write_json(data_dir / "trade_lifecycle.json", {
+        "records": [{
+            "id": "t1",
+            "city": "Paris",
+            "date": "2026-06-02",
+            "condition": "at_or_below",
+            "side": "NO",
+            "question": "Will the highest temperature in Paris be 20°C or below on June 2?",
+        }]
+    })
+    _write_jsonl(data_dir / "blocked_signals_resolutions.jsonl", [
+        {
+            "match_key": "Paris|2026-06-02|at_or_below|20|C",
+            "outcome": "Yes",
+            "market_id": "m2",
+            "condition_id": "c2",
+            "resolution_source": "polymarket_market_price",
+            "win_for_trader": True,
+        }
+    ])
+    result = build_weather_strategy_result(data_dir, repo_root, city="Paris", date="2026-06-02", now=NOW)
+    rec = result["trade_truth_ledger"]["city_date_lookup"]["records"][0]
+    assert rec["derived_match_key"] == "Paris|2026-06-02|at_or_below|20|C"
+    assert rec["join_method"] == "derived_match_key"
+    assert rec["market_outcome_observed"] == "YES"
+    assert rec["bot_side_aligned_with_observed_outcome"] is False  # NO side, YES outcome
+
+
+# ── 23. Bridge join — no match → fail closed ──────────────────────────────────
+
+def test_bridge_no_bsr_match_blocked(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    _write_json(data_dir / "trade_lifecycle.json", {
+        "records": [{
+            "id": "t1",
+            "city": "Seoul",
+            "date": "2026-06-01",
+            "condition": "exact",
+            "side": "NO",
+            "question": "Will the highest temperature in Seoul be 28°C on June 1?",
+        }]
+    })
+    _write_jsonl(data_dir / "blocked_signals_resolutions.jsonl", [
+        {"match_key": "Seoul|2026-06-01|exact|30|C", "outcome": "Yes", "win_for_trader": True}
+    ])
+    result = build_weather_strategy_result(data_dir, repo_root, city="Seoul", date="2026-06-01", now=NOW)
+    rec = result["trade_truth_ledger"]["city_date_lookup"]["records"][0]
+    assert rec["join_method"] == "BLOCKED_derived_key_no_bsr_match"
+    assert rec.get("market_outcome_observed") is None
+
+
+# ── 24. postmortem label corrected (Tarea 4 / Tarea 5 item 7) ─────────────────
+
+def test_lifecycle_to_postmortem_honest_label(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    _write_json(data_dir / "trade_lifecycle.json", {
+        "records": [
+            {"id": "t1", "token_id": "tok1", "city": "Madrid", "date": "2026-05-25"},
+            {"id": "t2", "token_id": "tok2", "city": "Seoul", "date": "2026-05-10"},
+        ]
+    })
+    result = build_weather_strategy_result(data_dir, repo_root, now=NOW)
+    jka = result["trade_truth_ledger"]["join_key_analysis"]
+    assert jka["lifecycle_to_postmortem"] == "KEYS_PRESENT_NOT_VALIDATED_AGAINST_POSTMORTEM"
+
+
+# ── 25. BSR observed never elevates live/canonical (Tarea 5 item 8) ──────────
+
+def test_bsr_observed_outcome_never_elevates_live_or_canonical(tmp_path: Path) -> None:
+    repo_root, data_dir = _data_dir(tmp_path)
+    _write_json(data_dir / "trade_lifecycle.json", {
+        "records": [{
+            "id": "tok52089",
+            "city": "Madrid",
+            "date": "2026-05-25",
+            "condition": "exact",
+            "side": "NO",
+            "question": "Will the highest temperature in Madrid be 32°C on May 25?",
+            "close_context": {"close_action": "SELL", "close_reason": "stop_loss", "pnl_cash": -13.94},
+        }]
+    })
+    _write_jsonl(data_dir / "blocked_signals_resolutions.jsonl", [
+        {
+            "match_key": "Madrid|2026-05-25|exact|32|C",
+            "outcome": "Yes",
+            "market_id": "2336912",
+            "condition_id": "cond123",
+            "resolution_source": "polymarket_market_price",
+            "win_for_trader": False,
+        }
+    ])
+    result = build_weather_strategy_result(data_dir, repo_root, city="Madrid", date="2026-05-25", now=NOW)
+    packet = result["weather_strategy_verdict_packet"]
+    rec = result["trade_truth_ledger"]["city_date_lookup"]["records"][0]
+    # V1 invariants hold regardless of observed outcome
+    assert packet["live_policy_eligible"] is False
+    assert packet["pnl_canonical_confirmed"] is False
+    assert rec["market_truth_canonical"] is False
+    # No CONFIRMED_MISSED_OPPORTUNITY anywhere in the output
+    assert "CONFIRMED_MISSED_OPPORTUNITY" not in str(result)
+    assert "LIVE_POLICY_ELIGIBLE=true" not in str(result)
+    assert "P&L_CANONICAL_CONFIRMED=true" not in str(result)

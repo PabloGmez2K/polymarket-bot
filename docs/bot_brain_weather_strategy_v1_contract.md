@@ -222,14 +222,20 @@ hold_vs_exit_flag               dict | null  — comparación diagnóstica hold-
                                              vs exit_price; claramente NOT_CANONICAL
 ```
 
-**`hold_vs_exit_flag` cuando disponible (NO canónico, NO autorizante):**
+**`hold_vs_exit_flag` — DEFERRED to R1 (not implemented in MARKET_TRUTH_LEDGER_JOIN_BRIDGE_V1):**
+
+`hold_pnl_estimate`, `EXIT_LIMITED_LOSS`, and `EXIT_DESTROYED_ALPHA` require reconciled
+fills/P&L/provenance from R1 CODE. MARKET_TRUTH_LEDGER_JOIN_BRIDGE_V1 emits only:
+- `bot_side_aligned_with_observed_outcome: bool`
+- `pnl_counterfactual_status: "R1_REQUIRED_FOR_CASH_COUNTERFACTUAL"`
+
+The schema below is the target design for a future R1-enabled phase, not the current bridge output:
 ```
 {
   "exit_price": float,          # precio al que salió el bot
   "exit_pnl_cash": float,       # P&L realizado al salir
   "resolution_outcome": str,    # YES | NO desde BSR
-  "hold_pnl_estimate": float,   # estimación de P&L si hubiera aguantado a resolución
-                                 # (solo calculable si se conoce outcome y shares)
+  "hold_pnl_estimate": float,   # DEFERRED: requires R1 fills reconciliation
   "flag": "EXIT_LIMITED_LOSS" | "EXIT_DESTROYED_ALPHA" | "INSUFFICIENT_DATA",
   "canonical": false,           # siempre false en este bridge
   "note": str
