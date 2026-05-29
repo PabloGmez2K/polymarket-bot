@@ -57,7 +57,7 @@ OUT_DIR = REPO_ROOT / "data" / "multimodel_shadow"
 PREREG_MARKER_FILE = OUT_DIR / "_h3_prereg_cutoff.json"
 
 _LOG_ONLY_HEADER = (
-    "H3_MULTIMODEL_DISAGREEMENT_SIGNAL_V1 | LOG_ONLY | READ_ONLY\n"
+    "H3_MULTIMODEL_DISAGREEMENT_SIGNAL_V1_1 | LOG_ONLY | READ_ONLY\n"
     "eligible_for_policy=false | live_policy_eligible=false\n"
     "No trading authorization. No Weather Truth canonical. No P&L canonical.\n"
 )

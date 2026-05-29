@@ -29,10 +29,10 @@ from typing import Any, Callable
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-H3_HYPOTHESIS_ID = "H3_MULTIMODEL_DISAGREEMENT_SIGNAL_V1"
+H3_HYPOTHESIS_ID = "H3_MULTIMODEL_DISAGREEMENT_SIGNAL_V1_1"
 H3_CANDIDATE_MODEL_ID = "multimodel_disagreement_candidate_v1"
-H3_SCHEMA_VERSION = "h3_v1"
-H3_FORMULA_VERSION = "inter_model_disagreement_v1"
+H3_SCHEMA_VERSION = "h3_v1_1"
+H3_FORMULA_VERSION = "inter_model_disagreement_v1_1"
 
 # Minimum sigma to avoid degenerate distributions
 _MIN_SIGMA: float = 0.8
@@ -73,7 +73,7 @@ _DAILY_TEMP_TAG_ID = "103040"
 _MONTHS = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"]
 
 _LOG_ONLY_DISCLAIMER = (
-    "H3_MULTIMODEL_DISAGREEMENT_SIGNAL_V1: LOG_ONLY / READ_ONLY. "
+    "H3_MULTIMODEL_DISAGREEMENT_SIGNAL_V1_1: LOG_ONLY / READ_ONLY. "
     "eligible_for_policy=false. live_policy_eligible=false. "
     "No trading authorization. No Weather Truth canonical. No P&L canonical."
 )
@@ -116,9 +116,13 @@ def compute_candidate_prob(
 ) -> float | None:
     """Compute H3 candidate probability using inter_model_disagreement_std as sigma.
 
+    Replicates bot.py's estimate_prob() integer-rounding convention: Polymarket
+    temperatures are stated as integers so "at or above T" means T >= T-0.5 and
+    "at or below T" means T <= T+0.5 (±0.5 boundary adjustment).
+
     sigma_candidate = max(inter_model_std, _MIN_SIGMA)
-    condition 'at_or_above': P(temp >= threshold)  = 1 - CDF(threshold, mu, sigma)
-    condition 'at_or_below': P(temp <= threshold)  = CDF(threshold, mu, sigma)
+    condition 'at_or_above': P(temp >= threshold-0.5) = 1 - CDF(threshold-0.5, mu, sigma)
+    condition 'at_or_below': P(temp <= threshold+0.5) = CDF(threshold+0.5, mu, sigma)
     'exact' and 'range' are out of scope for V1.
 
     Returns None for unsupported conditions.
@@ -127,8 +131,8 @@ def compute_candidate_prob(
         return None
     sigma = max(inter_model_std, _MIN_SIGMA)
     if condition == "at_or_above":
-        return round(1.0 - _normal_cdf(threshold, consensus_mean, sigma), 4)
-    return round(_normal_cdf(threshold, consensus_mean, sigma), 4)
+        return round(1.0 - _normal_cdf(threshold - 0.5, consensus_mean, sigma), 4)
+    return round(_normal_cdf(threshold + 0.5, consensus_mean, sigma), 4)
 
 
 # ── Snapshot key ─────────────────────────────────────────────────────────────
@@ -151,6 +155,21 @@ def ts_bucket_from_ts(ts_utc: str) -> str:
 
 # ── Open-Meteo fetcher ────────────────────────────────────────────────────────
 
+def _open_meteo_url_for_model(
+    lat: float, lon: float, model: str, timezone_str: str
+) -> str:
+    """Build Open-Meteo daily forecast URL for a single model.
+
+    timezone_str must be the contractual local timezone for the city so that
+    the returned daily.time[] aligns with the market's calendar day, not UTC.
+    """
+    return (
+        f"{_OPEN_METEO_URL}?latitude={lat}&longitude={lon}"
+        f"&daily=temperature_2m_max&models={model}"
+        f"&forecast_days=7&timezone={timezone_str}"
+    )
+
+
 def fetch_multimodel_tmax(
     target_date: str,
     lat: float,
@@ -160,16 +179,15 @@ def fetch_multimodel_tmax(
 ) -> dict[str, float | None]:
     """Fetch temperature_2m_max for target_date from each model via Open-Meteo.
 
+    Uses timezone_str (city's contractual local timezone) so that the daily
+    time axis aligns with the market's calendar day, not UTC.
+
     Returns {model_id: tmax_value_or_None}.
     Fails closed: if a model errors or has no data for target_date, value=None.
     """
     results: dict[str, float | None] = {}
     for model in model_ids:
-        url = (
-            f"{_OPEN_METEO_URL}?latitude={lat}&longitude={lon}"
-            f"&daily=temperature_2m_max&models={model}"
-            f"&forecast_days=7&timezone=UTC"
-        )
+        url = _open_meteo_url_for_model(lat, lon, model, timezone_str)
         try:
             req = urllib.request.Request(url)
             req.add_header("User-Agent", "polymarket-multimodel-shadow/1.0")
@@ -372,6 +390,8 @@ def build_snapshot(
         "icao": city_info["icao"],
         "lat": city_info["lat"],
         "lon": city_info["lon"],
+        "market_day_timezone": city_info["tz"],
+        "source_fidelity_basis": "icao_station_coords",
         "target_date": target_date,
         "condition": condition,
         "threshold": threshold,
@@ -415,19 +435,32 @@ def brier(probs: list[float], outcomes: list[int]) -> float:
     return sum((p - o) ** 2 for p, o in zip(probs, outcomes)) / len(probs)
 
 
-def resolve_outcome_from_gamma(market_id: str) -> str | None:
+def resolve_outcome_from_gamma(
+    market_id: str, _market_data: "dict | None" = None
+) -> "str | None":
     """Lookup resolved outcome for a closed market by market_id.
 
-    Returns 'YES', 'NO', or None if unresolved/error.
+    Requires market.closed == True from Gamma before interpreting prices.
+    Open markets with extreme prices are NOT treated as resolved.
+
+    _market_data: inject a pre-fetched market dict (tests only).
+    Returns 'YES', 'NO', or None if not closed / unresolved / error.
     Read-only.
     """
     try:
-        markets = _gamma_api_get(f"/markets/{market_id}")
-        if isinstance(markets, list):
-            market = markets[0] if markets else {}
-        elif isinstance(markets, dict):
-            market = markets
+        if _market_data is None:
+            raw = _gamma_api_get(f"/markets/{market_id}")
+            if isinstance(raw, list):
+                market = raw[0] if raw else {}
+            elif isinstance(raw, dict):
+                market = raw
+            else:
+                return None
         else:
+            market = _market_data
+        # Guard: only score markets that Gamma marks as closed.
+        # An open market with extreme price (e.g. YES=0.003) is NOT an outcome.
+        if not market.get("closed"):
             return None
         prices_raw = market.get("outcomePrices", "[]")
         prices = json.loads(prices_raw) if isinstance(prices_raw, str) else prices_raw

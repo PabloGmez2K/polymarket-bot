@@ -15,16 +15,19 @@ import pytest
 
 # Engine imports
 from tools._multimodel_engine import (
+    ACTIVE_CITY_COORDS,
     EFFECTIVE_MODEL_IDS,
     H3_CANDIDATE_MODEL_ID,
     H3_FORMULA_VERSION,
     H3_HYPOTHESIS_ID,
     MIN_MODELS_REQUIRED,
+    _open_meteo_url_for_model,
     build_snapshot,
     brier,
     compute_candidate_prob,
     compute_consensus,
     compute_report,
+    resolve_outcome_from_gamma,
     snapshot_key,
     ts_bucket_from_ts,
 )
@@ -114,42 +117,49 @@ def test_compute_disagreement_std():
 # ── Test 4: candidate_prob_yes for at_or_above ────────────────────────────────
 
 def test_candidate_prob_at_or_above():
-    """Test 4: candidate_prob_yes for at_or_above condition."""
+    """Test 4: candidate_prob_yes for at_or_above condition (±0.5 integer-rounding semantics)."""
     per_model = _fixture_per_model_tmax()
     mean, std = compute_consensus(per_model)
-    # Test threshold above mean: prob should be < 0.5
+    # Threshold above mean: P(T >= threshold-0.5) is still < 0.5 when threshold >> mean
     prob = compute_candidate_prob(mean, std, mean + 1.0, "at_or_above")
     assert prob is not None
     assert 0.0 < prob < 0.5
-    # Test threshold below mean: prob should be > 0.5
+    # Threshold below mean: prob should be > 0.5
     prob2 = compute_candidate_prob(mean, std, mean - 1.0, "at_or_above")
     assert prob2 is not None
     assert prob2 > 0.5
-    # At mean: prob ~= 0.5
+    # At mean: P(T >= mean-0.5) > 0.5 because we allow T in [mean-0.5, ∞)
     prob3 = compute_candidate_prob(mean, std, mean, "at_or_above")
     assert prob3 is not None
-    assert abs(prob3 - 0.5) < 0.05
+    assert prob3 > 0.5
 
 
 # ── Test 5: candidate_prob_yes for at_or_below ────────────────────────────────
 
 def test_candidate_prob_at_or_below():
-    """Test 5: candidate_prob_yes for at_or_below condition."""
+    """Test 5: candidate_prob_yes for at_or_below condition (±0.5 integer-rounding semantics)."""
     per_model = _fixture_per_model_tmax()
     mean, std = compute_consensus(per_model)
-    # P(temp <= threshold) at threshold=mean ~= 0.5
+    # P(T <= mean+0.5) > 0.5 because the ±0.5 boundary extends into the upper half
     prob = compute_candidate_prob(mean, std, mean, "at_or_below")
     assert prob is not None
-    assert abs(prob - 0.5) < 0.05
+    assert prob > 0.5
     # Threshold well below mean: prob should be < 0.5
     prob2 = compute_candidate_prob(mean, std, mean - 2.0, "at_or_below")
     assert prob2 is not None
     assert prob2 < 0.5
-    # Symmetry: at_or_above + at_or_below at same threshold ≈ 1.0
-    prob_above = compute_candidate_prob(mean, std, mean + 1.0, "at_or_above")
-    prob_below = compute_candidate_prob(mean, std, mean + 1.0, "at_or_below")
+    # Complementary relationship: at_or_above(T) + at_or_below(T-1) == 1.0
+    # because at_or_above(T)=1-CDF(T-0.5) and at_or_below(T-1)=CDF(T-1+0.5)=CDF(T-0.5)
+    T = mean + 1.0
+    prob_above_T = compute_candidate_prob(mean, std, T, "at_or_above")
+    prob_below_T_minus_1 = compute_candidate_prob(mean, std, T - 1.0, "at_or_below")
+    assert prob_above_T is not None and prob_below_T_minus_1 is not None
+    assert abs(prob_above_T + prob_below_T_minus_1 - 1.0) < 0.001
+    # Note: at_or_above(T) + at_or_below(T) > 1.0 (integer bin overlap is intentional)
+    prob_above = compute_candidate_prob(mean, std, T, "at_or_above")
+    prob_below = compute_candidate_prob(mean, std, T, "at_or_below")
     assert prob_above is not None and prob_below is not None
-    assert abs(prob_above + prob_below - 1.0) < 0.001
+    assert prob_above + prob_below > 1.0
 
 
 # ── Test 6: fail-closed with fewer than MIN_MODELS_REQUIRED ──────────────────
@@ -403,8 +413,9 @@ def test_sigma_floor_applied():
     )
     assert snap["inter_model_disagreement_std"] == 0.0
     assert snap["sigma_candidate"] >= 0.8
-    # At threshold == mean with sigma >= 0.8, prob ~= 0.5
-    assert abs(snap["candidate_prob_yes"] - 0.5) < 0.05
+    # With ±0.5 adjustment and threshold == mean:
+    # at_or_above(mean) = 1 - CDF(mean-0.5, mean, sigma) > 0.5
+    assert snap["candidate_prob_yes"] > 0.5
 
 
 # ── Test: Buenos Aires and Ankara are in ACTIVE_CITY_COORDS ──────────────────
@@ -426,3 +437,119 @@ def test_all_active_cities_snapshottable():
         )
         assert snap["city"] == city
         assert snap["eligible_for_policy"] is False
+
+
+# ── Problem 1 tests: resolved-market gate ─────────────────────────────────────
+
+def test_resolve_outcome_open_market_extreme_price_stays_pending():
+    """Open market with extreme NO price must not be scored (Problem 1 regression guard)."""
+    result = resolve_outcome_from_gamma("any-id", _market_data={
+        "closed": False,
+        "outcomePrices": "[0.003, 0.997]",
+    })
+    assert result is None, "Open market must never return an outcome regardless of price"
+
+
+def test_resolve_outcome_closed_market_yes():
+    """Closed market with YES price >= 0.95 resolves as YES."""
+    result = resolve_outcome_from_gamma("any-id", _market_data={
+        "closed": True,
+        "outcomePrices": "[0.98, 0.02]",
+    })
+    assert result == "YES"
+
+
+def test_resolve_outcome_closed_market_no():
+    """Closed market with NO price >= 0.95 resolves as NO."""
+    result = resolve_outcome_from_gamma("any-id", _market_data={
+        "closed": True,
+        "outcomePrices": "[0.01, 0.99]",
+    })
+    assert result == "NO"
+
+
+def test_readiness_does_not_accrue_from_open_market_extreme_price():
+    """Snapshot with market_outcome_observed=null counts as pending, never scored."""
+    snap = {
+        "h3_hypothesis_id": H3_HYPOTHESIS_ID,
+        "candidate_prob_yes": 0.97,
+        "mkt_prob_yes_at_snapshot": 0.003,
+        "market_outcome_observed": None,
+        "inter_model_disagreement_std": 1.0,
+    }
+    report = compute_report([snap])
+    assert report["n_pending"] == 1
+    assert report["n_resolved"] == 0
+    assert report["brier_candidate"] is None
+    assert report["readiness"] == "H3_HOLDOUT_ACCRUING"
+
+
+def test_resolve_outcome_missing_closed_field_stays_pending():
+    """Market without a closed field (e.g. old schema) is treated as open."""
+    result = resolve_outcome_from_gamma("any-id", _market_data={
+        "outcomePrices": "[0.002, 0.998]",
+    })
+    assert result is None
+
+
+# ── Problem 2 tests: market-day timezone alignment ────────────────────────────
+
+def test_open_meteo_url_uses_city_timezone_not_utc():
+    """Open-Meteo URL must include the city's local timezone, not UTC."""
+    url = _open_meteo_url_for_model(31.1497, 121.8002, "ecmwf_ifs025", "Asia/Shanghai")
+    assert "timezone=Asia/Shanghai" in url
+    assert "timezone=UTC" not in url
+
+
+def test_open_meteo_url_respects_different_timezones():
+    """URL builder uses whatever timezone_str is passed (not hardcoded)."""
+    for city, info in ACTIVE_CITY_COORDS.items():
+        tz = info["tz"]
+        url = _open_meteo_url_for_model(info["lat"], info["lon"], "gfs_seamless", tz)
+        assert f"timezone={tz}" in url, f"{city}: expected timezone={tz} in URL"
+
+
+def test_active_cities_have_non_utc_timezones():
+    """Each ACTIVE city must have a local timezone for correct market-day alignment."""
+    for city, info in ACTIVE_CITY_COORDS.items():
+        tz = info.get("tz", "")
+        assert tz and tz != "UTC", f"{city} has UTC or empty timezone — market-day alignment broken"
+
+
+# ── Problem 2 + snapshot: new provenance fields ───────────────────────────────
+
+def test_snapshot_contains_market_day_timezone_and_source_fidelity():
+    """Snapshot must include market_day_timezone and source_fidelity_basis."""
+    snap = build_snapshot(
+        city="Shanghai",
+        target_date="2026-06-01",
+        condition="at_or_above",
+        threshold=28.0,
+        unit="C",
+        h3_prereg_cutoff_utc="2026-06-01T00:00:00Z",
+        model_fetch_fn=_stub_model_fetcher_ok,
+        market_fetch_fn=_stub_market_ok,
+        model_ids=EFFECTIVE_MODEL_IDS,
+    )
+    assert snap["market_day_timezone"] == "Asia/Shanghai"
+    assert snap["source_fidelity_basis"] == "icao_station_coords"
+
+
+def test_snapshot_market_day_timezone_matches_city_config():
+    """market_day_timezone in snapshot must match ACTIVE_CITY_COORDS[city]['tz']."""
+    for city, info in ACTIVE_CITY_COORDS.items():
+        snap = build_snapshot(
+            city=city,
+            target_date="2026-06-01",
+            condition="at_or_below",
+            threshold=35.0,
+            unit="C",
+            h3_prereg_cutoff_utc="2026-06-01T00:00:00Z",
+            model_fetch_fn=_stub_model_fetcher_ok,
+            market_fetch_fn=_stub_market_ok,
+            model_ids=EFFECTIVE_MODEL_IDS,
+        )
+        assert snap["market_day_timezone"] == info["tz"], (
+            f"{city}: snapshot timezone {snap['market_day_timezone']!r} "
+            f"!= expected {info['tz']!r}"
+        )
