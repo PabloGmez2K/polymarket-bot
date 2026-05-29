@@ -1,0 +1,259 @@
+[
+  {
+    "_note": "at_or_above group (n=21): real BSE + Gamma outcomes. 2026-05-29 snapshot.",
+    "_real_brier": "brier_our=0.4242, brier_mkt=0.3303, brier_advantage=-0.0939 (H1 confirmed)",
+    "eval_key": "Kuala Lumpur|2026-05-20|at_or_above|32|C",
+    "condition": "at_or_above", "city": "Kuala Lumpur", "date_iso": "2026-05-20",
+    "our_prob": 47.9, "mkt_prob": 21.5, "ts_utc": "2026-05-19T20:00:55.693460+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "fuera_allowlist",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": "YES", "market_outcome_source": "gamma_api_v1",
+    "source_fidelity": "confirmed"
+  },
+  {
+    "eval_key": "Mexico City|2026-05-21|at_or_above|26|C",
+    "condition": "at_or_above", "city": "Mexico City", "date_iso": "2026-05-21",
+    "our_prob": 31.56, "mkt_prob": 30.0, "ts_utc": "2026-05-19T20:00:55.694560+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "below_min_edge",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": "NO", "market_outcome_source": "gamma_api_v1",
+    "source_fidelity": "confirmed"
+  },
+  {
+    "eval_key": "Denver|2026-05-20|at_or_above|56|F",
+    "condition": "at_or_above", "city": "Denver", "date_iso": "2026-05-20",
+    "our_prob": 67.96, "mkt_prob": 26.5, "ts_utc": "2026-05-20T08:00:40.391353+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "fuera_allowlist",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": "YES", "market_outcome_source": "gamma_api_v1",
+    "source_fidelity": "confirmed"
+  },
+  {
+    "eval_key": "Los Angeles|2026-05-21|at_or_above|74|F",
+    "condition": "at_or_above", "city": "Los Angeles", "date_iso": "2026-05-21",
+    "our_prob": 53.32, "mkt_prob": 36.5, "ts_utc": "2026-05-21T04:01:03.961280+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "below_min_edge",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": "NO", "market_outcome_source": "gamma_api_v1",
+    "source_fidelity": "confirmed"
+  },
+  {
+    "eval_key": "Hong Kong|2026-05-22|at_or_above|31|C",
+    "condition": "at_or_above", "city": "Hong Kong", "date_iso": "2026-05-22",
+    "our_prob": 80.01, "mkt_prob": 31.5, "ts_utc": "2026-05-21T20:00:55.510755+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "fuera_allowlist",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": "YES", "market_outcome_source": "gamma_api_v1",
+    "source_fidelity": "confirmed"
+  },
+  {
+    "eval_key": "Hong Kong|2026-05-23|at_or_above|33|C",
+    "condition": "at_or_above", "city": "Hong Kong", "date_iso": "2026-05-23",
+    "our_prob": 96.73, "mkt_prob": 69.0, "ts_utc": "2026-05-22T04:00:54.480948+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "fuera_allowlist",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": "NO", "market_outcome_source": "gamma_api_v1",
+    "source_fidelity": "confirmed"
+  },
+  {
+    "eval_key": "Shenzhen|2026-05-22|at_or_above|32|C",
+    "condition": "at_or_above", "city": "Shenzhen", "date_iso": "2026-05-22",
+    "our_prob": 70.88, "mkt_prob": 42.5, "ts_utc": "2026-05-22T04:00:54.481005+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "fuera_allowlist",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": "YES", "market_outcome_source": "gamma_api_v1",
+    "source_fidelity": "confirmed"
+  },
+  {
+    "eval_key": "Chongqing|2026-05-22|at_or_above|32|C",
+    "condition": "at_or_above", "city": "Chongqing", "date_iso": "2026-05-22",
+    "our_prob": 72.57, "mkt_prob": 72.0, "ts_utc": "2026-05-22T04:00:54.481092+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "fuera_allowlist",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": "YES", "market_outcome_source": "gamma_api_v1",
+    "source_fidelity": "confirmed"
+  },
+  {
+    "eval_key": "Chicago|2026-05-22|at_or_above|66|F",
+    "condition": "at_or_above", "city": "Chicago", "date_iso": "2026-05-22",
+    "our_prob": 93.1, "mkt_prob": 67.0, "ts_utc": "2026-05-22T16:14:25.412727+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "fuera_allowlist",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": "NO", "market_outcome_source": "gamma_api_v1",
+    "source_fidelity": "confirmed"
+  },
+  {
+    "eval_key": "Sao Paulo|2026-05-23|at_or_above|21|C",
+    "condition": "at_or_above", "city": "Sao Paulo", "date_iso": "2026-05-23",
+    "our_prob": 61.79, "mkt_prob": 61.5, "ts_utc": "2026-05-23T09:40:22.631795+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "fuera_allowlist",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": "NO", "market_outcome_source": "gamma_api_v1",
+    "source_fidelity": "confirmed"
+  },
+  {
+    "eval_key": "Hong Kong|2026-05-24|at_or_above|32|C",
+    "condition": "at_or_above", "city": "Hong Kong", "date_iso": "2026-05-24",
+    "our_prob": 86.43, "mkt_prob": 60.5, "ts_utc": "2026-05-24T04:00:55.060187+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "fuera_allowlist",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": "NO", "market_outcome_source": "gamma_api_v1",
+    "source_fidelity": "confirmed"
+  },
+  {
+    "eval_key": "Taipei|2026-05-24|at_or_above|37|C",
+    "condition": "at_or_above", "city": "Taipei", "date_iso": "2026-05-24",
+    "our_prob": 99.0, "mkt_prob": 80.0, "ts_utc": "2026-05-24T04:00:55.060578+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "fuera_allowlist",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": "NO", "market_outcome_source": "gamma_api_v1",
+    "source_fidelity": "confirmed"
+  },
+  {
+    "eval_key": "Kuala Lumpur|2026-05-24|at_or_above|34|C",
+    "condition": "at_or_above", "city": "Kuala Lumpur", "date_iso": "2026-05-24",
+    "our_prob": 78.81, "mkt_prob": 76.0, "ts_utc": "2026-05-24T04:00:55.061058+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "fuera_allowlist",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": "YES", "market_outcome_source": "gamma_api_v1",
+    "source_fidelity": "confirmed"
+  },
+  {
+    "eval_key": "Paris|2026-05-25|at_or_above|34|C",
+    "condition": "at_or_above", "city": "Paris", "date_iso": "2026-05-25",
+    "our_prob": 80.01, "mkt_prob": 75.0, "ts_utc": "2026-05-24T08:00:59.427581+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "fuera_allowlist",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": "NO", "market_outcome_source": "gamma_api_v1",
+    "source_fidelity": "confirmed"
+  },
+  {
+    "eval_key": "Paris|2026-05-24|at_or_above|33|C",
+    "condition": "at_or_above", "city": "Paris", "date_iso": "2026-05-24",
+    "our_prob": 32.64, "mkt_prob": 28.0, "ts_utc": "2026-05-24T10:53:46.642433+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "below_min_edge",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": "NO", "market_outcome_source": "gamma_api_v1",
+    "source_fidelity": "confirmed"
+  },
+  {
+    "eval_key": "Toronto|2026-05-24|at_or_above|18|C",
+    "condition": "at_or_above", "city": "Toronto", "date_iso": "2026-05-24",
+    "our_prob": 86.43, "mkt_prob": 68.5, "ts_utc": "2026-05-24T12:00:50.007488+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "fuera_allowlist",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": "NO", "market_outcome_source": "gamma_api_v1",
+    "source_fidelity": "confirmed"
+  },
+  {
+    "eval_key": "Houston|2026-05-24|at_or_above|86|F",
+    "condition": "at_or_above", "city": "Houston", "date_iso": "2026-05-24",
+    "our_prob": 85.31, "mkt_prob": 49.5, "ts_utc": "2026-05-24T16:00:53.922580+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "fuera_allowlist",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": "NO", "market_outcome_source": "gamma_api_v1",
+    "source_fidelity": "confirmed"
+  },
+  {
+    "eval_key": "Shanghai|2026-05-25|at_or_above|29|C",
+    "condition": "at_or_above", "city": "Shanghai", "date_iso": "2026-05-25",
+    "our_prob": 44.04, "mkt_prob": 34.5, "ts_utc": "2026-05-25T04:01:00.293212+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "fuera_allowlist",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": "NO", "market_outcome_source": "gamma_api_v1",
+    "source_fidelity": "confirmed"
+  },
+  {
+    "eval_key": "Hong Kong|2026-05-26|at_or_above|33|C",
+    "condition": "at_or_above", "city": "Hong Kong", "date_iso": "2026-05-26",
+    "our_prob": 91.15, "mkt_prob": 64.5, "ts_utc": "2026-05-26T00:00:56.289781+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "fuera_allowlist",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": "NO", "market_outcome_source": "gamma_api_v1",
+    "source_fidelity": "confirmed"
+  },
+  {
+    "eval_key": "Denver|2026-05-27|at_or_above|74|F",
+    "condition": "at_or_above", "city": "Denver", "date_iso": "2026-05-27",
+    "our_prob": 67.59, "mkt_prob": 26.0, "ts_utc": "2026-05-26T09:59:27.781943+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "fuera_allowlist",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": "NO", "market_outcome_source": "gamma_api_v1",
+    "source_fidelity": "confirmed"
+  },
+  {
+    "eval_key": "London|2026-05-28|at_or_above|31|C",
+    "condition": "at_or_above", "city": "London", "date_iso": "2026-05-28",
+    "our_prob": 46.02, "mkt_prob": 40.5, "ts_utc": "2026-05-28T08:00:39.932306+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "fuera_allowlist",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": "YES", "market_outcome_source": "gamma_api_v1",
+    "source_fidelity": "confirmed"
+  },
+  {
+    "_note": "at_or_below group (n=4): real BSE + Gamma outcomes.",
+    "_real_brier": "brier_our=0.1768, brier_mkt=0.2473, brier_advantage=+0.0705",
+    "eval_key": "Atlanta|2026-05-21|at_or_below|87|F",
+    "condition": "at_or_below", "city": "Atlanta", "date_iso": "2026-05-21",
+    "our_prob": 80.23, "mkt_prob": 25.0, "ts_utc": "2026-05-19T20:00:55.694240+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "fuera_allowlist",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": "YES", "market_outcome_source": "gamma_api_v1",
+    "source_fidelity": "confirmed"
+  },
+  {
+    "eval_key": "Chicago|2026-05-21|at_or_below|59|F",
+    "condition": "at_or_below", "city": "Chicago", "date_iso": "2026-05-21",
+    "our_prob": 75.82, "mkt_prob": 53.0, "ts_utc": "2026-05-21T12:00:45.544228+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "fuera_allowlist",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": "YES", "market_outcome_source": "gamma_api_v1",
+    "source_fidelity": "confirmed"
+  },
+  {
+    "eval_key": "Beijing|2026-05-23|at_or_below|26|C",
+    "condition": "at_or_below", "city": "Beijing", "date_iso": "2026-05-23",
+    "our_prob": 65.54, "mkt_prob": 61.0, "ts_utc": "2026-05-23T04:00:55.483239+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "below_min_edge",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": "YES", "market_outcome_source": "gamma_api_v1",
+    "source_fidelity": "confirmed"
+  },
+  {
+    "eval_key": "Beijing|2026-05-26|at_or_below|23|C",
+    "condition": "at_or_below", "city": "Beijing", "date_iso": "2026-05-26",
+    "our_prob": 70.07, "mkt_prob": 23.2, "ts_utc": "2026-05-25T16:00:56.809070+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "fuera_allowlist",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": "NO", "market_outcome_source": "gamma_api_v1",
+    "source_fidelity": "confirmed"
+  },
+  {
+    "_note": "Seoul rows — must be excluded (source_fidelity_suspect). 3 real records from BSE.",
+    "eval_key": "Seoul|2026-05-21|at_or_above|22|C",
+    "condition": "at_or_above", "city": "Seoul", "date_iso": "2026-05-21",
+    "our_prob": 99.0, "mkt_prob": 69.5, "ts_utc": "2026-05-20T16:00:44.218499+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "kelly_too_low",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": null, "market_outcome_source": null,
+    "source_fidelity": "suspect"
+  },
+  {
+    "eval_key": "Seoul|2026-05-22|at_or_above|27|C",
+    "condition": "at_or_above", "city": "Seoul", "date_iso": "2026-05-22",
+    "our_prob": 63.68, "mkt_prob": 28.5, "ts_utc": "2026-05-22T00:00:53.056696+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "sl_city_cooldown",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": null, "market_outcome_source": null,
+    "source_fidelity": "suspect"
+  },
+  {
+    "eval_key": "Seoul|2026-05-24|at_or_above|25|C",
+    "condition": "at_or_above", "city": "Seoul", "date_iso": "2026-05-24",
+    "our_prob": 84.13, "mkt_prob": 71.95, "ts_utc": "2026-05-24T04:00:55.060093+00:00",
+    "evaluation_source": "live_eval", "decision_gate": "below_min_edge",
+    "side": null, "candidate_side_source": "historical_inferred",
+    "market_outcome_observed": null, "market_outcome_source": null,
+    "source_fidelity": "suspect"
+  }
+]

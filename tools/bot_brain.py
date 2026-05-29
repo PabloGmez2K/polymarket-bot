@@ -377,6 +377,13 @@ def build_brain_report(
     elif scope_type == "weather_strategy":
         from tools._weather_strategy_engine import build_weather_strategy_result
         report["results"] = build_weather_strategy_result(data_dir, repo_root, city=city, date=date, now=now)
+    elif scope_type == "self_evaluation":
+        from tools._self_evaluation_engine import (
+            build_self_evaluation_report,
+            build_gamma_lookup_fn,
+        )
+        gamma_fn = build_gamma_lookup_fn()
+        report["results"] = build_self_evaluation_report(data_dir, gamma_lookup_fn=gamma_fn, now=now)
     else:
         report["no_match"] = True
         report["results"] = {"error": "unsupported_scope"}
@@ -393,7 +400,7 @@ def build_brain_report(
 
 def parse_scope(scope: str) -> dict[str, str]:
     text = str(scope or "").strip()
-    if text in {"overview", "weather_strategy"}:
+    if text in {"overview", "weather_strategy", "self_evaluation"}:
         return {"type": text}
     if ":" not in text:
         return {"type": "unknown", "value": text}
@@ -543,6 +550,48 @@ def build_key_result(scope_type: str, key: str, join: dict[str, Any]) -> dict[st
     }
 
 
+def _render_self_evaluation_markdown(report: dict[str, Any]) -> str:
+    r = report.get("results", {})
+    lines = [
+        "# Bot Brain — Self-Evaluation Calibration V1",
+        "",
+        f"Generated: `{r.get('generated_at', report.get('generated_at'))}`",
+        f"Cutoff: `{r.get('self_eval_h1_prereg_cutoff_utc')}`",
+        "",
+        "LOG_ONLY / NO_ACTION. eligible_for_policy=false. live_policy_eligible=false.",
+        "",
+        "## BSE Source",
+        f"- present: `{r.get('bse_present')}` rows_total: `{r.get('bse_rows_total')}` "
+        f"directional: `{r.get('bse_directional_rows')}` "
+        f"excluded_seoul: `{r.get('source_fidelity_excluded_count')}` "
+        f"deduped: `{r.get('deduped_eval_keys')}`",
+        f"- evidence_frozen: `{r.get('evidence_frozen_count')}` "
+        f"forward_holdout: `{r.get('forward_holdout_count')}`",
+        f"- gamma_lookup_failed: `{r.get('gamma_lookup_failed_count')}`",
+        "",
+        "## Cohorts",
+    ]
+    for c in r.get("cohorts", []):
+        n = c.get("n_resolved", 0)
+        pend = c.get("n_pending", 0)
+        adv = c.get("brier_advantage")
+        adv_str = f"{adv:+.4f}" if adv is not None else "N/A"
+        lines.append(
+            f"- `{c['condition']} × {c['probability_basis']}` [{c['partition']}] "
+            f"n={n} pending={pend} "
+            f"brier_our={c.get('brier_our')} brier_mkt={c.get('brier_mkt')} "
+            f"adv={adv_str} → `{c.get('readiness')}`"
+        )
+    lines += [
+        "",
+        f"## Experiment Readiness: `{r.get('experiment_readiness')}`",
+        "",
+        "## H1 Hypothesis (pre-registered)",
+        r.get("h1_hypothesis_preregistered", ""),
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def _render_weather_strategy_markdown(report: dict[str, Any]) -> str:
     results = report.get("results", {})
     packet = results.get("weather_strategy_verdict_packet", {})
@@ -591,6 +640,8 @@ def _render_weather_strategy_markdown(report: dict[str, Any]) -> str:
 def render_markdown(report: dict[str, Any]) -> str:
     if report.get("scope_type") == "weather_strategy":
         return _render_weather_strategy_markdown(report)
+    if report.get("scope_type") == "self_evaluation":
+        return _render_self_evaluation_markdown(report)
     lines = [
         "# Bot Brain v0",
         "",
