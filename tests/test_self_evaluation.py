@@ -21,6 +21,11 @@ import pytest
 from tools._self_evaluation_engine import (
     SELF_EVAL_H1_PREREG_CUTOFF_UTC,
     SUPPORTED_CONDITIONS,
+    H2_CANDIDATE_MODEL_ID,
+    H2_CANDIDATE_HYPOTHESIS_ID,
+    H2_LAMBDA_PRIMARY,
+    H2_LAMBDA_DIAGNOSTIC,
+    H2_PREREG_CUTOFF_UTC,
     build_self_evaluation_report,
     _deduplicate_by_eval_key,
     _is_source_fidelity_suspect,
@@ -31,13 +36,18 @@ from tools._self_evaluation_engine import (
     build_gamma_slug_from_eval_key,
     _build_gamma_question_text,
     _normalize_gamma_q,
+    _compute_h2_blend_metrics,
+    _score_h2_candidate_metrics,
+    _h2_candidate_readiness,
 )
 
 # Fixed reference time for deterministic tests — must be AFTER cutoff
 _NOW = datetime(2026, 5, 29, 12, 0, 0, tzinfo=timezone.utc)
 # Timestamps clearly before cutoff (evidence_frozen)
 _TS_FROZEN = "2026-04-15T20:00:00+00:00"
-# Timestamp after cutoff (forward_holdout)
+# Timestamp after H1 cutoff but before H2 cutoff (forward_holdout H1, diagnostic H2)
+_TS_H2_DIAGNOSTIC = "2026-05-29T10:00:00+00:00"
+# Timestamp after H2 cutoff (forward_holdout H1 AND H2 forward)
 _TS_HOLDOUT = "2026-05-30T08:00:00+00:00"
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "self_evaluation_directional_evidence_frozen_v1.json"
@@ -635,3 +645,260 @@ def test_evidence_frozen_brier_invariants_unaffected_by_engine_update(tmp_path: 
     assert above_ef["brier_advantage"] == pytest.approx(-0.0939, abs=0.001)
     assert below_ef["n_resolved"] == 4
     assert below_ef["brier_advantage"] == pytest.approx(0.0705, abs=0.001)
+
+
+# ── 16. H2 candidate: constants and formula ───────────────────────────────────
+
+def test_h2_constants_defined() -> None:
+    assert H2_CANDIDATE_MODEL_ID == "market_anchored_blend_v1_lambda050"
+    assert H2_CANDIDATE_HYPOTHESIS_ID == "H2_MARKET_ANCHORED_CALIBRATION_AT_OR_ABOVE"
+    assert H2_LAMBDA_PRIMARY == pytest.approx(0.5)
+    assert H2_LAMBDA_DIAGNOSTIC == (0.3, 0.7)
+    assert H2_PREREG_CUTOFF_UTC == datetime(2026, 5, 29, 20, 52, 29, tzinfo=timezone.utc)
+
+
+def test_h2_blend_formula_lambda_05() -> None:
+    """candidate = 0.5 * our + 0.5 * mkt."""
+    result = _compute_h2_blend_metrics(
+        our_probs=[0.8], mkt_probs=[0.4], outcomes=[0],
+        lambda_primary=0.5, lambda_diag=(0.3, 0.7),
+    )
+    assert result is not None
+    assert result["mean_candidate_prob_yes"] == pytest.approx(0.6, abs=0.0001)
+    # brier_baseline: (0.8-0)^2 = 0.64
+    assert result["brier_baseline"] == pytest.approx(0.64, abs=0.0001)
+    # brier_candidate: (0.6-0)^2 = 0.36
+    assert result["brier_candidate"] == pytest.approx(0.36, abs=0.0001)
+    # brier_market: (0.4-0)^2 = 0.16
+    assert result["brier_market"] == pytest.approx(0.16, abs=0.0001)
+    # candidate_vs_baseline = 0.64 - 0.36 = 0.28 > 0 (candidate better)
+    assert result["candidate_vs_baseline_advantage"] == pytest.approx(0.28, abs=0.0001)
+    # candidate_vs_market = 0.16 - 0.36 = -0.20 < 0 (market still better)
+    assert result["candidate_vs_market_advantage"] == pytest.approx(-0.20, abs=0.0001)
+
+
+def test_h2_blend_formula_empty_returns_none() -> None:
+    result = _compute_h2_blend_metrics([], [], [], 0.5, (0.3, 0.7))
+    assert result is None
+
+
+def test_h2_diagnostic_lambdas_present_nongating() -> None:
+    """Lambda 0.3 and 0.7 sensitivity values are present in blend metrics."""
+    result = _compute_h2_blend_metrics(
+        our_probs=[0.8], mkt_probs=[0.4], outcomes=[0],
+        lambda_primary=0.5, lambda_diag=(0.3, 0.7),
+    )
+    assert result is not None
+    # lambda_03: 0.3*0.8 + 0.7*0.4 = 0.52 → (0.52)^2 = 0.2704
+    assert result["brier_lambda_diag_0"] == pytest.approx(0.2704, abs=0.001)
+    # lambda_07: 0.7*0.8 + 0.3*0.4 = 0.68 → (0.68)^2 = 0.4624
+    assert result["brier_lambda_diag_1"] == pytest.approx(0.4624, abs=0.001)
+
+
+# ── 17. H2 candidate: evidence pre-cutoff is always diagnostic-only ───────────
+
+def test_h2_evidence_pre_cutoff_always_diagnostic_only(tmp_path: Path) -> None:
+    data_dir = _mk_data_dir(tmp_path)
+    rows = [_make_bse_row("k1|2026-04-15|at_or_above|20|C", our_prob=80.0, mkt_prob=30.0)]
+    _write_bse(data_dir, rows)
+    report = build_self_evaluation_report(data_dir, gamma_lookup_fn=lambda k: "NO", now=_NOW)
+    above_ef = next(
+        c for c in report["cohorts"]
+        if c["condition"] == "at_or_above" and c["partition"] == "evidence_frozen"
+    )
+    assert above_ef["h2_partition"] == "h2_evidence_diagnostic_only"
+    assert above_ef["candidate_readiness"] == "CANDIDATE_EVIDENCE_DIAGNOSTIC_ONLY"
+
+
+def test_h2_readiness_direct_evidence_diagnostic_only() -> None:
+    assert _h2_candidate_readiness("h2_evidence_diagnostic_only", 100, 0.5, 0.1) == "CANDIDATE_EVIDENCE_DIAGNOSTIC_ONLY"
+
+
+# ── 18. H2 candidate: forward holdout accruing when n < 20 ───────────────────
+
+def test_h2_forward_under_20_is_accruing(tmp_path: Path) -> None:
+    data_dir = _mk_data_dir(tmp_path)
+    rows = [
+        _make_bse_row(f"k{i}|2026-05-30|at_or_above|20|C", ts=_TS_HOLDOUT)
+        for i in range(5)
+    ]
+    _write_bse(data_dir, rows)
+    report = build_self_evaluation_report(data_dir, gamma_lookup_fn=lambda k: "YES", now=_NOW)
+    above_fh = next(
+        c for c in report["cohorts"]
+        if c["condition"] == "at_or_above" and c["partition"] == "forward_holdout"
+    )
+    assert above_fh["h2_partition"] == "h2_forward_holdout"
+    assert above_fh["n_h2_fwd_resolved"] == 5
+    assert above_fh["candidate_readiness"] == "CANDIDATE_HOLDOUT_ACCRUING"
+
+
+def test_h2_readiness_direct_holdout_accruing() -> None:
+    assert _h2_candidate_readiness("h2_forward_holdout", 19, 0.5, 0.1) == "CANDIDATE_HOLDOUT_ACCRUING"
+    assert _h2_candidate_readiness("h2_forward_holdout", 0, None, None) == "CANDIDATE_HOLDOUT_ACCRUING"
+
+
+# ── 19. H2 candidate: forward ≥20 falsified if no baseline improvement ────────
+
+def test_h2_forward_20_falsified_no_baseline_improvement(tmp_path: Path) -> None:
+    """When our_prob > mkt_prob and all outcomes YES, blend at λ=0.5 worsens Brier."""
+    # our=0.7, mkt=0.6, all YES → candidate=0.65; brier_base=0.09, brier_cand=0.1225
+    data_dir = _mk_data_dir(tmp_path)
+    rows = [
+        _make_bse_row(f"k{i}|2026-05-30|at_or_above|20|C", our_prob=70.0, mkt_prob=60.0, ts=_TS_HOLDOUT)
+        for i in range(20)
+    ]
+    _write_bse(data_dir, rows)
+    report = build_self_evaluation_report(data_dir, gamma_lookup_fn=lambda k: "YES", now=_NOW)
+    above_fh = next(
+        c for c in report["cohorts"]
+        if c["condition"] == "at_or_above" and c["partition"] == "forward_holdout"
+    )
+    assert above_fh["n_h2_fwd_resolved"] == 20
+    assert above_fh["candidate_vs_baseline_advantage"] < 0
+    assert above_fh["candidate_readiness"] == "CANDIDATE_FALSIFIED_NO_BASELINE_IMPROVEMENT"
+
+
+def test_h2_readiness_direct_falsified() -> None:
+    assert _h2_candidate_readiness("h2_forward_holdout", 20, -0.01, 0.1) == "CANDIDATE_FALSIFIED_NO_BASELINE_IMPROVEMENT"
+    assert _h2_candidate_readiness("h2_forward_holdout", 20, 0.0, 0.1) == "CANDIDATE_FALSIFIED_NO_BASELINE_IMPROVEMENT"
+    assert _h2_candidate_readiness("h2_forward_holdout", 20, None, 0.1) == "CANDIDATE_FALSIFIED_NO_BASELINE_IMPROVEMENT"
+
+
+# ── 20. H2 candidate: beats baseline but not market ──────────────────────────
+
+def test_h2_candidate_improves_baseline_not_market(tmp_path: Path) -> None:
+    """Baseline overestimates YES; candidate blends down; outcome is NO → candidate better than baseline."""
+    # our=0.8, mkt=0.3, outcome=NO: baseline=0.64, cand(0.55)=0.3025, mkt=0.09
+    data_dir = _mk_data_dir(tmp_path)
+    rows = [
+        _make_bse_row(f"k{i}|2026-05-30|at_or_above|20|C", our_prob=80.0, mkt_prob=30.0, ts=_TS_HOLDOUT)
+        for i in range(20)
+    ]
+    _write_bse(data_dir, rows)
+    report = build_self_evaluation_report(data_dir, gamma_lookup_fn=lambda k: "NO", now=_NOW)
+    above_fh = next(
+        c for c in report["cohorts"]
+        if c["condition"] == "at_or_above" and c["partition"] == "forward_holdout"
+    )
+    assert above_fh["brier_baseline"] == pytest.approx(0.64, abs=0.001)
+    assert above_fh["brier_candidate"] == pytest.approx(0.3025, abs=0.001)
+    assert above_fh["candidate_vs_baseline_advantage"] > 0
+    assert above_fh["candidate_vs_market_advantage"] < 0
+    assert above_fh["candidate_readiness"] == "CANDIDATE_BEATS_BASELINE_NOT_MARKET_OPUS_REVIEW"
+
+
+def test_h2_readiness_direct_beats_baseline_not_market() -> None:
+    assert _h2_candidate_readiness("h2_forward_holdout", 20, 0.1, -0.05) == "CANDIDATE_BEATS_BASELINE_NOT_MARKET_OPUS_REVIEW"
+    assert _h2_candidate_readiness("h2_forward_holdout", 20, 0.1, 0.0) == "CANDIDATE_BEATS_BASELINE_NOT_MARKET_OPUS_REVIEW"
+    assert _h2_candidate_readiness("h2_forward_holdout", 20, 0.1, None) == "CANDIDATE_BEATS_BASELINE_NOT_MARKET_OPUS_REVIEW"
+
+
+# ── 21. H2 candidate: beats both baseline and market ─────────────────────────
+
+def test_h2_candidate_beats_both_when_both_extremes_wrong(tmp_path: Path) -> None:
+    """our=0.9 and mkt=0.1 (extreme opposite errors); 10 YES + 10 NO → candidate=0.5 optimal."""
+    data_dir = _mk_data_dir(tmp_path)
+    rows = [
+        _make_bse_row(f"k{i}|2026-05-30|at_or_above|20|C", our_prob=90.0, mkt_prob=10.0, ts=_TS_HOLDOUT)
+        for i in range(20)
+    ]
+    _write_bse(data_dir, rows)
+    outcomes_dict = {f"k{i}|2026-05-30|at_or_above|20|C": ("YES" if i < 10 else "NO") for i in range(20)}
+    report = build_self_evaluation_report(
+        data_dir,
+        gamma_lookup_fn=lambda k: outcomes_dict.get(k),
+        now=_NOW,
+    )
+    above_fh = next(
+        c for c in report["cohorts"]
+        if c["condition"] == "at_or_above" and c["partition"] == "forward_holdout"
+    )
+    # brier_baseline = 0.41, brier_candidate = 0.25, brier_market = 0.41
+    assert above_fh["brier_candidate"] == pytest.approx(0.25, abs=0.001)
+    assert above_fh["candidate_vs_baseline_advantage"] > 0
+    assert above_fh["candidate_vs_market_advantage"] > 0
+    assert above_fh["candidate_readiness"] == "CANDIDATE_BEATS_BASELINE_AND_MARKET_OPUS_REVIEW"
+
+
+def test_h2_readiness_direct_beats_both() -> None:
+    assert _h2_candidate_readiness("h2_forward_holdout", 20, 0.1, 0.05) == "CANDIDATE_BEATS_BASELINE_AND_MARKET_OPUS_REVIEW"
+
+
+# ── 22. H2 invariants: never eligible, never canonical ───────────────────────
+
+def test_h2_invariants_eligible_and_canonical_always_false(tmp_path: Path) -> None:
+    data_dir = _mk_data_dir(tmp_path)
+    rows = [
+        _make_bse_row(f"k{i}|2026-05-30|at_or_above|20|C", ts=_TS_HOLDOUT)
+        for i in range(5)
+    ]
+    _write_bse(data_dir, rows)
+    report = build_self_evaluation_report(data_dir, gamma_lookup_fn=lambda k: "YES", now=_NOW)
+    assert report["live_policy_eligible"] is False
+    assert report["eligible_for_policy"] is False
+    assert report["market_truth_canonical"] is False
+    assert report["weather_truth_available"] is False
+    assert report["pnl_canonical_confirmed"] is False
+    for cohort in report["cohorts"]:
+        assert cohort["eligible_for_policy"] is False
+        assert cohort["live_policy_eligible"] is False
+        # H2 fields are present but never authorize policy
+        assert "candidate_readiness" in cohort
+        assert "candidate_model_id" in cohort
+
+
+# ── 23. H2 regression: evidence_frozen baselines unchanged ───────────────────
+
+def test_h2_regression_evidence_frozen_baselines_unchanged(tmp_path: Path) -> None:
+    """Adding H2 candidate fields must not alter evidence_frozen Brier baselines."""
+    fixture_rows = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+    non_seoul = [r for r in fixture_rows if str(r.get("city", "")).casefold() != "seoul"]
+    data_dir = _mk_data_dir(tmp_path)
+    _write_bse(data_dir, non_seoul)
+    mock_lookup = _build_mock_lookup_from_fixture(fixture_rows)
+    report = build_self_evaluation_report(data_dir, gamma_lookup_fn=mock_lookup, now=_NOW)
+    above_ef = next(
+        c for c in report["cohorts"]
+        if c["condition"] == "at_or_above" and c["partition"] == "evidence_frozen"
+    )
+    below_ef = next(
+        c for c in report["cohorts"]
+        if c["condition"] == "at_or_below" and c["partition"] == "evidence_frozen"
+    )
+    # Baselines frozen — must not change
+    assert above_ef["n_resolved"] == 21
+    assert above_ef["brier_our"] == pytest.approx(0.4242, abs=0.001)
+    assert above_ef["brier_mkt"] == pytest.approx(0.3303, abs=0.001)
+    assert above_ef["brier_advantage"] == pytest.approx(-0.0939, abs=0.001)
+    assert below_ef["n_resolved"] == 4
+    assert below_ef["brier_our"] == pytest.approx(0.1768, abs=0.001)
+    assert below_ef["brier_mkt"] == pytest.approx(0.2473, abs=0.001)
+    assert below_ef["brier_advantage"] == pytest.approx(0.0705, abs=0.001)
+    # H2 fields present
+    assert above_ef["candidate_readiness"] == "CANDIDATE_EVIDENCE_DIAGNOSTIC_ONLY"
+    assert above_ef["h2_partition"] == "h2_evidence_diagnostic_only"
+    # H2 candidate diagnostics computed on evidence rows
+    assert above_ef["candidate_diagnostic_brier"] is not None
+    assert above_ef["candidate_diagnostic_brier"]["n_resolved"] == 21
+
+
+# ── 24. H2 score_h2_candidate_metrics splits by cutoff ───────────────────────
+
+def test_h2_score_metrics_splits_by_cutoff(tmp_path: Path) -> None:
+    """Rows before H2 cutoff go to diagnostic; rows after go to forward."""
+    rows_diag = [
+        _make_bse_row("k1|2026-05-29|at_or_above|20|C", our_prob=80.0, mkt_prob=30.0, ts=_TS_H2_DIAGNOSTIC)
+    ]
+    rows_fwd = [
+        _make_bse_row("k2|2026-05-30|at_or_above|20|C", our_prob=80.0, mkt_prob=30.0, ts=_TS_HOLDOUT)
+    ]
+    outcomes_map = {
+        "k1|2026-05-29|at_or_above|20|C": "NO",
+        "k2|2026-05-30|at_or_above|20|C": "NO",
+    }
+    result = _score_h2_candidate_metrics(rows_diag + rows_fwd, outcomes_map, H2_PREREG_CUTOFF_UTC)
+    assert result["n_h2_diag_resolved"] == 1
+    assert result["n_h2_fwd_resolved"] == 1
+    assert result["forward_metrics"] is not None
+    assert result["diagnostic_metrics"] is not None

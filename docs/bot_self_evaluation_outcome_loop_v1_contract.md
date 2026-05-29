@@ -243,3 +243,99 @@ Resuelto: datos reales reproducen exactamente baselines documentados.
 - Forward holdout gate: `n_resolved >= 20` → Opus review → ¿recalibrar?
 - Conectar con Outcome Resolver R1 cuando disponible para fills canónicos
 - Captura de `side` en BSE forward (requiere patch bot.py separado + Pablo auth)
+
+---
+
+## 14. H2_MARKET_ANCHORED_CALIBRATION_CANDIDATE_V1
+
+**Status:** `H2_CANDIDATE_DEPLOYED_LOG_ONLY` (2026-05-29)
+**Approved by:** Pablo (2026-05-29)
+**Implemented:** 2026-05-29 (Sonnet, CODE + VALIDATE + PUSH)
+
+### H2 Hipótesis pre-registrada
+
+```
+H2: El predictor baseline sobreestima YES en at_or_above.
+Un candidato market-anchored fijo:
+  candidate_prob_yes = 0.5 * our_prob_yes + 0.5 * mkt_prob_yes
+reducirá el Brier frente al baseline en holdout independiente.
+H2 no afirma que el candidato bata al mercado.
+H2 no afirma causalidad sobre FORECAST_BIAS_C o sigma.
+H2 no autoriza trading.
+```
+
+### Fórmula y constantes
+
+```python
+H2_CANDIDATE_MODEL_ID = "market_anchored_blend_v1_lambda050"
+H2_CANDIDATE_HYPOTHESIS_ID = "H2_MARKET_ANCHORED_CALIBRATION_AT_OR_ABOVE"
+H2_LAMBDA_PRIMARY = 0.5
+H2_LAMBDA_DIAGNOSTIC = (0.3, 0.7)
+H2_PREREG_CUTOFF_UTC = datetime(2026, 5, 29, 20, 52, 29, tzinfo=timezone.utc)
+```
+
+Fórmula: `candidate_prob_yes = 0.5 * our_prob_yes + 0.5 * mkt_prob_yes`
+
+Sensibilidad diagnóstica (λ=0.3 y λ=0.7): no-gating, solo informativa.
+
+### Corte de preregistro H2
+
+`H2_PREREG_CUTOFF_UTC = 2026-05-29T20:52:29Z` (registrado antes de inspeccionar cualquier outcome H2 forward).
+
+- Predicciones `ts_utc < H2_PREREG_CUTOFF_UTC` → `h2_partition = "h2_evidence_diagnostic_only"` → `candidate_readiness = "CANDIDATE_EVIDENCE_DIAGNOSTIC_ONLY"`
+- Predicciones `ts_utc >= H2_PREREG_CUTOFF_UTC` → `h2_partition = "h2_forward_holdout"` → readiness según n_resolved y comparación Brier.
+
+### Cohortes
+
+| Cohorte | Rol H2 |
+|---------|--------|
+| `at_or_above × YES` | Gateada para H2 — cohorte principal |
+| `at_or_below × YES` | Observación secundaria — nunca gateada (n=4 insuficiente) |
+| `combined directional` | Diagnóstico solamente |
+
+Seoul excluido. `exact` y `range` fuera de scope.
+Filas `no_edge` (sin candidate side) aptas para calibración YES/NO probabilística; no para evaluación de decisión tradable.
+
+### Readiness H2
+
+| Estado | Condición |
+|--------|-----------|
+| `CANDIDATE_EVIDENCE_DIAGNOSTIC_ONLY` | Todas las filas pre-H2 cutoff (incluyendo evidence_frozen) |
+| `CANDIDATE_HOLDOUT_ACCRUING` | Forward, `n_h2_fwd_resolved < 20` |
+| `CANDIDATE_FALSIFIED_NO_BASELINE_IMPROVEMENT` | Forward `n >= 20`, candidato NO mejora baseline |
+| `CANDIDATE_BEATS_BASELINE_NOT_MARKET_OPUS_REVIEW` | Forward `n >= 20`, bate baseline pero NO mercado |
+| `CANDIDATE_BEATS_BASELINE_AND_MARKET_OPUS_REVIEW` | Forward `n >= 20`, bate baseline Y mercado/empata |
+
+### Criterio de falsación
+
+`candidate_vs_baseline_advantage <= 0` con `n_h2_fwd_resolved >= 20` → H2 falsificada.
+
+### Criterio de revisión Opus
+
+`CANDIDATE_BEATS_BASELINE_NOT_MARKET_OPUS_REVIEW` o `CANDIDATE_BEATS_BASELINE_AND_MARKET_OPUS_REVIEW` con `n >= 20` → revisión Opus obligatoria antes de cualquier cambio de policy.
+
+### Fecha de revisión operacional
+
+`2026-07-15`: si el holdout aún no alcanza `n = 20` en esa fecha, Opus revisa si continuar acumulando o clausurar H2. **No autoriza policy. No es deadline automático.**
+
+### Diagnóstico evidence (pre-H2 cutoff, solo informativo)
+
+| Cohorte | n_diag | brier_baseline | brier_cand (λ=0.5) | brier_mkt | λ=0.3 | λ=0.7 |
+|---------|--------|---------------|-------------------|-----------|--------|--------|
+| at_or_above × evidence | 21 | 0.4242 | 0.3623 | 0.3303 | 0.3459 | 0.3835 |
+| at_or_below × evidence | 4 | 0.1768 | 0.1759 | 0.2473 | 0.1958 | 0.1676 |
+
+Observación diagnóstica (no causal, no gating):
+- `at_or_above`: candidato λ=0.5 mejora baseline (0.4242→0.3623) pero no bate mercado (0.3303). λ=0.3 más cercano al mercado.
+- `at_or_below`: candidato λ=0.5 levemente mejor que baseline; mercado peor que ambos. λ=0.7 aún mejor (más peso al bot). Muestra insuficiente.
+
+Estas métricas son `h2_evidence_diagnostic_only` — no validan H2.
+
+### Guardrails
+
+- `eligible_for_policy=false` invariante en todos los cohorts
+- `live_policy_eligible=false` invariante global
+- No sustituye baseline (`brier_our`, `brier_mkt`, `brier_advantage` intactos)
+- No autoriza BUY/SELL/SKIP, no BANKROLL, no city modes
+- No Railway writes, no DB, no env vars, no bot.py
+- LOG_ONLY / NO_ACTION en todos los paths

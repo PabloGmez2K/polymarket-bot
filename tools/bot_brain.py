@@ -582,9 +582,28 @@ def _render_self_evaluation_markdown(report: dict[str, Any]) -> str:
             f"brier_our={c.get('brier_our')} brier_mkt={c.get('brier_mkt')} "
             f"adv={adv_str} → `{c.get('readiness')}`"
         )
+        # H2 candidate line
+        cand_b = c.get("brier_candidate")
+        c_vs_b = c.get("candidate_vs_baseline_advantage")
+        c_vs_m = c.get("candidate_vs_market_advantage")
+        c_vs_b_str = f"{c_vs_b:+.4f}" if c_vs_b is not None else "N/A"
+        c_vs_m_str = f"{c_vs_m:+.4f}" if c_vs_m is not None else "N/A"
+        lines.append(
+            f"  H2[{c.get('h2_partition')}] "
+            f"n_fwd={c.get('n_h2_fwd_resolved')} n_diag={c.get('n_h2_diag_resolved')} "
+            f"brier_cand={cand_b} "
+            f"cand_vs_base={c_vs_b_str} cand_vs_mkt={c_vs_m_str} "
+            f"→ `{c.get('candidate_readiness')}` "
+            f"[LOG_ONLY/NO_ACTION]"
+        )
     lines += [
         "",
         f"## Experiment Readiness: `{r.get('experiment_readiness')}`",
+        "",
+        f"## H2 Candidate: `{r.get('h2_candidate_model_id')}`",
+        f"Cutoff: `{r.get('h2_prereg_cutoff_utc')}` | lambda={r.get('h2_candidate_model_id', '').split('lambda')[-1] if r.get('h2_candidate_model_id') else 'N/A'}",
+        "LOG_ONLY / NO_ACTION / NOT_POLICY_ELIGIBLE.",
+        r.get("h2_hypothesis_preregistered", ""),
         "",
         "## H1 Hypothesis (pre-registered)",
         r.get("h1_hypothesis_preregistered", ""),

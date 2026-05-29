@@ -48,6 +48,23 @@ _V1_DISCLAIMER = (
     "pnl_canonical_confirmed=false. No trading authorization."
 )
 
+# H2: market-anchored calibration candidate — pre-registered 2026-05-29T20:52:29Z
+H2_CANDIDATE_MODEL_ID = "market_anchored_blend_v1_lambda050"
+H2_CANDIDATE_HYPOTHESIS_ID = "H2_MARKET_ANCHORED_CALIBRATION_AT_OR_ABOVE"
+H2_LAMBDA_PRIMARY: float = 0.5
+H2_LAMBDA_DIAGNOSTIC: tuple[float, float] = (0.3, 0.7)
+H2_PREREG_CUTOFF_UTC = datetime(2026, 5, 29, 20, 52, 29, tzinfo=timezone.utc)
+
+_H2_HYPOTHESIS = (
+    "H2: El predictor baseline sobreestima YES en at_or_above. "
+    "Un candidato market-anchored fijo: "
+    "candidate_prob_yes = 0.5 * our_prob_yes + 0.5 * mkt_prob_yes "
+    "reducira el Brier frente al baseline en holdout independiente. "
+    "H2 no afirma que el candidato bata al mercado. "
+    "H2 no afirma causalidad sobre FORECAST_BIAS_C o sigma. "
+    "H2 no autoriza trading. LOG_ONLY."
+)
+
 # Callable: eval_key -> "YES" | "NO" | None
 GammaLookupFn = Callable[[str], "str | None"]
 
@@ -432,6 +449,114 @@ def build_gamma_slug_from_eval_key(eval_key: str) -> str | None:
     return None
 
 
+# ── H2 candidate scoring ──────────────────────────────────────────────────────
+
+def _row_is_h2_forward(row: dict[str, Any], h2_cutoff: datetime) -> bool:
+    ts = _parse_ts(row.get("ts_utc"))
+    return ts is not None and ts >= h2_cutoff
+
+
+def _compute_h2_blend_metrics(
+    our_probs: list[float],
+    mkt_probs: list[float],
+    outcomes: list[int],
+    lambda_primary: float,
+    lambda_diag: tuple[float, float],
+) -> "dict[str, Any] | None":
+    """Compute H2 blend candidate Brier metrics. Returns None if no rows."""
+    n = len(our_probs)
+    if n == 0:
+        return None
+    cands = [lambda_primary * o + (1 - lambda_primary) * m for o, m in zip(our_probs, mkt_probs)]
+    cands_d0 = [lambda_diag[0] * o + (1 - lambda_diag[0]) * m for o, m in zip(our_probs, mkt_probs)]
+    cands_d1 = [lambda_diag[1] * o + (1 - lambda_diag[1]) * m for o, m in zip(our_probs, mkt_probs)]
+    b_base = _brier(our_probs, outcomes)
+    b_cand = _brier(cands, outcomes)
+    b_mkt = _brier(mkt_probs, outcomes)
+    return {
+        "n_resolved": n,
+        "mean_candidate_prob_yes": round(sum(cands) / n, 4),
+        "brier_baseline": round(b_base, 4),
+        "brier_candidate": round(b_cand, 4),
+        "brier_market": round(b_mkt, 4),
+        "candidate_vs_baseline_advantage": round(b_base - b_cand, 4),
+        "candidate_vs_market_advantage": round(b_mkt - b_cand, 4),
+        "brier_lambda_diag_0": round(_brier(cands_d0, outcomes), 4),
+        "brier_lambda_diag_1": round(_brier(cands_d1, outcomes), 4),
+    }
+
+
+def _score_h2_candidate_metrics(
+    rows: list[dict[str, Any]],
+    outcomes_map: dict[str, str],
+    h2_cutoff: datetime,
+    lambda_primary: float = H2_LAMBDA_PRIMARY,
+    lambda_diag: tuple[float, float] = H2_LAMBDA_DIAGNOSTIC,
+) -> dict[str, Any]:
+    """Compute H2 market-anchored candidate Brier metrics for a cohort.
+
+    Splits rows by h2_cutoff → forward (post-cutoff) and diagnostic (pre-cutoff).
+    Forward metrics drive readiness. Diagnostic metrics are non-gating.
+    LOG_ONLY. Not policy-eligible.
+    """
+    fwd_our: list[float] = []
+    fwd_mkt: list[float] = []
+    fwd_out: list[int] = []
+    diag_our: list[float] = []
+    diag_mkt: list[float] = []
+    diag_out: list[int] = []
+
+    for row in rows:
+        key = str(row.get("eval_key") or "").strip()
+        outcome_str = outcomes_map.get(key)
+        if outcome_str not in ("YES", "NO"):
+            continue
+        our_raw = row.get("our_prob")
+        mkt_raw = row.get("mkt_prob")
+        if our_raw is None or mkt_raw is None:
+            continue
+        try:
+            o = float(our_raw) / 100.0
+            m = float(mkt_raw) / 100.0
+        except (TypeError, ValueError):
+            continue
+        v = 1 if outcome_str == "YES" else 0
+        if _row_is_h2_forward(row, h2_cutoff):
+            fwd_our.append(o)
+            fwd_mkt.append(m)
+            fwd_out.append(v)
+        else:
+            diag_our.append(o)
+            diag_mkt.append(m)
+            diag_out.append(v)
+
+    return {
+        "n_h2_fwd_resolved": len(fwd_our),
+        "n_h2_diag_resolved": len(diag_our),
+        "forward_metrics": _compute_h2_blend_metrics(fwd_our, fwd_mkt, fwd_out, lambda_primary, lambda_diag),
+        "diagnostic_metrics": _compute_h2_blend_metrics(diag_our, diag_mkt, diag_out, lambda_primary, lambda_diag),
+    }
+
+
+def _h2_candidate_readiness(
+    h2_partition: str,
+    n_h2_fwd_resolved: int,
+    cand_vs_baseline: "float | None",
+    cand_vs_market: "float | None",
+) -> str:
+    """H2 candidate readiness label. LOG_ONLY. Never authorizes policy."""
+    if h2_partition == "h2_evidence_diagnostic_only":
+        return "CANDIDATE_EVIDENCE_DIAGNOSTIC_ONLY"
+    # h2_forward_holdout
+    if n_h2_fwd_resolved < 20:
+        return "CANDIDATE_HOLDOUT_ACCRUING"
+    if cand_vs_baseline is None or cand_vs_baseline <= 0:
+        return "CANDIDATE_FALSIFIED_NO_BASELINE_IMPROVEMENT"
+    if cand_vs_market is None or cand_vs_market <= 0:
+        return "CANDIDATE_BEATS_BASELINE_NOT_MARKET_OPUS_REVIEW"
+    return "CANDIDATE_BEATS_BASELINE_AND_MARKET_OPUS_REVIEW"
+
+
 # ── Main report builder ───────────────────────────────────────────────────────
 
 def build_self_evaluation_report(
@@ -485,12 +610,48 @@ def build_self_evaluation_report(
             cond_rows = [r for r in partition_rows if r.get("condition") == condition]
             scored = _score_cohort(cond_rows, outcomes_map)
             readiness = _cohort_readiness(condition, partition_name, scored["n_resolved"])
+
+            # H2 candidate fields
+            h2_part = (
+                "h2_evidence_diagnostic_only" if partition_name == "evidence_frozen"
+                else "h2_forward_holdout"
+            )
+            h2_data = _score_h2_candidate_metrics(cond_rows, outcomes_map, H2_PREREG_CUTOFF_UTC)
+            n_h2_fwd = h2_data["n_h2_fwd_resolved"]
+            fwd_m = h2_data["forward_metrics"]
+            diag_m = h2_data["diagnostic_metrics"]
+            cand_vs_baseline = fwd_m["candidate_vs_baseline_advantage"] if fwd_m else None
+            cand_vs_market = fwd_m["candidate_vs_market_advantage"] if fwd_m else None
+            h2_readiness = _h2_candidate_readiness(h2_part, n_h2_fwd, cand_vs_baseline, cand_vs_market)
+            # Report forward metrics when available; fall back to diagnostic for display
+            active_m = fwd_m or diag_m
+
             cohorts.append({
                 "condition": condition,
                 "probability_basis": "YES",
                 "partition": partition_name,
                 **scored,
                 "readiness": readiness,
+                # H2 candidate
+                "candidate_model_id": H2_CANDIDATE_MODEL_ID,
+                "candidate_hypothesis_id": H2_CANDIDATE_HYPOTHESIS_ID,
+                "candidate_lambda": H2_LAMBDA_PRIMARY,
+                "h2_partition": h2_part,
+                "n_h2_fwd_resolved": n_h2_fwd,
+                "n_h2_diag_resolved": h2_data["n_h2_diag_resolved"],
+                "mean_candidate_prob_yes": active_m["mean_candidate_prob_yes"] if active_m else None,
+                "brier_baseline": active_m["brier_baseline"] if active_m else None,
+                "brier_candidate": active_m["brier_candidate"] if active_m else None,
+                "brier_market_h2": active_m["brier_market"] if active_m else None,
+                "candidate_vs_baseline_advantage": cand_vs_baseline,
+                "candidate_vs_market_advantage": cand_vs_market,
+                "candidate_diagnostic_brier": {
+                    "n_resolved": h2_data["n_h2_diag_resolved"],
+                    "brier_lambda_03": diag_m["brier_lambda_diag_0"] if diag_m else None,
+                    "brier_lambda_05": diag_m["brier_candidate"] if diag_m else None,
+                    "brier_lambda_07": diag_m["brier_lambda_diag_1"] if diag_m else None,
+                },
+                "candidate_readiness": h2_readiness,
             })
 
     # Holdout accrual state — pending predictions never count toward readiness
@@ -516,6 +677,9 @@ def build_self_evaluation_report(
         "generated_at": now.isoformat(),
         "self_eval_h1_prereg_cutoff_utc": cutoff.isoformat(),
         "h1_hypothesis_preregistered": _H1_HYPOTHESIS,
+        "h2_prereg_cutoff_utc": H2_PREREG_CUTOFF_UTC.isoformat(),
+        "h2_hypothesis_preregistered": _H2_HYPOTHESIS,
+        "h2_candidate_model_id": H2_CANDIDATE_MODEL_ID,
         "prediction_provenance": "bot_forecast_self_eval",
         "market_outcome_source": "polymarket_market_price",
         "market_truth_canonical": False,
