@@ -1,0 +1,50 @@
+{
+  "description": "Fixture for H3 multimodel engine tests. Represents Open-Meteo responses for 5 deterministic models for Shanghai/ZSPD at target_date 2026-06-01.",
+  "city": "Shanghai",
+  "icao": "ZSPD",
+  "lat": 31.1497,
+  "lon": 121.8002,
+  "target_date": "2026-06-01",
+  "model_responses": {
+    "ecmwf_ifs025": {
+      "daily": {
+        "time": ["2026-05-29", "2026-05-30", "2026-06-01"],
+        "temperature_2m_max": [25.6, 25.9, 27.4]
+      }
+    },
+    "gfs_seamless": {
+      "daily": {
+        "time": ["2026-05-29", "2026-05-30", "2026-06-01"],
+        "temperature_2m_max": [25.5, 26.3, 28.1]
+      }
+    },
+    "icon_seamless": {
+      "daily": {
+        "time": ["2026-05-29", "2026-05-30", "2026-06-01"],
+        "temperature_2m_max": [24.9, 26.2, 26.8]
+      }
+    },
+    "jma_seamless": {
+      "daily": {
+        "time": ["2026-05-29", "2026-05-30", "2026-06-01"],
+        "temperature_2m_max": [23.4, 24.2, 25.9]
+      }
+    },
+    "gem_seamless": {
+      "daily": {
+        "time": ["2026-05-29", "2026-05-30", "2026-06-01"],
+        "temperature_2m_max": [24.5, 25.7, 27.0]
+      }
+    }
+  },
+  "expected_per_model_tmax": {
+    "ecmwf_ifs025": 27.4,
+    "gfs_seamless": 28.1,
+    "icon_seamless": 26.8,
+    "jma_seamless": 25.9,
+    "gem_seamless": 27.0
+  },
+  "expected_consensus_mean": 27.04,
+  "expected_disagreement_std": 0.79,
+  "notes": "mean = (27.4+28.1+26.8+25.9+27.0)/5 = 27.04; sample std of those 5 values"
+}
