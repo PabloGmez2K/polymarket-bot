@@ -1574,6 +1574,7 @@ def record_bot_evaluation(cycle_id, eval_key, would_buy: bool, **fields):
     try:
         condition = fields.get("condition")
         side = _normalize_bot_eval_side(fields.get("side"))
+        candidate_side_source = "runtime_evaluation_explicit" if side is not None else "not_captured_v2"
         city_mode = fields.get("city_mode")
         cohort_key = fields.get("cohort_key") or _build_bot_evaluation_cohort_key(
             condition=condition,
@@ -1591,6 +1592,8 @@ def record_bot_evaluation(cycle_id, eval_key, would_buy: bool, **fields):
             "date_iso": fields.get("date_iso"),
             "condition": condition,
             "side": side,
+            "candidate_side_source": candidate_side_source,
+            "eligible_for_policy_evaluation": False,
             "threshold": fields.get("threshold"),
             "threshold_high": fields.get("threshold_high"),
             "unit": fields.get("unit"),

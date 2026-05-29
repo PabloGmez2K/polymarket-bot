@@ -280,3 +280,156 @@ def test_price_filter_counterfactual_respects_cap_and_cache_miss(monkeypatch):
     assert len(rows) == 2
     assert {row["counterfactual_status"] for row in rows} == {"forecast_not_in_existing_cycle_cache"}
     assert all(row["candidate_allowed"] is False for row in rows)
+
+
+# ── Forward capture: candidate_side_source + eligible_for_policy_evaluation ──
+
+def test_record_bot_evaluation_explicit_side_sets_runtime_source(monkeypatch, tmp_path):
+    target = tmp_path / "bot_signal_evaluations.jsonl"
+    monkeypatch.setattr(bot, "BOT_SIGNAL_EVALUATIONS_FILE", str(target))
+    monkeypatch.delenv("DISABLE_BOT_EVAL_CAPTURE", raising=False)
+
+    bot.record_bot_evaluation(
+        "2026-05-29T08:00",
+        "Paris|2026-05-30|at_or_above|25|C",
+        False,
+        city="Paris",
+        date_iso="2026-05-30",
+        condition="at_or_above",
+        side="YES",
+        city_mode="canary",
+        threshold=25,
+        unit="C",
+        our_prob=62.0,
+        mkt_prob=55.0,
+        decision_gate="fuera_allowlist",
+    )
+
+    row = json.loads(target.read_text(encoding="utf-8").strip())
+    assert row["side"] == "YES"
+    assert row["candidate_side_source"] == "runtime_evaluation_explicit"
+    assert row["eligible_for_policy_evaluation"] is False
+
+
+def test_record_bot_evaluation_no_side_sets_not_captured(monkeypatch, tmp_path):
+    target = tmp_path / "bot_signal_evaluations.jsonl"
+    monkeypatch.setattr(bot, "BOT_SIGNAL_EVALUATIONS_FILE", str(target))
+    monkeypatch.delenv("DISABLE_BOT_EVAL_CAPTURE", raising=False)
+
+    bot.record_bot_evaluation(
+        "2026-05-29T08:00",
+        "Oslo|2026-05-30|at_or_above|15|C",
+        False,
+        city="Oslo",
+        date_iso="2026-05-30",
+        condition="at_or_above",
+        city_mode="shadow",
+        threshold=15,
+        unit="C",
+        our_prob=48.0,
+        mkt_prob=50.0,
+    )
+
+    row = json.loads(target.read_text(encoding="utf-8").strip())
+    assert row["side"] is None
+    assert row["candidate_side_source"] == "not_captured_v2"
+    assert row["eligible_for_policy_evaluation"] is False
+
+
+def test_record_bot_evaluation_eligible_for_policy_evaluation_always_false(monkeypatch, tmp_path):
+    target = tmp_path / "bot_signal_evaluations.jsonl"
+    monkeypatch.setattr(bot, "BOT_SIGNAL_EVALUATIONS_FILE", str(target))
+    monkeypatch.delenv("DISABLE_BOT_EVAL_CAPTURE", raising=False)
+
+    for side_val in ("YES", "NO", None):
+        target.unlink(missing_ok=True)
+        bot.record_bot_evaluation(
+            "2026-05-29T08:00",
+            f"Berlin|2026-05-30|at_or_above|20|C",
+            True,
+            city="Berlin",
+            date_iso="2026-05-30",
+            condition="at_or_above",
+            side=side_val,
+            threshold=20,
+            unit="C",
+        )
+        row = json.loads(target.read_text(encoding="utf-8").strip())
+        assert row["eligible_for_policy_evaluation"] is False
+
+
+def test_record_bot_evaluation_our_prob_mkt_prob_decision_gate_provenance_preserved(monkeypatch, tmp_path):
+    target = tmp_path / "bot_signal_evaluations.jsonl"
+    monkeypatch.setattr(bot, "BOT_SIGNAL_EVALUATIONS_FILE", str(target))
+    monkeypatch.delenv("DISABLE_BOT_EVAL_CAPTURE", raising=False)
+
+    bot.record_bot_evaluation(
+        "2026-05-29T08:00",
+        "Tokyo|2026-05-30|at_or_below|30|C",
+        False,
+        city="Tokyo",
+        date_iso="2026-05-30",
+        condition="at_or_below",
+        side="NO",
+        threshold=30,
+        unit="C",
+        our_prob=71.5,
+        mkt_prob=63.2,
+        decision_gate="sl_intra_guard",
+        evaluation_source="live_eval",
+    )
+
+    row = json.loads(target.read_text(encoding="utf-8").strip())
+    assert row["our_prob"] == 71.5
+    assert row["mkt_prob"] == 63.2
+    assert row["decision_gate"] == "sl_intra_guard"
+    assert row["evaluation_source"] == "live_eval"
+    assert row["candidate_side_source"] == "runtime_evaluation_explicit"
+
+
+def test_record_bot_evaluation_would_buy_not_altered_by_capture(monkeypatch, tmp_path):
+    target = tmp_path / "bot_signal_evaluations.jsonl"
+    monkeypatch.setattr(bot, "BOT_SIGNAL_EVALUATIONS_FILE", str(target))
+    monkeypatch.delenv("DISABLE_BOT_EVAL_CAPTURE", raising=False)
+
+    for would_buy_val in (True, False):
+        target.unlink(missing_ok=True)
+        bot.record_bot_evaluation(
+            "2026-05-29T08:00",
+            "Sydney|2026-05-30|at_or_above|22|C",
+            would_buy_val,
+            city="Sydney",
+            date_iso="2026-05-30",
+            condition="at_or_above",
+            side="YES",
+            threshold=22,
+            unit="C",
+        )
+        row = json.loads(target.read_text(encoding="utf-8").strip())
+        assert row["would_buy"] is would_buy_val
+        assert row["candidate_side_source"] == "runtime_evaluation_explicit"
+
+
+def test_record_bot_evaluation_schema_backward_compatible(monkeypatch, tmp_path):
+    """Legacy v1 row shape still readable; new fields absent on old rows don't crash engine."""
+    target = tmp_path / "bot_signal_evaluations.jsonl"
+    monkeypatch.setattr(bot, "BOT_SIGNAL_EVALUATIONS_FILE", str(target))
+    monkeypatch.delenv("DISABLE_BOT_EVAL_CAPTURE", raising=False)
+
+    bot.record_bot_evaluation(
+        "2026-05-29T08:00",
+        "London|2026-05-30|at_or_above|18|C",
+        False,
+        city="London",
+        date_iso="2026-05-30",
+        condition="at_or_above",
+        side="YES",
+        threshold=18,
+        unit="C",
+    )
+
+    row = json.loads(target.read_text(encoding="utf-8").strip())
+    assert row["schema_version"] == 2
+    assert "candidate_side_source" in row
+    assert "eligible_for_policy_evaluation" in row
+    assert row["eval_key"] == "London|2026-05-30|at_or_above|18|C"

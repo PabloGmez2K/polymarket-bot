@@ -186,10 +186,9 @@ def _score_cohort(
         mkt_probs.append(mkt_p)
         outcome_values.append(1 if outcome_str == "YES" else 0)
 
-        # side_explicit: row has a non-empty side field
-        side = str(row.get("side") or "").strip()
         cand_src = str(row.get("candidate_side_source") or "").strip()
-        if side and cand_src != "historical_inferred":
+        side = str(row.get("side") or "").strip()
+        if cand_src == "runtime_evaluation_explicit" and side:
             n_side_explicit += 1
         else:
             n_side_inferred += 1

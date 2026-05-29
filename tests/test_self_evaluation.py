@@ -504,3 +504,134 @@ def test_holdout_readiness_does_not_count_pending(tmp_path: Path) -> None:
     report = build_self_evaluation_report(data_dir, gamma_lookup_fn=lambda k: None, now=_NOW)
     # n_pending=25 but n_resolved=0 → HOLDOUT_ACCRUING (not READY)
     assert report["experiment_readiness"] == "HOLDOUT_ACCRUING"
+
+
+# ── 15. candidate_side_source: engine counts explicit vs legacy correctly ─────
+
+def test_score_cohort_runtime_explicit_counts_as_side_explicit(tmp_path: Path) -> None:
+    data_dir = _mk_data_dir(tmp_path)
+    rows = [
+        {
+            "eval_key": "Paris|2026-05-30|at_or_above|25|C",
+            "condition": "at_or_above",
+            "city": "Paris",
+            "our_prob": 62.0,
+            "mkt_prob": 55.0,
+            "ts_utc": _TS_HOLDOUT,
+            "side": "YES",
+            "candidate_side_source": "runtime_evaluation_explicit",
+            "eligible_for_policy_evaluation": False,
+            "evaluation_source": "live_eval",
+        }
+    ]
+    _write_bse(data_dir, rows)
+    report = build_self_evaluation_report(data_dir, gamma_lookup_fn=lambda k: "YES", now=_NOW)
+    fh = next(
+        c for c in report["cohorts"]
+        if c["condition"] == "at_or_above" and c["partition"] == "forward_holdout"
+    )
+    assert fh["n_side_explicit"] == 1
+    assert fh["n_side_inferred_legacy"] == 0
+
+
+def test_score_cohort_not_captured_v2_counts_as_inferred(tmp_path: Path) -> None:
+    data_dir = _mk_data_dir(tmp_path)
+    rows = [
+        {
+            "eval_key": "Oslo|2026-05-30|at_or_above|15|C",
+            "condition": "at_or_above",
+            "city": "Oslo",
+            "our_prob": 48.0,
+            "mkt_prob": 50.0,
+            "ts_utc": _TS_HOLDOUT,
+            "side": None,
+            "candidate_side_source": "not_captured_v2",
+            "eligible_for_policy_evaluation": False,
+            "evaluation_source": "live_eval",
+        }
+    ]
+    _write_bse(data_dir, rows)
+    report = build_self_evaluation_report(data_dir, gamma_lookup_fn=lambda k: "NO", now=_NOW)
+    fh = next(
+        c for c in report["cohorts"]
+        if c["condition"] == "at_or_above" and c["partition"] == "forward_holdout"
+    )
+    assert fh["n_side_explicit"] == 0
+    assert fh["n_side_inferred_legacy"] == 1
+
+
+def test_score_cohort_legacy_row_no_candidate_side_source_counts_as_inferred(tmp_path: Path) -> None:
+    data_dir = _mk_data_dir(tmp_path)
+    # Legacy row: has side but NO candidate_side_source (pre-patch format)
+    rows = [
+        {
+            "eval_key": "Vienna|2026-05-30|at_or_above|20|C",
+            "condition": "at_or_above",
+            "city": "Vienna",
+            "our_prob": 55.0,
+            "mkt_prob": 50.0,
+            "ts_utc": _TS_HOLDOUT,
+            "side": "YES",
+            # no candidate_side_source
+            "evaluation_source": "live_eval",
+        }
+    ]
+    _write_bse(data_dir, rows)
+    report = build_self_evaluation_report(data_dir, gamma_lookup_fn=lambda k: "YES", now=_NOW)
+    fh = next(
+        c for c in report["cohorts"]
+        if c["condition"] == "at_or_above" and c["partition"] == "forward_holdout"
+    )
+    assert fh["n_side_explicit"] == 0
+    assert fh["n_side_inferred_legacy"] == 1
+
+
+def test_engine_eligible_for_policy_and_live_policy_eligible_invariants_hold_with_new_rows(
+    tmp_path: Path,
+) -> None:
+    data_dir = _mk_data_dir(tmp_path)
+    rows = [
+        {
+            "eval_key": "London|2026-05-30|at_or_above|18|C",
+            "condition": "at_or_above",
+            "city": "London",
+            "our_prob": 60.0,
+            "mkt_prob": 55.0,
+            "ts_utc": _TS_HOLDOUT,
+            "side": "YES",
+            "candidate_side_source": "runtime_evaluation_explicit",
+            "eligible_for_policy_evaluation": False,
+        }
+    ]
+    _write_bse(data_dir, rows)
+    report = build_self_evaluation_report(data_dir, gamma_lookup_fn=lambda k: "YES", now=_NOW)
+    assert report["live_policy_eligible"] is False
+    assert report["eligible_for_policy"] is False
+    for cohort in report["cohorts"]:
+        assert cohort["eligible_for_policy"] is False
+        assert cohort["live_policy_eligible"] is False
+
+
+def test_evidence_frozen_brier_invariants_unaffected_by_engine_update(tmp_path: Path) -> None:
+    """Changing n_side_explicit logic must not alter evidence_frozen Brier baselines."""
+    fixture_rows = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+    non_seoul = [r for r in fixture_rows if str(r.get("city", "")).casefold() != "seoul"]
+
+    data_dir = _mk_data_dir(tmp_path)
+    _write_bse(data_dir, non_seoul)
+
+    mock_lookup = _build_mock_lookup_from_fixture(fixture_rows)
+    report = build_self_evaluation_report(data_dir, gamma_lookup_fn=mock_lookup, now=_NOW)
+
+    above_ef = next(
+        c for c in report["cohorts"]
+        if c["condition"] == "at_or_above" and c["partition"] == "evidence_frozen"
+    )
+    below_ef = next(
+        c for c in report["cohorts"]
+        if c["condition"] == "at_or_below" and c["partition"] == "evidence_frozen"
+    )
+    assert above_ef["n_resolved"] == 21
+    assert above_ef["brier_advantage"] == pytest.approx(-0.0939, abs=0.001)
+    assert below_ef["n_resolved"] == 4
+    assert below_ef["brier_advantage"] == pytest.approx(0.0705, abs=0.001)

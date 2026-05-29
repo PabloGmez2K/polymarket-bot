@@ -162,14 +162,43 @@ Establecidas por Gamma lookup manual en sesión previa (25 eval_keys no-Seoul):
 
 ## 10. Forward schema inspection (2026-05-29)
 
-Railway BSE snapshot:
+Railway BSE snapshot (sesión anterior):
 - total_raw: 1479 | directional_rows: 111 | eval_keys_unique: 34
 - our_prob: 100% | mkt_prob: 100% → Brier scoring posible
 - side: 12% → `FORWARD_CAPTURE_GAP_DETECTED` (policy evaluation gap)
 - market_id/condition_id: 1% → gap menor para este scope
 
 Veredicto: **`FORWARD_CAPTURE_GAP_DETECTED`** para policy. Brier scoring funcional.
-No se modifica `bot.py` en esta sesión.
+No se modifica `bot.py` en esa sesión.
+
+## 10b. SELF_EVAL_CANDIDATE_SIDE_PROVENANCE_V1 (2026-05-29)
+
+Scope: mejora de provenance/observabilidad del writer BSE. No amplía cobertura de trades candidatos ni autoriza policy. No cierra un gap de side en filas `no_edge`.
+
+Patch aplicado y pusheado (amend sesión 409).
+
+Campos nuevos en `bot_signal_evaluations.jsonl` desde este patch:
+
+| Campo | Tipo | Valor cuando runtime seleccionó side | Valor cuando no existe side por diseño |
+|-------|------|---------------------------------------|----------------------------------------|
+| `candidate_side_source` | str | `"runtime_evaluation_explicit"` | `"not_captured_v2"` |
+| `eligible_for_policy_evaluation` | bool | `False` | `False` |
+
+- `candidate_side_source="runtime_evaluation_explicit"`: filas post-edge donde el runtime ya eligió un lado (`below_min_edge`, `fuera_allowlist/shadow_only_override`, `kelly_too_low`, `sl_city_cooldown`, `existing_order/existing_position/sold_this_cycle`). Solo prueba que el runtime produjo un lado explícito; no convierte la fila en candidata para policy.
+- `candidate_side_source="not_captured_v2"`: filas `no_edge` donde no existe candidate side bajo la policy evaluada (ambos edges no producen candidato positivo). Correcto por diseño. Estas filas son aptas para calibración probabilística YES/NO, no para evaluación de una decisión tradable. No existe candidate side capturable sin inventarla o cambiar trading semantics.
+- `eligible_for_policy_evaluation=False` invariante en todas las filas.
+- `schema_version=2` ya existente, no se duplica.
+- Campos no disponibles sin scope nuevo: `policy_version`, `token_id_yes/no`.
+- `market_id`/`condition_id` ya en el writer cuando el caller los pasa; sin cambio.
+
+Cambio en `_self_evaluation_engine.py`:
+- `n_side_explicit`: solo cuenta filas con `candidate_side_source="runtime_evaluation_explicit"` + side no vacío.
+- Filas legacy sin `candidate_side_source` → `n_side_inferred_legacy` (diagnóstico, no policy).
+- Brier scores e invariantes `eligible_for_policy=false` sin cambio.
+
+El smoke previo validó clasificación de filas explícitas/no explícitas; no capturó side nueva para filas `no_edge`.
+Smoke local: Paris (runtime_explicit) → n_side_explicit=1; Oslo (not_captured) → n_side_inferred=1.
+Sesión: 872 pytest + 1258 verify_before_deploy, todos passing.
 
 ---
 
