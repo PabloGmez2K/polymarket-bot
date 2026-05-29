@@ -198,9 +198,65 @@ No es posible demostrar alineación temporal entre el forecast disponible antes 
 |---------|-----|
 | `tools/_multimodel_engine.py` | Motor privado LOG_ONLY |
 | `tools/multimodel_shadow.py` | CLI standalone |
-| `tests/test_multimodel_shadow.py` | 19 tests (todos inyectando fetchers) |
+| `tools/h3_auto_capture.py` | Wrapper automático LOG_ONLY para bot.py (H3_AUTOMATED_LOG_ONLY_CAPTURE_V1) |
+| `tests/test_multimodel_shadow.py` | 29 tests (inyectando fetchers) |
+| `tests/test_h3_auto_capture.py` | 31 tests wrapper automático |
 | `tests/fixtures/multimodel_open_meteo_sample.json` | Fixture 5 modelos Shanghai |
 | `data/multimodel_shadow/` | Snapshots locales (gitignored) |
+
+---
+
+## 13. H3_AUTOMATED_LOG_ONLY_CAPTURE_V1 (2026-05-30)
+
+**Estado:** `H3_AUTOMATED_LOG_ONLY_CAPTURE_V1_DEFAULT_OFF`
+**Implementado:** 2026-05-30 (Sonnet, CODE CONTROLADO)
+**Autorizado por:** Pablo (2026-05-30, session prompt)
+
+### Qué hace
+
+`tools/h3_auto_capture.py` — función `maybe_capture_h3_multimodel_shadow()` — se llama automáticamente en el PASO 4 del ciclo de bot.py (línea ~22348, tras `condition_name = ...` y antes del filtro de condiciones). Captura snapshots H3 por cada mercado direccional elegible usando los datos ya disponibles en el ciclo del bot.
+
+### Punto de integración
+
+| Campo | Fuente en bot.py |
+|-------|-----------------|
+| `city` | `c["city"]` |
+| `target_date` | `c["date_iso"]` |
+| `condition` | `condition_name` (ya normalizado) |
+| `threshold` | `threshold` = `c["temp_threshold"]` |
+| `unit` | `c["unit"]` |
+| `mkt_prob_yes` | `c["mkt_prob_yes"]` |
+| `market_id` | `c.get("market_id")` |
+| `condition_id` | `c.get("condition_id")` |
+
+**Cero nuevas consultas Gamma**: usa `market_id`/`mkt_prob_yes` ya disponibles en el ciclo (injected `market_fetch_fn`).  
+**HTTP real**: ~5 llamadas Open-Meteo por snapshot (solo cuando no es idempotente).
+
+### Gate de activación
+
+```
+H3_AUTO_CAPTURE_ENABLED=1   # default "0" = OFF
+```
+
+Mismo patrón que `LOG_ONLY_EXACT_NO_QT_MATCH_EVAL_ENABLED`. No requiere cambio de código para activar.
+
+### Guardrails
+
+- `eligible_for_policy = False` invariante (hardcoded en engine)
+- `live_policy_eligible = False` invariante (hardcoded en engine)
+- No modifica BUY/SELL/SKIP, edge, gates
+- `maybe_capture_h3_multimodel_shadow()` siempre retorna `None`
+- Doble protección: excepciones capturadas en la función Y en el try/except de bot.py
+- Idempotencia: check filesystem ANTES del compute HTTP
+- Solo `at_or_above` / `at_or_below` (exact/range excluidos)
+- Solo ciudades en `ACTIVE_CITY_COORDS` (Seoul excluido automáticamente)
+- Solo `unit == "C"` (Open-Meteo siempre retorna Celsius)
+- No DB / No env vars / No Railway writes
+
+### Activación (próximo paso)
+
+Para activar en Railway: añadir `H3_AUTO_CAPTURE_ENABLED=1` a las variables de entorno.  
+Requiere autorización explícita de Pablo. No activar sin revisión previa del overhead de ciclo.
 
 ---
 

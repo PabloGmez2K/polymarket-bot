@@ -26,6 +26,12 @@ from waitress import serve
 
 load_dotenv()
 
+# H3_AUTOMATED_LOG_ONLY_CAPTURE_V1 — lazy import, fail-closed if unavailable
+try:
+    from tools.h3_auto_capture import maybe_capture_h3_multimodel_shadow as _h3_capture_fn
+except Exception:
+    _h3_capture_fn = None  # type: ignore[assignment]
+
 # =============================================================
 # bot.py v10.6.43 — Exact/no-QT-match LOG_ONLY evaluation capture, env var OFF (sesion 2026-05-23)
 # bot.py v10.6.42 — SQLite Recorder Fase 0: persistencia pasiva fail-safe (sesion 257, 2026-04-27)
@@ -22346,6 +22352,23 @@ def main(client):
             sigma_used_val = None
 
         condition_name = str(c.get("condition", "") or "").strip().lower()
+
+        # H3_AUTOMATED_LOG_ONLY_CAPTURE_V1 — fail-closed, never modifies trading decisions
+        if _h3_capture_fn is not None:
+            try:
+                _h3_capture_fn(
+                    city=city,
+                    target_date=c["date_iso"],
+                    condition=condition_name,
+                    threshold=float(threshold),
+                    unit=c["unit"],
+                    mkt_prob_yes=c["mkt_prob_yes"],
+                    market_id=c.get("market_id"),
+                    condition_id=c.get("condition_id"),
+                )
+            except Exception:
+                pass  # fail-closed: never break the trading cycle
+
         if condition_name not in ALLOWED_CONDITIONS:
             # v10.6.15: Quality-trader-gated canary para exact/range
             # Si la condición está en QUALITY_TRADER_CONDITIONS, ciudad en whitelist,
