@@ -195,6 +195,11 @@ TRADERS_OPERATIONAL_INTELLIGENCE_ENABLED = os.getenv("TRADERS_OPERATIONAL_INTELL
 TRADERS_OPERATIONAL_INTELLIGENCE_TIMEOUT_SECONDS = int(os.getenv("TRADERS_OPERATIONAL_INTELLIGENCE_TIMEOUT_SECONDS", "180"))
 SOURCE_ONBOARDING_ANDON_ENABLED = os.getenv("SOURCE_ONBOARDING_ANDON_ENABLED", "true").lower() in ("1", "true", "yes", "on")
 SOURCE_ONBOARDING_ANDON_TIMEOUT_SECONDS = int(os.getenv("SOURCE_ONBOARDING_ANDON_TIMEOUT_SECONDS", "45"))
+# H3_RESEARCH_CAPTURE_SCHEDULE_V1 — standalone LOG_ONLY research capture, default OFF
+H3_RESEARCH_CAPTURE_ENABLED = os.getenv("H3_RESEARCH_CAPTURE_ENABLED", "0") == "1"
+H3_RESEARCH_CAPTURE_MAX_MARKETS = int(os.getenv("H3_RESEARCH_CAPTURE_MAX_MARKETS", "20"))
+H3_RESEARCH_CAPTURE_COOLDOWN_HOURS = int(os.getenv("H3_RESEARCH_CAPTURE_COOLDOWN_HOURS", "4"))
+H3_RESEARCH_CAPTURE_TIMEOUT_SECONDS = int(os.getenv("H3_RESEARCH_CAPTURE_TIMEOUT_SECONDS", "120"))
 # Cutoff de stats por ciudad: "Dallas=2026-04-06,Chicago=2026-03-01"
 # Trades cerrados ANTES de la fecha indicada se ignoran en get_city_accuracy().
 CITY_STATS_CUTOFF: dict[str, str] = {}
@@ -705,6 +710,11 @@ UNSELLABLE_GUARD_MONITOR_SCRIPT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "tools",
     "unsellable_guard_monitor.py",
+)
+H3_RESEARCH_CAPTURE_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "tools",
+    "multimodel_shadow.py",
 )
 CYCLES_HISTORY_FILE = _data_path("cycles_history.jsonl")
 FUNNEL_OBSERVABILITY_LOG_ONLY_FILE = _data_path("funnel_observability_log_only.jsonl")
@@ -2015,6 +2025,7 @@ def load_alerts_state():
         "unsellable_guard_safety_last_seen_at": None,
         "lifecycle_review_last_run_date": None,
         "lifecycle_review_alerted": {},
+        "h3_research_capture_last_run": None,
     }
     if not os.path.exists(ALERTS_FILE):
         return default
@@ -2069,6 +2080,7 @@ def load_alerts_state():
         state.setdefault("unsellable_guard_safety_last_seen_at", None)
         state.setdefault("lifecycle_review_last_run_date", None)
         state.setdefault("lifecycle_review_alerted", {})
+        state.setdefault("h3_research_capture_last_run", None)
         return state
     except Exception:
         return default
@@ -3105,6 +3117,76 @@ def maybe_run_wallet_snapshot(state, now=None):
             f"(phase2_ready={phase2_ready}, reason={state.get('wallet_snapshot_last_ready_reason')})"
         )
     return True
+
+
+def maybe_run_h3_research_capture(state, now=None):
+    """
+    H3_RESEARCH_CAPTURE_SCHEDULE_V1 — captura standalone LOG_ONLY de investigación H3.
+
+    Ejecuta tools/multimodel_shadow.py --forward-snapshot directamente (sin depender
+    de candidatos del loop de trading). Consulta Gamma y Open-Meteo de forma autónoma.
+
+    Fail-closed: subprocess timeout/error no afecta ciclos de trading.
+    Idempotente: multimodel_shadow.py gestiona dedup por snapshot_key+ts_bucket.
+    Gate: H3_RESEARCH_CAPTURE_ENABLED=1 (default "0" = OFF).
+    eligible_for_policy=False y live_policy_eligible=False invariantes en el engine.
+    No modifica BUY/SELL/SKIP, price filters, city modes, BANKROLL ni sizing.
+    """
+    logger = globals().get("log")
+    if not H3_RESEARCH_CAPTURE_ENABLED:
+        return False
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    # Cooldown gate
+    last_run_str = state.get("h3_research_capture_last_run")
+    if last_run_str:
+        try:
+            last_run = datetime.fromisoformat(last_run_str.replace("Z", "+00:00"))
+            if last_run.tzinfo is None:
+                last_run = last_run.replace(tzinfo=timezone.utc)
+            elapsed_hours = (now - last_run).total_seconds() / 3600
+            if elapsed_hours < H3_RESEARCH_CAPTURE_COOLDOWN_HOURS:
+                if logger:
+                    logger.info(
+                        "h3 research capture: skip "
+                        f"(cooldown {elapsed_hours:.1f}h < {H3_RESEARCH_CAPTURE_COOLDOWN_HOURS}h)"
+                    )
+                return False
+        except Exception:
+            pass  # malformed timestamp → proceed
+
+    cities = ["Shanghai", "Tokyo", "Buenos_Aires", "Ankara"]
+    command = [
+        sys.executable,
+        H3_RESEARCH_CAPTURE_SCRIPT,
+        "--forward-snapshot",
+        "--cities",
+        *cities,
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            capture_output=True,
+            text=True,
+            timeout=H3_RESEARCH_CAPTURE_TIMEOUT_SECONDS,
+            check=False,
+        )
+        state["h3_research_capture_last_run"] = now.isoformat()
+        if logger:
+            if result.returncode == 0:
+                logger.info("h3 research capture: OK (standalone forward-snapshot)")
+            else:
+                logger.warning(
+                    f"h3 research capture: exit {result.returncode} — "
+                    f"{(result.stderr or '').strip()[:200]}"
+                )
+        return True
+    except Exception as e:
+        if logger:
+            logger.warning(f"h3 research capture: error ({e})")
+        return False
 
 
 def maybe_run_bankroll_scaling_monitor(state):
@@ -7027,6 +7109,15 @@ def run_observability_alerts():
         logger = globals().get("log")
         if logger:
             logger.warning(f"city intelligence digest alert: fallo ({e})")
+
+    # H3_RESEARCH_CAPTURE_SCHEDULE_V1 — standalone LOG_ONLY, default OFF.
+    try:
+        if maybe_run_h3_research_capture(state):
+            changed = True
+    except Exception as e:
+        logger = globals().get("log")
+        if logger:
+            logger.warning(f"h3 research capture: fallo ({e})")
 
     if changed:
         save_alerts_state(state)

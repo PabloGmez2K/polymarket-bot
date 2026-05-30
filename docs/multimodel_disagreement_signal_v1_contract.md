@@ -201,8 +201,55 @@ No es posible demostrar alineación temporal entre el forecast disponible antes 
 | `tools/h3_auto_capture.py` | Wrapper automático LOG_ONLY para bot.py (H3_AUTOMATED_LOG_ONLY_CAPTURE_V1) |
 | `tests/test_multimodel_shadow.py` | 29 tests (inyectando fetchers) |
 | `tests/test_h3_auto_capture.py` | 31 tests wrapper automático |
+| `tests/test_h3_research_capture.py` | 13 tests scheduled research capture |
 | `tests/fixtures/multimodel_open_meteo_sample.json` | Fixture 5 modelos Shanghai |
 | `data/multimodel_shadow/` | Snapshots locales (gitignored) |
+
+---
+
+## 14. H3_RESEARCH_CAPTURE_SCHEDULE_V1 (2026-05-30)
+
+**Estado:** `H3_RESEARCH_CAPTURE_SCHEDULE_V1_DEFAULT_OFF`
+**Implementado:** 2026-05-30 (Sonnet, CODE CONTROLADO)
+**Autorizado por:** Pablo (2026-05-30, session prompt)
+
+### Qué hace
+
+`maybe_run_h3_research_capture(state, now)` en bot.py ejecuta `tools/multimodel_shadow.py --forward-snapshot` como subprocess desde el bloque de observabilidad (run_observability_alerts), al final del ciclo, fuera del loop de decisión de trading.
+
+Consulta Gamma directamente (sin pasar por candidatos del loop) y Open-Meteo para las 4 ciudades H3: Shanghai, Tokyo, Buenos Aires, Ankara. Condiciones: `at_or_above` y `at_or_below` únicamente.
+
+### Gate de activación
+
+```
+H3_RESEARCH_CAPTURE_ENABLED=0   # default OFF
+H3_RESEARCH_CAPTURE_COOLDOWN_HOURS=4    # entre ejecuciones (default 4)
+H3_RESEARCH_CAPTURE_MAX_MARKETS=20      # informativo; cap efectivo en el script
+H3_RESEARCH_CAPTURE_TIMEOUT_SECONDS=120 # timeout subprocess
+```
+
+No activar en Railway sin revisión previa de Pablo.
+
+### Guardrails
+
+- `eligible_for_policy = False` invariante (hardcoded en engine)
+- `live_policy_eligible = False` invariante (hardcoded en engine)
+- No modifica BUY/SELL/SKIP, edge, gates, BANKROLL, sizing, city modes
+- Fail-closed: subprocess error/timeout → log warning, ciclo no afectado
+- Idempotente: `snapshot_key+ts_bucket` gestionado por multimodel_shadow.py
+- Cooldown `h3_research_capture_last_run` en alerts_state
+- Solo `at_or_above` / `at_or_below` (exact/range excluidos en la CLI)
+- No DB / No env vars Railway / No push
+
+### Diferencia con H3_AUTOMATED_LOG_ONLY_CAPTURE_V1
+
+| | H3_AUTO_CAPTURE (loop) | H3_RESEARCH_CAPTURE (standalone) |
+|--|--|--|
+| Fuente de mercados | Candidatos del loop de bot.py | Gamma directo (`_discover_open_markets_for_city`) |
+| Punto de ejecución | PASO 4 dentro del ciclo de mercado | Bloque observabilidad post-ciclo |
+| Gate | `H3_AUTO_CAPTURE_ENABLED` | `H3_RESEARCH_CAPTURE_ENABLED` |
+| Activado | Sí (Railway) | No (default OFF) |
+| Produce datos hoy | No (mercados filtrados antes de llegar) | Sí (auditoría local confirmada) |
 
 ---
 
