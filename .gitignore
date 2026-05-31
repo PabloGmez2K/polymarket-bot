@@ -105,6 +105,7 @@ RESEARCH_*.md
 
 # ─── LOG_ONLY experiment artefacts (runtime, never commit) ──────────────────
 data/exact_no_qt_match_evaluations_log_only.jsonl
+data/reconciled_executions.jsonl
 
 # ─── SQLite databases (runtime, never commit) ────────────────────────────────
 *.db
