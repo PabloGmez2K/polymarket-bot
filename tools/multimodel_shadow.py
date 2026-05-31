@@ -51,6 +51,7 @@ from _multimodel_engine import (
     resolve_outcome_from_gamma,
     snapshot_key,
     ts_bucket_from_ts,
+    unique_market_key,
 )
 
 OUT_DIR = REPO_ROOT / "data" / "multimodel_shadow"
@@ -392,14 +393,24 @@ def cmd_report() -> int:
 
     report = compute_report(snapshots)
 
-    print(f"\nn_total={report['n_total']} n_resolved={report['n_resolved']} n_pending={report['n_pending']}")
+    print(f"\n--- Snapshot level (diagnostic: counts every snapshot) ---")
+    print(f"n_snapshots_total={report['n_snapshots_total']} n_snapshots_resolved={report['n_snapshots_resolved']} n_snapshots_pending={report['n_snapshots_pending']}")
     if report.get("n_scored") is not None:
-        print(f"n_scored={report['n_scored']}")
-    print(f"brier_candidate={report['brier_candidate']}")
-    print(f"brier_market={report['brier_market']}")
-    print(f"brier_advantage_market={report['brier_advantage_market']} (>0 = H3 beats market)")
+        print(f"n_scored_snapshot={report['n_scored']}")
+    print(f"brier_candidate_snapshot_weighted={report['brier_candidate_snapshot_weighted']}")
+    print(f"brier_market_snapshot_weighted={report['brier_market_snapshot_weighted']}")
+
+    print(f"\n--- Market level (alpha evidence: one data point per unique market) ---")
+    print(f"n_unique_markets_total={report['n_unique_markets_total']} n_unique_markets_resolved={report['n_unique_markets_resolved']} n_unique_markets_pending={report['n_unique_markets_pending']}")
+    if report.get("n_markets_scored") is not None:
+        print(f"n_markets_scored={report['n_markets_scored']}")
+    print(f"brier_candidate_market_weighted={report['brier_candidate_market_weighted']}")
+    print(f"brier_market_market_weighted={report['brier_market_market_weighted']}")
+    print(f"brier_advantage_market_weighted={report['brier_advantage_market_weighted']} (>0 = H3 beats market)")
     print(f"inter_model_disagreement_std_mean={report['inter_model_disagreement_std_mean']}")
-    print(f"\nreadiness: {report['readiness']}")
+    print(f"[NOTE] Lead-time analysis (Brier by days-ahead) is pending/future work.")
+
+    print(f"\nreadiness: {report['readiness']}  [gated by n_unique_markets_resolved, not snapshot count]")
     print("\neligible_for_policy=false | live_policy_eligible=false")
 
     # Show snapshot details

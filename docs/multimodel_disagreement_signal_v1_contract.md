@@ -151,13 +151,56 @@ Cada snapshot JSON en `data/multimodel_shadow/` contiene:
 
 ---
 
-## 7. Readiness por cohorte
+## 7. Readiness por cohorte — H3_UNIQUE_MARKET_READINESS_GUARD_V1
+
+**Reparado 2026-05-31 (Sonnet, CODE REPAIR / H3_UNIQUE_MARKET_READINESS_GUARD_V1)**
+
+El reporte H3 distingue dos niveles:
+
+### Nivel snapshot (diagnóstico)
+Cuenta cada snapshot individualmente. Útil para análisis temporal (lead-time, drift de modelos). No se usa para gating de alpha.
+
+| Campo | Descripción |
+|-------|-------------|
+| `n_snapshots_total` | Total de snapshots |
+| `n_snapshots_resolved` | Snapshots con outcome cerrado |
+| `n_snapshots_pending` | Snapshots aún pendientes |
+| `brier_candidate_snapshot_weighted` | Brier candidato sobre todos los snapshots |
+| `brier_market_snapshot_weighted` | Brier mercado sobre todos los snapshots |
+
+### Nivel mercado (evidencia de alpha)
+Agrupa snapshots del mismo mercado. Un mercado con 3 snapshots cuenta como 1 punto de evidencia.
+
+| Campo | Descripción |
+|-------|-------------|
+| `n_unique_markets_total` | Mercados únicos totales |
+| `n_unique_markets_resolved` | Mercados únicos cerrados |
+| `n_unique_markets_pending` | Mercados únicos pendientes |
+| `brier_candidate_market_weighted` | Brier candidato (media de probs por mercado, 1 punto por mercado) |
+| `brier_market_market_weighted` | Brier mercado (ídem) |
+| `brier_advantage_market_weighted` | Ventaja H3 sobre mercado (>0 = H3 bate mercado) |
+
+**Agregación por mercado:** media simple de `candidate_prob_yes` y `mkt_prob_yes_at_snapshot` sobre los snapshots del mismo mercado, antes de calcular Brier. Lead-time analysis (Brier por días de anticipación) queda pendiente / futuro.
+
+### Clave de mercado único
+
+```python
+unique_market_key(snap):
+    # Primary: market_id (Gamma ID globalmente único)
+    if snap["market_id"]: return snap["market_id"]
+    # Fallback: city|target_date|condition|threshold|unit|market_slug
+    return f"{city}|{target_date}|{condition}|{threshold}|{unit}|{slug}"
+```
+
+### Gate de readiness
 
 | Condición | Readiness |
 |-----------|-----------|
-| `n_resolved < 20` | `H3_HOLDOUT_ACCRUING` |
-| `n_resolved >= 20` y `brier_advantage_market > 0` | `H3_BEATS_MARKET_OPUS_REVIEW` |
-| `n_resolved >= 20` y `brier_advantage_market <= 0` | `H3_FALSIFIED_NO_INCREMENTAL_WEATHER_ALPHA` |
+| `n_unique_markets_resolved < 20` | `H3_HOLDOUT_ACCRUING` |
+| `n_unique_markets_resolved >= 20` y `brier_advantage_market_weighted > 0` | `H3_BEATS_MARKET_OPUS_REVIEW` |
+| `n_unique_markets_resolved >= 20` y `brier_advantage_market_weighted <= 0` | `H3_FALSIFIED_NO_INCREMENTAL_WEATHER_ALPHA` |
+
+**Invariante:** 20 snapshots del mismo mercado no activan revisión. Solo 20 mercados únicos resueltos pueden activarla.
 
 Policy no se autoriza automáticamente en ningún caso. Opus debe revisar.
 

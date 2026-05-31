@@ -435,6 +435,25 @@ def brier(probs: list[float], outcomes: list[int]) -> float:
     return sum((p - o) ** 2 for p, o in zip(probs, outcomes)) / len(probs)
 
 
+def unique_market_key(snap: dict) -> str:
+    """Deterministic key identifying a unique market across snapshots.
+
+    Primary: market_id (Gamma ID is globally unique).
+    Fallback: composite of semantic fields (city/date/condition/threshold/unit/slug).
+    Three snapshots of the same market at different lead-times share the same key.
+    """
+    mid = snap.get("market_id", "")
+    if mid:
+        return mid
+    city = snap.get("city", "")
+    target_date = snap.get("target_date", "")
+    condition = snap.get("condition", "")
+    threshold = snap.get("threshold", "")
+    unit = snap.get("unit", "")
+    slug = snap.get("market_slug", "")
+    return f"{city}|{target_date}|{condition}|{threshold}|{unit}|{slug}"
+
+
 def resolve_outcome_from_gamma(
     market_id: str, _market_data: "dict | None" = None
 ) -> "str | None":
@@ -479,8 +498,14 @@ def resolve_outcome_from_gamma(
 def compute_report(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
     """Compute H3 holdout report from resolved snapshots.
 
-    Outcome is looked up from gamma for closed markets.
-    Snapshots with market_outcome_observed=null are counted as pending.
+    Returns two levels of metrics:
+      snapshot-level (diagnostic): counts and Brier over all snapshots
+      market-level (alpha evidence): counts and Brier aggregated per unique market
+
+    Readiness gates on n_unique_markets_resolved, not n_snapshots_resolved.
+    Three snapshots of the same market are NOT independent evidence.
+
+    Lead-time analysis (per-snapshot Brier by days-ahead) is out of scope here.
     """
     n_total = len(snapshots)
     resolved_snaps = []
@@ -495,20 +520,41 @@ def compute_report(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
 
     n_resolved = len(resolved_snaps)
 
-    if n_resolved == 0:
-        return {
-            "n_total": n_total,
-            "n_resolved": 0,
-            "n_pending": n_pending,
-            "brier_candidate": None,
-            "brier_market": None,
-            "brier_advantage_market": None,
-            "inter_model_disagreement_std_mean": None,
-            "readiness": "H3_HOLDOUT_ACCRUING",
-            "eligible_for_policy": False,
-            "live_policy_eligible": False,
-        }
+    # Unique-market counts
+    all_market_keys = {unique_market_key(s) for s in snapshots}
+    resolved_market_keys = {unique_market_key(s) for s in resolved_snaps}
+    n_unique_markets_total = len(all_market_keys)
+    n_unique_markets_resolved = len(resolved_market_keys)
+    n_unique_markets_pending = len(all_market_keys - resolved_market_keys)
 
+    _base: dict[str, Any] = {
+        "n_total": n_total,
+        "n_snapshots_total": n_total,
+        "n_resolved": n_resolved,
+        "n_snapshots_resolved": n_resolved,
+        "n_pending": n_pending,
+        "n_snapshots_pending": n_pending,
+        "n_unique_markets_total": n_unique_markets_total,
+        "n_unique_markets_resolved": n_unique_markets_resolved,
+        "n_unique_markets_pending": n_unique_markets_pending,
+        "brier_candidate": None,
+        "brier_market": None,
+        "brier_advantage_market": None,
+        "brier_candidate_snapshot_weighted": None,
+        "brier_market_snapshot_weighted": None,
+        "brier_candidate_market_weighted": None,
+        "brier_market_market_weighted": None,
+        "brier_advantage_market_weighted": None,
+        "inter_model_disagreement_std_mean": None,
+        "readiness": "H3_HOLDOUT_ACCRUING",
+        "eligible_for_policy": False,
+        "live_policy_eligible": False,
+    }
+
+    if n_resolved == 0:
+        return _base
+
+    # ── Snapshot-level Brier (diagnostic; counts repeated snapshots) ──────────
     cand_probs, mkt_probs, outcome_vals = [], [], []
     disagree_stds = []
 
@@ -527,44 +573,67 @@ def compute_report(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
             disagree_stds.append(float(std))
 
     n_scored = len(cand_probs)
-    if n_scored == 0:
-        return {
-            "n_total": n_total,
-            "n_resolved": n_resolved,
-            "n_pending": n_pending,
-            "brier_candidate": None,
-            "brier_market": None,
-            "brier_advantage_market": None,
-            "inter_model_disagreement_std_mean": None,
-            "readiness": "H3_HOLDOUT_ACCRUING",
-            "eligible_for_policy": False,
-            "live_policy_eligible": False,
-        }
-
-    brier_cand = round(brier(cand_probs, outcome_vals), 4)
-    brier_mkt = round(brier(mkt_probs, outcome_vals), 4)
-    brier_adv = round(brier_mkt - brier_cand, 4)
     mean_std = round(statistics.mean(disagree_stds), 4) if disagree_stds else None
 
-    if n_scored >= 20:
-        if brier_adv > 0:
+    if n_scored > 0:
+        brier_cand_snap = round(brier(cand_probs, outcome_vals), 4)
+        brier_mkt_snap = round(brier(mkt_probs, outcome_vals), 4)
+        brier_adv_snap = round(brier_mkt_snap - brier_cand_snap, 4)
+        _base.update({
+            "n_scored": n_scored,
+            "brier_candidate": brier_cand_snap,
+            "brier_market": brier_mkt_snap,
+            "brier_advantage_market": brier_adv_snap,
+            "brier_candidate_snapshot_weighted": brier_cand_snap,
+            "brier_market_snapshot_weighted": brier_mkt_snap,
+            "inter_model_disagreement_std_mean": mean_std,
+        })
+
+    # ── Market-level Brier (alpha evidence; one data point per unique market) ─
+    # Group resolved snapshots by unique market. Aggregate probs with mean
+    # (simple average across lead-times; lead-time analysis is future work).
+    market_groups: dict[str, list[dict]] = {}
+    for snap in resolved_snaps:
+        mk = unique_market_key(snap)
+        market_groups.setdefault(mk, []).append(snap)
+
+    mkt_cand_probs: list[float] = []
+    mkt_mkt_probs: list[float] = []
+    mkt_outcome_vals: list[int] = []
+
+    for snaps_for_market in market_groups.values():
+        o = 1 if snaps_for_market[0]["market_outcome_observed"] == "YES" else 0
+        cvals = [float(s["candidate_prob_yes"]) for s in snaps_for_market if s.get("candidate_prob_yes") is not None]
+        mvals = [float(s["mkt_prob_yes_at_snapshot"]) for s in snaps_for_market if s.get("mkt_prob_yes_at_snapshot") is not None]
+        if not cvals or not mvals:
+            continue
+        mkt_cand_probs.append(statistics.mean(cvals))
+        mkt_mkt_probs.append(statistics.mean(mvals))
+        mkt_outcome_vals.append(o)
+
+    n_markets_scored = len(mkt_cand_probs)
+
+    if n_markets_scored > 0:
+        brier_cand_mkt = round(brier(mkt_cand_probs, mkt_outcome_vals), 4)
+        brier_mkt_mkt = round(brier(mkt_mkt_probs, mkt_outcome_vals), 4)
+        brier_adv_mkt = round(brier_mkt_mkt - brier_cand_mkt, 4)
+        _base.update({
+            "n_markets_scored": n_markets_scored,
+            "brier_candidate_market_weighted": brier_cand_mkt,
+            "brier_market_market_weighted": brier_mkt_mkt,
+            "brier_advantage_market_weighted": brier_adv_mkt,
+        })
+
+    # ── Readiness: gates on unique resolved markets, not snapshot count ────────
+    if n_unique_markets_resolved >= 20 and n_markets_scored >= 20:
+        brier_adv_mkt_val = _base.get("brier_advantage_market_weighted")
+        if brier_adv_mkt_val is not None and brier_adv_mkt_val > 0:
             readiness = "H3_BEATS_MARKET_OPUS_REVIEW"
         else:
             readiness = "H3_FALSIFIED_NO_INCREMENTAL_WEATHER_ALPHA"
     else:
         readiness = "H3_HOLDOUT_ACCRUING"
 
-    return {
-        "n_total": n_total,
-        "n_resolved": n_resolved,
-        "n_pending": n_pending,
-        "n_scored": n_scored,
-        "brier_candidate": brier_cand,
-        "brier_market": brier_mkt,
-        "brier_advantage_market": brier_adv,
-        "inter_model_disagreement_std_mean": mean_std,
-        "readiness": readiness,
-        "eligible_for_policy": False,
-        "live_policy_eligible": False,
-        "_disclaimer": _LOG_ONLY_DISCLAIMER,
-    }
+    _base["readiness"] = readiness
+    _base["_disclaimer"] = _LOG_ONLY_DISCLAIMER
+    return _base

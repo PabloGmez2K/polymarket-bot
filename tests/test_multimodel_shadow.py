@@ -30,6 +30,7 @@ from tools._multimodel_engine import (
     resolve_outcome_from_gamma,
     snapshot_key,
     ts_bucket_from_ts,
+    unique_market_key,
 )
 
 # ── Fixture data ──────────────────────────────────────────────────────────────
@@ -270,37 +271,43 @@ def test_readiness_accruing_when_n_lt_20():
 
 
 def test_readiness_beats_market_when_n_ge_20_and_advantage_gt_0():
-    """Test 10b: readiness=H3_BEATS_MARKET_OPUS_REVIEW when n>=20 and brier_advantage > 0."""
-    # candidate much better than market
+    """Test 10b: readiness=H3_BEATS_MARKET_OPUS_REVIEW when n_unique_markets>=20 and brier_advantage_market_weighted > 0."""
+    # 20 unique markets, candidate much better than market
     snaps = [
         {
             "h3_hypothesis_id": H3_HYPOTHESIS_ID,
+            "market_id": f"mkt-unique-{i:03d}",
             "candidate_prob_yes": 0.95,
             "mkt_prob_yes_at_snapshot": 0.50,
             "market_outcome_observed": "YES",
             "inter_model_disagreement_std": 1.0,
         }
-    ] * 20
+        for i in range(20)
+    ]
     report = compute_report(snaps)
     assert report["readiness"] == "H3_BEATS_MARKET_OPUS_REVIEW"
-    assert report["brier_advantage_market"] > 0
+    assert report["n_unique_markets_resolved"] == 20
+    assert report["brier_advantage_market_weighted"] > 0
 
 
 def test_readiness_falsified_when_n_ge_20_and_advantage_le_0():
-    """Test 10c: readiness=H3_FALSIFIED_NO_INCREMENTAL_WEATHER_ALPHA when n>=20 and advantage<=0."""
-    # market better than candidate
+    """Test 10c: readiness=H3_FALSIFIED_NO_INCREMENTAL_WEATHER_ALPHA when n_unique_markets>=20 and advantage<=0."""
+    # 20 unique markets, market better than candidate
     snaps = [
         {
             "h3_hypothesis_id": H3_HYPOTHESIS_ID,
+            "market_id": f"mkt-unique-{i:03d}",
             "candidate_prob_yes": 0.50,
             "mkt_prob_yes_at_snapshot": 0.95,
             "market_outcome_observed": "YES",
             "inter_model_disagreement_std": 1.0,
         }
-    ] * 20
+        for i in range(20)
+    ]
     report = compute_report(snaps)
     assert report["readiness"] == "H3_FALSIFIED_NO_INCREMENTAL_WEATHER_ALPHA"
-    assert report["brier_advantage_market"] <= 0
+    assert report["n_unique_markets_resolved"] == 20
+    assert report["brier_advantage_market_weighted"] <= 0
 
 
 # ── Test 11: invariants ────────────────────────────────────────────────────────
@@ -553,3 +560,141 @@ def test_snapshot_market_day_timezone_matches_city_config():
             f"{city}: snapshot timezone {snap['market_day_timezone']!r} "
             f"!= expected {info['tz']!r}"
         )
+
+
+# ── H3_UNIQUE_MARKET_READINESS_GUARD_V1 tests ─────────────────────────────────
+
+def _make_snap(market_id: str, outcome: str | None, cand: float = 0.7, mkt: float = 0.5) -> dict:
+    return {
+        "h3_hypothesis_id": H3_HYPOTHESIS_ID,
+        "market_id": market_id,
+        "candidate_prob_yes": cand,
+        "mkt_prob_yes_at_snapshot": mkt,
+        "market_outcome_observed": outcome,
+        "inter_model_disagreement_std": 1.0,
+    }
+
+
+def test_unique_market_key_uses_market_id():
+    """unique_market_key returns market_id when present."""
+    snap = {"market_id": "mkt-abc-123", "city": "Shanghai"}
+    assert unique_market_key(snap) == "mkt-abc-123"
+
+
+def test_unique_market_key_fallback_composite():
+    """unique_market_key falls back to composite key when market_id is absent."""
+    snap = {
+        "city": "Shanghai",
+        "target_date": "2026-06-01",
+        "condition": "at_or_below",
+        "threshold": 23.0,
+        "unit": "C",
+        "market_slug": "shanghai-temp",
+    }
+    key = unique_market_key(snap)
+    assert "Shanghai" in key
+    assert "2026-06-01" in key
+    assert "at_or_below" in key
+    assert "23.0" in key
+
+
+def test_three_snapshots_same_market_count_as_one_unique():
+    """3 snapshots of the same market → n_snapshots_total=3, n_unique_markets_total=1."""
+    snaps = [_make_snap("mkt-2383815", None)] * 3
+    report = compute_report(snaps)
+    assert report["n_snapshots_total"] == 3
+    assert report["n_snapshots_pending"] == 3
+    assert report["n_unique_markets_total"] == 1
+    assert report["n_unique_markets_pending"] == 1
+    assert report["n_unique_markets_resolved"] == 0
+    assert report["readiness"] == "H3_HOLDOUT_ACCRUING"
+
+
+def test_three_snapshots_same_market_resolved_still_one_unique():
+    """3 snapshots of the same market resolving → n_unique_markets_resolved=1, readiness stays ACCRUING."""
+    snaps = [_make_snap("mkt-2383815", "NO")] * 3
+    report = compute_report(snaps)
+    assert report["n_snapshots_resolved"] == 3
+    assert report["n_unique_markets_resolved"] == 1
+    assert report["readiness"] == "H3_HOLDOUT_ACCRUING"
+
+
+def test_twenty_snapshots_same_market_do_not_activate_review():
+    """20 snapshots of the same market must NOT activate Opus review (n_unique_markets=1)."""
+    snaps = [_make_snap("mkt-same", "YES", cand=0.95, mkt=0.50)] * 20
+    report = compute_report(snaps)
+    assert report["n_snapshots_resolved"] == 20
+    assert report["n_unique_markets_resolved"] == 1
+    assert report["readiness"] == "H3_HOLDOUT_ACCRUING", (
+        "20 snapshots from 1 market must not trigger review — only unique markets count"
+    )
+
+
+def test_twenty_unique_markets_resolved_can_activate_review():
+    """20 snapshots from 20 distinct markets, H3 beating market → readiness=H3_BEATS_MARKET_OPUS_REVIEW."""
+    snaps = [_make_snap(f"mkt-{i:03d}", "YES", cand=0.95, mkt=0.50) for i in range(20)]
+    report = compute_report(snaps)
+    assert report["n_unique_markets_resolved"] == 20
+    assert report["readiness"] == "H3_BEATS_MARKET_OPUS_REVIEW"
+    assert report["brier_advantage_market_weighted"] > 0
+
+
+def test_market_weighted_brier_aggregates_per_market():
+    """Market-level Brier averages probs across snapshots before scoring."""
+    # Market A: 2 snapshots with different candidate probs → should average
+    snap_a1 = _make_snap("mkt-A", "YES", cand=0.8, mkt=0.6)
+    snap_a2 = _make_snap("mkt-A", "YES", cand=0.6, mkt=0.6)
+    # Expected market-A candidate_prob = mean(0.8, 0.6) = 0.7
+    snaps = [snap_a1, snap_a2]
+    report = compute_report(snaps)
+    # 2 snapshots, 1 unique market — Brier market-level uses mean prob
+    assert report["n_snapshots_resolved"] == 2
+    assert report["n_unique_markets_resolved"] == 1
+    # brier_candidate_market_weighted = (0.7 - 1)^2 = 0.09
+    expected_brier_cand_mkt = round((0.7 - 1) ** 2, 4)
+    assert abs(report["brier_candidate_market_weighted"] - expected_brier_cand_mkt) < 0.001
+    # snapshot-level Brier averages (0.8-1)^2 + (0.6-1)^2 / 2 = (0.04 + 0.16) / 2 = 0.1
+    expected_brier_cand_snap = round(((0.8 - 1) ** 2 + (0.6 - 1) ** 2) / 2, 4)
+    assert abs(report["brier_candidate_snapshot_weighted"] - expected_brier_cand_snap) < 0.001
+    # They differ: market-level != snapshot-level when probs vary within market
+    assert report["brier_candidate_market_weighted"] != report["brier_candidate_snapshot_weighted"]
+
+
+def test_report_invariants_with_unique_market_fields():
+    """eligible_for_policy and live_policy_eligible are always False regardless of market count."""
+    snaps = [_make_snap(f"mkt-{i}", "YES") for i in range(25)]
+    report = compute_report(snaps)
+    assert report["eligible_for_policy"] is False
+    assert report["live_policy_eligible"] is False
+
+
+def test_current_state_3_snapshots_1_unique_market_pending():
+    """Smoke: current Railway state (3 snapshots, same market, no outcomes) → correct report."""
+    snaps = [
+        {
+            "h3_hypothesis_id": H3_HYPOTHESIS_ID,
+            "market_id": "2383815",
+            "city": "Shanghai",
+            "target_date": "2026-05-31",
+            "condition": "at_or_below",
+            "threshold": 23.0,
+            "unit": "C",
+            "candidate_prob_yes": 0.12,
+            "mkt_prob_yes_at_snapshot": 0.003,
+            "market_outcome_observed": None,
+            "inter_model_disagreement_std": 1.1,
+            "eligible_for_policy": False,
+            "live_policy_eligible": False,
+        }
+    ] * 3
+    report = compute_report(snaps)
+    assert report["n_snapshots_total"] == 3
+    assert report["n_snapshots_pending"] == 3
+    assert report["n_snapshots_resolved"] == 0
+    assert report["n_unique_markets_total"] == 1
+    assert report["n_unique_markets_pending"] == 1
+    assert report["n_unique_markets_resolved"] == 0
+    assert report["readiness"] == "H3_HOLDOUT_ACCRUING"
+    assert report["brier_candidate_market_weighted"] is None
+    assert report["eligible_for_policy"] is False
+    assert report["live_policy_eligible"] is False
