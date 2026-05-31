@@ -23195,6 +23195,7 @@ def main(client):
                     trader_confirmed=trade.get("trader_confirmed", []),
                     cycle_number=bot_state["cycle_count"] + 1,
                     logic_cycle_number=bot_state.get("cycle_count_series", 0) + 1,
+                    order_id=result.get("order_id"),
                 )
             elif not result["ok"]:
                 execution_failures.append({
