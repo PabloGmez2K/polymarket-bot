@@ -59,6 +59,8 @@ para que una ciudad shadow/active acumule datos en `observed_vs_forecast`.
 - En sesiones de código: consolidar docs y `agent_events.jsonl` antes del último `verify_before_deploy.py` cuando el contrato del repo lo requiera.
 - La memoria externa (Engram) no sustituye la fuente de verdad del repo; toda decisión durable debe quedar en `CONTEXTO.md`, `HISTORIAL_SESIONES.md` y `agent_events.jsonl`.
 - Si se añade entrada a `agent_events.jsonl`, usar timestamp obtenido del sistema en UTC; no inventarlo. En docs-only, no acceder a Railway para registrar eventos.
+- Fuente canónica de fills R1 = API CLOB `get_trades(order_id)` cuando existe `order_id`. `trades.log` es log humano sin `order_id`: **prohibido construir parser canónico de fills sobre `trades.log`**. `performance.json`/`postmortem.json`/`trade_lifecycle.json` son contexto/cross-check, no fuente canónica de fill. Ver `docs/learning_data_contract.md` §3.
+- Verificar env vars con filtrado selectivo; no listar `railway variables` completo ni pegar secretos en chat, prompts o docs.
 
 ## Cierre
 

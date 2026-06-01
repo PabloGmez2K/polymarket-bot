@@ -46,9 +46,22 @@ Cuatro conceptos distintos que los artefactos actuales mezclan:
 
 ## 3. Contrato canónico por artefacto
 
+> **CORRECCIÓN R1 (2026-06-01, commit `1e60a46`).** La premisa original de este
+> contrato (`trades.log` como fuente canónica de fills reconciliados por
+> `order_id`) quedó **invalidada por la implementación R1**: `trades.log` es un
+> log humano de aplicación **sin `order_id`**, por lo que no admite linkage
+> canónico a fills. La fuente canónica de fills R1 es la **API CLOB
+> `get_trades(TradeParams(id=order_id))`** cuando existe `order_id` (fills
+> embebidos en las entradas SELL de `performance.json` capturadas en runtime).
+> `performance.json` / `postmortem.json` / `trade_lifecycle.json` siguen siendo
+> contexto/cross-check, no fuente canónica de fill. La actualización formal del
+> §6 (premisa del Outcome Resolver) requiere ratificación Opus. Ver Sesión de
+> cierre 2026-06-01 en `CONTEXTO.md`.
+
 | Artefacto | Clasificación | Uso autorizado | Uso prohibido |
 |-----------|--------------|----------------|---------------|
-| `trades.log` / fills reconciliados por `order_id` + `fill_value` | **CANONICAL_FOR_REALIZED_PNL** | PnL realizado, reconciliación de fills | — |
+| API CLOB `get_trades(TradeParams(id=order_id))` (fills embebidos en SELL de `performance.json`) | **CANONICAL_FOR_REALIZED_PNL** (R1, requiere `order_id`) | PnL realizado, reconciliación de fills | Filas sin `order_id` (`missing_fill_identity`) |
+| `trades.log` | **DISCARDED_AS_FILL_SOURCE** (log humano, sin `order_id`) | Lectura humana de aplicación | Parser canónico de fills, training, calibración, Outcome Resolver input |
 | `postmortem.json` | **OBSERVABILITY_ONLY** | Seguimiento por-trade, auditoría interna | PnL agregado canónico, market outcomes, training |
 | `performance.json` | **REQUIRES_RECONCILIATION + PROHIBITED_FOR_TRAINING_UNTIL_FIXED** | Consulta manual con disclaimer | PnL canónico, training, calibración, Outcome Resolver input |
 | `trade_lifecycle.json` | **PROHIBITED_FOR_TRAINING_UNTIL_FIXED** (contaminated 1.0) | Telemetría interna con disclaimer `untrusted_pnl` | Training, calibración, Outcome Resolver input, BANKROLL readiness |
@@ -82,7 +95,7 @@ La reconciliación limpia comienza desde los dos commits de corrección:
 - `0882997` — fix: correct NO position re-eval pricing
 - `3307b4f` — fix: align Seoul forecast station with RKSI
 
-Trades y fills **posteriores** a estos commits pueden reconciliarse sobre `trades.log` con confianza.
+Trades y fills **posteriores** a estos commits pueden reconciliarse vía API CLOB `get_trades(order_id)` con confianza (corrección R1 2026-06-01: no sobre `trades.log`, que carece de `order_id`; ver §3). BUY forward persiste `order_id` desde commit `02b4c16`; BUY histórico sin `order_id` queda `legacy_observability / missing_fill_identity`.
 
 ### Tratamiento del histórico
 
@@ -101,7 +114,7 @@ El Outcome Resolver CODE queda **BLOCKED** hasta que se cumplan todos los requis
 3. Pre-Edge T+7d checkpoint sano (~2026-05-31T11:15:04Z, Sesión siguiente).
 
 El Outcome Resolver **solo puede declararse CANONICAL_FOR_LEARNING** si:
-- Lee fills/trades reconciliados desde `trades.log` (no `trade_lifecycle`).
+- Lee fills/trades reconciliados desde la **API CLOB `get_trades(order_id)`** (no `trades.log`, no `trade_lifecycle`). Ver corrección R1 en §3.
 - Lee settlement oficial de Polymarket (Gamma/WU verificado) como fuente de market outcome.
 - Excluye explícitamente artefactos contaminados (`trade_lifecycle`, `performance.json` no reconciliado).
 - Trata `micro_position_unsellable` según §4.
@@ -142,4 +155,5 @@ El Outcome Resolver **solo puede declararse CANONICAL_FOR_LEARNING** si:
 
 | Versión | Fecha | Autor | Cambio |
 |---------|-------|-------|--------|
+| 1.1 | 2026-06-01 | Sonnet (cierre R1) | Corrección R1 (commit `1e60a46`): `trades.log` descartado como fuente de fills (sin `order_id`); fuente canónica = API CLOB `get_trades(order_id)`. Actualiza §3, §5, §6. Premisa §6 del Outcome Resolver pendiente de ratificación Opus |
 | 1.0 | 2026-05-25 | Opus (diseño) + Sonnet (documentación, Sesión 390) | Creación inicial |
