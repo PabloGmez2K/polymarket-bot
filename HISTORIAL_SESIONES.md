@@ -1,4 +1,4 @@
-﻿# HISTORIAL DE SESIONES
+# HISTORIAL DE SESIONES
 
 Bitácora legible del proyecto reconstruida desde:
 
@@ -31,6 +31,7 @@ Comandos útiles:
 
 | Fecha | Tipo | Referencia | Commits clave | Resumen |
 |------|------|------------|---------------|---------|
+| 2026-06-01 | Explícita | Sesión 418 | — | Sonnet docs-only. Cierre documental de decisión Opus 2026-06-01: KEEP_EXACT_NO_BLOCK (SHADOW_EXACT_NO_GLOBAL permanece; trigger n>=10 era de otro experimento canary_exact_no_high_entry_filter 17-may, no del gate real 26-may); REJECT_ROTATION_NOW (city rotation Shanghai/Tokyo diferida hasta cierre Phase 2 2026-06-09; BA/Ankara cleanup foldeado); Outcome Resolver bloqueado (21 shadow edges = capturas sin outcomes resueltos; criterio canónico reapertura: n_closed_calibration_unique>=10, wr>=0.60, cal_gap<=0.10, pnl_sim_unit>0); BANKROLL HOLD $25; Fase C no autorizada; R1/H3 no autorizan trading. Docs actualizados: CONTEXTO.md, HISTORIAL_SESIONES.md, agent_events.jsonl. Sin código, sin env vars, sin Railway, sin DB. |
 | 2026-05-27 | Explícita | Sesión 400 | pending | Codex implementa `DENVER_SOURCE_ALIGNMENT_SHADOW_ONLY`: Denver queda alineada con la estacion Polymarket/WU `KBKF / Buckley Space Force Base` usando `RESOLUTION_STATIONS` y `RESOLUTION_ICAO`, sin cambiar modo operativo. Precheck confirma Denver fuera de `ACTIVE_TRADING_CITIES`, `CANARY_TRADING_CITIES`, `auto_canary_cities` y `auto_canary_from_active`; modo efectivo shadow; deployment Railway previo `ffed1a6b-3c47-45f5-8a74-18f241fb0ba5` SUCCESS; sin exposicion Denver abierta encontrada en runtime. `bot.py` añade coordenadas FAA-derived KBKF `39.701761, -104.751961`, nombre `Buckley Space Force Base (KBKF)`, `icao=KBKF` y `wu_url=_wu_history_url("KBKF")`. No se añaden NOAA IDs ni `OBSERVED_AUDIT_CITIES` porque los IDs daily/ISD no quedaron verificados en scope; estado posterior `DENVER_SOURCE_LOCATION_ALIGNED_PENDING_FORWARD_VALIDATION`. Tests focales cubren mapping, WU URL, forecast path sin fallback geocodificado, shadow-only y gates exact/NO intactos. Validaciones locales: 13 focales passed, `py_compile`, `git diff --check`, `verify_before_deploy.py` 1258/1258. No se tocan city modes, auto-canary, whitelist, BUY/SELL/SKIP, exact/NO gates, directional NO, price range, edge threshold, BANKROLL, sizing, guards, scheduler, Fase C, accounting, env vars, Telegram, DB ni backfills. |
 | 2026-05-26 | Explícita | Sesión 399 | `b909a04` | Codex implementa `PRICE_FILTER_COUNTERFACTUAL_LOG_ONLY_FIRST` con coste acotado. Gate runtime: 100 rechazos `price_out_of_range` active/canary en últimas 24h, máximo reciente 37/ciclo; decisión `USES_NEW_EXTERNAL_FORECAST_CALLS=NO` porque el contrafactual solo usa `forecast_cache` ya existente y cap fijo de 40 filas/ciclo. `bot.py` captura en `price_filter_counterfactual_log_only.jsonl` solo active/canary price skips, persiste identidad real (eval_key/identity_key, market/condition IDs, token IDs, slug), precios YES/NO, condición, side/our_prob/edge hipotéticos, cohort_key y outcome-link fields; si no hay forecast cache marca `forecast_not_in_existing_cycle_cache`. `condition=exact` + `side=NO` queda `excluded_protected_exact_no` y nunca candidata. `tools/cohort_intelligence_report.py` añade `PRICE_FILTER_COUNTERFACTUAL` con estados informativos sin `CANDIDATE_FOR_CANARY_REVIEW`; `tools/daily_bot_observability_run.py` lo muestra fail-open; docs actualizadas. Validaciones: focales 49 passed, gates exact/NO 7 passed, `py_compile`, `git diff --check`, `verify_before_deploy.py` 1255/1255. Railway `66fe4a08-0813-4bc7-9126-d46fedd431d6` SUCCESS; smoke runtime confirma código/gates/reporte/digest activos y `RUNTIME_PRICE_COUNTERFACTUAL_EXERCISED=NO_YET` porque aún no existe el artefacto. No se tocan admisión live, price range, edge threshold, BUY/SELL/SKIP, exact/NO shadow, directional NO, BANKROLL, sizing, guards, scheduler, whitelist, city modes, Fase C, accounting, env vars ni Telegram. |
 | 2026-05-26 | Explícita | Sesión 398 | `ba6078b` | Codex implementa `LIVE_SURVIVING_COHORT_VISIBILITY_FIRST` LOG_ONLY. `bot.py` persiste forward en `bot_signal_evaluations` el `side` real elegido (`YES`/`NO`) en el punto donde el loop ya comparó `edge_yes/edge_no`, junto con `city_mode`, ids de mercado disponibles, `evaluation_source`, `cohort_schema_version` y `cohort_key`; el wrapper de `skip_log` propaga `side/city_mode` sin cambiar gates. `tools/cohort_intelligence_report.py` define `LIVE_SIDE_VISIBILITY_FORWARD_START_UTC=2026-05-26T20:58:28Z` y añade `SURVIVING_COHORTS_BY_SIDE`, que usa solo filas forward con side explícito, segmenta por `exact/directional` + `YES/NO` + modo operativo, muestra `n_eval_forward`, `n_would_buy`, shadow/blocked y calibración única solo con outcome enlazado. `exact / NO` se muestra como protegido y no candidata. `tools/daily_bot_observability_run.py` añade el resumen compacto fail-open; `docs/cohort_intelligence_loop_v1.md` documenta el epoch. Validaciones: focales 24 passed, `py_compile` OK, `git diff --check` OK, `verify_before_deploy.py` 1255/1255. Railway deployment `5c6534c5-31e3-4a72-8981-ede0fce6e9e7` SUCCESS; smoke runtime confirma código/report activos y gates intactos; no hay evaluación nueva post-deploy aún (`RUNTIME_NEW_SIDE_FIELDS_OBSERVED=NO_YET`). Sin backfill histórico. No se tocan admisión live, filtros, `price_out_of_range`, edge threshold, `SHADOW_EXACT_NO_GLOBAL`, `PAUSE_WELLINGTON_EXACT_NO`, directional NO live, BANKROLL, sizing, guards, scheduler, whitelist, city modes, Fase C, accounting canónico, env vars, Telegram ni BUY/SELL/SKIP. |
@@ -6383,3 +6384,53 @@ No se tocaron bot.py, env vars, Railway, DB, BANKROLL, trading core, city modes,
 ### Guardrails
 
 No se tocaron bot.py, env vars, Railway writes, DB, BANKROLL, trading core, city modes, exits, guards, SL, SHADOW_ONLY_MODE, exact/NO live ni BUY/SELL/SKIP.
+
+
+---
+
+## Sesión 418 — CIERRE LITE REPO / EXACT_NO_REVIEW_GATE + CITY_ROTATION_DECISION (1 jun 2026, Sonnet)
+
+**Tipo:** DOCS_ONLY
+**Clasificación:** RISK_CONTROL / MONETIZATION_RELEVANT
+**Agente:** Sonnet (Claude Code)
+**Archivos modificados:** CONTEXTO.md, HISTORIAL_SESIONES.md, agent_events.jsonl
+
+### Contexto
+
+Registro durable de la decisión Opus cerrada el 1 jun 2026. Corrección de premisa crítica: el trigger «2 semanas o n>=10» citado por Sonnet pertenecía al experimento  del 17-may; el gate real que bloquea trading es , aplicado el 26-may sin trigger de reapertura temporal ni por conteo ligero.
+
+### Decisiones registradas
+
+| Decisión | Veredicto | Motivo |
+|----------|-----------|--------|
+| SHADOW_EXACT_NO_GLOBAL | KEEP_EXACT_NO_BLOCK | Evidencia previa negativa; Outcome Resolver bloqueado |
+| City rotation Shanghai/Tokyo | REJECT_ROTATION_NOW | Phase 2 abierta hasta 2026-06-09; rotación contamina readout |
+| BA/Ankara cleanup | DEFER | Foldear al cierre Phase 2 2026-06-09 |
+| Outcome Resolver | BLOQUEADO | 21 shadow edges = capturas sin outcomes resueltos |
+| BANKROLL | HOLD $25 | Sin cambio |
+| Fase C | NO AUTORIZADA | Sin cambio |
+| R1/H3 autorizan trading | NO | Sin cambio |
+
+### Evidencia previa exact/NO (negativa, permanece vigente)
+
+| Cohorte | n | WR | cal_gap | P&L |
+|---------|---|----|---------|-----|
+| near | 82 | 42.68% | 38.56pp | -$13.71 |
+| far | 52 | 57.69% | 32.09pp | — |
+
+### Criterio canónico de reapertura exact/NO
+
+- `n_closed_calibration_unique >= 10`
+- `wr >= 0.60`
+- `calibration_gap <= 0.10`
+- `pnl_simulated_unit > 0`
+- Dependencia previa: Outcome Resolver operacional
+
+### Próximos pasos
+
+- 2026-06-09: Phase 2 Recalibration close / Opus read-only
+- Outcome Resolver desbloqueo solo si el repo ya lo permite o Phase 2 lo requiere
+
+### Guardrails
+
+No se tocaron bot.py, env vars, Railway, DB, BANKROLL, trading core, city modes, scheduler, guards, SL, BUY/SELL/SKIP ni Fase C.
