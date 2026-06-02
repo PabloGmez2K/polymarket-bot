@@ -107,8 +107,14 @@ RESEARCH_*.md
 data/exact_no_qt_match_evaluations_log_only.jsonl
 data/reconciled_executions.jsonl
 data/exact_no_resolutions_log_only.jsonl
+data/predictive/*.jsonl
+data/predictive/*.db
+data/predictive/*.db-journal
+data/predictive/resolution_conflicts.jsonl
+!data/predictive/decision_dataset_summary.json
 
 # ─── SQLite databases (runtime, never commit) ────────────────────────────────
 *.db
+*.db-journal
 *.sqlite
 *.sqlite3

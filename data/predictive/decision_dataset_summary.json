@@ -1,0 +1,109 @@
+{
+  "cohorts": {
+    "exact|NO|unknown|15-30%": {
+      "eval_source": "exact_no",
+      "maturity_counts": {
+        "resolved_fresh": 17,
+        "settled_mature": 4
+      },
+      "n": 21,
+      "settled_mature": {
+        "brier_advantage": -0.253037,
+        "calibration_gap": 0.6346,
+        "n": 4,
+        "sim_pnl": -1.62,
+        "win_rate": 0.25
+      }
+    },
+    "exact|NO|unknown|30%+": {
+      "eval_source": "exact_no",
+      "maturity_counts": {
+        "resolved_fresh": 5,
+        "settled_mature": 3
+      },
+      "n": 8,
+      "settled_mature": {
+        "brier_advantage": 0.031533,
+        "calibration_gap": 0.1416,
+        "n": 3,
+        "sim_pnl": 0.6,
+        "win_rate": 0.6667
+      }
+    },
+    "exact|NO|unknown|5-15%": {
+      "eval_source": "exact_no",
+      "maturity_counts": {
+        "pending": 2,
+        "resolved_fresh": 16,
+        "settled_mature": 6
+      },
+      "n": 24,
+      "settled_mature": {
+        "brier_advantage": 0.011871,
+        "calibration_gap": -0.0035,
+        "n": 6,
+        "sim_pnl": 0.56,
+        "win_rate": 0.8333
+      }
+    },
+    "exact|NO|unknown|<5%": {
+      "eval_source": "exact_no",
+      "maturity_counts": {
+        "resolved_fresh": 5,
+        "settled_mature": 4
+      },
+      "n": 9,
+      "settled_mature": {
+        "brier_advantage": -0.023803,
+        "calibration_gap": 0.3165,
+        "n": 4,
+        "sim_pnl": -1.1435,
+        "win_rate": 0.5
+      }
+    }
+  },
+  "conflicts": {
+    "count": 0
+  },
+  "dataset": {
+    "benchmark_input_rows": 17,
+    "eligible_for_policy": false,
+    "pnl_label": "simulated_non_canonical_not_money",
+    "rows": 62
+  },
+  "generated_at_utc": "2026-06-02T17:45:09.490573+00:00",
+  "inputs": {
+    "allowlist": [
+      "blocked_signals_resolutions",
+      "bot_signal_evaluations",
+      "exact_no_resolutions"
+    ],
+    "blocked_signals_resolutions": {
+      "path": "data\\runtime_import_derived\\blocked_signals_resolutions.jsonl",
+      "present": true,
+      "resolved_index_rows": 113
+    },
+    "bot_signal_evaluations": {
+      "path": null,
+      "present": false,
+      "status": "deferred_if_absent"
+    },
+    "exact_no_resolutions": {
+      "accepted_rows": 62,
+      "path": "data\\exact_no_resolutions_log_only.jsonl",
+      "present": true,
+      "rows": 62
+    }
+  },
+  "proto_r2_exact_no": {
+    "WR_NO": 0.5882,
+    "calibration_gap": 0.2476,
+    "settled_mature_n": 17,
+    "sim_pnl": -1.6035
+  },
+  "schema_version": "decision_dataset_summary_v1",
+  "write_counts": {
+    "inserted": 62,
+    "updated": 0
+  }
+}
