@@ -26,7 +26,16 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools._canonical_resolver import bsr_no_would_win
+from tools._canonical_resolver import (
+    Settlement,
+    bsr_no_would_win,
+    classify_maturity,
+    fetch_outcome,
+    fetch_outcome_by_eval_key,
+    fetch_outcomes_by_eval_key,
+    side_won_from_outcome,
+    simulated_unit_pnl,
+)
 
 DATA_DIR = REPO_ROOT / "data"
 PREDICTIVE_DIR = DATA_DIR / "predictive"
@@ -257,6 +266,13 @@ def _to_int(value: Any) -> int | None:
         return None
 
 
+def _prob_from_bse(value: Any) -> float | None:
+    raw = _to_float(value)
+    if raw is None:
+        return None
+    return raw / 100.0 if raw > 1.0 else raw
+
+
 def _threshold_c(value: Any, unit: str | None) -> float | None:
     raw = _to_float(value)
     if raw is None:
@@ -319,6 +335,50 @@ def _resolved_at_or_now(row: dict[str, Any]) -> str:
     return row.get("resolved_at") or row.get("ts_utc") or datetime.now(timezone.utc).isoformat()
 
 
+def _bse_snapshot_bucket(row: dict[str, Any]) -> str:
+    return str(row.get("cycle_id") or row.get("ts_utc") or "unknown")
+
+
+def _is_seoul(row: dict[str, Any]) -> bool:
+    return str(row.get("city") or "").strip().casefold() == "seoul"
+
+
+def _resolve_bse_outcome(row: dict[str, Any]) -> Settlement:
+    market_id = str(row.get("market_id") or "").strip()
+    if market_id:
+        return fetch_outcome(market_id)
+    eval_key = str(row.get("eval_key") or "").strip()
+    if eval_key:
+        return fetch_outcome_by_eval_key(eval_key)
+    return Settlement(False, None, None, None, None)
+
+
+def _resolve_bse_outcomes(rows: list[dict[str, Any]]) -> dict[str, Settlement]:
+    outcomes: dict[str, Settlement] = {}
+    eval_keys_for_bulk: list[str] = []
+    for row in rows:
+        eval_key = str(row.get("eval_key") or "").strip()
+        market_id = str(row.get("market_id") or "").strip()
+        if market_id:
+            outcomes[eval_key] = fetch_outcome(market_id)
+        elif eval_key:
+            eval_keys_for_bulk.append(eval_key)
+    outcomes.update(fetch_outcomes_by_eval_key(sorted(set(eval_keys_for_bulk))))
+    return outcomes
+
+
+def _deduplicate_bse_by_eval_key(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_key: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        key = str(row.get("eval_key") or "").strip()
+        if not key:
+            continue
+        existing = by_key.get(key)
+        if existing is None or str(row.get("ts_utc") or "") > str(existing.get("ts_utc") or ""):
+            by_key[key] = row
+    return list(by_key.values())
+
+
 def normalize_exact_no_resolution(row: dict[str, Any], provenance: dict[str, Any]) -> dict[str, Any]:
     side = (row.get("best_side_log_only") or "NO").upper()
     eval_source = "exact_no"
@@ -375,6 +435,77 @@ def normalize_exact_no_resolution(row: dict[str, Any], provenance: dict[str, Any
     }
 
 
+def normalize_bot_signal_evaluation(
+    row: dict[str, Any],
+    provenance: dict[str, Any],
+    outcome: Settlement | None = None,
+    today: date | None = None,
+) -> dict[str, Any]:
+    """
+    Normalize one bot_signal_evaluations row.
+
+    Convention: BSE our_prob/mkt_prob are YES probabilities in percent form
+    when emitted by the runtime, so this loader evaluates side=YES.
+    """
+    today = today or datetime.now(timezone.utc).date()
+    outcome = outcome or _resolve_bse_outcome(row)
+    side = "YES"
+    eval_source = "bot_signal_evaluations"
+    eval_key = str(row.get("eval_key") or "").strip()
+    condition = row.get("condition") or "UNKNOWN"
+    model_prob = _prob_from_bse(row.get("our_prob"))
+    market_prob = _prob_from_bse(row.get("mkt_prob"))
+    edge = _to_float(row.get("bot_edge_pct_at_signal"))
+    if edge is None and model_prob is not None and market_prob is not None:
+        edge = round((model_prob - market_prob) * 100.0, 6)
+    days_ahead = _to_int(row.get("days_ahead"))
+    maturity_bucket = classify_maturity(str(row.get("date_iso") or ""), outcome.settled, today)
+    resolution_status = "settled" if outcome.settled else "pending"
+    resolution_outcome = outcome.market_outcome or "UNKNOWN"
+    side_won = side_won_from_outcome(side, resolution_outcome)
+    payload = {
+        "source_row": row,
+        "decision_gate": row.get("decision_gate"),
+        "skip_or_block_reason": row.get("skip_or_block_reason"),
+        "evaluation_source": row.get("evaluation_source"),
+        "probability_convention": "our_prob_and_mkt_prob_are_yes_probabilities",
+        "sim_unit_pnl_is": "simulated_non_canonical_not_money",
+        "eligible_for_policy": False,
+    }
+    return {
+        "city": row.get("city"),
+        "date_iso": row.get("date_iso"),
+        "condition": condition,
+        "threshold_c": _threshold_c(row.get("threshold") or row.get("threshold_high"), row.get("unit")),
+        "question": None,
+        "market_id": str(row.get("market_id") or ""),
+        "token_id_yes": None,
+        "token_id_no": None,
+        "forecast_high_c": _to_float(row.get("forecast_max")),
+        "forecast_source": None,
+        "observed_high_c": None,
+        "observed_source": None,
+        "resolution_outcome": resolution_outcome,
+        "resolution_ts_utc": outcome.resolved_at,
+        "resolution_method": "gamma_official" if outcome.settled else None,
+        "bot_had_position": 0,
+        "bot_side": None,
+        "snapshot_ts_utc": row.get("ts_utc") or row.get("cycle_id"),
+        "payload_json": _json_dumps(payload),
+        "market_prob_at_eval": market_prob,
+        "model_prob": model_prob,
+        "side": side,
+        "sim_unit_pnl": simulated_unit_pnl(side_won, market_prob),
+        "eval_source": eval_source,
+        "resolution_status": resolution_status,
+        "maturity_bucket": maturity_bucket,
+        "cohort_key": build_cohort_key(condition, side, days_ahead, edge),
+        "days_ahead": days_ahead,
+        "edge_pct_at_eval": edge,
+        "decision_id": stable_decision_id(eval_key, side, eval_source, _bse_snapshot_bucket(row)),
+        "data_provenance": _json_dumps(provenance),
+        "unit_raw": row.get("unit"),
+    }
 def _load_bsr_rows(path: Path) -> dict[str, dict[str, Any]]:
     return {row.get("match_key"): row for row in _iter_jsonl(path) if row.get("match_key") and row.get("resolved")}
 
@@ -522,6 +653,27 @@ def _summary_from_db(conn: sqlite3.Connection, inputs: dict[str, Any], conflicts
         WHERE eval_source='exact_no' AND maturity_bucket='settled_mature'
         """
     ).fetchone()
+    bse_above = conn.execute(
+        """
+        SELECT COUNT(*) AS n,
+               AVG((market_prob_at_eval - CASE WHEN resolution_outcome='YES' THEN 1.0 ELSE 0.0 END)
+                   * (market_prob_at_eval - CASE WHEN resolution_outcome='YES' THEN 1.0 ELSE 0.0 END)) AS brier_market,
+               AVG((model_prob - CASE WHEN resolution_outcome='YES' THEN 1.0 ELSE 0.0 END)
+                   * (model_prob - CASE WHEN resolution_outcome='YES' THEN 1.0 ELSE 0.0 END)) AS brier_model
+        FROM truth_records
+        WHERE eval_source='bot_signal_evaluations'
+          AND condition='at_or_above'
+          AND side='YES'
+          AND resolution_status='settled'
+          AND resolution_outcome IN ('YES', 'NO')
+          AND model_prob IS NOT NULL
+          AND market_prob_at_eval IS NOT NULL
+          AND (snapshot_ts_utc IS NULL OR datetime(snapshot_ts_utc) < datetime('2026-05-29T00:00:00+00:00'))
+        """
+    ).fetchone()
+    bse_brier_advantage = None
+    if bse_above["n"] and bse_above["brier_market"] is not None and bse_above["brier_model"] is not None:
+        bse_brier_advantage = round(bse_above["brier_market"] - bse_above["brier_model"], 4)
 
     return {
         "schema_version": "decision_dataset_summary_v1",
@@ -539,6 +691,20 @@ def _summary_from_db(conn: sqlite3.Connection, inputs: dict[str, Any], conflicts
             "WR_NO": round((exact["no_wins"] or 0) / exact["n"], 4) if exact["n"] else None,
             "sim_pnl": round(exact["sim_pnl"], 4) if exact["n"] else None,
             "calibration_gap": round(exact["calibration_gap"], 4) if exact["n"] else None,
+        },
+        "bse_directional_at_or_above": {
+            "self_eval_parity_yes_n": bse_above["n"],
+            "brier_advantage": bse_brier_advantage,
+            "acceptance_target": -0.0939,
+            "acceptance_status": (
+                "DATA_MISSING_BSE_LOCAL"
+                if not inputs.get("bot_signal_evaluations", {}).get("present")
+                else (
+                    "REPRODUCED"
+                    if bse_brier_advantage == -0.0939
+                    else ("NO_RESOLVED_BENCHMARK_ROWS" if not bse_above["n"] else "REPRO_CHECK_REQUIRED")
+                )
+            ),
         },
         "cohorts": cohorts,
     }
@@ -582,6 +748,49 @@ def build_dataset(
         source_state["exact_no_resolutions"]["rows"] = len(exact_rows)
         source_state["exact_no_resolutions"]["accepted_rows"] = len(accepted)
         source_state["blocked_signals_resolutions"]["resolved_index_rows"] = len(bsr_index)
+
+    if bot_signal_evaluations and bot_signal_evaluations.exists():
+        provenance = {
+            "source_file": bot_signal_evaluations.name,
+            "sha256": _file_sha256(bot_signal_evaluations),
+            "capture_method": "local_allowlist",
+            "capture_ts": datetime.now(timezone.utc).isoformat(),
+        }
+        bse_rows = _iter_jsonl(bot_signal_evaluations)
+        directional = [
+            row
+            for row in bse_rows
+            if row.get("condition") in {"at_or_above", "at_or_below"}
+            and _prob_from_bse(row.get("our_prob")) is not None
+            and _prob_from_bse(row.get("mkt_prob")) is not None
+        ]
+        seoul_excluded = [row for row in directional if _is_seoul(row)]
+        eligible = [row for row in directional if not _is_seoul(row)]
+        deduped = _deduplicate_bse_by_eval_key(eligible)
+        bse_records: list[dict[str, Any]] = []
+        bse_outcomes = _resolve_bse_outcomes(deduped)
+        for row in deduped:
+            eval_key = str(row.get("eval_key") or "").strip()
+            bse_records.append(
+                normalize_bot_signal_evaluation(
+                    row,
+                    provenance,
+                    outcome=bse_outcomes.get(eval_key, Settlement(False, None, None, None, None)),
+                )
+            )
+        records.extend(bse_records)
+        source_state["bot_signal_evaluations"].update(
+            {
+                "status": "loaded",
+                "rows": len(bse_rows),
+                "directional_rows_with_probs": len(directional),
+                "source_fidelity_excluded_seoul_rows": len(seoul_excluded),
+                "deduped_eval_keys": len(deduped),
+                "accepted_rows": len(bse_records),
+            }
+        )
+    elif bot_signal_evaluations:
+        source_state["bot_signal_evaluations"]["status"] = "DATA_MISSING_BSE_LOCAL"
 
     _write_conflicts(conflicts_path, conflicts)
 

@@ -86,6 +86,7 @@ SELECT
     decision_id,
     city,
     date_iso,
+    snapshot_ts_utc,
     condition,
     threshold_c,
     side,

@@ -1,5 +1,155 @@
 {
+  "bse_directional_at_or_above": {
+    "acceptance_status": "REPRODUCED",
+    "acceptance_target": -0.0939,
+    "brier_advantage": -0.0939,
+    "self_eval_parity_yes_n": 21
+  },
   "cohorts": {
+    "at_or_above|YES|0-1|15-30%": {
+      "eval_source": "bot_signal_evaluations",
+      "maturity_counts": {
+        "pending": 1,
+        "settled_mature": 9
+      },
+      "n": 10,
+      "settled_mature": {
+        "brier_advantage": -0.205731,
+        "calibration_gap": 0.5833,
+        "n": 9,
+        "sim_pnl": -3.1,
+        "win_rate": 0.2222
+      }
+    },
+    "at_or_above|YES|0-1|30%+": {
+      "eval_source": "bot_signal_evaluations",
+      "maturity_counts": {
+        "pending": 2,
+        "resolved_fresh": 4,
+        "settled_mature": 4
+      },
+      "n": 10,
+      "settled_mature": {
+        "brier_advantage": -0.00129,
+        "calibration_gap": 0.2522,
+        "n": 4,
+        "sim_pnl": 0.665,
+        "win_rate": 0.5
+      }
+    },
+    "at_or_above|YES|0-1|5-15%": {
+      "eval_source": "bot_signal_evaluations",
+      "maturity_counts": {
+        "resolved_fresh": 2,
+        "settled_mature": 2
+      },
+      "n": 4,
+      "settled_mature": {
+        "brier_advantage": -0.076294,
+        "calibration_gap": 0.6202,
+        "n": 2,
+        "sim_pnl": -1.095,
+        "win_rate": 0.0
+      }
+    },
+    "at_or_above|YES|0-1|<5%": {
+      "eval_source": "bot_signal_evaluations",
+      "maturity_counts": {
+        "settled_mature": 4
+      },
+      "n": 4,
+      "settled_mature": {
+        "brier_advantage": -0.003964,
+        "calibration_gap": 0.1145,
+        "n": 4,
+        "sim_pnl": -0.375,
+        "win_rate": 0.5
+      }
+    },
+    "at_or_above|YES|2-3|<5%": {
+      "eval_source": "bot_signal_evaluations",
+      "maturity_counts": {
+        "settled_mature": 1
+      },
+      "n": 1,
+      "settled_mature": {
+        "brier_advantage": -0.009603,
+        "calibration_gap": 0.3156,
+        "n": 1,
+        "sim_pnl": -0.3,
+        "win_rate": 0.0
+      }
+    },
+    "at_or_below|YES|0-1|15-30%": {
+      "eval_source": "bot_signal_evaluations",
+      "maturity_counts": {
+        "settled_mature": 1
+      },
+      "n": 1,
+      "settled_mature": {
+        "brier_advantage": 0.162433,
+        "calibration_gap": -0.2418,
+        "n": 1,
+        "sim_pnl": 0.47,
+        "win_rate": 1.0
+      }
+    },
+    "at_or_below|YES|0-1|30%+": {
+      "eval_source": "bot_signal_evaluations",
+      "maturity_counts": {
+        "settled_mature": 1
+      },
+      "n": 1,
+      "settled_mature": {
+        "brier_advantage": -0.437156,
+        "calibration_gap": 0.7007,
+        "n": 1,
+        "sim_pnl": -0.232,
+        "win_rate": 0.0
+      }
+    },
+    "at_or_below|YES|0-1|5-15%": {
+      "eval_source": "bot_signal_evaluations",
+      "maturity_counts": {
+        "pending": 1
+      },
+      "n": 1,
+      "settled_mature": {
+        "brier_advantage": null,
+        "calibration_gap": null,
+        "n": 0,
+        "sim_pnl": null,
+        "win_rate": null
+      }
+    },
+    "at_or_below|YES|0-1|<5%": {
+      "eval_source": "bot_signal_evaluations",
+      "maturity_counts": {
+        "settled_mature": 1
+      },
+      "n": 1,
+      "settled_mature": {
+        "brier_advantage": 0.033351,
+        "calibration_gap": -0.3446,
+        "n": 1,
+        "sim_pnl": 0.39,
+        "win_rate": 1.0
+      }
+    },
+    "at_or_below|YES|2-3|30%+": {
+      "eval_source": "bot_signal_evaluations",
+      "maturity_counts": {
+        "settled_mature": 1
+      },
+      "n": 1,
+      "settled_mature": {
+        "brier_advantage": 0.523415,
+        "calibration_gap": -0.1977,
+        "n": 1,
+        "sim_pnl": 0.75,
+        "win_rate": 1.0
+      }
+    },
     "exact|NO|unknown|15-30%": {
       "eval_source": "exact_no",
       "maturity_counts": {
@@ -66,12 +216,12 @@
     "count": 0
   },
   "dataset": {
-    "benchmark_input_rows": 17,
+    "benchmark_input_rows": 41,
     "eligible_for_policy": false,
     "pnl_label": "simulated_non_canonical_not_money",
-    "rows": 62
+    "rows": 96
   },
-  "generated_at_utc": "2026-06-02T17:45:09.490573+00:00",
+  "generated_at_utc": "2026-06-03T08:56:18.009337+00:00",
   "inputs": {
     "allowlist": [
       "blocked_signals_resolutions",
@@ -79,18 +229,23 @@
       "exact_no_resolutions"
     ],
     "blocked_signals_resolutions": {
-      "path": "data\\runtime_import_derived\\blocked_signals_resolutions.jsonl",
+      "path": "C:\\Projects\\polymarket-bot\\data\\runtime_import_derived\\blocked_signals_resolutions.jsonl",
       "present": true,
       "resolved_index_rows": 113
     },
     "bot_signal_evaluations": {
-      "path": null,
-      "present": false,
-      "status": "deferred_if_absent"
+      "accepted_rows": 34,
+      "deduped_eval_keys": 34,
+      "directional_rows_with_probs": 144,
+      "path": "C:\\Projects\\polymarket-bot\\data\\runtime_import\\bot_signal_evaluations.jsonl",
+      "present": true,
+      "rows": 1877,
+      "source_fidelity_excluded_seoul_rows": 38,
+      "status": "loaded"
     },
     "exact_no_resolutions": {
       "accepted_rows": 62,
-      "path": "data\\exact_no_resolutions_log_only.jsonl",
+      "path": "C:\\Projects\\polymarket-bot\\data\\exact_no_resolutions_log_only.jsonl",
       "present": true,
       "rows": 62
     }
@@ -103,7 +258,7 @@
   },
   "schema_version": "decision_dataset_summary_v1",
   "write_counts": {
-    "inserted": 62,
+    "inserted": 96,
     "updated": 0
   }
 }

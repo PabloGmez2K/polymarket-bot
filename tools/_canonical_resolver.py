@@ -17,6 +17,8 @@ from typing import Any
 GAMMA_URL = "https://gamma-api.polymarket.com"
 WIN_THRESHOLD = 0.95
 T7_DAYS = 7
+DAILY_TEMP_TAG_ID = "103040"
+MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
 
 
 @dataclass(frozen=True)
@@ -92,6 +94,127 @@ def fetch_outcome(market_id: str) -> Settlement:
     if settled and yes_price is not None and no_price is not None:
         market_outcome = "NO" if no_price >= WIN_THRESHOLD else "YES"
     return Settlement(settled, yes_price, no_price, resolved_at, market_outcome)
+
+
+def _normalize_gamma_question(text: str) -> str:
+    return text.lower().strip().rstrip("?").rstrip(".")
+
+
+def _question_from_eval_key(eval_key: str) -> str | None:
+    parts = eval_key.split("|")
+    if len(parts) != 5:
+        return None
+    city, date_iso, condition, threshold, unit = parts
+    try:
+        _, month, day = date_iso.split("-")
+        month_name = MONTHS[int(month) - 1]
+        day_number = str(int(day))
+    except Exception:
+        return None
+
+    city_lower = city.lower()
+    unit_lower = unit.lower()
+    if condition == "at_or_above":
+        return _normalize_gamma_question(
+            f"will the highest temperature in {city_lower} be "
+            f"{threshold}deg{unit_lower} or higher on {month_name} {day_number}"
+        )
+    if condition == "at_or_below":
+        return _normalize_gamma_question(
+            f"will the highest temperature in {city_lower} be "
+            f"{threshold}deg{unit_lower} or below on {month_name} {day_number}"
+        )
+    return None
+
+
+def fetch_market_by_eval_key(eval_key: str, tag_id: str = DAILY_TEMP_TAG_ID) -> dict | None:
+    """Return a closed Gamma temperature market matching an eval_key question."""
+    target = _question_from_eval_key(eval_key)
+    if target is None:
+        return None
+    offset = 0
+    page_size = 100
+    while True:
+        try:
+            events = _api_get(
+                f"/events?tag_id={tag_id}&closed=true&limit={page_size}"
+                f"&offset={offset}&order=startDate&ascending=false"
+            )
+        except Exception:
+            return None
+        if not events:
+            return None
+        for event in events:
+            for market in event.get("markets", []):
+                question = str(market.get("question") or "")
+                normalized = _normalize_gamma_question(
+                    question.replace(chr(176), "deg").replace(" degrees ", "deg")
+                )
+                if normalized == target:
+                    return market
+        if len(events) < page_size:
+            return None
+        offset += page_size
+
+
+def fetch_outcome_by_eval_key(eval_key: str) -> Settlement:
+    """Fetch and classify official Gamma settlement for a directional eval_key."""
+    market = fetch_market_by_eval_key(eval_key)
+    settled, yes_price, no_price, resolved_at = determine_settlement(market)
+    market_outcome: str | None = None
+    if settled and yes_price is not None and no_price is not None:
+        market_outcome = "NO" if no_price >= WIN_THRESHOLD else "YES"
+    return Settlement(settled, yes_price, no_price, resolved_at, market_outcome)
+
+
+def fetch_outcomes_by_eval_key(eval_keys: list[str], tag_id: str = DAILY_TEMP_TAG_ID) -> dict[str, Settlement]:
+    """Bulk official Gamma lookup for directional eval_keys."""
+    targets = {key: _question_from_eval_key(key) for key in eval_keys}
+    wanted = {question for question in targets.values() if question is not None}
+    if not wanted:
+        return {}
+
+    by_question: dict[str, Settlement] = {}
+    offset = 0
+    page_size = 100
+    while wanted - set(by_question):
+        try:
+            events = _api_get(
+                f"/events?tag_id={tag_id}&closed=true&limit={page_size}"
+                f"&offset={offset}&order=startDate&ascending=false"
+            )
+        except Exception:
+            break
+        if not events:
+            break
+        for event in events:
+            for market in event.get("markets", []):
+                question = str(market.get("question") or "")
+                normalized = _normalize_gamma_question(
+                    question.replace(chr(176), "deg").replace(" degrees ", "deg")
+                )
+                if normalized not in wanted:
+                    continue
+                settled, yes_price, no_price, resolved_at = determine_settlement(market)
+                market_outcome: str | None = None
+                if settled and yes_price is not None and no_price is not None:
+                    market_outcome = "NO" if no_price >= WIN_THRESHOLD else "YES"
+                by_question[normalized] = Settlement(
+                    settled,
+                    yes_price,
+                    no_price,
+                    resolved_at,
+                    market_outcome,
+                )
+        if len(events) < page_size:
+            break
+        offset += page_size
+
+    return {
+        key: by_question[question]
+        for key, question in targets.items()
+        if question is not None and question in by_question
+    }
 
 
 def classify_maturity(date_iso: str, settled: bool, today: date) -> str:

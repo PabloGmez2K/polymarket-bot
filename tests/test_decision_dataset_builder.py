@@ -58,22 +58,126 @@ def _exact_row(
     }
 
 
-def _build(tmp_path: Path, exact_rows: list[dict], bsr_rows: list[dict] | None = None):
+def _bse_row(
+    eval_key: str = "Tokyo|2026-05-20|at_or_above|25|C",
+    ts_utc: str = "2026-05-20T03:00:00+00:00",
+    our_prob: float | None = 64.0,
+    mkt_prob: float | None = 55.0,
+) -> dict:
+    city, date_iso, condition, threshold, unit = eval_key.split("|")
+    return {
+        "schema_version": "bot_signal_evaluation_v1",
+        "ts_utc": ts_utc,
+        "cycle_id": "2026-05-20T03:00:00Z",
+        "eval_key": eval_key,
+        "city": city,
+        "date_iso": date_iso,
+        "condition": condition,
+        "threshold": int(threshold),
+        "threshold_high": None,
+        "unit": unit,
+        "would_buy": False,
+        "bot_edge_pct_at_signal": 9.0,
+        "evaluation_source": "shadow",
+        "skip_or_block_reason": "shadow_city",
+        "decision_gate": "blocked_by_city_mode",
+        "our_prob": our_prob,
+        "mkt_prob": mkt_prob,
+        "forecast_max": 27.2,
+        "sigma_used": 2.5,
+        "days_ahead": 2,
+    }
+
+
+def _build(
+    tmp_path: Path,
+    exact_rows: list[dict],
+    bsr_rows: list[dict] | None = None,
+    bse_rows: list[dict] | None = None,
+):
     exact = tmp_path / "exact_no_resolutions_log_only.jsonl"
     bsr = tmp_path / "blocked_signals_resolutions.jsonl"
+    bse = tmp_path / "bot_signal_evaluations.jsonl"
     db = tmp_path / "decision_dataset.db"
     summary = tmp_path / "decision_dataset_summary.json"
     _write_jsonl(exact, exact_rows)
     _write_jsonl(bsr, bsr_rows or [])
+    if bse_rows is not None:
+        _write_jsonl(bse, bse_rows)
     result = builder.build_dataset(
         db_path=db,
         exact_no_resolutions=exact,
         blocked_signals_resolutions=bsr,
-        bot_signal_evaluations=None,
+        bot_signal_evaluations=bse if bse_rows is not None else None,
         output_summary=summary,
         conflicts_path=tmp_path / "resolution_conflicts.jsonl",
     )
     return db, summary, result
+
+
+def test_normalize_bot_signal_evaluation_maps_directional_yes_fields():
+    row = _bse_row()
+    record = builder.normalize_bot_signal_evaluation(
+        row,
+        {"source_file": "bot_signal_evaluations.jsonl", "sha256": "abc"},
+        outcome=builder.Settlement(True, 1.0, 0.0, "2026-05-21T00:00:00Z", "YES"),
+        today=builder.date(2026, 5, 30),
+    )
+
+    assert record["eval_source"] == "bot_signal_evaluations"
+    assert record["side"] == "YES"
+    assert record["snapshot_ts_utc"] == row["ts_utc"]
+    assert record["model_prob"] == pytest.approx(0.64)
+    assert record["market_prob_at_eval"] == pytest.approx(0.55)
+    assert record["edge_pct_at_eval"] == pytest.approx(9.0)
+    assert record["maturity_bucket"] == "settled_mature"
+    assert record["sim_unit_pnl"] == pytest.approx(0.45)
+    assert json.loads(record["payload_json"])["probability_convention"] == "our_prob_and_mkt_prob_are_yes_probabilities"
+
+
+def test_build_dataset_loads_bse_directional_rows_and_exposes_snapshot(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        builder,
+        "_resolve_bse_outcomes",
+        lambda rows: {
+            row["eval_key"]: builder.Settlement(True, 1.0, 0.0, "2026-05-21T00:00:00Z", "YES")
+            for row in rows
+        },
+    )
+    db, _, result = _build(tmp_path, [], bse_rows=[_bse_row()])
+
+    assert result["inputs"]["bot_signal_evaluations"]["status"] == "loaded"
+    assert result["inputs"]["bot_signal_evaluations"]["accepted_rows"] == 1
+    with sqlite3.connect(db) as conn:
+        row = conn.execute(
+            """
+            SELECT eval_source, side, snapshot_ts_utc, model_prob, market_prob_at_eval
+            FROM v_benchmark_input
+            WHERE eval_source='bot_signal_evaluations'
+            """
+        ).fetchone()
+    assert row == ("bot_signal_evaluations", "YES", "2026-05-20T03:00:00+00:00", 0.64, 0.55)
+
+
+def test_bse_loader_excludes_seoul_for_self_eval_parity(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        builder,
+        "_resolve_bse_outcomes",
+        lambda rows: {
+            row["eval_key"]: builder.Settlement(True, 1.0, 0.0, "2026-05-21T00:00:00Z", "YES")
+            for row in rows
+        },
+    )
+    rows = [
+        _bse_row("Seoul|2026-05-20|at_or_above|25|C"),
+        _bse_row("Tokyo|2026-05-20|at_or_above|25|C"),
+    ]
+    db, _, result = _build(tmp_path, [], bse_rows=rows)
+
+    assert result["inputs"]["bot_signal_evaluations"]["source_fidelity_excluded_seoul_rows"] == 1
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM truth_records WHERE city='Seoul'").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM truth_records WHERE city='Tokyo'").fetchone()[0] == 1
 
 
 def test_reproduces_proto_r2_exact_no_from_local_oracle(tmp_path):
@@ -156,6 +260,15 @@ def test_summary_is_aggregate_and_labels_sim_pnl_non_canonical(tmp_path):
 
 def test_benchmark_view_filters_settled_mature_with_probs(tmp_path):
     mature = _exact_row(eval_key="Tokyo|2026-05-20|exact|25|C", market_id="1")
+    fresh = _exact_row(
+        eval_key="Paris|2026-05-28|exact|24|C",
+        market_id="3",
+        outcome="NO",
+        bucket="resolved_fresh",
+        p_model_no=0.5,
+        p_market_no=0.5,
+        sim_pnl=0.0,
+    )
     pending = _exact_row(
         eval_key="Seoul|2026-05-20|exact|26|C",
         market_id="2",
@@ -165,12 +278,31 @@ def test_benchmark_view_filters_settled_mature_with_probs(tmp_path):
         p_market_no=0.5,
         sim_pnl=0.0,
     )
-    db, _, _ = _build(tmp_path, [mature, pending])
+    db, _, _ = _build(tmp_path, [mature, fresh, pending])
 
     with sqlite3.connect(db) as conn:
         assert conn.execute("SELECT COUNT(*) FROM v_benchmark_input").fetchone()[0] == 1
-        row = conn.execute("SELECT side, model_prob, market_prob_at_eval FROM v_benchmark_input").fetchone()
-        assert row == ("NO", 0.85, 0.79)
+        row = conn.execute("SELECT side, snapshot_ts_utc, model_prob, market_prob_at_eval FROM v_benchmark_input").fetchone()
+        assert row == ("NO", "2026-05-21T12:00:00Z", 0.85, 0.79)
+
+
+def test_real_bse_acceptance_reproduces_or_skips_data_missing(tmp_path):
+    bse = Path("data/runtime_import/bot_signal_evaluations.jsonl")
+    if not bse.exists():
+        pytest.skip("DATA_MISSING_BSE_LOCAL")
+
+    db = tmp_path / "decision_dataset.db"
+    summary = tmp_path / "decision_dataset_summary.json"
+    result = builder.build_dataset(
+        db_path=db,
+        exact_no_resolutions=Path("data/exact_no_resolutions_log_only.jsonl"),
+        blocked_signals_resolutions=Path("data/runtime_import_derived/blocked_signals_resolutions.jsonl"),
+        bot_signal_evaluations=bse,
+        output_summary=summary,
+        conflicts_path=tmp_path / "resolution_conflicts.jsonl",
+    )
+
+    assert result["bse_directional_at_or_above"]["brier_advantage"] == pytest.approx(-0.0939, abs=0.0001)
 
 
 def test_builder_has_no_bot_import():
