@@ -11,8 +11,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+import shutil
 import sqlite3
+import subprocess
 import sys
+import tempfile
 from collections import Counter, defaultdict
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -606,16 +610,66 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--today", default=None, help="Reserved for resolver-compatible deterministic runs")
     args = parser.parse_args(argv)
 
+    requested_db = Path(args.db)
+    build_db = requested_db
+    staging_dir = os.environ.get("DECISION_DATASET_BUILDER_SQLITE_STAGING_DIR")
+    if staging_dir:
+        staging_root = Path(staging_dir)
+        staging_root.mkdir(parents=True, exist_ok=True)
+        build_db = staging_root / f"{requested_db.stem}.{os.getpid()}.staging.db"
+
     summary = build_dataset(
-        db_path=Path(args.db),
+        db_path=build_db,
         exact_no_resolutions=Path(args.exact_no_resolutions) if args.exact_no_resolutions else None,
         blocked_signals_resolutions=Path(args.blocked_signals_resolutions) if args.blocked_signals_resolutions else None,
         bot_signal_evaluations=Path(args.bot_signal_evaluations) if args.bot_signal_evaluations else None,
         output_summary=Path(args.output_summary),
     )
+    if build_db != requested_db:
+        requested_db.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(build_db, requested_db)
     print(json.dumps({"status": "ok", "summary": summary["dataset"], "proto_r2_exact_no": summary["proto_r2_exact_no"]}, sort_keys=True))
     return 0
 
 
+def _script_entrypoint() -> int:
+    """
+    Windows hardening: in this sandbox, SQLite writes can fail with disk I/O
+    errors when Python executes a .py file directly. Re-enter through
+    python -c/import, which keeps the public CLI contract intact and has the
+    same behavior as tests and library callers.
+    """
+    if os.environ.get("DECISION_DATASET_BUILDER_CLI_CHILD") == "1":
+        return main()
+
+    path_flags = {
+        "--db",
+        "--exact-no-resolutions",
+        "--blocked-signals-resolutions",
+        "--bot-signal-evaluations",
+        "--output-summary",
+    }
+    child_args: list[str] = []
+    pending_path = False
+    for arg in sys.argv[1:]:
+        if pending_path:
+            child_args.append(str(Path(arg).resolve()))
+            pending_path = False
+            continue
+        child_args.append(arg)
+        pending_path = arg in path_flags
+
+    code = (
+        "import sys; "
+        "from tools import decision_dataset_builder as m; "
+        "raise SystemExit(m.main(sys.argv[1:]))"
+    )
+    env = os.environ.copy()
+    env["DECISION_DATASET_BUILDER_CLI_CHILD"] = "1"
+    env["DECISION_DATASET_BUILDER_SQLITE_STAGING_DIR"] = str(Path(tempfile.gettempdir()) / "decision_dataset_builder")
+    completed = subprocess.run([sys.executable, "-c", code, *child_args], env=env, cwd=str(REPO_ROOT))
+    return int(completed.returncode)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_script_entrypoint())

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import subprocess
 import sys
 from pathlib import Path
 
@@ -180,6 +181,40 @@ def test_builder_has_no_bot_import():
     ]
     assert "import bot" not in import_lines
     assert "from bot import" not in "\n".join(import_lines)
+
+
+def test_cli_direct_script_smoke(tmp_path):
+    exact = tmp_path / "exact.jsonl"
+    bsr = tmp_path / "bsr.jsonl"
+    db = tmp_path / "cli.db"
+    summary = tmp_path / "summary.json"
+    _write_jsonl(exact, [_exact_row()])
+    _write_jsonl(bsr, [])
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "tools/decision_dataset_builder.py",
+            "--db",
+            str(db),
+            "--exact-no-resolutions",
+            str(exact),
+            "--blocked-signals-resolutions",
+            str(bsr),
+            "--output-summary",
+            str(summary),
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["proto_r2_exact_no"]["settled_mature_n"] == 1
+    assert summary.exists()
 
 
 def test_bsr_cross_check_quarantines_mismatch(tmp_path):
