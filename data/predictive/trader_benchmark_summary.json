@@ -1,0 +1,955 @@
+{
+  "baseline": {
+    "primary": "market_at_avg_price_entered",
+    "secondary_diagnostic": "base_rate",
+    "tertiary_reference_only": "bot_forecast_via_E1_join"
+  },
+  "coverage_warnings": [
+    "dedup_by_signal_key_applied_before_metrics",
+    "single_trader_dominance_gate_hard_enabled",
+    "yes_price_no_price_absent_ok_baseline_avg_price_entered"
+  ],
+  "disclaimer": "sim_pnl simulated_non_canonical_not_money. eligible_for_policy=false. market_truth_canonical=false. No trading authorization. exact_no_live_remains_blocked.",
+  "eligible_for_policy": false,
+  "generated_at_utc": "2026-06-04T20:34:12.702910+00:00",
+  "global_metrics": {
+    "WR": 0.9566,
+    "edge_ci": {
+      "lower": 0.195653,
+      "upper": 0.382424
+    },
+    "mean_price": 0.670975,
+    "n": 852,
+    "n_traders": 10,
+    "p_raw": 0.0,
+    "sim_unit_pnl_mean": 0.285597,
+    "sim_unit_pnl_total": 243.3289,
+    "top1_pct": 43.075117,
+    "top2_pct": 75.821596
+  },
+  "global_verdict": "NO_PROMOTABLE_CELLS_DOMINANCE_GATED",
+  "inventory": {
+    "date_max": "2026-06-03",
+    "date_min": "2026-04-08",
+    "eligible_rows_post_dedup": 852,
+    "eligible_rows_pre_dedup": 955,
+    "forward_n": 129,
+    "n_traders_distinct": 10,
+    "raw_rows": 989,
+    "top1_n": 367,
+    "top1_pct": 43.075117,
+    "top2_n": 646,
+    "top2_pct": 75.821596,
+    "top5_n": 827,
+    "top5_pct": 97.065728
+  },
+  "l1_cells": [
+    {
+      "WR": 0.8462,
+      "cohort": "60-70|trader_NO|no",
+      "dominance": {
+        "forward_top1_pct": null,
+        "post_dedup_top1_pct": 92.307692,
+        "post_dedup_top2_pct": 100.0,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": -0.8927,
+        "upper": 0.115783
+      },
+      "forward": {
+        "WR": null,
+        "mean_price": null,
+        "n": 0,
+        "n_traders": 0,
+        "sim_unit_pnl_mean": null,
+        "top1_pct": null
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 0.0,
+        "mean_price": 0.8927,
+        "n": 2,
+        "n_traders": 1,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 24,
+          "removed_pct": 92.307692
+        },
+        "sim_unit_pnl_mean": -0.8927
+      },
+      "mean_price": 0.807946,
+      "n": 26,
+      "n_traders": 2,
+      "p_fdr": 0.255,
+      "p_raw": 0.255,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.038208,
+      "sim_unit_pnl_total": 0.9934,
+      "top1_pct": 92.307692,
+      "top2_pct": 100.0,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "WR": null,
+      "cohort": "60-70|trader_NO|yes",
+      "dominance": {
+        "forward_top1_pct": null,
+        "post_dedup_top1_pct": null,
+        "post_dedup_top2_pct": null,
+        "top1_label": null
+      },
+      "edge_ci": {
+        "lower": null,
+        "upper": null
+      },
+      "forward": {
+        "WR": null,
+        "mean_price": null,
+        "n": 0,
+        "n_traders": 0,
+        "sim_unit_pnl_mean": null,
+        "top1_pct": null
+      },
+      "level": "L1",
+      "lto": {
+        "WR": null,
+        "mean_price": null,
+        "n": 0,
+        "n_traders": 0,
+        "removed_top_trader": {
+          "removed_label": null,
+          "removed_n": 0,
+          "removed_pct": null
+        },
+        "sim_unit_pnl_mean": null
+      },
+      "mean_price": null,
+      "n": 0,
+      "n_traders": 0,
+      "p_fdr": null,
+      "p_raw": null,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": null,
+      "sim_unit_pnl_total": null,
+      "top1_pct": null,
+      "top2_pct": null,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "WR": 0.9808,
+      "cohort": "60-70|trader_YES|no",
+      "dominance": {
+        "forward_top1_pct": null,
+        "post_dedup_top1_pct": 84.615385,
+        "post_dedup_top2_pct": 96.153846,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": -0.12035,
+        "upper": 0.419271
+      },
+      "forward": {
+        "WR": null,
+        "mean_price": null,
+        "n": 0,
+        "n_traders": 0,
+        "sim_unit_pnl_mean": null,
+        "top1_pct": null
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 0.875,
+        "mean_price": 0.559375,
+        "n": 8,
+        "n_traders": 3,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 44,
+          "removed_pct": 84.615385
+        },
+        "sim_unit_pnl_mean": 0.315625
+      },
+      "mean_price": 0.62911,
+      "n": 52,
+      "n_traders": 4,
+      "p_fdr": 0.0494,
+      "p_raw": 0.0456,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.35166,
+      "sim_unit_pnl_total": 18.2863,
+      "top1_pct": 84.615385,
+      "top2_pct": 96.153846,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "WR": null,
+      "cohort": "60-70|trader_YES|yes",
+      "dominance": {
+        "forward_top1_pct": null,
+        "post_dedup_top1_pct": null,
+        "post_dedup_top2_pct": null,
+        "top1_label": null
+      },
+      "edge_ci": {
+        "lower": null,
+        "upper": null
+      },
+      "forward": {
+        "WR": null,
+        "mean_price": null,
+        "n": 0,
+        "n_traders": 0,
+        "sim_unit_pnl_mean": null,
+        "top1_pct": null
+      },
+      "level": "L1",
+      "lto": {
+        "WR": null,
+        "mean_price": null,
+        "n": 0,
+        "n_traders": 0,
+        "removed_top_trader": {
+          "removed_label": null,
+          "removed_n": 0,
+          "removed_pct": null
+        },
+        "sim_unit_pnl_mean": null
+      },
+      "mean_price": null,
+      "n": 0,
+      "n_traders": 0,
+      "p_fdr": null,
+      "p_raw": null,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": null,
+      "sim_unit_pnl_total": null,
+      "top1_pct": null,
+      "top2_pct": null,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "WR": 0.8993,
+      "cohort": "70-80|trader_NO|no",
+      "dominance": {
+        "forward_top1_pct": 100.0,
+        "post_dedup_top1_pct": 81.208054,
+        "post_dedup_top2_pct": 93.959732,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": 0.011068,
+        "upper": 0.270644
+      },
+      "forward": {
+        "WR": 0.766,
+        "mean_price": 0.686487,
+        "n": 47,
+        "n_traders": 1,
+        "sim_unit_pnl_mean": 0.07947,
+        "top1_pct": 100.0
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 0.9286,
+        "mean_price": 0.834068,
+        "n": 28,
+        "n_traders": 2,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 121,
+          "removed_pct": 81.208054
+        },
+        "sim_unit_pnl_mean": 0.094504
+      },
+      "mean_price": 0.759865,
+      "n": 149,
+      "n_traders": 3,
+      "p_fdr": 0.0,
+      "p_raw": 0.0,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.139464,
+      "sim_unit_pnl_total": 20.7801,
+      "top1_pct": 81.208054,
+      "top2_pct": 93.959732,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "WR": 1.0,
+      "cohort": "70-80|trader_NO|yes",
+      "dominance": {
+        "forward_top1_pct": null,
+        "post_dedup_top1_pct": 55.555556,
+        "post_dedup_top2_pct": 88.888889,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": 0.22948,
+        "upper": 0.3274
+      },
+      "forward": {
+        "WR": null,
+        "mean_price": null,
+        "n": 0,
+        "n_traders": 0,
+        "sim_unit_pnl_mean": null,
+        "top1_pct": null
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 1.0,
+        "mean_price": 0.6745,
+        "n": 4,
+        "n_traders": 2,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 5,
+          "removed_pct": 55.555556
+        },
+        "sim_unit_pnl_mean": 0.3255
+      },
+      "mean_price": 0.727844,
+      "n": 9,
+      "n_traders": 3,
+      "p_fdr": 0.0,
+      "p_raw": 0.0,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.272156,
+      "sim_unit_pnl_total": 2.4494,
+      "top1_pct": 55.555556,
+      "top2_pct": 88.888889,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "WR": 0.9167,
+      "cohort": "70-80|trader_YES|no",
+      "dominance": {
+        "forward_top1_pct": 100.0,
+        "post_dedup_top1_pct": 43.333333,
+        "post_dedup_top2_pct": 75.0,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": 0.202384,
+        "upper": 0.293623
+      },
+      "forward": {
+        "WR": 0.625,
+        "mean_price": 0.42505,
+        "n": 8,
+        "n_traders": 1,
+        "sim_unit_pnl_mean": 0.19995,
+        "top1_pct": 100.0
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 0.8529,
+        "mean_price": 0.590185,
+        "n": 34,
+        "n_traders": 3,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 26,
+          "removed_pct": 43.333333
+        },
+        "sim_unit_pnl_mean": 0.262756
+      },
+      "mean_price": 0.666208,
+      "n": 60,
+      "n_traders": 4,
+      "p_fdr": 0.0,
+      "p_raw": 0.0,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.250458,
+      "sim_unit_pnl_total": 15.0275,
+      "top1_pct": 43.333333,
+      "top2_pct": 75.0,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "WR": 0.9444,
+      "cohort": "70-80|trader_YES|yes",
+      "dominance": {
+        "forward_top1_pct": null,
+        "post_dedup_top1_pct": 44.444444,
+        "post_dedup_top2_pct": 88.888889,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": 0.173912,
+        "upper": 0.2824
+      },
+      "forward": {
+        "WR": null,
+        "mean_price": null,
+        "n": 0,
+        "n_traders": 0,
+        "sim_unit_pnl_mean": null,
+        "top1_pct": null
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 0.9,
+        "mean_price": 0.66755,
+        "n": 10,
+        "n_traders": 2,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 8,
+          "removed_pct": 44.444444
+        },
+        "sim_unit_pnl_mean": 0.23245
+      },
+      "mean_price": 0.738011,
+      "n": 18,
+      "n_traders": 3,
+      "p_fdr": 0.0,
+      "p_raw": 0.0,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.206433,
+      "sim_unit_pnl_total": 3.7158,
+      "top1_pct": 44.444444,
+      "top2_pct": 88.888889,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "WR": 0.75,
+      "cohort": "<60|trader_NO|no",
+      "dominance": {
+        "forward_top1_pct": null,
+        "post_dedup_top1_pct": 100.0,
+        "post_dedup_top2_pct": 100.0,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": 0.091675,
+        "upper": 0.091675
+      },
+      "forward": {
+        "WR": null,
+        "mean_price": null,
+        "n": 0,
+        "n_traders": 0,
+        "sim_unit_pnl_mean": null,
+        "top1_pct": null
+      },
+      "level": "L1",
+      "lto": {
+        "WR": null,
+        "mean_price": null,
+        "n": 0,
+        "n_traders": 0,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 4,
+          "removed_pct": 100.0
+        },
+        "sim_unit_pnl_mean": null
+      },
+      "mean_price": 0.658325,
+      "n": 4,
+      "n_traders": 1,
+      "p_fdr": 0.0,
+      "p_raw": 0.0,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.091675,
+      "sim_unit_pnl_total": 0.3667,
+      "top1_pct": 100.0,
+      "top2_pct": 100.0,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "WR": null,
+      "cohort": "<60|trader_NO|yes",
+      "dominance": {
+        "forward_top1_pct": null,
+        "post_dedup_top1_pct": null,
+        "post_dedup_top2_pct": null,
+        "top1_label": null
+      },
+      "edge_ci": {
+        "lower": null,
+        "upper": null
+      },
+      "forward": {
+        "WR": null,
+        "mean_price": null,
+        "n": 0,
+        "n_traders": 0,
+        "sim_unit_pnl_mean": null,
+        "top1_pct": null
+      },
+      "level": "L1",
+      "lto": {
+        "WR": null,
+        "mean_price": null,
+        "n": 0,
+        "n_traders": 0,
+        "removed_top_trader": {
+          "removed_label": null,
+          "removed_n": 0,
+          "removed_pct": null
+        },
+        "sim_unit_pnl_mean": null
+      },
+      "mean_price": null,
+      "n": 0,
+      "n_traders": 0,
+      "p_fdr": null,
+      "p_raw": null,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": null,
+      "sim_unit_pnl_total": null,
+      "top1_pct": null,
+      "top2_pct": null,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "WR": 0.8936,
+      "cohort": "<60|trader_YES|no",
+      "dominance": {
+        "forward_top1_pct": null,
+        "post_dedup_top1_pct": 59.574468,
+        "post_dedup_top2_pct": 78.723404,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": 0.243453,
+        "upper": 0.605324
+      },
+      "forward": {
+        "WR": null,
+        "mean_price": null,
+        "n": 0,
+        "n_traders": 0,
+        "sim_unit_pnl_mean": null,
+        "top1_pct": null
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 0.7368,
+        "mean_price": 0.345116,
+        "n": 19,
+        "n_traders": 4,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 28,
+          "removed_pct": 59.574468
+        },
+        "sim_unit_pnl_mean": 0.391726
+      },
+      "mean_price": 0.361079,
+      "n": 47,
+      "n_traders": 5,
+      "p_fdr": 0.009573,
+      "p_raw": 0.0081,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.532538,
+      "sim_unit_pnl_total": 25.0293,
+      "top1_pct": 59.574468,
+      "top2_pct": 78.723404,
+      "verdict": "NON_PROMOTABLE_BY_DOMINANCE"
+    },
+    {
+      "WR": 1.0,
+      "cohort": "<60|trader_YES|yes",
+      "dominance": {
+        "forward_top1_pct": null,
+        "post_dedup_top1_pct": 100.0,
+        "post_dedup_top2_pct": 100.0,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": 0.1651,
+        "upper": 0.1651
+      },
+      "forward": {
+        "WR": null,
+        "mean_price": null,
+        "n": 0,
+        "n_traders": 0,
+        "sim_unit_pnl_mean": null,
+        "top1_pct": null
+      },
+      "level": "L1",
+      "lto": {
+        "WR": null,
+        "mean_price": null,
+        "n": 0,
+        "n_traders": 0,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 1,
+          "removed_pct": 100.0
+        },
+        "sim_unit_pnl_mean": null
+      },
+      "mean_price": 0.8349,
+      "n": 1,
+      "n_traders": 1,
+      "p_fdr": 0.0,
+      "p_raw": 0.0,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.1651,
+      "sim_unit_pnl_total": 0.1651,
+      "top1_pct": 100.0,
+      "top2_pct": 100.0,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "WR": 0.989,
+      "cohort": ">=80|trader_NO|no",
+      "dominance": {
+        "forward_top1_pct": 55.319149,
+        "post_dedup_top1_pct": 60.07326,
+        "post_dedup_top2_pct": 91.941392,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": 0.153479,
+        "upper": 0.286188
+      },
+      "forward": {
+        "WR": 1.0,
+        "mean_price": 0.742417,
+        "n": 47,
+        "n_traders": 2,
+        "sim_unit_pnl_mean": 0.257583,
+        "top1_pct": 55.319149
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 0.9817,
+        "mean_price": 0.779353,
+        "n": 109,
+        "n_traders": 4,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 164,
+          "removed_pct": 60.07326
+        },
+        "sim_unit_pnl_mean": 0.202298
+      },
+      "mean_price": 0.735733,
+      "n": 273,
+      "n_traders": 5,
+      "p_fdr": 0.0,
+      "p_raw": 0.0,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.253278,
+      "sim_unit_pnl_total": 69.1448,
+      "top1_pct": 60.07326,
+      "top2_pct": 91.941392,
+      "verdict": "NON_PROMOTABLE_BY_DOMINANCE"
+    },
+    {
+      "WR": 0.9744,
+      "cohort": ">=80|trader_NO|yes",
+      "dominance": {
+        "forward_top1_pct": 100.0,
+        "post_dedup_top1_pct": 94.871795,
+        "post_dedup_top2_pct": 100.0,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": 0.265519,
+        "upper": 0.27525
+      },
+      "forward": {
+        "WR": 0.9167,
+        "mean_price": 0.663492,
+        "n": 12,
+        "n_traders": 1,
+        "sim_unit_pnl_mean": 0.253175,
+        "top1_pct": 100.0
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 1.0,
+        "mean_price": 0.72475,
+        "n": 2,
+        "n_traders": 1,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 37,
+          "removed_pct": 94.871795
+        },
+        "sim_unit_pnl_mean": 0.27525
+      },
+      "mean_price": 0.708341,
+      "n": 39,
+      "n_traders": 2,
+      "p_fdr": 0.0,
+      "p_raw": 0.0,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.266018,
+      "sim_unit_pnl_total": 10.3747,
+      "top1_pct": 94.871795,
+      "top2_pct": 100.0,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "WR": 0.9932,
+      "cohort": ">=80|trader_YES|no",
+      "dominance": {
+        "forward_top1_pct": 100.0,
+        "post_dedup_top1_pct": 77.702703,
+        "post_dedup_top2_pct": 90.540541,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": 0.301137,
+        "upper": 0.532944
+      },
+      "forward": {
+        "WR": 1.0,
+        "mean_price": 0.538464,
+        "n": 14,
+        "n_traders": 1,
+        "sim_unit_pnl_mean": 0.461536,
+        "top1_pct": 100.0
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 1.0,
+        "mean_price": 0.635139,
+        "n": 33,
+        "n_traders": 4,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 115,
+          "removed_pct": 77.702703
+        },
+        "sim_unit_pnl_mean": 0.364861
+      },
+      "mean_price": 0.550671,
+      "n": 148,
+      "n_traders": 5,
+      "p_fdr": 0.0,
+      "p_raw": 0.0,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.442572,
+      "sim_unit_pnl_total": 65.5007,
+      "top1_pct": 77.702703,
+      "top2_pct": 90.540541,
+      "verdict": "NON_PROMOTABLE_BY_DOMINANCE"
+    },
+    {
+      "WR": 1.0,
+      "cohort": ">=80|trader_YES|yes",
+      "dominance": {
+        "forward_top1_pct": 100.0,
+        "post_dedup_top1_pct": 84.615385,
+        "post_dedup_top2_pct": 96.153846,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": 0.2461,
+        "upper": 0.476805
+      },
+      "forward": {
+        "WR": 1.0,
+        "mean_price": 0.3124,
+        "n": 1,
+        "n_traders": 1,
+        "sim_unit_pnl_mean": 0.6876,
+        "top1_pct": 100.0
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 1.0,
+        "mean_price": 0.74865,
+        "n": 4,
+        "n_traders": 2,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 22,
+          "removed_pct": 84.615385
+        },
+        "sim_unit_pnl_mean": 0.25135
+      },
+      "mean_price": 0.557881,
+      "n": 26,
+      "n_traders": 3,
+      "p_fdr": 0.0,
+      "p_raw": 0.0,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.442119,
+      "sim_unit_pnl_total": 11.4951,
+      "top1_pct": 84.615385,
+      "top2_pct": 96.153846,
+      "verdict": "INSUFFICIENT_N"
+    }
+  ],
+  "lto_fold_seed": 2026,
+  "non_promotable_cells": [
+    {
+      "cohort": "60-70|trader_NO|no",
+      "forward_n": 0,
+      "forward_top1_pct": null,
+      "n": 26,
+      "n_traders": 2,
+      "top1_pct": 92.307692,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "cohort": "60-70|trader_NO|yes",
+      "forward_n": 0,
+      "forward_top1_pct": null,
+      "n": 0,
+      "n_traders": 0,
+      "top1_pct": null,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "cohort": "60-70|trader_YES|no",
+      "forward_n": 0,
+      "forward_top1_pct": null,
+      "n": 52,
+      "n_traders": 4,
+      "top1_pct": 84.615385,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "cohort": "60-70|trader_YES|yes",
+      "forward_n": 0,
+      "forward_top1_pct": null,
+      "n": 0,
+      "n_traders": 0,
+      "top1_pct": null,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "cohort": "70-80|trader_NO|no",
+      "forward_n": 47,
+      "forward_top1_pct": 100.0,
+      "n": 149,
+      "n_traders": 3,
+      "top1_pct": 81.208054,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "cohort": "70-80|trader_NO|yes",
+      "forward_n": 0,
+      "forward_top1_pct": null,
+      "n": 9,
+      "n_traders": 3,
+      "top1_pct": 55.555556,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "cohort": "70-80|trader_YES|no",
+      "forward_n": 8,
+      "forward_top1_pct": 100.0,
+      "n": 60,
+      "n_traders": 4,
+      "top1_pct": 43.333333,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "cohort": "70-80|trader_YES|yes",
+      "forward_n": 0,
+      "forward_top1_pct": null,
+      "n": 18,
+      "n_traders": 3,
+      "top1_pct": 44.444444,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "cohort": "<60|trader_NO|no",
+      "forward_n": 0,
+      "forward_top1_pct": null,
+      "n": 4,
+      "n_traders": 1,
+      "top1_pct": 100.0,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "cohort": "<60|trader_NO|yes",
+      "forward_n": 0,
+      "forward_top1_pct": null,
+      "n": 0,
+      "n_traders": 0,
+      "top1_pct": null,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "cohort": "<60|trader_YES|no",
+      "forward_n": 0,
+      "forward_top1_pct": null,
+      "n": 47,
+      "n_traders": 5,
+      "top1_pct": 59.574468,
+      "verdict": "NON_PROMOTABLE_BY_DOMINANCE"
+    },
+    {
+      "cohort": "<60|trader_YES|yes",
+      "forward_n": 0,
+      "forward_top1_pct": null,
+      "n": 1,
+      "n_traders": 1,
+      "top1_pct": 100.0,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "cohort": ">=80|trader_NO|no",
+      "forward_n": 47,
+      "forward_top1_pct": 55.319149,
+      "n": 273,
+      "n_traders": 5,
+      "top1_pct": 60.07326,
+      "verdict": "NON_PROMOTABLE_BY_DOMINANCE"
+    },
+    {
+      "cohort": ">=80|trader_NO|yes",
+      "forward_n": 12,
+      "forward_top1_pct": 100.0,
+      "n": 39,
+      "n_traders": 2,
+      "top1_pct": 94.871795,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "cohort": ">=80|trader_YES|no",
+      "forward_n": 14,
+      "forward_top1_pct": 100.0,
+      "n": 148,
+      "n_traders": 5,
+      "top1_pct": 77.702703,
+      "verdict": "NON_PROMOTABLE_BY_DOMINANCE"
+    },
+    {
+      "cohort": ">=80|trader_YES|yes",
+      "forward_n": 1,
+      "forward_top1_pct": 100.0,
+      "n": 26,
+      "n_traders": 3,
+      "top1_pct": 84.615385,
+      "verdict": "INSUFFICIENT_N"
+    }
+  ],
+  "prereg_cutoff_utc": "2026-05-29T00:00:00+00:00",
+  "schema_version": "trader_benchmark_summary_v1",
+  "source_description": "stdin:blocked_signals_resolutions.jsonl",
+  "thresholds": {
+    "DOMINANCE_MAX_PCT": 50.0,
+    "FDR_Q": 0.1,
+    "FORWARD_MIN_N": 10,
+    "LTO_MIN_N": 20,
+    "LTO_MIN_WR": 0.7,
+    "MARGIN": 0.02,
+    "N_PROMOTE_FLOOR": 30,
+    "N_REVIEW": 20,
+    "N_TRADER_CELL_MIN": 5,
+    "N_TRADER_MIN": 12,
+    "SIMPNL_FLOOR": 0.0,
+    "bootstrap_samples": 10000,
+    "seed": 2026
+  },
+  "top_candidates": [],
+  "triggers": [
+    "opus_review_required_before_any_live_use",
+    "if_all_positive_cells_are_dominance_gated_decide_accumulate_or_close_camino_a",
+    "rerun_when_new_forward_cells_have_n>=10_and_top1<=50pct"
+  ]
+}
