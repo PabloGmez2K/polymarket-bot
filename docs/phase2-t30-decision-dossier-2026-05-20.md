@@ -284,3 +284,83 @@ Preguntas binarias para revisión Opus el 2026-06-09 (o antes si se activa kill-
 - ✅ No se tocó Fase C
 - ✅ No se tocó sigma, MIN_EDGE, Kelly, sizing, exits, scheduler, NOAA, whitelist, city modes
 - ✅ No se activaron señales de Traders Intelligence como ejecutables
+
+---
+
+## Addendum T+30 — Cierre Phase 2 (2026-06-09, Sesión 422)
+
+**Fecha de cierre:** 2026-06-09
+**Adjudicado por:** Fable (lectura Railway SSH read-only: trade_lifecycle.json, cycles_history.jsonl tail, funnel_observability_log_only.jsonl tail)
+**Veredicto:** `STOP_CURRENT_LINE / PHASE2_CLOSED_FAIL_B6_ZERO_THROUGHPUT_TAIL`
+
+### Readout ventana 2026-05-10 → 2026-06-09
+
+| Campo | Valor |
+|---|---|
+| Filas trade_lifecycle | 37 (36 con PnL) |
+| B5 (n >= 25) | **PASS** — n=36 |
+| WR global | 47.2% (17W / 19L) |
+| P&L no canónico bruto | +$2.11 |
+| Outlier Wellington | +$19.05 |
+| P&L ex-outlier | **-$16.94** |
+| B6 (≥2 ciudades n>=3 WR>=40%) | **FAIL** |
+| Tokyo Phase 2 | n=3, WR>=40% (único PASS) |
+| Shanghai Phase 2 | n=0/3 WR>=40% (FAIL) |
+| Buenos Aires Phase 2 | n=0 (FAIL) |
+| Ankara Phase 2 | n=0 (FAIL) |
+| Trades de ciudades ACTIVE | 6/37 (16%) |
+| Fuente real del flujo | canary/auto-canary (Munich, Singapore, Seoul, Wellington) |
+| Trades exact/NO | ~62% — bloqueados por SHADOW_EXACT_NO_GLOBAL |
+| micro_position_unsellable | 11 cierres = -$22.77 (~60% pérdidas brutas) |
+| Trades desde 2026-05-26 | 0 |
+
+### Funnel diagnóstico (ciclos 497-499, 2026-06-09)
+
+| Paso | Valor |
+|---|---|
+| discovered | 330 |
+| city_window | ~250 |
+| price_out_of_range | 50-86 |
+| condition_filtered | mata 100% de los evaluados |
+| with_edge | **0** |
+
+**Diagnóstico estructural:** la superficie operable de la policy actual está vacía. El catálogo weather actual es casi todo exact/range; directional apenas existe; exact requiere QT match; exact/NO está bloqueado por SHADOW_EXACT_NO_GLOBAL.
+
+### Decisión
+
+`STOP_CURRENT_LINE`. No rediseñar policy para forzar throughput sobre un modelo con evidencia congelada negativa.
+
+**Descartado explícitamente (mientras flujo=0):**
+- Recalibración sigma/bias
+- Rotación ciudades
+- FOK/orderbook depth
+- Unsellable Guard enforcement
+- Camino B Forecast Autopsy
+- Más observabilidad
+
+**Deferrido (cosmético, sin efecto P&L):**
+- Cleanup BA/Ankara de ACTIVE — requiere env var/FULL + confirmación Pablo
+
+### Invariantes confirmados
+
+| Invariante | Estado |
+|---|---|
+| BANKROLL | HOLD $25 |
+| $35 | No autorizado |
+| Fase C | No autorizada |
+| BUY/SELL/SKIP | Sin cambio |
+| City modes | Sin cambio |
+| Env vars / Railway | Sin cambio |
+| bot.py | No tocado |
+
+### Triggers de reapertura
+
+| Trigger | Condición | Check |
+|---|---|---|
+| A — Trader-following | Celda forward n>=10 **y** top1<=50% en `tools/trader_benchmark.py` sobre BSR fresco | 2026-06-23 (natural); celda cercana: `>=80\|trader_NO\|no` forward n=47 WR=100% top1=55.3% |
+| B — Forecast path | E2 L1 `forward_holdout n>=30` en alguna cohorte | Sin fecha fija |
+| C — exact/NO | Criterio S418: n_closed_calibration_unique>=10, wr>=0.60, calibration_gap<=0.10, pnl_sim_unit>0 | Sin fecha fija |
+
+### Siguiente acción
+
+Ninguna hasta 2026-06-23. Si `tools/trader_benchmark.py` (rerun sobre BSR fresco) encuentra alguna celda con `n>=10 && top1<=50%`, abrir sesión Opus para diseñar experimento trader-following LOG_ONLY. Si no, siguiente check +14d sin sesión intermedia.
