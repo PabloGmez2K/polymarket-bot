@@ -716,8 +716,10 @@ def run_tests():
                 events_count = sum(1 for line in f if line.strip())
             test("agent_events.jsonl tiene eventos semilla", events_count >= 5, f"eventos={events_count}")
             test("agent_events.jsonl explicita stage en eventos", bool(agent_event_rows) and all(row.get("stage") for row in agent_event_rows))
+            # S423: aceptar "Sesión" y "Sesion" — las entradas desde S419 no llevan tilde
+            # y la variante acentuada dejaba el max congelado en 418.
             latest_doc_session = max(
-                [int(v) for v in re.findall(r"Sesión\s+(\d+)", contexto_code + "\n" + historial_code)],
+                [int(v) for v in re.findall(r"Sesi[oó]n\s+(\d+)", contexto_code + "\n" + historial_code)],
                 default=0,
             )
             latest_event_session = max(
@@ -5027,6 +5029,7 @@ def run_tests():
         "timedelta": timedelta,
         "os": type("_FakeOSv2a", (), {
             "getenv": staticmethod(lambda k, d="": {
+                "OPERATIONAL_PHASE": "PHASE2",  # S423: non-standby para testear la precondición phase2
                 "RECALIBRATION_PHASE2_CLOSED": "false",
                 "ACTIVE_TRADING_CITIES": "Tokyo",
             }.get(k, d)),
@@ -5058,6 +5061,7 @@ def run_tests():
             "timedelta": timedelta,
             "os": type("_FakeOSv2b", (), {
                 "getenv": staticmethod(lambda k, d="": {
+                    "OPERATIONAL_PHASE": "PHASE2",  # S423: non-standby para testear el one-shot
                     "RECALIBRATION_PHASE2_CLOSED": "true",
                     "ACTIVE_TRADING_CITIES": "Tokyo",
                 }.get(k, d)),
@@ -5080,6 +5084,33 @@ def run_tests():
         test("v10.6.14 v2 trigger: segunda invocacion no alerta (idempotente)",
              len(v2_msgs2) == 1,
              {"fired": fire_v2c, "msgs_count": len(v2_msgs2)})
+
+        # S423 STANDBY_ALARM_HYGIENE_V0: sin OPERATIONAL_PHASE (default STANDBY),
+        # aunque todas las precondiciones v2 se cumplan, NO alerta ni muta state.
+        v2_msgs3 = []
+        v2_ns3 = {
+            "datetime": datetime,
+            "timezone": timezone,
+            "timedelta": timedelta,
+            "os": type("_FakeOSv2c", (), {
+                "getenv": staticmethod(lambda k, d="": {
+                    "RECALIBRATION_PHASE2_CLOSED": "true",
+                    "ACTIVE_TRADING_CITIES": "Tokyo",
+                }.get(k, d)),
+                "path": _os_v14.path,
+                "makedirs": _os_v14.makedirs,
+            })(),
+            "json": __import__("json"),
+            "SIGNALS_FILE": _sig_tmp.name,
+            "_data_path": lambda f: "__nonexistent_phase2__.json",
+            "send_telegram": lambda text, with_menu=False, custom_keyboard=None: v2_msgs3.append(text),
+        }
+        exec(get_function_source(module_ast, code_lines, "maybe_alert_v2_trigger"), v2_ns3)
+        st_v2d = {}
+        fire_v2d = v2_ns3["maybe_alert_v2_trigger"](st_v2d)
+        test("S423 v2 trigger: OPERATIONAL_PHASE default STANDBY silencia la sugerencia v2",
+             fire_v2d is False and not v2_msgs3 and not st_v2d,
+             {"fired": fire_v2d, "msgs": v2_msgs3, "state": st_v2d})
     finally:
         try:
             _os_v14.unlink(_sig_tmp.name)

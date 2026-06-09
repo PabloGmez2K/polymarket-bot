@@ -182,6 +182,12 @@ class TestBuildPhase2MonitorMessage:
 
 
 class TestMaybeRunPhase2Monitor:
+    @pytest.fixture(autouse=True)
+    def _non_standby_phase(self, monkeypatch):
+        # S423 STANDBY_ALARM_HYGIENE_V0: el default es STANDBY (monitor silenciado).
+        # Estos tests validan el comportamiento histórico del monitor con Phase 2 viva.
+        monkeypatch.setattr(bot, "OPERATIONAL_PHASE", "PHASE2", raising=False)
+
     def _no_kill_stats(self):
         return {
             "mixed_kill_switch": False,
@@ -261,3 +267,15 @@ class TestMaybeRunPhase2Monitor:
         bot.maybe_run_phase2_monitor(state, now=datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc))
         assert state["phase2_monitor_last_sent"]["date"] == "2026-05-20"
         assert state["phase2_monitor_last_sent"]["mixed_kill"] is True
+
+    def test_standby_phase_silences_even_with_kill_switch(self, monkeypatch):
+        # S423: en STANDBY (default post Phase 2 close) no alerta ni muta state.
+        monkeypatch.setattr(bot, "OPERATIONAL_PHASE", "STANDBY", raising=False)
+        monkeypatch.setattr(bot, "_phase2_monitor_stats", lambda **kw: self._mixed_kill_stats())
+        sent = []
+        monkeypatch.setattr(bot, "send_telegram", lambda msg: sent.append(msg))
+        state = {}
+        result = bot.maybe_run_phase2_monitor(state, now=datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc))
+        assert result is False
+        assert sent == []
+        assert state == {}

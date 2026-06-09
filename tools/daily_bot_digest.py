@@ -651,11 +651,34 @@ def render_funnel_telegram_lines(summary: dict[str, Any] | None) -> list[str]:
     ]
 
 
+OPERATIONAL_PHASE_ENV = "OPERATIONAL_PHASE"
+OPERATIONAL_PHASE_DEFAULT = "STANDBY"
+STANDBY_NEXT_TRIGGER = "E3 trader-following check 2026-06-23"
+
+
+def operational_phase() -> str:
+    raw = os.getenv(OPERATIONAL_PHASE_ENV, OPERATIONAL_PHASE_DEFAULT) or OPERATIONAL_PHASE_DEFAULT
+    return str(raw).strip().upper()
+
+
+def standby_banner_lines(telegram: bool) -> list[str]:
+    """S423 STANDBY_ALARM_HYGIENE_V0: nota de fase para que edge=0/BUY=0 se lea como esperado."""
+    if operational_phase() != "STANDBY":
+        return []
+    title = f"⏸ {bold('Bot state: STANDBY')}" if telegram else "Bot state: STANDBY"
+    return [
+        "",
+        title,
+        "Phase 2 closed (2026-06-09). No live trading expected.",
+        f"Next actionable trigger: {STANDBY_NEXT_TRIGGER}.",
+    ]
+
+
 def render_human_digest(digest: dict[str, Any]) -> str:
     latest = digest.get("latest")
     previous = digest.get("previous")
     deltas = digest.get("deltas") or {}
-    lines = ["DAILY BOT DIGEST"]
+    lines = ["DAILY BOT DIGEST", *standby_banner_lines(telegram=False)]
     lines.append("")
     if not latest:
         lines.extend(
@@ -766,6 +789,7 @@ def render_telegram_digest(digest: dict[str, Any]) -> str:
         return "\n".join(
             [
                 f"📊 {bold('RESUMEN DIARIO DEL BOT')}",
+                *standby_banner_lines(telegram=True),
                 "",
                 f"🕒 {bold('Actualización')}",
                 "Aún no hay datos del leaderboard.",
@@ -820,6 +844,7 @@ def render_telegram_digest(digest: dict[str, Any]) -> str:
 
     lines = [
         f"📊 {bold('RESUMEN DIARIO DEL BOT')}",
+        *standby_banner_lines(telegram=True),
         "",
         f"🕒 {bold('Actualización')}",
         update_line,

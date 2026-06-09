@@ -191,6 +191,11 @@ BANKROLL_SCALING_MONITOR_ENABLED = os.getenv("BANKROLL_SCALING_MONITOR_ENABLED",
 BANKROLL_SCALING_MONITOR_EVERY_CYCLES = int(os.getenv("BANKROLL_SCALING_MONITOR_EVERY_CYCLES", "6"))
 BANKROLL_SCALING_MONITOR_ON_STATUS_CHANGE = os.getenv("BANKROLL_SCALING_MONITOR_ON_STATUS_CHANGE", "1").lower() in ("1", "true", "yes", "on")
 BANKROLL_SCALING_MONITOR_TIMEOUT_SECONDS = int(os.getenv("BANKROLL_SCALING_MONITOR_TIMEOUT_SECONDS", "12"))
+# Bot Stable v0 (S423): fase operativa SOLO para routing de alertas/digest.
+# STANDBY = Phase 2 cerrada (2026-06-09, STOP_CURRENT_LINE), sin live trading esperado;
+# los monitores de fase muerta no alertan. NO toca BUY/SELL/SKIP, city modes, guards,
+# sizing ni scheduler. Salir de STANDBY = env var OPERATIONAL_PHASE (cambio FULL autorizado).
+OPERATIONAL_PHASE = str(os.getenv("OPERATIONAL_PHASE", "STANDBY") or "STANDBY").strip().upper()
 TRADERS_OPERATIONAL_INTELLIGENCE_ENABLED = os.getenv("TRADERS_OPERATIONAL_INTELLIGENCE_ENABLED", "true").lower() in ("1", "true", "yes", "on")
 TRADERS_OPERATIONAL_INTELLIGENCE_TIMEOUT_SECONDS = int(os.getenv("TRADERS_OPERATIONAL_INTELLIGENCE_TIMEOUT_SECONDS", "180"))
 SOURCE_ONBOARDING_ANDON_ENABLED = os.getenv("SOURCE_ONBOARDING_ANDON_ENABLED", "true").lower() in ("1", "true", "yes", "on")
@@ -3213,6 +3218,10 @@ def maybe_run_bankroll_scaling_monitor(state):
     blockers_changed = blockers_hash != state.get("bankroll_scaling_last_blockers_hash")
     eligible_transition = eligible and not state.get("bankroll_scaling_last_eligible_for_manual_review", False)
     cycle_summary_due = cycle > 0 and (cycle - last_cycle) >= every_cycles
+    if OPERATIONAL_PHASE == "STANDBY":
+        # S423: BANKROLL en HOLD y fase STANDBY — sin resumen periódico;
+        # se mantienen alertas por transición de elegibilidad o cambio de estado.
+        cycle_summary_due = False
 
     should_alert = (
         eligible_transition
@@ -13937,7 +13946,13 @@ def maybe_alert_v2_trigger(state, now=None):
 
     One-shot: idempotencia via state["v2_trigger_notified"].
     Retorna True si state fue mutado.
+
+    S423: en STANDBY no sugiere expansión v2 aunque Phase 2 figure cerrada.
+    Lee os.getenv inline (no la constante module-level) porque verify_before_deploy
+    ejecuta esta función en un namespace aislado con os falso.
     """
+    if str(os.getenv("OPERATIONAL_PHASE", "STANDBY") or "STANDBY").strip().upper() == "STANDBY":
+        return False
     if now is None:
         now = datetime.now(timezone.utc)
     today = now.date().isoformat()
@@ -14485,7 +14500,12 @@ def maybe_run_phase2_monitor(state, now=None):
 
     Dispara diariamente si kill-switch activo. Anti-spam: un envío por día por tipo.
     No auto-modifica Railway. Solo alerta para acción manual.
+
+    S423: en OPERATIONAL_PHASE=STANDBY no alerta — Phase 2 está cerrada
+    (STOP_CURRENT_LINE 2026-06-09) y un rollback de fase muerta es ruido.
     """
+    if OPERATIONAL_PHASE == "STANDBY":
+        return False
     if now is None:
         now = datetime.now(timezone.utc)
     today_str = now.date().isoformat()
