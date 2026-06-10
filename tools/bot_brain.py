@@ -38,6 +38,17 @@ LOG_ONLY_DISCLAIMER = (
     "Pipeline change."
 )
 
+# Bot Stable v0 / S423-S424 operational state. Descriptive banner only;
+# does not gate, score, or authorize anything. Update when phase changes.
+STANDBY_BANNER = (
+    "Bot state: STANDBY. BUY blocked by SHADOW_ONLY_MODE=true. "
+    "No live trading expected. Next actionable trigger: E3 trader-following check 2026-06-23."
+)
+STANDBY_EXPECTED_STATE_NOTE = (
+    "Zero trades, zero BUYs, and with_edge=0 are the expected state under "
+    "STANDBY/SHADOW_ONLY_MODE, not an anomaly."
+)
+
 
 ARTIFACTS = {
     "cycles_history": ("jsonl", "data/cycles_history.jsonl"),
@@ -349,6 +360,13 @@ def build_brain_report(
         "log_only": True,
         "trading_authorization": "NO_ACTION",
         "disclaimer": LOG_ONLY_DISCLAIMER,
+        "bot_state": {
+            "operational_phase": "STANDBY",
+            "banner": STANDBY_BANNER,
+            "buy_blocked_by": "SHADOW_ONLY_MODE=true",
+            "next_actionable_trigger": "E3 trader-following check 2026-06-23",
+            "expected_state_note": STANDBY_EXPECTED_STATE_NOTE,
+        },
         "artifact_inventory": artifact_inventory,
         "missing_artifacts": missing_artifacts,
         "undersampled": False,
@@ -560,6 +578,8 @@ def _render_self_evaluation_markdown(report: dict[str, Any]) -> str:
         "",
         "LOG_ONLY / NO_ACTION. eligible_for_policy=false. live_policy_eligible=false.",
         "",
+        STANDBY_BANNER,
+        "",
         "## BSE Source",
         f"- present: `{r.get('bse_present')}` rows_total: `{r.get('bse_rows_total')}` "
         f"directional: `{r.get('bse_directional_rows')}` "
@@ -624,6 +644,8 @@ def _render_weather_strategy_markdown(report: dict[str, Any]) -> str:
         "",
         "LOG_ONLY / NO_ACTION. LIVE_POLICY_ELIGIBLE=false. No trading authorization.",
         "",
+        STANDBY_BANNER,
+        "",
         "## Verdict",
         f"- `verdict`: `{packet.get('verdict')}`",
         f"- `pnl_canonical_confirmed`: `{packet.get('pnl_canonical_confirmed')}`",
@@ -668,6 +690,9 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"Window: `{report.get('window')}`",
         "",
         "LOG_ONLY / NO_ACTION. No trading authorization.",
+        "",
+        STANDBY_BANNER,
+        STANDBY_EXPECTED_STATE_NOTE,
         "",
         "## Result",
     ]

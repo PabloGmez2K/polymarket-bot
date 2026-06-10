@@ -161,6 +161,7 @@ def test_markdown_output(tmp_path: Path, capsys) -> None:
     assert "# Bot Brain v0" in markdown
     assert "LOG_ONLY / NO_ACTION" in markdown
     assert "Evidence Pointers" in markdown
+    assert "Bot state: STANDBY" in markdown
 
     exit_code = main(
         [
@@ -179,3 +180,14 @@ def test_markdown_output(tmp_path: Path, capsys) -> None:
     captured = capsys.readouterr()
     assert exit_code == 0
     assert "# Bot Brain v0" in captured.out
+
+
+def test_report_has_standby_bot_state(tmp_path: Path) -> None:
+    repo_root, data_dir = _fixture(tmp_path)
+    report = build_brain_report("overview", "7d", repo_root=repo_root, data_dir=data_dir, now=NOW)
+
+    bot_state = report["bot_state"]
+    assert bot_state["operational_phase"] == "STANDBY"
+    assert bot_state["buy_blocked_by"] == "SHADOW_ONLY_MODE=true"
+    assert "E3" in bot_state["next_actionable_trigger"]
+    assert "expected state" in bot_state["expected_state_note"]

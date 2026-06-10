@@ -185,11 +185,17 @@ def _probe_phase2(data_dir: Path) -> dict[str, Any]:
             "Mixed-condition slice included. T+30 = 2026-06-09 (30 days from 2026-05-10 shadow activation). "
             "Exact slice protected/affected by: historical bugs (Seoul active during pause, "
             "match_key=None in lifecycle records), Phase 2 gate drift, S341. "
-            "No canonical machine-readable state persisted in V1."
+            "No canonical machine-readable state persisted in V1. "
+            "T+30 closed 2026-06-09 with STOP_CURRENT_LINE (B6 FAIL); bot in "
+            "STANDBY with SHADOW_ONLY_MODE=true. Zero trades / with_edge=0 is "
+            "the expected state, not an anomaly. Next actionable trigger: "
+            "E3 trader-following check 2026-06-23."
         ),
         "canonical_state": None,
         "trigger": "T+30 = 2026-06-09 (30 days from 2026-05-10 shadow activation)",
         "trigger_date": "2026-06-09",
+        "t30_outcome": "STOP_CURRENT_LINE (closed 2026-06-09, B6 FAIL)",
+        "next_actionable_trigger": "E3 trader-following check 2026-06-23",
         "decision_candidate": "Outcome Resolver R1 CODE after T+30 + Opus design + Pablo approval",
         "live_promotion_authorized": False,
         "shadow_exact_no_global_active": True,
