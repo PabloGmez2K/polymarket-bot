@@ -570,3 +570,55 @@ futuro. Cada paso debe completarse antes del siguiente:
 Regla anti-drift: "más reporting" ≠ aprendizaje. Toda observación nueva debe
 habilitar una futura decisión medible con trigger, ventana y criterio definidos.
 Si no hay decision path claro → `DEFER_STOP`.
+
+---
+
+## 15. STANDBY_AND_LEARNING_TRANSFER_FLOW
+
+### Estado operativo actual
+
+**Polymarket Bot está en STANDBY.** El trading está bloqueado globalmente vía
+`SHADOW_ONLY_MODE=true` en Railway (verificado 2026-06-10, Sesión 424). La línea
+Phase 2 se cerró como FAIL (2026-06-09, Sesión 422). El bot puede operar en modo
+observación, accrual y alertas; no emite BUY reales.
+
+**Salir de STANDBY requiere:**
+1. Trigger E3 (check 2026-06-23) u otro trigger documentado.
+2. Decisión explícita de Pablo en sesión separada.
+3. Cambio FULL en Railway (`SHADOW_ONLY_MODE=false`) con autorización literal.
+
+Este documento y sus actualizaciones docs-only **no autorizan salir de STANDBY**.
+
+### Flujo por defecto en STANDBY
+
+- Modo: docs-only / read-only.
+- No tocar: ejecución, Railway, bankroll, estrategias, guards, schedulers, city modes,
+  env vars de runtime, bot.py, DB ni datos sensibles.
+- Sesiones permitidas sin autorización: cierres documentales, mantenimiento de governance,
+  auditorías read-only, transferencias de aprendizaje metodológico saneado.
+- Sesiones que requieren autorización explícita: cualquier cambio de código, env vars,
+  Railway, trading core o reactivación de operación.
+
+### SESSION_LEARNING_TRANSFER en STANDBY
+
+El repo puede transferir aprendizajes metodológicos saneados al ecosistema
+(lafabrica-template, pablo-operating-brain) mientras está en STANDBY.
+
+**Qué se puede transferir:**
+- Gobernanza de proyectos largos con agentes (cierres, guardrails, invariantes).
+- Kill switches y shadow mode como patrones genéricos de control de riesgo.
+- Gates de promoción como metodología de avance controlado.
+- Economía de tokens: cuándo escalar modelo, cuándo usar cierre LITE.
+- STANDBY como estado operativo explícito (vs. abandono caótico).
+- Observabilidad accionable: artefactos con consumer y outcome path definidos.
+- Origen histórico del ecosistema de agentes de Pablo (polymarket-bot como primer lab).
+
+**Qué NO se transfiere:**
+- Estrategia de trading, bankroll, parámetros, thresholds, señales, mercados.
+- Ciudades/tokens específicos, claves, env vars, Railway, DB, snapshots privados.
+- Runtime, lógica de ejecución, código core, posiciones operadas.
+
+**Cola local:** `docs/meta/SESSION_LEARNING_TRANSFER_QUEUE.md`
+
+**Regla:** Una sesión de transferencia de aprendizaje NO reabre el bot, NO activa
+trading, NO cambia env vars y NO autoriza cambios de runtime.

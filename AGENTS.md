@@ -74,3 +74,36 @@ Para docs-only o backlog sin estado vivo durable, no forzar `CONTEXTO.md`,
 `HISTORIAL_SESIONES.md` ni `agent_events.jsonl`.
 
 La memoria externa no sustituye la fuente de verdad del repo.
+
+### SESSION_LEARNING_TRANSFER (opcional, proporcional)
+
+Bloque de cierre para capturar aprendizajes metodológicos transferibles al ecosistema
+(lafabrica-template, pablo-operating-brain). Solo cuando hay aprendizaje real no obvio.
+No usar en microajustes, patches operativos rutinarios o sesiones sin aprendizaje nuevo.
+
+**Reglas específicas de polymarket-bot:**
+
+- `privacy_level` por defecto `INTERNAL_ONLY`; solo `PUBLIC_SAFE` si el patrón es 100% abstracto.
+- No transferir: estrategia de trading, bankroll, parámetros, thresholds, señales, mercados,
+  ciudades/tokens, claves, env vars, Railway, DB, snapshots, runtime, lógica de ejecución,
+  código core, posiciones ni nombres de mercados operados.
+- Transferible solo: patrones de gobernanza, kill switches como concepto, shadow mode como
+  concepto, gates de promoción, economía de tokens, documentación de cierres, observabilidad
+  accionable, STANDBY como estado explícito.
+- Este bloque no autoriza reactivar el bot, cambiar city modes, env vars ni runtime.
+- Cola local: `docs/meta/SESSION_LEARNING_TRANSFER_QUEUE.md`.
+
+```
+SESSION_LEARNING_TRANSFER:
+  project_value:    [valor para polymarket-bot — o "No aplica"]
+  lafabrica:        [patrón/workflow/criterio/guardrail transferible — o "No aplica"]
+  brain:
+    evidence:       [evidencia profesional saneada — o "No aplica"]
+    skills:         [capacidad demostrada — o "No aplica"]
+    service_angle:  [servicio que podría alimentar — o "No aplica"]
+    content_angle:  [narrativa o post publicable — o "No aplica"]
+    portfolio_asset: [caso o activo de portfolio — o "No aplica"]
+  future_product:   [insight para producto futuro — o "No aplica"]
+  no_copy:          [qué NO transferir ni publicar — obligatorio si hay riesgo]
+  privacy_level:    [PUBLIC_SAFE / INTERNAL_ONLY / PRIVATE_DO_NOT_EXPORT]
+```
