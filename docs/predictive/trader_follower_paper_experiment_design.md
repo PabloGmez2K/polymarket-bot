@@ -148,6 +148,15 @@ Archivos/campos a revisar en una auditoria futura:
 Si hay leakage, el experimento queda bloqueado. La unica salida aceptable seria
 redefinir la celda con WR historico limpio y volver a Opus antes de runner.
 
+Nota forward-only (2026-06-25): `trader_analyzer.py` y el writer BSR capturan
+metadata de provenance para nuevas filas (`signals_generated_at`,
+`trader_win_rate_source`, `trader_win_rate_closed_positions_count`,
+`trader_win_rate_asof_method`, `trader_win_rate_cutoff_at`,
+`trader_win_rate_leakage_status`). `PRECONDITION_A` permanece bloqueada para
+filas historicas; futuras filas con provenance WR pueden auditarse. Si el
+collector no preserva timestamp de entry ni cutoff de closed positions, el
+cutoff debe seguir marcado como `unknown`, nunca inferido.
+
 ## 7. Precondicion de resolucion: BSR fidelity spot-check
 
 Nombre canonico:

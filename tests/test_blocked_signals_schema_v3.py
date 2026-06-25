@@ -18,6 +18,12 @@ def _base_signal(**extra):
         "avg_price": 0.42,
         "match_key": "Reykjavik|2026-05-05|exact|7|C",
         "trader_win_rate": 81.0,
+        "signals_generated_at": "2026-05-04T08:00:00+00:00",
+        "trader_win_rate_source": "polymarket_data_api_closed_positions_cashPnl",
+        "trader_win_rate_closed_positions_count": 37,
+        "trader_win_rate_asof_method": "snapshot_at_signals_generation_no_entry_cutoff",
+        "trader_win_rate_cutoff_at": "unknown",
+        "trader_win_rate_leakage_status": "not_auditable_no_entry_or_closed_position_cutoff",
         "has_consensus": True,
     }
     signal.update(extra)
@@ -50,6 +56,12 @@ def test_blocked_signals_new_records_are_schema_v3_live_eval():
     assert record["token_id_yes"] == "yes-token"
     assert record["token_id_no"] == "no-token"
     assert record["reason_blocked"] in {"condition_filtered", "mixed"}
+    assert record["signals_generated_at"] == "2026-05-04T08:00:00+00:00"
+    assert record["trader_win_rate_source"] == "polymarket_data_api_closed_positions_cashPnl"
+    assert record["trader_win_rate_closed_positions_count"] == 37
+    assert record["trader_win_rate_asof_method"] == "snapshot_at_signals_generation_no_entry_cutoff"
+    assert record["trader_win_rate_cutoff_at"] == "unknown"
+    assert record["trader_win_rate_leakage_status"] == "not_auditable_no_entry_or_closed_position_cutoff"
 
 
 def test_blocked_signals_v3_does_not_invent_bot_buy_evidence():

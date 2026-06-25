@@ -366,6 +366,7 @@ def generate_signals_file(all_results, consensus):
     Solo incluye señales de traders RENTABLES (WR>50%, PnL>0).
     Traders malos se analizan pero no generan señales.
     """
+    generated_at = datetime.now(timezone.utc).isoformat()
     actionable = []
     skipped_low_quality = 0
 
@@ -383,6 +384,12 @@ def generate_signals_file(all_results, consensus):
             # Añadir win rate del trader a la señal
             signal["trader_win_rate"] = result["win_rate"]
             signal["trader_pnl"] = result["pnl_closed"]
+            signal["signals_generated_at"] = generated_at
+            signal["trader_win_rate_source"] = "polymarket_data_api_closed_positions_cashPnl"
+            signal["trader_win_rate_closed_positions_count"] = int(result.get("wins", 0) + result.get("losses", 0))
+            signal["trader_win_rate_asof_method"] = "snapshot_at_signals_generation_no_entry_cutoff"
+            signal["trader_win_rate_cutoff_at"] = "unknown"
+            signal["trader_win_rate_leakage_status"] = "not_auditable_no_entry_or_closed_position_cutoff"
 
             # Marcar si hay consenso
             signal["has_consensus"] = signal["match_key"] in consensus
@@ -405,7 +412,12 @@ def generate_signals_file(all_results, consensus):
     ]
 
     output = {
-        "generated": datetime.now(timezone.utc).isoformat(),
+        "generated": generated_at,
+        "signals_generated_at": generated_at,
+        "trader_win_rate_source": "polymarket_data_api_closed_positions_cashPnl",
+        "trader_win_rate_asof_method": "snapshot_at_signals_generation_no_entry_cutoff",
+        "trader_win_rate_cutoff_at": "unknown",
+        "trader_win_rate_leakage_status": "not_auditable_no_entry_or_closed_position_cutoff",
         "n_traders_analyzed": len(all_results),
         "n_quality_traders": len(quality_traders),
         "quality_traders": quality_traders,
