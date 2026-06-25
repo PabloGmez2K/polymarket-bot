@@ -25,6 +25,14 @@ No cargar `CONTEXTO.md` completo ni sesiones antiguas sin necesidad.
 - Codex implementa, testea y valida; no decide semántica de trading/riesgo: BANKROLL, sizing, whitelist, city modes, scheduler, BUY/SELL/SKIP, guards/SL, source promotion y Fase C requieren Opus o confirmación humana según modo.
 - `/plan` es apropiado para arquitectura LOG_ONLY o pre-implementation cuando Opus ya fijó semántica; no autoriza CODE. `/goal` solo para implementación iterativa ya autorizada, con objetivo verificable y stop condition; nunca para decisiones de trading/riesgo/BANKROLL/city modes/guards/Fase C/env vars. Para patches runtime concretos ya decididos, usar prompt normal cerrado.
 
+## Governance de evidencia (artifact-first, lección E3)
+
+- **Artifact-first:** ninguna estrategia, design doc, ratificación ni runner avanza si la evidencia base no está committeada en el repo o runtime-citada con ruta exacta y reproducible. Si no, `BLOCKED_NEEDS_ARTIFACT`.
+- **Temp quarantine:** outputs en `%TEMP%`/chat = solo diagnóstico; nunca ratifican. Materializar summary committeado o citar ruta antes de cerrar estrategia. Producción = `/app/data`, no `data/runtime_import` local.
+- **One truth lane:** un solo agente reconcilia una verdad de datos a la vez. Contradicción dato↔doc → reconciliación primero (Codex/Antigravity), no estrategia Opus.
+- **Roles extendidos:** Antigravity = evidence workflow/multirepo/visual audit/source maps cuando Codex queda ambiguo; no decide trading/riesgo. Bot Brain = reporter/radar; no autoriza BUY/SELL/SKIP, BANKROLL, city modes ni salida de STANDBY.
+- Detalle completo en `ORCHESTRATOR.md §16`.
+
 ## Modos de ciudad — regla canónica
 
 Cuatro modos exclusivos y ordenados por prioridad (el primero que aplica gana):

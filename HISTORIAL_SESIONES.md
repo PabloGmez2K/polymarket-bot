@@ -6476,3 +6476,34 @@ trading (los del repo son más estrictos que el template).
 No se tocaron bot.py, env vars, Railway, DB, BANKROLL, trading core, city modes, scheduler, exact/NO, guards, SL,
 SHADOW_ONLY_MODE, BUY/SELL/SKIP, Fase C ni CONTEXTO.md (sin cambio operativo vivo). No se borró ningún archivo.
 No se tocaron los untracked preexistentes `2026-04-27]` y `342)`. No se usó memoria externa como fuente durable.
+
+## Sesión 427 — ORCHESTRATOR_OPTIMIZATION_AFTER_E3_LESSONS (25 jun 2026, Opus 4.8)
+
+**Tipo:** DOCS_ONLY / META · **Clasificación:** WATCH_ONLY (gobernanza) · **Modo:** READ_ONLY / ORCHESTRATION_REWRITE / DOC_PATCH_SAFE_NOW
+**Archivos modificados:** `ORCHESTRATOR.md` (§5 roles Antigravity/Bot Brain + nuevo §16 Governance de evidencia), `AGENTS.md` (bloque artifact-first + roles extendidos), `docs/meta/orchestrator_optimization_after_e3_2026-06-25.md` (nuevo), `HISTORIAL_SESIONES.md`, `agent_events.jsonl`
+
+### Contexto
+
+Optimización de orquestación tras E3: el design doc avanzó con números no trazados al repo; se reconcilió con
+summary committeado (`e3_trader_benchmark_summary_2026-06-25.json`) + provenance forward-only (`c7955fd`). El
+sistema permitía loops caros (estrategia antes de evidencia, paper sin forward falsable, Antigravity sin rol).
+
+### Veredicto
+
+`DOC_PATCH_SAFE_NOW`. Hueco real cubierto en repo: **artifact-first gate** (nada avanza sin artefacto
+committeado/runtime-citado con ruta exacta), **temp evidence quarantine** (%TEMP% solo diagnóstico),
+**one truth lane / strategy-after-reconciliation**, **paper no es progreso sin forward falsable**, roles
+**Antigravity** (evidence/multirepo, no trading) y **Bot Brain** (reporter/radar, no policy engine). Project
+instructions optimizadas (~6.4k) materializadas en el doc nuevo: puntero al repo, no espejo. NO ejecutado:
+consolidar token-economics §3/§12/§13 ni BACKLOG/plantillas/anchor/índice (siguen DEFER con trigger).
+
+### Próximos pasos
+
+- Volver al trigger vivo **BSR_POST_PROVENANCE_ROWS_CHECK** cuando haya filas BSR nuevas post-deploy con provenance.
+- Lecciones entrantes (token-economics único, BACKLOG.md, etc.): solo si dispara su trigger D1–D5.
+
+### Guardrails
+
+No se tocaron bot.py, trader_analyzer.py, trading core, env vars, Railway, DB, BANKROLL, city modes, scheduler,
+exact/NO, guards, SL, runner, leakage/provenance, estrategia E3 ni CONTEXTO.md (sin cambio operativo vivo). No se
+borró nada. No se tocaron los untracked preexistentes `2026-04-27]` y `342)`. No se usó memoria externa como fuente durable.

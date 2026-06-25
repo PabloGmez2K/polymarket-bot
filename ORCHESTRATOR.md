@@ -167,6 +167,16 @@ completo.
   - DB controlada.
   - Checks técnicos.
   - Investigación técnica reproducible.
+  - Reconciliación de evidencia (materializar summary committeado, provenance, fidelity/leakage audits).
+
+- **Antigravity** (evidence/multirepo, no trading)
+  - Evidence workflow, reproducibilidad, source maps, auditoría visual, tareas multiarchivo/multifuente.
+  - Se usa solo cuando Codex queda ambiguo o el trabajo cruza varios repos/fuentes.
+  - **No decide** trading, riesgo, BANKROLL, sizing, guards, city modes ni Fase C. Si aparece esa semántica, cerrar y escalar a Opus.
+
+- **Bot Brain** (reporter/radar, no trader)
+  - Reporta estado, alarmas, banners (STANDBY/Phase) y radar de triggers.
+  - **No es policy engine ni trader:** no autoriza por sí mismo BUY/SELL/SKIP, BANKROLL, city modes ni salida de STANDBY.
 
 Reglas de escalado:
 
@@ -623,3 +633,51 @@ El repo puede transferir aprendizajes metodológicos saneados al ecosistema
 
 **Regla:** Una sesión de transferencia de aprendizaje NO reabre el bot, NO activa
 trading, NO cambia env vars y NO autoriza cambios de runtime.
+
+---
+
+## 16. Governance de evidencia (lección E3, 2026-06-25)
+
+Origen: el design doc E3 avanzó con números no trazados al repo; hubo que reconciliar
+con un summary committeado (`data/predictive/e3_trader_benchmark_summary_2026-06-25.json`)
+y añadir provenance forward-only (`c7955fd`). Estas reglas previenen ese loop caro.
+
+### Artifact-first gate (regla dura)
+
+Ninguna estrategia, design doc, ratificación o runner avanza si su evidencia base no está
+en un **artefacto reproducible**: committeado en el repo o runtime-citado con **ruta exacta**.
+Si la cita no existe o no reproduce, el veredicto es `BLOCKED_NEEDS_ARTIFACT`, no análisis.
+
+### Cuatro tipos de evidencia (solo committed+ ratifica)
+
+| Tipo | Qué es | Para qué vale |
+|---|---|---|
+| **Temporal** | `%TEMP%`, outputs pegados, archivos subidos al chat | Solo diagnóstico exploratorio |
+| **Committeada** | Artefacto en el repo, reproducible | Ratifica estrategia/diseño |
+| **Runtime** | Railway `SUCCESS` / `/app/data/...` en producción | Prueba "en producción" |
+| **Estratégica** | Forward, falsable, con trigger/ventana | Desbloquea decisión de trading |
+
+### Temp evidence quarantine
+
+Outputs en `%TEMP%` se usan para diagnóstico, **nunca para ratificación estratégica**, hasta
+materializar un summary saneado y committeado **o** citar ruta exacta + reproducibilidad.
+No usar `data/runtime_import` local como evidencia final de producción (usar `/app/data`).
+
+### One truth lane + strategy-after-reconciliation
+
+- No abrir dos agentes a la vez sobre la **misma verdad de datos**. Si Codex/Antigravity está
+  reconciliando evidencia, los demás esperan.
+- Si hay **contradicción dato↔doc**, primero reconciliación (Codex/Antigravity); **no** Opus
+  strategy hasta reconciliar. STOP antes de seguir.
+
+### Paper / LOG_ONLY no es progreso sin forward evidence
+
+Un paper/experimento solo cuenta como avance si produce **evidencia forward falsable** con
+trigger, ventana y criterio. Si acaba en `WAITING_FOR_FORWARD_ROWS`: **cerrar en chat**, fijar
+trigger/recordatorio, **no abrir otra sesión** ni docs-only pesado.
+
+### BANKROLL / micro-canary / runner
+
+Bloqueados hasta: **paper pass + micro-canary + revisión P&L/riesgo canónica + Opus**.
+STANDBY no se sale con docs (sigue §15: cambio FULL + autorización literal de Pablo).
+No abrir "buscar nuevas oportunidades" hasta cerrar o activar el workstream vivo, salvo trigger explícito.
