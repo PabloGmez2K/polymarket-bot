@@ -75,6 +75,11 @@ La celda candidata ratificada es:
 | LTO without top trader | +0.098 |
 | p_fdr | 0.0177 |
 
+Fuente trazable: `data/predictive/e3_trader_benchmark_summary_2026-06-25.json`,
+generado read-only desde el BSR fresco temporal del 2026-06-25 con
+`tools/trader_benchmark.py`. Este artefacto agregado reproduce la celda como
+`TRADER_ALPHA_CANDIDATE` y conserva `eligible_for_policy=false`.
+
 Por que es candidata:
 
 - Tiene muestra suficiente para un experimento paper acotado.

@@ -1,0 +1,946 @@
+{
+  "baseline": {
+    "primary": "market_at_avg_price_entered",
+    "secondary_diagnostic": "base_rate",
+    "tertiary_reference_only": "bot_forecast_via_E1_join"
+  },
+  "coverage_warnings": [
+    "dedup_by_signal_key_applied_before_metrics",
+    "single_trader_dominance_gate_hard_enabled",
+    "yes_price_no_price_absent_ok_baseline_avg_price_entered"
+  ],
+  "disclaimer": "sim_pnl simulated_non_canonical_not_money. eligible_for_policy=false. market_truth_canonical=false. No trading authorization. exact_no_live_remains_blocked.",
+  "eligible_for_policy": false,
+  "generated_at_utc": "2026-06-25T17:30:44.499398+00:00",
+  "global_metrics": {
+    "WR": 0.9076,
+    "edge_ci": {
+      "lower": 0.169618,
+      "upper": 0.310506
+    },
+    "mean_price": 0.651844,
+    "n": 1407,
+    "n_traders": 23,
+    "p_raw": 0.0,
+    "sim_unit_pnl_mean": 0.255761,
+    "sim_unit_pnl_total": 359.8555,
+    "top1_pct": 40.298507,
+    "top2_pct": 68.230277
+  },
+  "global_verdict": "TRADER_ALPHA_CANDIDATE",
+  "inventory": {
+    "date_max": "2026-06-24",
+    "date_min": "2026-04-08",
+    "eligible_rows_post_dedup": 1407,
+    "eligible_rows_pre_dedup": 1665,
+    "forward_n": 684,
+    "n_traders_distinct": 23,
+    "raw_rows": 1720,
+    "top1_n": 567,
+    "top1_pct": 40.298507,
+    "top2_n": 960,
+    "top2_pct": 68.230277,
+    "top5_n": 1142,
+    "top5_pct": 81.165601
+  },
+  "l1_cells": [
+    {
+      "WR": 0.8586,
+      "cohort": "60-70|trader_NO|no",
+      "dominance": {
+        "forward_top1_pct": 28.767123,
+        "post_dedup_top1_pct": 24.242424,
+        "post_dedup_top2_pct": 45.454545,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": 0.021981,
+        "upper": 0.175322
+      },
+      "forward": {
+        "WR": 0.863,
+        "mean_price": 0.737442,
+        "n": 73,
+        "n_traders": 10,
+        "sim_unit_pnl_mean": 0.125571,
+        "top1_pct": 28.767123
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 0.84,
+        "mean_price": 0.741583,
+        "n": 75,
+        "n_traders": 11,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 24,
+          "removed_pct": 24.242424
+        },
+        "sim_unit_pnl_mean": 0.098417
+      },
+      "mean_price": 0.755959,
+      "n": 99,
+      "n_traders": 12,
+      "p_fdr": 0.017745,
+      "p_raw": 0.0122,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.102627,
+      "sim_unit_pnl_total": 10.1601,
+      "top1_pct": 24.242424,
+      "top2_pct": 45.454545,
+      "verdict": "TRADER_ALPHA_CANDIDATE"
+    },
+    {
+      "WR": 0.8519,
+      "cohort": "60-70|trader_NO|yes",
+      "dominance": {
+        "forward_top1_pct": 40.740741,
+        "post_dedup_top1_pct": 40.740741,
+        "post_dedup_top2_pct": 77.777778,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": -7.9e-05,
+        "upper": 0.211692
+      },
+      "forward": {
+        "WR": 0.8519,
+        "mean_price": 0.749967,
+        "n": 27,
+        "n_traders": 4,
+        "sim_unit_pnl_mean": 0.101885,
+        "top1_pct": 40.740741
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 0.8125,
+        "mean_price": 0.7788,
+        "n": 16,
+        "n_traders": 3,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 11,
+          "removed_pct": 40.740741
+        },
+        "sim_unit_pnl_mean": 0.0337
+      },
+      "mean_price": 0.749967,
+      "n": 27,
+      "n_traders": 4,
+      "p_fdr": 0.048914,
+      "p_raw": 0.0428,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.101885,
+      "sim_unit_pnl_total": 2.7509,
+      "top1_pct": 40.740741,
+      "top2_pct": 77.777778,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "WR": 0.88,
+      "cohort": "60-70|trader_YES|no",
+      "dominance": {
+        "forward_top1_pct": 26.086957,
+        "post_dedup_top1_pct": 58.666667,
+        "post_dedup_top2_pct": 66.666667,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": 0.178166,
+        "upper": 0.365235
+      },
+      "forward": {
+        "WR": 0.6522,
+        "mean_price": 0.406209,
+        "n": 23,
+        "n_traders": 8,
+        "sim_unit_pnl_mean": 0.245965,
+        "top1_pct": 26.086957
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 0.7097,
+        "mean_price": 0.445735,
+        "n": 31,
+        "n_traders": 11,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 44,
+          "removed_pct": 58.666667
+        },
+        "sim_unit_pnl_mean": 0.263942
+      },
+      "mean_price": 0.560753,
+      "n": 75,
+      "n_traders": 12,
+      "p_fdr": 0.0,
+      "p_raw": 0.0,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.319247,
+      "sim_unit_pnl_total": 23.9435,
+      "top1_pct": 58.666667,
+      "top2_pct": 66.666667,
+      "verdict": "NON_PROMOTABLE_BY_DOMINANCE"
+    },
+    {
+      "WR": 0.6667,
+      "cohort": "60-70|trader_YES|yes",
+      "dominance": {
+        "forward_top1_pct": 33.333333,
+        "post_dedup_top1_pct": 33.333333,
+        "post_dedup_top2_pct": 58.333333,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": 0.128629,
+        "upper": 0.67374
+      },
+      "forward": {
+        "WR": 0.6667,
+        "mean_price": 0.285642,
+        "n": 12,
+        "n_traders": 5,
+        "sim_unit_pnl_mean": 0.381025,
+        "top1_pct": 33.333333
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 0.75,
+        "mean_price": 0.305,
+        "n": 8,
+        "n_traders": 4,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 4,
+          "removed_pct": 33.333333
+        },
+        "sim_unit_pnl_mean": 0.445
+      },
+      "mean_price": 0.285642,
+      "n": 12,
+      "n_traders": 5,
+      "p_fdr": 0.000533,
+      "p_raw": 0.0003,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.381025,
+      "sim_unit_pnl_total": 4.5723,
+      "top1_pct": 33.333333,
+      "top2_pct": 58.333333,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "WR": 0.8814,
+      "cohort": "70-80|trader_NO|no",
+      "dominance": {
+        "forward_top1_pct": 83.58209,
+        "post_dedup_top1_pct": 78.813559,
+        "post_dedup_top2_pct": 89.40678,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": 0.010045,
+        "upper": 0.16907
+      },
+      "forward": {
+        "WR": 0.8209,
+        "mean_price": 0.684731,
+        "n": 134,
+        "n_traders": 6,
+        "sim_unit_pnl_mean": 0.136165,
+        "top1_pct": 83.58209
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 0.86,
+        "mean_price": 0.7858,
+        "n": 50,
+        "n_traders": 6,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 186,
+          "removed_pct": 78.813559
+        },
+        "sim_unit_pnl_mean": 0.0742
+      },
+      "mean_price": 0.731817,
+      "n": 236,
+      "n_traders": 7,
+      "p_fdr": 0.020667,
+      "p_raw": 0.0155,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.149539,
+      "sim_unit_pnl_total": 35.2911,
+      "top1_pct": 78.813559,
+      "top2_pct": 89.40678,
+      "verdict": "NON_PROMOTABLE_BY_DOMINANCE"
+    },
+    {
+      "WR": 0.9032,
+      "cohort": "70-80|trader_NO|yes",
+      "dominance": {
+        "forward_top1_pct": 63.636364,
+        "post_dedup_top1_pct": 54.83871,
+        "post_dedup_top2_pct": 96.774194,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": 0.137035,
+        "upper": 0.3274
+      },
+      "forward": {
+        "WR": 0.8636,
+        "mean_price": 0.717114,
+        "n": 22,
+        "n_traders": 2,
+        "sim_unit_pnl_mean": 0.146523,
+        "top1_pct": 63.636364
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 0.9286,
+        "mean_price": 0.689764,
+        "n": 14,
+        "n_traders": 2,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 17,
+          "removed_pct": 54.83871
+        },
+        "sim_unit_pnl_mean": 0.238807
+      },
+      "mean_price": 0.720229,
+      "n": 31,
+      "n_traders": 3,
+      "p_fdr": 0.0,
+      "p_raw": 0.0,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.182997,
+      "sim_unit_pnl_total": 5.6729,
+      "top1_pct": 54.83871,
+      "top2_pct": 96.774194,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "WR": 0.8875,
+      "cohort": "70-80|trader_YES|no",
+      "dominance": {
+        "forward_top1_pct": 67.857143,
+        "post_dedup_top1_pct": 37.5,
+        "post_dedup_top2_pct": 70.0,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": 0.20803,
+        "upper": 0.341325
+      },
+      "forward": {
+        "WR": 0.75,
+        "mean_price": 0.430046,
+        "n": 28,
+        "n_traders": 4,
+        "sim_unit_pnl_mean": 0.319954,
+        "top1_pct": 67.857143
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 0.98,
+        "mean_price": 0.734914,
+        "n": 50,
+        "n_traders": 5,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 30,
+          "removed_pct": 37.5
+        },
+        "sim_unit_pnl_mean": 0.245086
+      },
+      "mean_price": 0.607668,
+      "n": 80,
+      "n_traders": 6,
+      "p_fdr": 0.0,
+      "p_raw": 0.0,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.279833,
+      "sim_unit_pnl_total": 22.3866,
+      "top1_pct": 37.5,
+      "top2_pct": 70.0,
+      "verdict": "FORWARD_DOMINATED"
+    },
+    {
+      "WR": 0.913,
+      "cohort": "70-80|trader_YES|yes",
+      "dominance": {
+        "forward_top1_pct": 60.0,
+        "post_dedup_top1_pct": 47.826087,
+        "post_dedup_top2_pct": 82.608696,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": 0.091971,
+        "upper": 0.305521
+      },
+      "forward": {
+        "WR": 0.8,
+        "mean_price": 0.64552,
+        "n": 5,
+        "n_traders": 3,
+        "sim_unit_pnl_mean": 0.15448,
+        "top1_pct": 60.0
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 0.9167,
+        "mean_price": 0.744367,
+        "n": 12,
+        "n_traders": 3,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 11,
+          "removed_pct": 47.826087
+        },
+        "sim_unit_pnl_mean": 0.1723
+      },
+      "mean_price": 0.717904,
+      "n": 23,
+      "n_traders": 4,
+      "p_fdr": 0.0,
+      "p_raw": 0.0,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.195139,
+      "sim_unit_pnl_total": 4.4882,
+      "top1_pct": 47.826087,
+      "top2_pct": 82.608696,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "WR": 0.6154,
+      "cohort": "<60|trader_NO|no",
+      "dominance": {
+        "forward_top1_pct": 28.571429,
+        "post_dedup_top1_pct": 25.641026,
+        "post_dedup_top2_pct": 41.025641,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": -0.055438,
+        "upper": 0.061908
+      },
+      "forward": {
+        "WR": 0.6,
+        "mean_price": 0.617303,
+        "n": 35,
+        "n_traders": 8,
+        "sim_unit_pnl_mean": -0.017303,
+        "top1_pct": 28.571429
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 0.6552,
+        "mean_price": 0.642576,
+        "n": 29,
+        "n_traders": 8,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 10,
+          "removed_pct": 25.641026
+        },
+        "sim_unit_pnl_mean": 0.012597
+      },
+      "mean_price": 0.62151,
+      "n": 39,
+      "n_traders": 9,
+      "p_fdr": 0.607467,
+      "p_raw": 0.5695,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": -0.006126,
+      "sim_unit_pnl_total": -0.2389,
+      "top1_pct": 25.641026,
+      "top2_pct": 41.025641,
+      "verdict": "NO_TRADER_EDGE"
+    },
+    {
+      "WR": 0.5,
+      "cohort": "<60|trader_NO|yes",
+      "dominance": {
+        "forward_top1_pct": 50.0,
+        "post_dedup_top1_pct": 50.0,
+        "post_dedup_top2_pct": 100.0,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": -0.3345,
+        "upper": 0.2482
+      },
+      "forward": {
+        "WR": 0.5,
+        "mean_price": 0.54315,
+        "n": 2,
+        "n_traders": 2,
+        "sim_unit_pnl_mean": -0.04315,
+        "top1_pct": 50.0
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 1.0,
+        "mean_price": 0.7518,
+        "n": 1,
+        "n_traders": 1,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 1,
+          "removed_pct": 50.0
+        },
+        "sim_unit_pnl_mean": 0.2482
+      },
+      "mean_price": 0.54315,
+      "n": 2,
+      "n_traders": 2,
+      "p_fdr": 0.7515,
+      "p_raw": 0.7515,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": -0.04315,
+      "sim_unit_pnl_total": -0.0863,
+      "top1_pct": 50.0,
+      "top2_pct": 100.0,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "WR": 0.7619,
+      "cohort": "<60|trader_YES|no",
+      "dominance": {
+        "forward_top1_pct": 27.027027,
+        "post_dedup_top1_pct": 33.333333,
+        "post_dedup_top2_pct": 45.238095,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": 0.156076,
+        "upper": 0.514505
+      },
+      "forward": {
+        "WR": 0.5946,
+        "mean_price": 0.422603,
+        "n": 37,
+        "n_traders": 7,
+        "sim_unit_pnl_mean": 0.171992,
+        "top1_pct": 27.027027
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 0.6429,
+        "mean_price": 0.396313,
+        "n": 56,
+        "n_traders": 11,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 28,
+          "removed_pct": 33.333333
+        },
+        "sim_unit_pnl_mean": 0.246545
+      },
+      "mean_price": 0.388179,
+      "n": 84,
+      "n_traders": 12,
+      "p_fdr": 0.00064,
+      "p_raw": 0.0004,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.373726,
+      "sim_unit_pnl_total": 31.393,
+      "top1_pct": 33.333333,
+      "top2_pct": 45.238095,
+      "verdict": "NON_PROMOTABLE_LTO_FAIL"
+    },
+    {
+      "WR": 0.75,
+      "cohort": "<60|trader_YES|yes",
+      "dominance": {
+        "forward_top1_pct": 66.666667,
+        "post_dedup_top1_pct": 50.0,
+        "post_dedup_top2_pct": 75.0,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": 0.1651,
+        "upper": 0.81
+      },
+      "forward": {
+        "WR": 0.6667,
+        "mean_price": 0.286467,
+        "n": 3,
+        "n_traders": 2,
+        "sim_unit_pnl_mean": 0.3802,
+        "top1_pct": 66.666667
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 1.0,
+        "mean_price": 0.51245,
+        "n": 2,
+        "n_traders": 2,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 2,
+          "removed_pct": 50.0
+        },
+        "sim_unit_pnl_mean": 0.48755
+      },
+      "mean_price": 0.423575,
+      "n": 4,
+      "n_traders": 3,
+      "p_fdr": 0.0,
+      "p_raw": 0.0,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.326425,
+      "sim_unit_pnl_total": 1.3057,
+      "top1_pct": 50.0,
+      "top2_pct": 75.0,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "WR": 0.9821,
+      "cohort": ">=80|trader_NO|no",
+      "dominance": {
+        "forward_top1_pct": 71.95122,
+        "post_dedup_top1_pct": 65.641026,
+        "post_dedup_top2_pct": 92.307692,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": 0.132213,
+        "upper": 0.277213
+      },
+      "forward": {
+        "WR": 0.9756,
+        "mean_price": 0.725753,
+        "n": 164,
+        "n_traders": 3,
+        "sim_unit_pnl_mean": 0.249857,
+        "top1_pct": 71.95122
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 0.9701,
+        "mean_price": 0.774237,
+        "n": 134,
+        "n_traders": 5,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 256,
+          "removed_pct": 65.641026
+        },
+        "sim_unit_pnl_mean": 0.195913
+      },
+      "mean_price": 0.730731,
+      "n": 390,
+      "n_traders": 6,
+      "p_fdr": 0.0,
+      "p_raw": 0.0,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.25132,
+      "sim_unit_pnl_total": 98.0149,
+      "top1_pct": 65.641026,
+      "top2_pct": 92.307692,
+      "verdict": "NON_PROMOTABLE_BY_DOMINANCE"
+    },
+    {
+      "WR": 0.9385,
+      "cohort": ">=80|trader_NO|yes",
+      "dominance": {
+        "forward_top1_pct": 84.210526,
+        "post_dedup_top1_pct": 87.692308,
+        "post_dedup_top2_pct": 98.461538,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": -0.5756,
+        "upper": 0.393114
+      },
+      "forward": {
+        "WR": 0.8947,
+        "mean_price": 0.695908,
+        "n": 38,
+        "n_traders": 3,
+        "sim_unit_pnl_mean": 0.198829,
+        "top1_pct": 84.210526
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 0.875,
+        "mean_price": 0.602975,
+        "n": 8,
+        "n_traders": 2,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 57,
+          "removed_pct": 87.692308
+        },
+        "sim_unit_pnl_mean": 0.272025
+      },
+      "mean_price": 0.709352,
+      "n": 65,
+      "n_traders": 3,
+      "p_fdr": 0.047138,
+      "p_raw": 0.0383,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.229109,
+      "sim_unit_pnl_total": 14.8921,
+      "top1_pct": 87.692308,
+      "top2_pct": 98.461538,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "WR": 0.9559,
+      "cohort": ">=80|trader_YES|no",
+      "dominance": {
+        "forward_top1_pct": 91.428571,
+        "post_dedup_top1_pct": 80.882353,
+        "post_dedup_top2_pct": 90.196078,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": 0.205013,
+        "upper": 0.46881
+      },
+      "forward": {
+        "WR": 0.8857,
+        "mean_price": 0.466004,
+        "n": 70,
+        "n_traders": 2,
+        "sim_unit_pnl_mean": 0.41971,
+        "top1_pct": 91.428571
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 0.8974,
+        "mean_price": 0.592269,
+        "n": 39,
+        "n_traders": 5,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 165,
+          "removed_pct": 80.882353
+        },
+        "sim_unit_pnl_mean": 0.305167
+      },
+      "mean_price": 0.522456,
+      "n": 204,
+      "n_traders": 6,
+      "p_fdr": 0.0,
+      "p_raw": 0.0,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.433426,
+      "sim_unit_pnl_total": 88.4189,
+      "top1_pct": 80.882353,
+      "top2_pct": 90.196078,
+      "verdict": "NON_PROMOTABLE_BY_DOMINANCE"
+    },
+    {
+      "WR": 1.0,
+      "cohort": ">=80|trader_YES|yes",
+      "dominance": {
+        "forward_top1_pct": 90.909091,
+        "post_dedup_top1_pct": 86.111111,
+        "post_dedup_top2_pct": 97.222222,
+        "top1_label": "T1"
+      },
+      "edge_ci": {
+        "lower": 0.2461,
+        "upper": 0.502923
+      },
+      "forward": {
+        "WR": 1.0,
+        "mean_price": 0.447,
+        "n": 11,
+        "n_traders": 2,
+        "sim_unit_pnl_mean": 0.553,
+        "top1_pct": 90.909091
+      },
+      "level": "L1",
+      "lto": {
+        "WR": 1.0,
+        "mean_price": 0.74002,
+        "n": 5,
+        "n_traders": 2,
+        "removed_top_trader": {
+          "removed_label": "T1",
+          "removed_n": 31,
+          "removed_pct": 86.111111
+        },
+        "sim_unit_pnl_mean": 0.25998
+      },
+      "mean_price": 0.530819,
+      "n": 36,
+      "n_traders": 3,
+      "p_fdr": 0.0,
+      "p_raw": 0.0,
+      "promotion_surface": true,
+      "sim_unit_pnl_mean": 0.469181,
+      "sim_unit_pnl_total": 16.8905,
+      "top1_pct": 86.111111,
+      "top2_pct": 97.222222,
+      "verdict": "INSUFFICIENT_N"
+    }
+  ],
+  "lto_fold_seed": 2026,
+  "non_promotable_cells": [
+    {
+      "cohort": "60-70|trader_NO|yes",
+      "forward_n": 27,
+      "forward_top1_pct": 40.740741,
+      "n": 27,
+      "n_traders": 4,
+      "top1_pct": 40.740741,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "cohort": "60-70|trader_YES|no",
+      "forward_n": 23,
+      "forward_top1_pct": 26.086957,
+      "n": 75,
+      "n_traders": 12,
+      "top1_pct": 58.666667,
+      "verdict": "NON_PROMOTABLE_BY_DOMINANCE"
+    },
+    {
+      "cohort": "60-70|trader_YES|yes",
+      "forward_n": 12,
+      "forward_top1_pct": 33.333333,
+      "n": 12,
+      "n_traders": 5,
+      "top1_pct": 33.333333,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "cohort": "70-80|trader_NO|no",
+      "forward_n": 134,
+      "forward_top1_pct": 83.58209,
+      "n": 236,
+      "n_traders": 7,
+      "top1_pct": 78.813559,
+      "verdict": "NON_PROMOTABLE_BY_DOMINANCE"
+    },
+    {
+      "cohort": "70-80|trader_NO|yes",
+      "forward_n": 22,
+      "forward_top1_pct": 63.636364,
+      "n": 31,
+      "n_traders": 3,
+      "top1_pct": 54.83871,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "cohort": "70-80|trader_YES|no",
+      "forward_n": 28,
+      "forward_top1_pct": 67.857143,
+      "n": 80,
+      "n_traders": 6,
+      "top1_pct": 37.5,
+      "verdict": "FORWARD_DOMINATED"
+    },
+    {
+      "cohort": "70-80|trader_YES|yes",
+      "forward_n": 5,
+      "forward_top1_pct": 60.0,
+      "n": 23,
+      "n_traders": 4,
+      "top1_pct": 47.826087,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "cohort": "<60|trader_NO|yes",
+      "forward_n": 2,
+      "forward_top1_pct": 50.0,
+      "n": 2,
+      "n_traders": 2,
+      "top1_pct": 50.0,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "cohort": "<60|trader_YES|no",
+      "forward_n": 37,
+      "forward_top1_pct": 27.027027,
+      "n": 84,
+      "n_traders": 12,
+      "top1_pct": 33.333333,
+      "verdict": "NON_PROMOTABLE_LTO_FAIL"
+    },
+    {
+      "cohort": "<60|trader_YES|yes",
+      "forward_n": 3,
+      "forward_top1_pct": 66.666667,
+      "n": 4,
+      "n_traders": 3,
+      "top1_pct": 50.0,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "cohort": ">=80|trader_NO|no",
+      "forward_n": 164,
+      "forward_top1_pct": 71.95122,
+      "n": 390,
+      "n_traders": 6,
+      "top1_pct": 65.641026,
+      "verdict": "NON_PROMOTABLE_BY_DOMINANCE"
+    },
+    {
+      "cohort": ">=80|trader_NO|yes",
+      "forward_n": 38,
+      "forward_top1_pct": 84.210526,
+      "n": 65,
+      "n_traders": 3,
+      "top1_pct": 87.692308,
+      "verdict": "INSUFFICIENT_N"
+    },
+    {
+      "cohort": ">=80|trader_YES|no",
+      "forward_n": 70,
+      "forward_top1_pct": 91.428571,
+      "n": 204,
+      "n_traders": 6,
+      "top1_pct": 80.882353,
+      "verdict": "NON_PROMOTABLE_BY_DOMINANCE"
+    },
+    {
+      "cohort": ">=80|trader_YES|yes",
+      "forward_n": 11,
+      "forward_top1_pct": 90.909091,
+      "n": 36,
+      "n_traders": 3,
+      "top1_pct": 86.111111,
+      "verdict": "INSUFFICIENT_N"
+    }
+  ],
+  "prereg_cutoff_utc": "2026-05-29T00:00:00+00:00",
+  "schema_version": "trader_benchmark_summary_v1",
+  "source_description": "stdin:blocked_signals_resolutions.jsonl",
+  "thresholds": {
+    "DOMINANCE_MAX_PCT": 50.0,
+    "FDR_Q": 0.1,
+    "FORWARD_MIN_N": 10,
+    "LTO_MIN_N": 20,
+    "LTO_MIN_WR": 0.7,
+    "MARGIN": 0.02,
+    "N_PROMOTE_FLOOR": 30,
+    "N_REVIEW": 20,
+    "N_TRADER_CELL_MIN": 5,
+    "N_TRADER_MIN": 12,
+    "SIMPNL_FLOOR": 0.0,
+    "bootstrap_samples": 10000,
+    "seed": 2026
+  },
+  "top_candidates": [
+    {
+      "cohort": "60-70|trader_NO|no",
+      "level": "L1",
+      "n": 99,
+      "n_traders": 12,
+      "sim_unit_pnl_mean": 0.102627,
+      "verdict": "TRADER_ALPHA_CANDIDATE"
+    }
+  ],
+  "triggers": [
+    "opus_review_required_before_any_live_use",
+    "if_all_positive_cells_are_dominance_gated_decide_accumulate_or_close_camino_a",
+    "rerun_when_new_forward_cells_have_n>=10_and_top1<=50pct"
+  ]
+}
