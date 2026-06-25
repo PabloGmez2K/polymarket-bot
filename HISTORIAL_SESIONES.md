@@ -6441,3 +6441,37 @@ Registro durable de la decisión Opus cerrada el 1 jun 2026. Corrección de prem
 ### Guardrails
 
 No se tocaron bot.py, env vars, Railway, DB, BANKROLL, trading core, city modes, scheduler, guards, SL, BUY/SELL/SKIP ni Fase C.
+
+
+---
+
+## Sesión 426 — SYSTEM_UPGRADE_FROM_LAFABRICA_AND_OPERATING_BRAIN (25 jun 2026, Opus 4.8)
+
+**Tipo:** DOCS_ONLY / META · **Clasificación:** WATCH_ONLY (gobernanza) · **Modo:** READ_ONLY / ARCHITECTURE_TRANSFER / DOC_PATCH_SAFE_NOW
+**Archivos modificados:** `docs/meta/system_learning_transfer_from_lafabrica_2026-06-25.md` (nuevo), `ORCHESTRATOR.md` (1 puntero §15), `HISTORIAL_SESIONES.md`, `agent_events.jsonl`
+
+### Contexto
+
+Revisión read-only previa a la ratificación E3: ¿debe polymarket-bot absorber arquitectura/operativa de
+LaFábrica Template y Pablo Operating Brain? **Premisa invertida:** polymarket-bot es el **origen** del SO del
+ecosistema (LaFábrica README "361 sesiones de Polymarket Bot"; Brain ABSORB_LOG absorbió SLT-001/002/003;
+LaFábrica PATTERN-01/02/03 derivan de aquí). El loop de transferencia ya está cableado y mayormente saliente.
+
+### Veredicto
+
+`DOC_PATCH_SAFE_NOW`. Lo entrante genuino (BACKLOG.md, plantillas de prompt, Workstream Anchor, TOKEN_ECONOMICS
+único, índice docs) es pequeño y **sería migración** → parqueado DEFER con trigger en el doc nuevo. NO ejecutado.
+Fricción real identificada (no corregida): doc sprawl (428 docs/), token-economics triplicado (ORCHESTRATOR
+§3/§12/§13), drift HISTORIAL (cierra S418) ↔ agent_events (S424). No se absorbe nada que diluya guardrails de
+trading (los del repo son más estrictos que el template).
+
+### Próximos pasos
+
+- Volver a **ratificación E3 trader-following** (prompt `E3_TRIGGER_PASS_RATIFICATION_FOLLOWER_EXPERIMENT`).
+- Lecciones entrantes: solo si dispara su trigger (D1–D5 en el doc). Sin abrir backlog.
+
+### Guardrails
+
+No se tocaron bot.py, env vars, Railway, DB, BANKROLL, trading core, city modes, scheduler, exact/NO, guards, SL,
+SHADOW_ONLY_MODE, BUY/SELL/SKIP, Fase C ni CONTEXTO.md (sin cambio operativo vivo). No se borró ningún archivo.
+No se tocaron los untracked preexistentes `2026-04-27]` y `342)`. No se usó memoria externa como fuente durable.

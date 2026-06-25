@@ -618,7 +618,8 @@ El repo puede transferir aprendizajes metodológicos saneados al ecosistema
 - Ciudades/tokens específicos, claves, env vars, Railway, DB, snapshots privados.
 - Runtime, lógica de ejecución, código core, posiciones operadas.
 
-**Cola local:** `docs/meta/SESSION_LEARNING_TRANSFER_QUEUE.md`
+**Cola local (saliente):** `docs/meta/SESSION_LEARNING_TRANSFER_QUEUE.md`
+**Análisis entrante (qué absorbe polymarket-bot del ecosistema):** `docs/meta/system_learning_transfer_from_lafabrica_2026-06-25.md` — veredicto: el repo es el origen del SO del ecosistema; lecciones entrantes parqueadas DEFER con trigger, sin migración.
 
 **Regla:** Una sesión de transferencia de aprendizaje NO reabre el bot, NO activa
 trading, NO cambia env vars y NO autoriza cambios de runtime.
