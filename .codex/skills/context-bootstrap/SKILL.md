@@ -5,10 +5,16 @@ description: Usa esta skill al arrancar trabajo en este repo para abrir el minim
 
 # Context Bootstrap
 
-1. Leer `AGENTS.md`.
-2. Leer solo el bloque relevante de `CONTEXTO.md`.
-3. Abrir `OPERATIONS_PLAYBOOK.md` solo si la tarea toca workflow, cierre, deploy, Railway o scoreboard.
-4. Elegir como mucho un artefacto extra: handoff, snapshot, log o archivo objetivo.
+1. Leer `PROJECT_BOOTSTRAP.md` (entrypoints, handshake — manifiesto de descubrimiento, no contrato).
+2. Leer `docs/meta/ACTIVE_CONTEXT_PACK.md` (L0, <2 min: fase, owners, prohibiciones vivas, blocker
+   `NEXT_REAL_ORDER_WRITE`, trigger vigente, punteros).
+3. Leer `AGENTS.md` (contrato corto) y solo el bloque relevante de `CONTEXTO.md`.
+4. Abrir `OPERATIONS_PLAYBOOK.md` solo si la tarea toca workflow, cierre, deploy, Railway o scoreboard.
+5. Owners causales necesarios: si la tarea es bug/incidente/recurrente, `docs/meta/AGENT_EXPERIENCE_LEDGER.md`
+   antes de cualquier búsqueda amplia; como mucho un artefacto extra más (handoff, snapshot, log o
+   archivo objetivo).
 
 - No abrir `CONTEXTO.md` completo por defecto.
 - No leer sesiones antiguas salvo relacion directa.
+- Esta receta no crea un segundo sistema de reading recipes: es el orden de lectura de
+  `PROJECT_BOOTSTRAP.md`/`AGENTS.md`, no una lista paralela de artefactos por tipo de tarea.

@@ -8,6 +8,10 @@
 > city modes, exact/NO, guards, SL, BUY/SELL/SKIP, BANKROLL ni Fase C. **No autoriza salir de STANDBY.**
 > Es la contraparte **entrante** (qué absorbe polymarket-bot del ecosistema) de la cola **saliente**
 > `docs/meta/SESSION_LEARNING_TRANSFER_QUEUE.md` (qué exporta polymarket-bot al ecosistema).
+>
+> **Nota (2026-08-31):** este análisis cubría el estado de Lafábrica en MR-001..MR-003 (junio 2026).
+> No representa el estado metodológico MR-014 vigente. Ver `docs/meta/LAFABRICA_ADOPTION.md` para la
+> disposición actual completa.
 
 ---
 

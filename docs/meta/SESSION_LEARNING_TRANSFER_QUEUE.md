@@ -183,8 +183,39 @@ Este repo contiene información sensible. Antes de cualquier transferencia:
 
 ---
 
+### SLT-004 — CANDIDATE_CHILD_LOCAL: outcome-scoped worktree execution
+
+- Fecha: 2026-08-31
+- Proyecto: polymarket-bot
+- Sesión/bloque: migración de sistema operativo documental Lafábrica MR-003 → MR-014
+- project_value: Ejecutar cada outcome discreto en un worktree aislado del mismo repo evita
+  contaminar el checkout principal con estado a medio terminar y hace explícito qué cambios
+  pertenecen a qué tarea.
+- lafabrica: Patrón candidato — no confirmado como estándar todavía. Concepto abstracto: cuando una
+  tarea tiene un outcome acotado y verificable, ejecutarla en un espacio de trabajo aislado
+  (worktree o equivalente) por outcome, en vez de por agente o por sesión de chat, reduce el riesgo
+  de mezclar cambios no relacionados y facilita el handshake `BASELINE_HEAD` (`PATTERN-16`). Sin
+  evidencia todavía de un segundo proyecto independiente que lo valide.
+- brain:
+  - evidence: No aplica.
+  - skills: No aplica.
+  - service_angle: No aplica.
+  - content_angle: No aplica.
+  - portfolio_asset: No aplica.
+- future_product: No aplica.
+- no_copy: No mencionar rutas locales, nombres de agentes, herramientas de orquestación concretas ni
+  ningún dato de trading. Solo el concepto abstracto de aislamiento por outcome.
+- privacy_level: PUBLIC_SAFE
+- Estado: `CANDIDATE`
+- Siguiente acción: Pablo revisa. No se declara estándar de Lafábrica ni regla del hijo hasta
+  validarse en un segundo proyecto independiente — ver `LAFABRICA_RELEASE_PROTOCOL.md §7` (regla del
+  segundo proyecto).
+
+---
+
 ## Historial de revisiones
 
 | Fecha | Cambio |
 |-------|--------|
 | 2026-06-20 | Documento creado. Candidatos iniciales: SLT-001, SLT-002, SLT-003. |
+| 2026-08-31 | SLT-004 añadido (candidato abstracto y saneado: outcome-scoped worktree execution). Parte de la migración Lafábrica MR-014. |

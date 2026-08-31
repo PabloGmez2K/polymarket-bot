@@ -2,16 +2,24 @@
 
 Configurador durable del orquestador para sesiones nuevas (ChatGPT / Claude / Codex). Este archivo no reemplaza `AGENTS.md`, `CONTEXTO.md` ni `OPERATIONS_PLAYBOOK.md`: los complementa describiendo **cómo debe actuar el guía** que coordina agentes.
 
-Actualizado: 2026-05-13.
+Actualizado: 2026-08-31 (adopción Lafábrica MR-014).
 
 ---
 
 ## 1. Fuente de verdad
 
-- Repo local autoritativo: `C:\Projects\polymarket-bot` (espejo en GitHub).
+- **El repo es la fuente de verdad, identificado por handshake — no una ruta local hardcodeada.**
+  La autoridad la da `PROJECT_BOOTSTRAP.md` (handshake `REMOTE_VIEW`/`LOCAL_VIEW`: `remote_head`,
+  `local_head` congelado como `BASELINE_HEAD`, `worktree`, `relation_to_remote_view`), no la ruta
+  del checkout local en la que se ejecuta la sesión. Distintos worktrees o clones son vistas válidas
+  del mismo repo siempre que el handshake reconcilie.
 - La verdad durable es el repo, no la memoria del chat.
 - **No confiar en archivos subidos al chat** si pueden estar desactualizados.
 - Si hay conflicto entre memoria, outputs pegados, archivos subidos y repo, **gana el repo**.
+- **Preflight fundamentado en el repositorio (`PATTERN-16 REPOSITORY_GROUNDED_PREFLIGHT`, MR-014):**
+  antes de editar un owner compartido, restaurar/revertir en bloque, o crear/cambiar una norma
+  durable, derivar el estado previo desde el propio repo en el momento de escribir — no desde lo que
+  se recuerda. Detalle operativo (`IMPACT`/`BASELINE`/`NORMATIVE_STATE`) en `AGENTS.md`.
 - En sesión nueva o cambio de bloque, pedir lectura proporcional:
   - `git status --short --untracked-files=all`
   - `git log -1 --oneline`
@@ -41,6 +49,27 @@ El orquestador **no implementa directamente** salvo petición explícita. Su tra
 - No pedir cierre previo si la sesión anterior ya cerró limpia con commit/push, validaciones, Railway observado si aplica y `git status` final.
 - Pedir cierre previo si queda worktree sucio, contexto no durable, tarea incompleta, resultado ambiguo o cambio delicado de agente.
 - Sesión compactada: si un agente compacta contexto, puede terminar el bloque ya abierto si conserva scope y gates; no debe comenzar el siguiente workstream. Abrir sesión nueva desde repo.
+
+---
+
+## 2.1. Comprobación consciente de decisiones (MR-013.1)
+
+Antes de proponer un plan o abrir agente, en una sola pasada:
+
+1. Leer `docs/meta/ACTIVE_DECISION_STATE.md` si tiene un `WORKSTREAM.active` distinto de `NONE`.
+2. No reabrir una opción `REJECTED` sin cumplir su `reopen_if`.
+3. Investigar los hechos disponibles en repo, entorno o documentación; reservar a Pablo las
+   decisiones, preferencias y trade-offs de trading/riesgo/BANKROLL.
+4. Al aceptar o descartar una opción, registrar motivo y condición de reapertura.
+
+No es un gate con veredicto propio: es una comprobación de estado que se resuelve leyendo un
+archivo. No sustituye `HISTORIAL_SESIONES.md`, `CONTEXTO.md` ni los guardrails de trading; cubre el
+hueco de lo **rechazado**, que no tenía hogar durable y volvía a proponerse.
+
+**Frontera con `NORMATIVE_STATE` (`PATTERN-16`):** esta comprobación cubre las opciones rechazadas
+del workstream vivo. La coherencia de las normas durables a través del tiempo —una regla nueva
+frente a una regla antigua todavía descubrible en `ORCHESTRATOR.md`/`AGENTS.md`/`HISTORIAL_SESIONES.md`—
+es otro sujeto, con veredicto `CONFLICTS` → `STOP_FOR_DECISION`. No se solapan.
 
 ---
 
@@ -268,6 +297,83 @@ Usar salidas binarias cuando haya riesgo de backlog:
 
 Si el usuario pega outputs de agentes, analizarlos también desde token economics: detectar si hubo lectura excesiva, checks innecesarios, loops de observabilidad o falta de decisión.
 
+### 7.a Estructura Outcome-First (MR-005/MR-009/MR-011/MR-012)
+
+Cuando la tarea merece agente (§3), el prompt se construye por outcome antes que por pasos. Usar
+estos bloques y omitir los que no aporten decisión — no repetir contexto que ya vive en el repo:
+
+```
+OUTCOME       — resultado real que debe existir al cerrar, una frase medible
+DONE_BAR      — condiciones observables para aceptar el resultado
+NON_GOALS     — qué queda fuera de scope aunque parezca cercano
+AUTONOMY      — nivel A0-A3 (abajo) y decisiones que el agente puede tomar sin volver a preguntar
+HOUSE_RULES   — guardrails de este documento y de AGENTS.md; solo excepciones/riesgos específicos
+VERIFY_PLAN   — cómo se intentará demostrar que el resultado no cumple la DONE_BAR
+STOP_LOSS     — cuándo parar, reportar y devolver el control (calibrar por R0-R3, abajo)
+CLOSE_MODE    — LITE / NORMAL / FULL / PARTIAL (§4), o separar CODE / VERIFY / CLOSE si el riesgo lo exige
+```
+
+**Niveles de autonomía A0-A3:**
+
+| Nivel | Nombre | Puede hacer | No puede hacer |
+|---|---|---|---|
+| A0 | READ_ONLY | Leer, diagnosticar, proponer, devolver veredicto | Modificar archivos, ejecutar cambios externos |
+| A1 | PATCH_PROPOSAL | Preparar diff o plan aplicable | Aplicar cambios sin aprobación |
+| A2 | APPLY_LOCAL | Editar repo local, validar localmente, commit si se pide | Push, deploy, Railway, env vars, datos reales |
+| A3 | CONTROLLED_EXTERNAL_WRITE | Acciones externas acotadas y autorizadas (Railway, trading, DB) | Cambios LIVE sin `SHADOW_FIRST`, cascadas, acciones irreversibles |
+
+Las fronteras A0/A1 prohíben escrituras de repo y de estado externo salvo autorización explícita.
+`external_state_writes` incluye Railway, env vars, trading, DB y cualquier estado fuera del
+checkout local. Al activar `STOP_LOSS`, el agente detiene el trabajo y devuelve el control
+inmediatamente; no abre otro cuestionario. Esta frontera (`MR-012.6`, CRITICAL) es coherente con —
+y más estricta que — la regla ya vigente en §6/§8: env vars, Railway, trading y DB siempre requieren
+confirmación literal de Pablo, independientemente del nivel A0-A3 declarado.
+
+**Niveles de riesgo efectivo R0-R3** (calibran `STOP_LOSS`, no sustituyen los guardrails de trading):
+
+| Nivel | Entorno | Regla operativa |
+|---|---|---|
+| R0 | lógica pura, lectura o docs reversibles | iterar mientras cada intento aporte evidencia; `SIMPLIFY_REPLAN` tras dos intentos equivalentes sin avance |
+| R1 | entorno sintético, aislado, desechable (tests, fixtures) | varias iteraciones técnicas seguras; parar tras dos fallos equivalentes sin nueva hipótesis |
+| R2 | entorno local persistente o datos privados (`data/`, DB local) | no experimentar sobre datos reales; aislar primero |
+| R3 | producción, Railway, trading real, BANKROLL | stop-loss corto: parar ante precondición de seguridad fallida, efecto no previsto o necesidad de ampliar autorización |
+
+**Builder / Verifier / Closer** son responsabilidades, no agentes obligatorios (kernel lean de
+MR-011). En LITE/NORMAL de riesgo bajo, la misma sesión ejecutora cubre las tres. Separar solo por
+riesgo, cambio de autorización, entregable independiente o petición explícita de Pablo:
+
+- **Builder:** implementa el cambio mínimo que satisface el `OUTCOME`.
+- **Verifier:** intenta demostrar que el cambio no pasa la `DONE_BAR` — huecos, regresiones,
+  validación insuficiente.
+- **Closer:** cierra proporcionalmente (§4), mueve backlog si procede, registra decisiones.
+
+**Handoff semántico mínimo** (MR-012.1) para trabajo delegado nuevo o rehidratado:
+
+```yaml
+ASSIGNMENT:
+  responsibility:
+  expected_artifact:
+  authorized_boundary:
+
+DECISIONS_ALREADY_CLOSED:
+  durable_decisions_not_to_reopen:
+  verified_state:
+  authority_granted_or_withheld:
+  actions_still_not_authorized:
+```
+
+`ASSIGNMENT` y `DECISIONS_ALREADY_CLOSED` son vinculantes: el agente ejecuta dentro de su
+`authorized_boundary` y no reabre decisiones cerradas. Una continuación dentro de la misma sesión no
+repite este bloque completo — solo estado aprobado + siguiente acción + autorización nueva + punto
+de parada.
+
+**`INTERACTION_POLICY` (condicional, MR-013.2):** cuando la operación es segura (A0-A2, sin trading
+ni Railway), el resultado del agente puede llegar directo a Pablo, que continúa dentro de la
+frontera congelada sin que el orquestador transporte cada mensaje. Volver al orquestador si cambia
+`outcome`/scope, se necesita autoridad nueva, aumenta el riesgo, aparece contradicción durable, se
+reabriría una dirección `REJECTED`, o dos intentos equivalentes fallan. No aplica a trading, riesgo,
+BANKROLL, Fase C, city modes ni ninguna superficie que ya exija Opus o confirmación literal (§5/§8).
+
 ---
 
 ## 7.1 Codex Operating Pattern
@@ -315,6 +421,14 @@ source promotion y Fase C requieren Opus o confirmación humana según modo.
 - En docs-only: no acceder a Railway ni runtime para registrar eventos. Si se añade entrada a `agent_events.jsonl`, usar timestamp obtenido explícitamente del sistema en UTC; no inventarlo ni calcularlo de memoria.
 - "Fase C" está reservada para la fase estratégica/operativa definida en el contrato durable del proyecto y no puede reutilizarse como nombre de fases internas de tooling, observabilidad o diseño. Para estas usar R1/R2/R3/R4 u otra nomenclatura no conflictiva.
 - No tocar el untracked preexistente `2026-04-27]`.
+- **DOMAIN_PRODUCT_MODELING_GATE (`PATTERN-10`, MR-004):** en tareas de UI/dashboard (`templates/`,
+  `static/`) o vocabulario ambiguo de dominio, antes de CODE separar valor interno, label visible y
+  valor externo/API. Si ya hay 2+ microfixes de UI/dominio seguidos, parar y replantear antes de
+  seguir parcheando. No aplica a trading/riesgo, que ya tiene su propio gate en §8.
+- **Grilling proporcional (`MR-013.3`):** cuando el objetivo todavía no está formado (varias
+  direcciones plausibles, alto coste de retrabajo, contradicción con una decisión vigente), aclarar
+  con una pregunta a la vez en vez de gastar una sesión de agente para descubrirlo. No aplica a bugs
+  reproducibles ni tareas con contrato ya cerrado.
 
 ---
 
@@ -558,6 +672,14 @@ Pedir veredictos únicos y tareas concretas, no ensayos abiertos. Si Opus ya dec
 - **Sonnet**: docs, dossiers, cierres, síntesis, task cards, auditorías read-only no delicadas.
 - Si ya hay decisión Opus, no reanalizar: ejecutar directamente, validar y cerrar.
 
+### I. Deliberación barata, transmisión cara (`MR-013.6`)
+
+El orquestador puede razonar e investigar ampliamente antes de abrir agente — ese coste es bajo.
+Compilar el prompt para el agente es caro: solo lo que cambia materialmente la ejecución, referenciado
+por path, no copiado. Y la carga cognitiva de Pablo es el recurso más escaso: veredicto primero,
+detalle solo si cambia la decisión. No fijar umbrales rígidos de palabras/tokens; cargar por capas
+(bootstrap y contrato aplicable, después solo lo que desbloquea la siguiente acción).
+
 ---
 
 ## 14. Connected Learning Loop — patrón reutilizable
@@ -681,3 +803,37 @@ trigger/recordatorio, **no abrir otra sesión** ni docs-only pesado.
 Bloqueados hasta: **paper pass + micro-canary + revisión P&L/riesgo canónica + Opus**.
 STANDBY no se sale con docs (sigue §15: cambio FULL + autorización literal de Pablo).
 No abrir "buscar nuevas oportunidades" hasta cerrar o activar el workstream vivo, salvo trigger explícito.
+
+---
+
+## 17. Adopción metodológica Lafábrica
+
+Estado de adopción, Change Index consumido y disposición completa MR-001..MR-014:
+`docs/meta/LAFABRICA_ADOPTION.md`. Protocolo fuente: `PROJECT_BOOTSTRAP.md → methodology_source`.
+Arranque L0: `docs/meta/ACTIVE_CONTEXT_PACK.md`. `PATTERN-14 CONTROLLED_EXTERNAL_WRITE_FOUNDATION`
+tiene disposición de release terminal (`pending_critical: none`); su gate operacional sigue sin
+resolver: `NEXT_REAL_ORDER_WRITE = BLOCKED` hasta verificación runtime en sesión separada autorizada.
+
+<!-- LAFABRICA:BEGIN UPDATE_NOTIFICATION_CHECK MR-008 -->
+**CHECK de notificación de actualizaciones (protocolo Lafábrica, MR-008):**
+
+- Al inicio de una sesión operativa, una reactivación o la preparación de una adopción, ejecutar como máximo un `CHECK` read-only. No repetirlo salvo que cambie la evidencia o lo pida el operador.
+- No ejecutar `CHECK` obligatoriamente en `CHAT_CLOSE`, explicaciones generales ni consultas simples.
+- Obtener Lafabrica mediante `methodology_source` del propio `PROJECT_BOOTSTRAP.md`; verificar su `REMOTE_VIEW` y leer el bootstrap remoto de Lafabrica.
+- Comparar `lafabrica_release_base` (declarado en `docs/meta/LAFABRICA_ADOPTION.md`) con `methodological_release_current` observado en el bootstrap de Lafabrica.
+- Producir como máximo una notificación `NOTIFY` compacta por sesión operativa.
+- No persistir los estados derivados (`tracking_status`, `delta_status`, `primary_notification`, etc.); son efímeros de la sesión.
+- No editar archivos, hijos, registry ni ChatGPT.com como parte de `CHECK`.
+- `CHECK` no concede `A2 APPLY_LOCAL` ni `A3 CONTROLLED_EXTERNAL_WRITE`; cualquier escritura requiere su propio contrato de sesión.
+- `REVIEW` sigue reutilizando `AUDIT -> PLAN`. `INSTALL` sigue reutilizando `APPLY` con autorización explícita.
+- Si Lafabrica no puede verificarse (remoto inalcanzable, bootstrap ilegible), usar el resultado seguro del protocolo (`MANUAL_REVIEW` / tracking degradado) — nunca inventar una release actual.
+<!-- LAFABRICA:END UPDATE_NOTIFICATION_CHECK -->
+
+---
+
+## Historial de cambios de este documento
+
+| Fecha | Cambio | Quién |
+|-------|--------|-------|
+| 2026-05-13 | Última actualización previa a la migración metodológica (versión histórica no tabulada aquí; ver `git log -- ORCHESTRATOR.md`). | — |
+| 2026-08-31 | Adopción Lafábrica MR-004..MR-014 por delta: repo/handshake como autoridad (retira ruta hardcodeada), §2.1 comprobación consciente de decisiones, §7.a Outcome-First (A0-A3, R0-R3, Builder/Verifier/Closer, handoff mínimo, INTERACTION_POLICY), guardrails `DOMAIN_PRODUCT_MODELING_GATE` y grilling proporcional en §8, §13.I deliberación barata, §17 adopción metodológica + bloque gestionado `UPDATE_NOTIFICATION_CHECK` (MR-008). Sin cambios en trading/riesgo/BANKROLL/city modes/guards/STANDBY. | Claude Sonnet 5 |

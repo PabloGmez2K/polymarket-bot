@@ -2,11 +2,13 @@
 
 ## Lectura minima obligatoria
 
+- `PROJECT_BOOTSTRAP.md`
 - `AGENTS.md`
 - `CONTEXTO.md`
 - `OPERATIONS_PLAYBOOK.md`
 
-Usar `AGENTS.md` como contrato corto, `CONTEXTO.md` como estado vivo y `OPERATIONS_PLAYBOOK.md` como protocolo de trabajo/cierre.
+`PROJECT_BOOTSTRAP.md` es el manifiesto de descubrimiento (entrypoints, handshake); no reemplaza a
+`AGENTS.md`. Usar `AGENTS.md` como contrato corto, `CONTEXTO.md` como estado vivo y `OPERATIONS_PLAYBOOK.md` como protocolo de trabajo/cierre. Arranque rápido (L0, <2 min): `docs/meta/ACTIVE_CONTEXT_PACK.md`.
 
 ## Rol de este archivo
 

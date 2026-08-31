@@ -4,9 +4,15 @@ Capa canonica y corta para Codex en este repo.
 
 ## Leer primero
 
-1. `AGENTS.md`
-2. bloque relevante de `CONTEXTO.md`
-3. `OPERATIONS_PLAYBOOK.md` solo si la tarea toca workflow, cierre, deploy, Railway o scoreboard
+1. `PROJECT_BOOTSTRAP.md` — descubre entrypoints y el handshake (`REMOTE_VIEW`/`LOCAL_VIEW`); no
+   sustituye este contrato.
+2. `AGENTS.md`
+3. bloque relevante de `CONTEXTO.md`
+4. `OPERATIONS_PLAYBOOK.md` solo si la tarea toca workflow, cierre, deploy, Railway o scoreboard
+5. Si la tarea es un bug, un incidente o una tarea recurrente: consultar
+   `docs/meta/AGENT_EXPERIENCE_LEDGER.md` **antes** de cualquier búsqueda amplia del repositorio.
+6. El handshake Git que la tarea requiera. Registrar su `local_head` literal como `BASELINE_HEAD` —
+   es la baseline aprobada de la sesión y no se recalcula después, ni siquiera tras commitear.
 
 No cargar `CONTEXTO.md` completo ni sesiones antiguas sin necesidad.
 
@@ -24,6 +30,58 @@ No cargar `CONTEXTO.md` completo ni sesiones antiguas sin necesidad.
 - La cola/backlog de Codex requiere trigger, ROI esperado y criterio de cierre; evitar cementerios `WATCH`.
 - Codex implementa, testea y valida; no decide semántica de trading/riesgo: BANKROLL, sizing, whitelist, city modes, scheduler, BUY/SELL/SKIP, guards/SL, source promotion y Fase C requieren Opus o confirmación humana según modo.
 - `/plan` es apropiado para arquitectura LOG_ONLY o pre-implementation cuando Opus ya fijó semántica; no autoriza CODE. `/goal` solo para implementación iterativa ya autorizada, con objetivo verificable y stop condition; nunca para decisiones de trading/riesgo/BANKROLL/city modes/guards/Fase C/env vars. Para patches runtime concretos ya decididos, usar prompt normal cerrado.
+
+## Preflights fundamentados en el repositorio (`PATTERN-16`, MR-014)
+
+Antes de escribir, derivar el estado previo desde el repositorio en vez de recordarlo. La
+recuperación es mecánica; la clasificación y el veredicto son del agente. Un resultado vacío es una
+abstención, no una prueba de que no hay nada. No dependen de runtime, comando ni dependencia
+concreta.
+
+**Experiencia previa — antes de una búsqueda amplia** (bug, incidente, tarea recurrente). Buscar en
+`docs/meta/AGENT_EXPERIENCE_LEDGER.md`, y solo en ese archivo, por los términos de la tarea. Si hay
+camino conocido, usarlo y evitar sus callejones. Ver `PATTERN-06` en
+`docs/meta/LAFABRICA_ADOPTION.md`.
+
+**`IMPACT` — antes de editar un owner que pueda ser compartido** (`bot.py`, `trader_analyzer.py`,
+`ORCHESTRATOR.md`/`AGENTS.md`, contratos de datos). Derivar del repositorio quién depende de ese
+owner. El radio de validación **sigue al impacto derivado**. Si el impacto excede el `ASSIGNMENT`
+autorizado → `STOP` y reportar el alcance real; no ampliar el scope en silencio.
+
+**`BASELINE` — antes de restaurar, revertir en bloque o recuperar una versión anterior.** La
+baseline aprobada es `BASELINE_HEAD` (el `local_head` congelado del handshake de apertura), nunca el
+`HEAD` actual. Enumerar qué cambió en esas rutas entre el estado objetivo y `BASELINE_HEAD`. Si
+aparece trabajo aprobado que la operación eliminaría → `STOP`: revertir el delta causal, no un
+estado de archivo completo.
+
+**`NORMATIVE_STATE` — antes de crear o cambiar una norma durable** (guardrail, invariante, decisión
+de trading/riesgo). Recuperar la norma previa desde `ORCHESTRATOR.md`, `AGENTS.md`,
+`HISTORIAL_SESIONES.md` y `CONTEXTO.md`, y clasificar: `SAME` (reutilizar) / `EXTENDS` (modificar el
+propietario canónico) / `SUPERSEDES` (dejar evidencia de ciclo de vida) / `CONFLICTS` →
+**`STOP_FOR_DECISION`**. No elegir en silencio ni asumir que lo más reciente gana.
+
+Prohibido mantener a mano un registro paralelo de owners, consumidores, capacidades aprobadas o
+normas: la evidencia del repositorio, la historia de Git y el corpus normativo ya son esa fuente.
+
+---
+
+## Diagnóstico con feedback loop (`MR-013.5`)
+
+Para bugs no triviales, antes de construir una teoría hay que tener una señal ejecutable que se
+ponga en rojo con **este** bug:
+
+1. Establecer un comando, reproducción, test o loop ejecutable que atraviese el camino del defecto y
+   afirme el síntoma real, no "no ha petado".
+2. Ejecutarlo al menos una vez. Conservar la invocación, el resultado causal y el entorno.
+3. Solo entonces formular hipótesis falsables — cada una con su predicción — y probar la más barata
+   primero.
+
+Leer código para construir una teoría antes de que exista esa señal es el fallo que esta regla
+evita. Si no puede construirse el loop, decirlo explícitamente con lo que se intentó y pedir acceso,
+artefacto capturado o instrumentación; no seguir hacia la hipótesis sin señal. No sustituye `ASK →
+CODE` ni los guardrails de trading; no aplica a correcciones documentales ni cambios mecánicos.
+
+---
 
 ## Governance de evidencia (artifact-first, lección E3)
 
@@ -56,6 +114,11 @@ para que una ciudad shadow/active acumule datos en `observed_vs_forecast`.
 
 - No tocar trading, NOAA, scheduler, reglas de entrada/salida ni arquitectura core salvo pedido explicito.
 - Primero evidencia, luego copy o refactor.
+- **Autonomía A0-A3** (`ORCHESTRATOR.md §7.a`): A0 `READ_ONLY`, A1 `PATCH_PROPOSAL`, A2 `APPLY_LOCAL`, A3 `CONTROLLED_EXTERNAL_WRITE`. A0/A1 no escriben repo ni estado externo salvo autorización explícita. Al activar `STOP_LOSS`, devolver el control inmediatamente sin abrir otro cuestionario.
+- **PERSIST_BEFORE_DELEGATE (`MR-009.1`):** antes de aceptar una delegación basada en un bloque previamente cerrado, comprobar que el artefacto durable citado existe y es verificable. Si solo existe un cierre declarado en chat (`CLOSED_CHAT_ONLY`, sin artefacto durable), parar con `FIX_BLOCKER_FIRST`.
+- **Idempotencia:** antes de repetir una operación de escritura solicitada, comprobar si el estado objetivo ya existe. Si ya existe exactamente, no repetirla y devolver `ALREADY_APPLIED`/`ALREADY_COMMITTED` con evidencia.
+- **Test de alcance a nivel de línea:** cada hunk o línea modificada debe ser necesaria para el `OUTCOME` y pertenecer al scope autorizado. Si una modificación no supera esa prueba, retirarla.
+- **DOMAIN_PRODUCT_MODELING_GATE (`PATTERN-10`):** en tareas de UI/dashboard (`templates/`, `static/`) con vocabulario ambiguo de dominio, separar valor interno, label visible y valor externo/API antes de CODE. Tras 2+ microfixes de dominio seguidos, parar y replantear antes de seguir parcheando.
 - Preferir `rg` y lecturas puntuales.
 - Para Railway, usar `tools/railway_safe.ps1`.
 - Antes de push/deploy con cambios de codigo, correr `python verify_before_deploy.py`.
@@ -82,6 +145,15 @@ Para docs-only o backlog sin estado vivo durable, no forzar `CONTEXTO.md`,
 `HISTORIAL_SESIONES.md` ni `agent_events.jsonl`.
 
 La memoria externa no sustituye la fuente de verdad del repo.
+
+**Cosecha proporcional al ledger (`PATTERN-06`/`MR-014.1`):** si la tarea es repetible y hubo camino
+ganador claro, callejones relevantes o mejora real de autonomía, crear o actualizar su entrada en
+`docs/meta/AGENT_EXPERIENCE_LEDGER.md`, con sus `Disparadores`. Omitir en one-off y microajustes
+triviales. `agent_events.jsonl` sigue siendo log, no reemplaza esta cosecha.
+
+**`docs/meta/ACTIVE_DECISION_STATE.md` (`MR-013.1`):** si el workstream tuvo una decisión rechazada
+que podría reproponerse, registrarla con motivo y `reopen_if` antes de cerrar. Si el workstream
+cierra por completo, limpiar el archivo o reanclarlo al siguiente.
 
 ### SESSION_LEARNING_TRANSFER (opcional, proporcional)
 

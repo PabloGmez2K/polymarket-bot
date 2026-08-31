@@ -53,6 +53,11 @@ plantillas prompt (L2), Workstream Anchor (L3), índice docs (L8) — siguen DEF
 
 ## C. PROJECT_INSTRUCTIONS_OPTIMIZED (copiar al Project de ChatGPT)
 
+> **`SUPERSEDED` (2026-08-31).** Reemplazada por el shell canónico
+> `docs/orchestrator_chatgpt_project_instructions.md`, adoptado en la migración Lafábrica MR-014
+> (`MR-006.4` política manual-first + shell `templates/orchestrator/CHATGPT_PROJECT_INSTRUCTIONS.md`).
+> Se conserva íntegra abajo como sedimento histórico — no usar como Project Instructions vigentes.
+
 > Versión compacta (~6.4k chars). El detalle durable vive en el repo; esto es el guía conversacional.
 
 ```
