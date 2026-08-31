@@ -97,9 +97,10 @@ Este repo contiene información sensible. Antes de cualquier transferencia:
 - no_copy: No mencionar parámetros de trading, bankroll, thresholds, ciudades, señales,
   mercados Polymarket, P&L real ni ningún detalle del bot. Solo el concepto.
 - privacy_level: PUBLIC_SAFE
-- Estado: CANDIDATE
-- Siguiente acción: Pablo autoriza absorción en lafabrica-template ORCHESTRATOR.md o
-  docs/orchestrator/ como patrón de control de riesgo operativo.
+- Estado: IMPORTED_TO_BOTH
+- Traza Brain: 2026-06-20 → pablo-operating-brain EVID-005 ext., POST_IDEAS, OFFER-07 creado (Sesión 5 Brain); 2026-06-29 → confirmado, status actualizado.
+- Traza Lafabrica: PATTERN-01 en ECOSYSTEM_LEARNING_PATTERNS.md (SHADOW_FIRST).
+- Siguiente acción: Ninguna.
 
 ---
 
@@ -137,9 +138,10 @@ Este repo contiene información sensible. Antes de cualquier transferencia:
 - no_copy: No mencionar trading, señales, bankroll, Polymarket, ciudades, P&L ni
   ningún detalle operativo del bot. Solo el framework de gobernanza.
 - privacy_level: PUBLIC_SAFE
-- Estado: CANDIDATE
-- Siguiente acción: Verificar contra lafabrica-template si el patrón ya está
-  generalizado (ORCHESTRATOR.md, OPERATIONS_PLAYBOOK.md). Absorber los gaps si los hay.
+- Estado: IMPORTED_TO_BOTH
+- Traza Brain: 2026-06-20 → pablo-operating-brain EVID-005 ext. (>400 sesiones, gobernanza), POST_IDEAS (Sesión 5 Brain); 2026-06-29 → confirmado, status actualizado.
+- Traza Lafabrica: PATTERN-02 en ECOSYSTEM_LEARNING_PATTERNS.md (LONG_RUNNING_PROJECT_GOVERNANCE).
+- Siguiente acción: Ninguna.
 
 ---
 
@@ -177,9 +179,10 @@ Este repo contiene información sensible. Antes de cualquier transferencia:
 - no_copy: No mencionar por qué el bot entró en STANDBY (trading, resultados,
   estrategia, P&L). Solo el patrón de gestión del estado.
 - privacy_level: PUBLIC_SAFE
-- Estado: CANDIDATE
-- Siguiente acción: Pablo revisa y autoriza absorción en lafabrica-template como
-  patrón de ciclo de vida de proyecto.
+- Estado: IMPORTED_TO_BOTH
+- Traza Brain: 2026-06-20 → pablo-operating-brain EVID-005 ext. (STANDBY explícito), POST_IDEAS (Sesión 5 Brain); 2026-06-29 → confirmado, status actualizado.
+- Traza Lafabrica: PATTERN-03 en ECOSYSTEM_LEARNING_PATTERNS.md (STANDBY_AS_FIRST_CLASS_STATE).
+- Siguiente acción: Ninguna.
 
 ---
 
