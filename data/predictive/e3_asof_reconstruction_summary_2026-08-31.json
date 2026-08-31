@@ -1,0 +1,130 @@
+{
+  "schema_version": "e3_asof_reconstruction_summary_v1",
+  "generated_at_utc": "2026-08-31T22:36:26.508Z",
+  "status": "ASOF_RECONSTRUCTION_COMPLETE",
+  "source": {
+    "canonical_runtime_paths": [
+      "/app/data/blocked_signals_resolutions.jsonl",
+      "/app/data/traders_db.json"
+    ],
+    "extracted_at_utc": "2026-08-31T16:14:54.8793375Z",
+    "snapshot_hashes": {
+      "blocked_signals_resolutions_sha256": "541B827B408BEE786110CD127A39D7BD55AF6811A5B7AC7A80917970B5B8BFEB",
+      "traders_db_sha256": "691F858B08F909B043F2D826C21595BF82F3F38BDE99664AB604F19A0DC84DD9"
+    },
+    "verified_evidence_hashes": {
+      "reconstructed_bsr_sha256": "77673d71a0bbbaa10cc23eac449be8a43fdde771e6e4dc7552a2ee0fd2edf94e",
+      "reconstruction_summary_sha256": "85975df9468069570c54bc961c23e61ea935ee2435affaf0cf11332d8e081221",
+      "benchmark_preview_sha256": "3d1a478639dafb76288429a1b29b098e5e95546050c9576798b9b9a51b744fcf"
+    }
+  },
+  "forward_window": {
+    "membership_basis": "signals_generated_at",
+    "boundary": "signals_generated_at > 2026-06-25T00:00:00Z",
+    "first_signal_generated_at": "2026-06-25T18:20:22.172270Z",
+    "last_signal_generated_at": "2026-08-31T00:01:43.010763Z",
+    "rows": 1609,
+    "snapshots": 212,
+    "traders": 26
+  },
+  "reconstruction_method": {
+    "source": "Polymarket closed-positions",
+    "cutoff_rule": "closed-position timestamp < signals_generated_at",
+    "outcome_rule": "realizedPnl sign",
+    "exclusions": [
+      "own conditionId+outcome row",
+      "neutral PnL"
+    ],
+    "api_truncation": "none",
+    "coverage_note": "All 26 trader histories completed below the API offset cap."
+  },
+  "validation": {
+    "known_samples": 3,
+    "additional_deterministic_samples": 10,
+    "deterministic_rerun": true,
+    "temporal_violations": 0,
+    "own_row_violations": 0,
+    "closed_position_duplicates_removed": 202,
+    "benchmark_eligible_pre_dedup": 1589,
+    "benchmark_eligible_post_dedup": 1362
+  },
+  "coverage": {
+    "status": "complete",
+    "snapshots_total": 212,
+    "snapshots_reconstructed": 212,
+    "snapshots_failed": 0,
+    "rows_usable": 1609,
+    "traders_covered": 26
+  },
+  "wr_reclassification": {
+    "stored_membership_suitable_for_clean_adjudication": false,
+    "stored_vs_reconstructed_error_pp": {
+      "n": 1609,
+      "mean": -18.3309,
+      "median": -13.8654,
+      "min": -56.0611,
+      "max": 43.7793,
+      "pearson_error_vs_signal_time": -0.2140
+    },
+    "reconstructed_bucket_counts": {
+      "<60": 720,
+      "60-70": 43,
+      "70-80": 740,
+      ">=80": 106
+    },
+    "stored_60_70_instability": {
+      "stored_rows_remaining_in_60_70": 3,
+      "stored_rows_moved_elsewhere": 100,
+      "note": "Stored trader WR and bucket membership were not temporally suitable for clean adjudication."
+    }
+  },
+  "target_cohort": {
+    "cohort": "60-70|trader_NO|no",
+    "raw_n": 16,
+    "dedup_n": 15,
+    "n_traders": 4,
+    "stored_cohort_overlap": 2,
+    "stored_cohort_prior_rows": 25,
+    "WR": 1.0000,
+    "mean_price": 0.77318,
+    "sim_unit_pnl_mean": 0.22682,
+    "edge_ci": [
+      0.179133,
+      0.244329
+    ],
+    "top1_pct": 40.0,
+    "top2_pct": 80.0,
+    "LTO": {
+      "n": 9,
+      "n_traders": 3
+    },
+    "benchmark_verdict": "INSUFFICIENT_N"
+  },
+  "benchmark_preview": {
+    "global_verdict": "NO_PROMOTABLE_CELLS_DOMINANCE_GATED",
+    "top_candidates_n": 0,
+    "eligible_for_policy": false,
+    "raw_rows": 1609,
+    "eligible_rows_pre_dedup": 1589,
+    "eligible_rows_post_dedup": 1362
+  },
+  "contract_comparison": {
+    "required_n": 30,
+    "required_n_traders": 5,
+    "observed_n": 15,
+    "observed_n_traders": 4,
+    "paper_win_satisfied": false,
+    "real_reactivation_supported": false
+  },
+  "historical_truth": {
+    "stored_trader_wr_bucket_membership_not_temporally_suitable": true,
+    "reconstructed_asof_membership_supersedes_stored_membership_for_e3_adjudication": true,
+    "historical_june_artifacts_rewritten": false,
+    "prior_stored_target_rows": 25,
+    "clean_target_overlap_rows": 2,
+    "clean_target_insufficient_for_real_reactivation": true
+  },
+  "reactivation_evidence_verdict": "FAIL_REACTIVATION_EVIDENCE",
+  "eligible_for_policy": false,
+  "disclaimer": "Reconstructed forward evidence. sim_unit_pnl is simulated, non-canonical and not money. No paper, micro-canary or live trading authorization."
+}
