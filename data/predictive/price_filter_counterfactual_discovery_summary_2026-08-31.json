@@ -1,0 +1,109 @@
+{
+  "schema_version": "price_filter_counterfactual_discovery_summary_v1",
+  "generated_at_utc": "2026-09-01T09:09:15.483270Z",
+  "status": "completed",
+  "source": {
+    "original_runtime_canonical_paths": [
+      "/app/data/price_filter_counterfactual_log_only.jsonl",
+      "/app/data/blocked_signals_resolutions.jsonl",
+      "/app/data/bot_signal_evaluations.jsonl"
+    ],
+    "extracted_at_utc": null,
+    "extracted_at_note": "Extraction timestamp was not present in the verified final readout.",
+    "snapshots": [
+      {"rows": 14678, "sha256": "bc1d14198f17a54b4692e265672b4fbd60e5290621122386264e9db906334c33"},
+      {"rows": 3329, "sha256": "1c9d93c91041f8253d052df35767af99ba1b991450fb5c5b5d311256c5fbbfff"},
+      {"rows": 15397, "sha256": "0920577129c2e1cd73787b529cf0ad7d3631177473e50a6fd712d8682925f2ad"}
+    ],
+    "final_readout_sha256": "a75b899b622e7d8fa44dff0def75cda43ac52e4637243fd8a7ddce092d0365ad",
+    "holdout_open_record_sha256": "cd1d5019898afec565ed1418bd0fc75a609ab61c9b15613443fb47736d201e17"
+  },
+  "hypothesis": {
+    "literal_h1": "counterfactual_status == hypothetical_edge_over_threshold AND candidate_allowed == true",
+    "qualifying_semantics": "First eligible decision-time observation per identity, with evaluation fallback only when identity is absent.",
+    "protected_exact_and_no_exclusion": 0
+  },
+  "independence": {
+    "opportunity_definition": "First eligible H1 observation per identity; evaluation fallback only when identity is absent.",
+    "cluster_definition": "city + date_iso",
+    "raw_h1_rows": 426,
+    "unique_opportunities": 268,
+    "independent_clusters": 208,
+    "duplicates_removed": 158
+  },
+  "data_quality": {
+    "missing_h1_timestamp": 0,
+    "missing_identity": 0,
+    "missing_decision_time_price": 0,
+    "missing_mkt_prob": 0,
+    "exact_outcome_linkage_status": "PASS for selected observations; no outcome linkage issues or fetch errors",
+    "bsr_gamma_conflict_count": 0,
+    "side_price_mismatch_count": 0,
+    "temporal_leakage_result": "PASS: selection used no outcome-derived fields; no pre-decision resolution rows"
+  },
+  "sealed_split": {
+    "split_method": "Chronological city-date clusters by first decision timestamp; 60% discovery, 20% validation, remainder sealed holdout.",
+    "discovery": {"opportunities": 165, "clusters": 124},
+    "validation": {"opportunities": 50, "clusters": 41},
+    "holdout": {"opportunities": 53, "clusters": 43},
+    "manifest_sha256": "9c75d2c6021e1430a4649d84ed73693812c378f36b6db5fb96cf8b7bcf87cb2d",
+    "holdout_opened_once": true,
+    "holdout_open_event": "OPEN_SEALED_HOLDOUT_ONCE",
+    "holdout_open_record_sha256": "cd1d5019898afec565ed1418bd0fc75a609ab61c9b15613443fb47736d201e17",
+    "holdout_opened_at_utc": "2026-08-31T23:12:53.542765Z"
+  },
+  "discovery": {
+    "n": 165,
+    "mean_decision_price": 0.01470,
+    "win_rate": 0.0424,
+    "sim_unit_pnl_mean": 0.027724242424242426,
+    "sim_unit_pnl_total": 4.5745,
+    "cluster_bootstrap_ci95": [0.0006190625, 0.058643506493506484],
+    "positive_clusters": 7,
+    "negative_clusters": 117,
+    "worst_sequential_drawdown": -0.5865
+  },
+  "validation": {
+    "n": 50,
+    "mean_decision_price": 0.01740,
+    "win_rate": 0.0600,
+    "sim_unit_pnl_mean": 0.0426,
+    "sim_unit_pnl_total": 2.13,
+    "cluster_bootstrap_ci95": [-0.017181864564007422, 0.10838190814393939],
+    "positive_clusters": 3,
+    "negative_clusters": 38,
+    "worst_sequential_drawdown": -0.3880,
+    "fragility_note": "Positive mean, but fragile and concentrated."
+  },
+  "holdout": {
+    "n": 53,
+    "mean_decision_price": 0.04666981132075471,
+    "win_rate": 0.0377,
+    "sim_unit_pnl_mean": -0.008933962264150943,
+    "sim_unit_pnl_total": -0.4735,
+    "cluster_bootstrap_ci95": [-0.056746529720279715, 0.04308455188679244],
+    "positive_clusters": 2,
+    "negative_clusters": 41,
+    "worst_sequential_drawdown": -1.4130,
+    "sign_flip": true
+  },
+  "pooled_oos": {
+    "n": 103,
+    "mean_decision_price": 0.03246116504854368,
+    "win_rate": 0.0485,
+    "sim_unit_pnl_mean": 0.01608252427184466,
+    "pooled_value_cannot_override_failed_sealed_holdout": true
+  },
+  "economics": {
+    "unique_opportunities_by_decision_month": {"2026-05": 2, "2026-06": 63, "2026-07": 121, "2026-08": 82},
+    "independent_clusters_by_first_decision_month": {"2026-05": 2, "2026-06": 51, "2026-07": 88, "2026-08": 67},
+    "average_opportunity_frequency_per_observed_month": 67.0,
+    "average_independent_cluster_frequency_per_observed_month": 52.0,
+    "simulated_noncanonical": true,
+    "no_dollar_forecast": true
+  },
+  "final_verdict": "FAIL_POLICY_SUPPRESSED_EDGE",
+  "eligible_for_policy_change": false,
+  "eligible_for_trading": false,
+  "disclaimer": "Simulated counterfactual evidence only. Not canonical cash P&L. No policy, BANKROLL, micro-canary or live-trading authorization."
+}
