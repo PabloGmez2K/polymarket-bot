@@ -444,12 +444,14 @@ def normalize_bot_signal_evaluation(
     """
     Normalize one bot_signal_evaluations row.
 
-    Convention: BSE our_prob/mkt_prob are YES probabilities in percent form
-    when emitted by the runtime, so this loader evaluates side=YES.
+    Explicit BSE sides use our_prob/mkt_prob as percent probabilities for that
+    selected side. Rows without a valid side retain the legacy YES-probability
+    fallback.
     """
     today = today or datetime.now(timezone.utc).date()
     outcome = outcome or _resolve_bse_outcome(row)
-    side = "YES"
+    captured_side = str(row.get("side") or "").strip().upper()
+    side = captured_side if captured_side in {"YES", "NO"} else "YES"
     eval_source = "bot_signal_evaluations"
     eval_key = str(row.get("eval_key") or "").strip()
     condition = row.get("condition") or "UNKNOWN"
@@ -468,7 +470,10 @@ def normalize_bot_signal_evaluation(
         "decision_gate": row.get("decision_gate"),
         "skip_or_block_reason": row.get("skip_or_block_reason"),
         "evaluation_source": row.get("evaluation_source"),
-        "probability_convention": "our_prob_and_mkt_prob_are_yes_probabilities",
+        "probability_convention": (
+            "explicit_side_uses_selected_side_probabilities;"
+            "missing_or_invalid_side_uses_legacy_yes_probability_convention"
+        ),
         "sim_unit_pnl_is": "simulated_non_canonical_not_money",
         "eligible_for_policy": False,
     }

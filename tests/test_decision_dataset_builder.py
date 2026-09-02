@@ -115,8 +115,9 @@ def _build(
     return db, summary, result
 
 
-def test_normalize_bot_signal_evaluation_maps_directional_yes_fields():
+def test_normalize_bot_signal_evaluation_preserves_explicit_yes_fields():
     row = _bse_row()
+    row.update(side="YES", candidate_side_source="runtime_evaluation_explicit")
     record = builder.normalize_bot_signal_evaluation(
         row,
         {"source_file": "bot_signal_evaluations.jsonl", "sha256": "abc"},
@@ -132,7 +133,66 @@ def test_normalize_bot_signal_evaluation_maps_directional_yes_fields():
     assert record["edge_pct_at_eval"] == pytest.approx(9.0)
     assert record["maturity_bucket"] == "settled_mature"
     assert record["sim_unit_pnl"] == pytest.approx(0.45)
-    assert json.loads(record["payload_json"])["probability_convention"] == "our_prob_and_mkt_prob_are_yes_probabilities"
+    assert json.loads(record["payload_json"])["probability_convention"] == (
+        "explicit_side_uses_selected_side_probabilities;"
+        "missing_or_invalid_side_uses_legacy_yes_probability_convention"
+    )
+
+
+def test_normalize_bot_signal_evaluation_preserves_explicit_no_side_and_probabilities():
+    row = _bse_row(our_prob=99.0, mkt_prob=45.5)
+    row.update(side="NO", candidate_side_source="runtime_evaluation_explicit")
+    record = builder.normalize_bot_signal_evaluation(
+        row,
+        {"source_file": "bot_signal_evaluations.jsonl", "sha256": "abc"},
+        outcome=builder.Settlement(True, 0.0, 1.0, "2026-05-21T00:00:00Z", "NO"),
+        today=builder.date(2026, 5, 30),
+    )
+
+    assert record["side"] == "NO"
+    assert record["model_prob"] == pytest.approx(0.99)
+    assert record["market_prob_at_eval"] == pytest.approx(0.455)
+    assert record["sim_unit_pnl"] == pytest.approx(0.545)
+    assert record["cohort_key"] == "at_or_above|NO|2-3|5-15%"
+    assert record["decision_id"] == builder.stable_decision_id(
+        row["eval_key"], "NO", "bot_signal_evaluations", row["cycle_id"]
+    )
+    assert record["decision_id"] != builder.stable_decision_id(
+        row["eval_key"], "YES", "bot_signal_evaluations", row["cycle_id"]
+    )
+
+
+def test_normalize_bot_signal_evaluation_explicit_no_loses_when_outcome_is_yes():
+    row = _bse_row(our_prob=99.0, mkt_prob=45.5)
+    row.update(side="NO", candidate_side_source="runtime_evaluation_explicit")
+    record = builder.normalize_bot_signal_evaluation(
+        row,
+        {"source_file": "bot_signal_evaluations.jsonl", "sha256": "abc"},
+        outcome=builder.Settlement(True, 1.0, 0.0, "2026-05-21T00:00:00Z", "YES"),
+        today=builder.date(2026, 5, 30),
+    )
+
+    assert record["side"] == "NO"
+    assert record["sim_unit_pnl"] == pytest.approx(-0.455)
+
+
+@pytest.mark.parametrize("raw_side", [None, "MAYBE"])
+def test_normalize_bot_signal_evaluation_missing_or_invalid_side_keeps_legacy_yes_convention(raw_side):
+    row = _bse_row()
+    row["candidate_side_source"] = "not_captured_v2"
+    if raw_side is not None:
+        row["side"] = raw_side
+    record = builder.normalize_bot_signal_evaluation(
+        row,
+        {"source_file": "bot_signal_evaluations.jsonl", "sha256": "abc"},
+        outcome=builder.Settlement(True, 1.0, 0.0, "2026-05-21T00:00:00Z", "YES"),
+        today=builder.date(2026, 5, 30),
+    )
+
+    assert record["side"] == "YES"
+    assert record["model_prob"] == pytest.approx(0.64)
+    assert record["market_prob_at_eval"] == pytest.approx(0.55)
+    assert record["sim_unit_pnl"] == pytest.approx(0.45)
 
 
 def test_build_dataset_loads_bse_directional_rows_and_exposes_snapshot(monkeypatch, tmp_path):
