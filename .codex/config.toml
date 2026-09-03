@@ -1,19 +1,5 @@
-# Configuracion por proyecto para mantener Codex en modo eficiente por defecto.
-# Base deliberada: medium siempre. La subida de profundidad se hace por perfil,
-# no inflando todo el hilo por inercia.
-# En el CLI local actual dejamos solo claves observables/seguras para no depender
-# de opciones no verificadas en esta version.
+# Configuracion local del proyecto.
+# El modelo y reasoning effort se heredan de la configuracion global del usuario.
 
-model = "gpt-5.4"
-model_reasoning_effort = "medium"
 approval_policy = "on-request"
 sandbox_mode = "workspace-write"
-
-[profiles.low]
-model_reasoning_effort = "low"
-
-[profiles.deep]
-model_reasoning_effort = "high"
-
-[profiles.max]
-model_reasoning_effort = "xhigh"
