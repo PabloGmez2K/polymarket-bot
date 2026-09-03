@@ -357,6 +357,8 @@ def _resolve_bse_outcomes(rows: list[dict[str, Any]]) -> dict[str, Settlement]:
     outcomes: dict[str, Settlement] = {}
     eval_keys_for_bulk: list[str] = []
     for row in rows:
+        if row.get("market_id_identity_status") == "IDENTITY_CONFLICT":
+            continue
         eval_key = str(row.get("eval_key") or "").strip()
         market_id = str(row.get("market_id") or "").strip()
         if market_id:
@@ -367,16 +369,64 @@ def _resolve_bse_outcomes(rows: list[dict[str, Any]]) -> dict[str, Settlement]:
     return outcomes
 
 
+def _parse_causal_bse_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
+def _causally_known_bse_market_id(
+    rows: list[dict[str, Any]],
+    retained_ts_utc: Any,
+) -> tuple[str | None, bool]:
+    retained_at = _parse_causal_bse_timestamp(retained_ts_utc)
+    if retained_at is None:
+        return None, False
+
+    market_ids = {
+        market_id
+        for row in rows
+        if (row_at := _parse_causal_bse_timestamp(row.get("ts_utc"))) is not None
+        and row_at <= retained_at
+        and (market_id := str(row.get("market_id") or "").strip())
+    }
+    if len(market_ids) > 1:
+        return None, True
+    return next(iter(market_ids), None), False
+
+
 def _deduplicate_bse_by_eval_key(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     by_key: dict[str, dict[str, Any]] = {}
+    rows_by_key: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         key = str(row.get("eval_key") or "").strip()
         if not key:
             continue
+        rows_by_key[key].append(row)
         existing = by_key.get(key)
         if existing is None or str(row.get("ts_utc") or "") > str(existing.get("ts_utc") or ""):
             by_key[key] = row
-    return list(by_key.values())
+
+    deduped: list[dict[str, Any]] = []
+    for key, latest in by_key.items():
+        retained = dict(latest)
+        market_id, identity_conflict = _causally_known_bse_market_id(
+            rows_by_key[key],
+            retained.get("ts_utc"),
+        )
+        if identity_conflict:
+            retained["market_id"] = None
+            retained["market_id_identity_status"] = "IDENTITY_CONFLICT"
+        elif not str(retained.get("market_id") or "").strip() and market_id:
+            retained["market_id"] = market_id
+        deduped.append(retained)
+    return deduped
 
 
 def normalize_exact_no_resolution(row: dict[str, Any], provenance: dict[str, Any]) -> dict[str, Any]:
@@ -791,6 +841,10 @@ def build_dataset(
                 "directional_rows_with_probs": len(directional),
                 "source_fidelity_excluded_seoul_rows": len(seoul_excluded),
                 "deduped_eval_keys": len(deduped),
+                "market_id_identity_conflicts": sum(
+                    row.get("market_id_identity_status") == "IDENTITY_CONFLICT"
+                    for row in deduped
+                ),
                 "accepted_rows": len(bse_records),
             }
         )

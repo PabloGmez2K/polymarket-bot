@@ -89,6 +89,91 @@ def _bse_row(
     }
 
 
+def test_bse_dedup_retains_earlier_causally_known_market_id_for_latest_decision():
+    eval_key = "Tokyo|2026-05-20|at_or_above|25|C"
+    earlier = _bse_row(eval_key, ts_utc="2026-05-20T10:00:00+00:00", our_prob=60.0)
+    earlier["market_id"] = "market-123"
+    latest = _bse_row(eval_key, ts_utc="2026-05-20T11:00:00+00:00", our_prob=70.0)
+
+    deduped = builder._deduplicate_bse_by_eval_key([earlier, latest])
+
+    assert deduped == [
+        {
+            **latest,
+            "market_id": "market-123",
+        }
+    ]
+    assert "market_id" not in latest
+
+
+def test_bse_dedup_retains_latest_decision_features_when_inheriting_market_id():
+    eval_key = "Tokyo|2026-05-20|at_or_above|25|C"
+    earlier = _bse_row(eval_key, ts_utc="2026-05-20T10:00:00+00:00", our_prob=60.0, mkt_prob=50.0)
+    earlier.update(market_id="market-123", side="YES", bot_edge_pct_at_signal=10.0, decision_gate="earlier_gate")
+    latest = _bse_row(eval_key, ts_utc="2026-05-20T11:00:00+00:00", our_prob=72.0, mkt_prob=61.0)
+    latest.update(side="NO", bot_edge_pct_at_signal=11.0, decision_gate="latest_gate")
+
+    deduped = builder._deduplicate_bse_by_eval_key([earlier, latest])
+
+    retained = deduped[0]
+    assert retained["market_id"] == "market-123"
+    assert retained["side"] == "NO"
+    assert retained["our_prob"] == 72.0
+    assert retained["mkt_prob"] == 61.0
+    assert retained["ts_utc"] == "2026-05-20T11:00:00+00:00"
+    assert retained["bot_edge_pct_at_signal"] == 11.0
+    assert retained["decision_gate"] == "latest_gate"
+
+
+def test_bse_dedup_fails_closed_for_conflicting_causally_known_market_ids(monkeypatch):
+    eval_key = "Tokyo|2026-05-20|at_or_above|25|C"
+    first = _bse_row(eval_key, ts_utc="2026-05-20T09:00:00+00:00")
+    first["market_id"] = "market-123"
+    second = _bse_row(eval_key, ts_utc="2026-05-20T10:00:00+00:00")
+    second["market_id"] = "market-999"
+    latest = _bse_row(eval_key, ts_utc="2026-05-20T11:00:00+00:00")
+
+    deduped = builder._deduplicate_bse_by_eval_key([first, second, latest])
+
+    assert deduped[0]["market_id"] is None
+    assert deduped[0]["market_id_identity_status"] == "IDENTITY_CONFLICT"
+    monkeypatch.setattr(builder, "fetch_outcome", lambda _: pytest.fail("conflict must not resolve by market_id"))
+    monkeypatch.setattr(
+        builder,
+        "fetch_outcomes_by_eval_key",
+        lambda keys: {} if not keys else pytest.fail("conflict must not resolve by eval_key fallback"),
+    )
+    assert builder._resolve_bse_outcomes(deduped) == {}
+
+
+def test_bse_market_id_donor_requires_timestamp_at_or_before_retained_decision():
+    retained_ts = "2026-05-20T10:00:00+00:00"
+    retained = _bse_row(ts_utc=retained_ts)
+    future_donor = _bse_row(ts_utc="2026-05-20T11:00:00+00:00")
+    future_donor["market_id"] = "market-123"
+
+    market_id, identity_conflict = builder._causally_known_bse_market_id(
+        [retained, future_donor],
+        retained_ts,
+    )
+
+    assert market_id is None
+    assert identity_conflict is False
+
+
+def test_bse_dedup_leaves_single_and_latest_identified_rows_unchanged():
+    single = _bse_row()
+    latest_identified = _bse_row(ts_utc="2026-05-20T11:00:00+00:00")
+    latest_identified["market_id"] = "market-123"
+    earlier = _bse_row(ts_utc="2026-05-20T10:00:00+00:00")
+
+    single_deduped = builder._deduplicate_bse_by_eval_key([single])
+    repeated_deduped = builder._deduplicate_bse_by_eval_key([earlier, latest_identified])
+
+    assert single_deduped == [single]
+    assert repeated_deduped == [latest_identified]
+
+
 def _build(
     tmp_path: Path,
     exact_rows: list[dict],
