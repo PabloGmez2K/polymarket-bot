@@ -1,0 +1,122 @@
+{
+  "schema_version": "e2_predictor_diagnostic_summary_v1",
+  "generated_at_utc": "2026-09-03T21:10:59.054352+00:00",
+  "status": "E2_REVEALS_NEXT_CAUSAL_BLOCKER",
+  "baseline": {
+    "evidence_branch_commit": "602c3afb4e04d62588e045e3dee5e59f489c38ad",
+    "side_fidelity_fix_present": true,
+    "identity_retention_fix_present": true
+  },
+  "source": {
+    "canonical_runtime_paths": [
+      "/app/data/bot_signal_evaluations.jsonl",
+      "/app/data/blocked_signals_resolutions.jsonl"
+    ],
+    "extracted_at_utc": {
+      "bse": "2026-09-03T20:10:01.324450+00:00",
+      "bsr": "2026-09-03T20:10:13.877788+00:00"
+    },
+    "raw_capture": {
+      "bse_rows": 15768,
+      "bse_sha256": "a52f6edd0e2dd1d105fc1d648feff712c6bfc4cbc0c9b84596918f33446b4997",
+      "bsr_rows": 3672,
+      "bsr_sha256": "9e5eba385b55d98ca6fb69de5918ed13c7d34a32110cbb08cff1b35a7d38d9a8"
+    },
+    "normalized_builder_inputs": {
+      "bse_utf8_sha256": "88e84714f23ad1c3e4cfbe95985bb332dfd3366e5036d549164c82d5d353888f",
+      "bsr_utf8_sha256": "d60ff1dab122f8b1ac1b63607d6d26cb3827181579e9d6ba817756ba20349dda"
+    }
+  },
+  "fidelity": {
+    "selected_side_fidelity": "PASS",
+    "decision_timestamp_fidelity": "PASS",
+    "seoul_source_fidelity_exclusion": "PASS",
+    "exact_no_firewall": "PASS",
+    "latest_decision_dedup": "PASS",
+    "causal_identity_retention": "PASS",
+    "identity_conflicts": 0,
+    "fuzzy_matching_used": false,
+    "lookahead_used": false
+  },
+  "funnel": {
+    "raw_bse_rows": 15768,
+    "directional_valid_probability_rows": 328,
+    "post_cutoff_directional_rows": 223,
+    "non_seoul_directional_rows": 283,
+    "deduplicated_decision_keys": 111,
+    "deduped_with_causal_identity": 1,
+    "canonically_resolved": 1,
+    "settled_mature": 1,
+    "benchmark_eligible": 1,
+    "unique_economic_markets": 1,
+    "independent_city_date_clusters": 1,
+    "unresolved_deduped_decisions": 110
+  },
+  "e2_protocol": {
+    "cutoff_utc": "2026-05-29T00:00:00+00:00",
+    "bootstrap_samples": 10000,
+    "seed": 2026,
+    "N_REVIEW": 20,
+    "N_PROMOTE_FLOOR": 30,
+    "MARGIN": 0.01,
+    "SIMPNL_FLOOR": 0.0,
+    "FDR_Q": 0.1,
+    "code_default_bootstrap_samples": 1000,
+    "preregistered_bootstrap_samples": 10000,
+    "explicit_preregistered_value_used": true
+  },
+  "e2_result": {
+    "global_verdict": "INSUFFICIENT_N",
+    "l0_forward_n": 1,
+    "l0_WR": 1.0,
+    "l0_brier_model": 0.193952,
+    "l0_brier_market": 0.275625,
+    "l0_brier_advantage": 0.081673,
+    "l0_brier_advantage_ci": [
+      0.081673,
+      0.081673
+    ],
+    "l0_sim_unit_pnl_mean": 0.525,
+    "l1_forward": [
+      {
+        "cohort": "at_or_above|NO",
+        "n": 1,
+        "brier_advantage": 0.081673,
+        "brier_advantage_ci": [
+          0.081673,
+          0.081673
+        ],
+        "sim_unit_pnl_mean": 0.525,
+        "diagnostic_verdict": "INSUFFICIENT_N",
+        "verdict": "INSUFFICIENT_N"
+      }
+    ],
+    "top_candidates": 0
+  },
+  "evidence_coverage": {
+    "e2_pipeline_evaluable": true,
+    "representative_predictor_adjudication_possible": false,
+    "resolved_decisions_numerator": 1,
+    "deduped_decisions_denominator": 111,
+    "residual_gap": "OUTCOME_SOURCE_PROVENANCE_COVERAGE",
+    "residual_gap_is_distinct_from_side_fidelity": true,
+    "residual_gap_is_distinct_from_identity_retention": true
+  },
+  "orchestration_decision": {
+    "auto_patch_next_provenance_gap": false,
+    "reason": "Strategic stop after two causal fidelity and provenance repairs; historical E2 coverage remains 1/111.",
+    "predictor_pass_declared": false,
+    "predictor_no_edge_declared": false,
+    "predictor_kill_declared": false,
+    "next_decision": "ALPHA_ROI_REASSESSMENT"
+  },
+  "artifact_hashes": {
+    "decision_dataset_db_sha256": "bd3dc6e54bd730caa17957935c234587f895d3f6cccb117be6c953d353d863dc",
+    "decision_dataset_summary_sha256": "4df70d1c447f111360a3756b79b6121a7809c0760e83f0e49d1c465887a87ffd",
+    "benchmark_summary_sha256": "0f285da0d4f14de2ea7b8fc45900a03684ad607ba05f359f3764113832e25fc4"
+  },
+  "eligible_for_policy": false,
+  "eligible_for_trading": false,
+  "sim_pnl_label": "simulated_non_canonical_not_money",
+  "disclaimer": "Diagnostic E2 evidence only. One resolved market is insufficient to adjudicate predictor edge. No policy, BANKROLL, canary, STANDBY or live-trading authorization."
+}
